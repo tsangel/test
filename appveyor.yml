@@ -51,7 +51,8 @@ install:
 - git submodule update --init --recursive
 
 build_script:
-- cmd: echo MSVC BUILD ==========================
+- cmd:
+       echo MSVC BUILD ==========================
        echo %APPVEYOR_BUILD_WORKER_IMAGE%
        echo %APPVEYOR_JOB_NAME%
        echo %CIBW_BUILD%echo %CIBW_VERSION%
@@ -60,7 +61,8 @@ build_script:
        cd ..\..\..
        python -m pip install cibuildwheel==%CIBW_VERSION%
 
-- sh: echo OSX or LINUX BUILD ==================
+- sh:
+      echo OSX or LINUX BUILD ==================
       echo $APPVEYOR_BUILD_WORKER_IMAGE
       echo $APPVEYOR_JOB_NAME
       echo $CIBW_BUILD
