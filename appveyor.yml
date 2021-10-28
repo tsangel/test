@@ -51,26 +51,24 @@ install:
 - git submodule update --init --recursive
 
 build_script:
-- cmd:
-       echo MSVC BUILD ==========================
-       echo %APPVEYOR_BUILD_WORKER_IMAGE%
-       echo %APPVEYOR_JOB_NAME%
-       echo %CIBW_BUILD%echo %CIBW_VERSION%
-       cd src\ext\pybind11
-       git checkout %PYBIND11_BRANCH%
-       cd ..\..\..
-       python -m pip install cibuildwheel==%CIBW_VERSION%
+- cmd: echo MSVC BUILD ==========================
+- cmd: echo %APPVEYOR_BUILD_WORKER_IMAGE%
+- cmd: echo %APPVEYOR_JOB_NAME%
+- cmd: echo %CIBW_BUILD%echo %CIBW_VERSION%
+- cmd: cd src\ext\pybind11
+- cmd: git checkout %PYBIND11_BRANCH%
+- cmd: cd ..\..\..
+- cmd: python -m pip install cibuildwheel==%CIBW_VERSION%
 
-- sh:
-      echo OSX or LINUX BUILD ==================
-      echo $APPVEYOR_BUILD_WORKER_IMAGE
-      echo $APPVEYOR_JOB_NAME
-      echo $CIBW_BUILD
-      echo $CIBW_VERSION
-      cd src/ext/pybind11
-      git checkout $PYBIND11_BRANCH
-      cd ../../..
-      python -m pip install cibuildwheel==$CIBW_VERSION
+- sh: echo OSX or LINUX BUILD ==================
+- sh: echo $APPVEYOR_BUILD_WORKER_IMAGE
+- sh: echo $APPVEYOR_JOB_NAME
+- sh: echo $CIBW_BUILD
+- sh: echo $CIBW_VERSION
+- sh: cd src/ext/pybind11
+- sh: git checkout $PYBIND11_BRANCH
+- sh: cd ../../..
+- sh: python -m pip install cibuildwheel==$CIBW_VERSION
 
 - python -m cibuildwheel --output-dir wheelhouse1
 
