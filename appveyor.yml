@@ -10,28 +10,37 @@ environment:
       APPVEYOR_JOB_NAME: "python37-x64-ubuntu-1"
       CIBW_BUILD: cp27-* cp35-*
       CIBW_VERSION: 1.12.0
+      PYBIND11_BRANCH: v2.5
+
     - APPVEYOR_BUILD_WORKER_IMAGE: Ubuntu
       APPVEYOR_JOB_NAME: "python37-x64-ubuntu-2"
       CIBW_BUILD: cp36-* cp37-* cp38-* cp39-* cp10-*
       CIBW_VERSION: 2.2.2
+      PYBIND11_BRANCH: v2.5
 
     - APPVEYOR_BUILD_WORKER_IMAGE: macos-mojave
       APPVEYOR_JOB_NAME: "python37-x64-macos-mojave-1"
       CIBW_BUILD: cp27-* cp35-*
       CIBW_VERSION: 1.12.0
+      PYBIND11_BRANCH: stable
+
     - APPVEYOR_BUILD_WORKER_IMAGE: macos-mojave
       APPVEYOR_JOB_NAME: "python37-x64-macos-mojave-2"
-      CIBW_BUILD: cp36-* cp37-* cp38-* cp39-* cp10-*
-      
+      CIBW_BUILD: cp36-* cp37-* cp38-* cp39-* cp10-*    
       CIBW_VERSION: 2.2.2
+      PYBIND11_BRANCH: stable
+
     - APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2017
       APPVEYOR_JOB_NAME: "python37-x64-vs2017-1"
       CIBW_BUILD: cp27-* cp35-*
       CIBW_VERSION: 1.12.0
+      PYBIND11_BRANCH: stable
+
     - APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2017
       APPVEYOR_JOB_NAME: "python37-x64-vs2017-2"
       CIBW_BUILD: cp36-* cp37-* cp38-* cp39-* cp10-*
       CIBW_VERSION: 2.2.2
+      PYBIND11_BRANCH: stable
 
 stack: python 3.7
 
@@ -42,16 +51,24 @@ install:
 - git submodule update --init --recursive
 
 build_script:
-- sh: echo MSVC BUILD ==========================
-- cmd: echo %APPVEYOR_BUILD_WORKER_IMAGE%
-- cmd: echo %APPVEYOR_JOB_NAME%
-- cmd: echo %CIBW_BUILD%
-- cmd: echo %CIBW_VERSION%
+- cmd: echo MSVC BUILD ==========================
+       echo %APPVEYOR_BUILD_WORKER_IMAGE%
+       echo %APPVEYOR_JOB_NAME%
+       echo %CIBW_BUILD%echo %CIBW_VERSION%
+- cmd: cd src\ext\pybind11
+- cmd: git checkout %PYBIND11_BRANCH%
+- cmd: cd ..\..\..
+- cmd: python -m pip install cibuildwheel==%CIBW_VERSION%
+
 - sh: echo OSX or LINUX BUILD ==================
 - sh: echo $APPVEYOR_BUILD_WORKER_IMAGE
 - sh: echo $APPVEYOR_JOB_NAME
 - sh: echo $CIBW_BUILD
 - sh: echo $CIBW_VERSION
+- sh: cd src/ext/pybind11
+- sh: git checkout $PYBIND11_BRANCH
+- sh: cd ../../..
+- sh: python -m pip install cibuildwheel==$CIBW_VERSION
 
 # - python -m pip install cibuildwheel==1.12.0
 # - python -m cibuildwheel --output-dir wheelhouse1
