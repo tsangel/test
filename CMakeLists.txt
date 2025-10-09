@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.16)
 
 project(DicomProject VERSION 0.1.0 LANGUAGES CXX)
 
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
 set(DICOM_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 add_library(dicomsdl STATIC
