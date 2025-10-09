@@ -1,9 +1,9 @@
 import os
-import os
 import pathlib
 import shutil
 import subprocess
 import sys
+import sysconfig
 from setuptools import Extension, setup
 from setuptools.command.build_ext import build_ext
 
@@ -25,6 +25,8 @@ class CMakeBuild(build_ext):
         cfg = "Debug" if self.debug else "Release"
 
         python_executable = sys.executable
+        python_tag = sysconfig.get_python_version().replace(".", "")
+        build_suffix = f"{ext.name}_{python_tag}_{self.plat_name}"
 
         cmake_args = [
             f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={extdir}",
@@ -43,7 +45,9 @@ class CMakeBuild(build_ext):
         else:
             cmake_args += [f"-DCMAKE_BUILD_TYPE={cfg}"]
 
-        build_temp = pathlib.Path(self.build_temp) / ext.name
+        build_temp = pathlib.Path(self.build_temp) / build_suffix
+        if build_temp.exists() and not self.force:
+            shutil.rmtree(build_temp)
         build_temp.mkdir(parents=True, exist_ok=True)
 
         subprocess.check_call(
@@ -51,34 +55,8 @@ class CMakeBuild(build_ext):
         )
         subprocess.check_call(["cmake", "--build", str(build_temp)] + build_args)
 
-        built_artifact = None
-        module_basename = ext.name.split(".")[-1]
-        search_patterns = [
-            f"{module_basename}*.so",
-            f"{module_basename}*.pyd",
-            f"lib{module_basename}*.dylib",
-        ]
-
-        search_roots = [
-            build_temp,
-            build_temp.parent,
-            ROOT_DIR / "build",
-        ]
-
-        for root in search_roots:
-            for pattern in search_patterns:
-                matches = sorted(root.rglob(pattern))
-                if matches:
-                    built_artifact = matches[0]
-                    break
-            if built_artifact:
-                break
-
-        if built_artifact is None:
-            raise RuntimeError(f"Cannot find built extension for {module_basename} in {build_temp}")
-
-        if built_artifact.resolve() != ext_full_path:
-            shutil.copyfile(built_artifact, ext_full_path)
+        if not ext_full_path.exists():
+            raise RuntimeError(f"Expected extension at {ext_full_path} not found")
 
 
 setup(
