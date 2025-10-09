@@ -77,7 +77,8 @@ class CMakeBuild(build_ext):
         if built_artifact is None:
             raise RuntimeError(f"Cannot find built extension for {module_basename} in {build_temp}")
 
-        shutil.copyfile(built_artifact, ext_full_path)
+        if built_artifact.resolve() != ext_full_path:
+            shutil.copyfile(built_artifact, ext_full_path)
 
 
 setup(
