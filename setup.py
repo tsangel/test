@@ -1,5 +1,6 @@
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -26,7 +27,9 @@ class CMakeBuild(build_ext):
 
         python_executable = sys.executable
         python_tag = sysconfig.get_python_version().replace(".", "")
-        build_suffix = f"{ext.name}_{python_tag}_{self.plat_name}"
+        plat_name_raw = getattr(self, "plat_name", sysconfig.get_platform())
+        plat_name = plat_name_raw.replace("-", "_")
+        build_suffix = f"{ext.name.replace('.', '_')}_{python_tag}_{plat_name}"
 
         cmake_args = [
             f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={extdir}",
@@ -44,6 +47,16 @@ class CMakeBuild(build_ext):
             build_args += ["--config", cfg]
         else:
             cmake_args += [f"-DCMAKE_BUILD_TYPE={cfg}"]
+
+        if sys.platform == "darwin":
+            arch_candidate = None
+            plat_tokens = re.split(r"[-_]", plat_name_raw)
+            if plat_tokens:
+                maybe_arch = plat_tokens[-1]
+                if maybe_arch in {"arm64", "x86_64"}:
+                    arch_candidate = maybe_arch
+            if arch_candidate:
+                cmake_args += [f"-DCMAKE_OSX_ARCHITECTURES={arch_candidate}"]
 
         build_temp = pathlib.Path(self.build_temp) / build_suffix
         if build_temp.exists() and not self.force:
