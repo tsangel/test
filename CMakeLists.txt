@@ -4,6 +4,26 @@ project(DicomProject VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+if(MSVC)
+    add_compile_options(
+        $<$<CONFIG:Release>:/Ox /Ob2 /Oi /Ot /GL /DNDEBUG>
+        $<$<CONFIG:RelWithDebInfo>:/Ox /Ob2 /Oi /Ot /GL /DNDEBUG>
+    )
+    add_link_options(
+        $<$<CONFIG:Release>:/LTCG>
+        $<$<CONFIG:RelWithDebInfo>:/LTCG>
+    )
+else()
+    add_compile_options(
+        $<$<CONFIG:Release>:-O3;-ffast-math;-fstrict-aliasing;-funroll-loops>
+        $<$<CONFIG:RelWithDebInfo>:-O3;-ffast-math;-fstrict-aliasing;-funroll-loops>
+    )
+    add_link_options(
+        $<$<CONFIG:Release>:-O3>
+        $<$<CONFIG:RelWithDebInfo>:-O3>
+    )
+endif()
+
 set(DICOM_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 add_library(dicomsdl STATIC
