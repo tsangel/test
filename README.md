@@ -46,5 +46,5 @@ python examples/python/dicom_example.py
 ## Continuous Integration
 
 GitHub Actions builds Python wheels for Linux, macOS (x86_64 & arm64), and Windows
-across CPython 3.8 through 3.13. Generated wheels are published as workflow
+across CPython 3.8 through 3.14. Generated wheels are published as workflow
 artifacts.
