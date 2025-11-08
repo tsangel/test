@@ -6,8 +6,8 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 if(MSVC)
     add_compile_options(
-        $<$<CONFIG:Release>:/Ox /Ob2 /Oi /Ot /GL /DNDEBUG>
-        $<$<CONFIG:RelWithDebInfo>:/Ox /Ob2 /Oi /Ot /GL /DNDEBUG>
+        $<$<CONFIG:Release>:/Ox;/Ob2;/Oi;/Ot;/GL;/DNDEBUG>
+        $<$<CONFIG:RelWithDebInfo>:/Ox;/Ob2;/Oi;/Ot;/GL;/DNDEBUG>
     )
     add_link_options(
         $<$<CONFIG:Release>:/LTCG>
