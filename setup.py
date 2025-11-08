@@ -64,7 +64,7 @@ class CMakeBuild(build_ext):
         build_temp.mkdir(parents=True, exist_ok=True)
 
         subprocess.check_call(
-            ["cmake", "-S", ext.sourcedir, "-B", str(build_temp)] + cmake_args
+            ["cmake", "-S", ext.sourcedir, "-B", str(build_temp)] + cmake_args # type: ignore
         )
         subprocess.check_call(["cmake", "--build", str(build_temp)] + build_args)
 
