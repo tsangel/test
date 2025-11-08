@@ -113,6 +113,29 @@ constexpr const DataElementEntry* keyword_to_entry_chm(std::string_view keyword)
     return index == detail::kInvalidRegistryIndex ? nullptr : detail::entry_from_index(index);
 }
 
+constexpr std::uint16_t keyword_to_registry_index_bdz(std::string_view keyword) {
+    if (keyword.empty()) {
+        return detail::kInvalidRegistryIndex;
+    }
+    const auto hash = detail::keyword_hash64(keyword, kBdzSeed);
+    const auto v0 = static_cast<std::size_t>(hash & kBdzVertexMask);
+    const auto v1 = static_cast<std::size_t>((hash >> kBdzHashShift) & kBdzVertexMask);
+    const auto v2 = static_cast<std::size_t>((hash >> kBdzHashDoubleShift) & kBdzVertexMask);
+    const auto slot = static_cast<std::size_t>(
+        (kBdzGValues[v0] + kBdzGValues[v1] + kBdzGValues[v2]) & kBdzTableMask);
+    const auto index = kBdzSlots[slot];
+    if (index == detail::kInvalidRegistryIndex) {
+        return detail::kInvalidRegistryIndex;
+    }
+    const auto* entry = detail::entry_from_index(index);
+    return entry && detail::sv_equal(entry->keyword, keyword) ? index : detail::kInvalidRegistryIndex;
+}
+
+constexpr const DataElementEntry* keyword_to_entry_bdz(std::string_view keyword) {
+    const auto index = keyword_to_registry_index_bdz(keyword);
+    return index == detail::kInvalidRegistryIndex ? nullptr : detail::entry_from_index(index);
+}
+
 constexpr const DataElementEntry* keyword_to_entry_binary(std::string_view keyword) {
     if (keyword.empty()) {
         return nullptr;
@@ -156,6 +179,13 @@ constexpr std::string_view keyword_to_tag_chd(std::string_view keyword) {
 
 constexpr std::string_view keyword_to_tag_chm(std::string_view keyword) {
     if (const auto* entry = keyword_to_entry_chm(keyword)) {
+        return entry->tag;
+    }
+    return {};
+}
+
+constexpr std::string_view keyword_to_tag_bdz(std::string_view keyword) {
+    if (const auto* entry = keyword_to_entry_bdz(keyword)) {
         return entry->tag;
     }
     return {};

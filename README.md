@@ -11,7 +11,7 @@ git submodule update --init --recursive
 ## C++ Build
 
 ```
-cmake -S . -B build -DDICOM_BUILD_EXAMPLES=ON
+cmake -S . -B build -DDICOM_BUILD_EXAMPLES=ON -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 

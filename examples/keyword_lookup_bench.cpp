@@ -57,6 +57,13 @@ int main() {
         iterations,
         false);
     run_benchmark(
+        "  BDZ (hash + G[x3])",
+        [](std::string_view keyword) {
+            return dicom::lookup::keyword_to_entry_bdz(keyword) != nullptr;
+        },
+        iterations,
+        false);
+    run_benchmark(
         "  Binary search",
         [](std::string_view keyword) {
             return dicom::lookup::keyword_to_entry_binary(keyword) != nullptr;
@@ -76,6 +83,13 @@ int main() {
         "  CHM (hash + G[x2])",
         [](std::string_view keyword) {
             return dicom::lookup::keyword_to_entry_chm(keyword) != nullptr;
+        },
+        iterations,
+        true);
+    run_benchmark(
+        "  BDZ (hash + G[x3])",
+        [](std::string_view keyword) {
+            return dicom::lookup::keyword_to_entry_bdz(keyword) != nullptr;
         },
         iterations,
         true);
