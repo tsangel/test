@@ -42,63 +42,67 @@ void run_benchmark(const char* name, Fn&& fn, std::size_t iterations, bool flush
 int main() {
     constexpr std::size_t iterations = 100;
     std::cout << "Warm cache runs\n";
-    run_benchmark(
-        "  CHD (hash + G[x1])",
-        [](std::string_view keyword) {
-            return dicom::lookup::keyword_to_entry_chd(keyword) != nullptr;
-        },
-        iterations,
-        false);
-    run_benchmark(
-        "  CHM (hash + G[x2])",
-        [](std::string_view keyword) {
-            return dicom::lookup::keyword_to_entry_chm(keyword) != nullptr;
-        },
-        iterations,
-        false);
-    run_benchmark(
-        "  BDZ (hash + G[x3])",
-        [](std::string_view keyword) {
-            return dicom::lookup::keyword_to_entry_bdz(keyword) != nullptr;
-        },
-        iterations,
-        false);
-    run_benchmark(
-        "  Binary search",
-        [](std::string_view keyword) {
-            return dicom::lookup::keyword_to_entry_binary(keyword) != nullptr;
-        },
-        iterations,
-        false);
+    for (int i = 0; i < 2; i++) {
+        run_benchmark(
+            "  CHD (hash + G[x1])",
+            [](std::string_view keyword) {
+                return dicom::lookup::keyword_to_entry_chd(keyword) != nullptr;
+            },
+            iterations,
+            false);
+        run_benchmark(
+            "  CHM (hash + G[x2])",
+            [](std::string_view keyword) {
+                return dicom::lookup::keyword_to_entry_chm(keyword) != nullptr;
+            },
+            iterations,
+            false);
+        run_benchmark(
+            "  BDZ (hash + G[x3])",
+            [](std::string_view keyword) {
+                return dicom::lookup::keyword_to_entry_bdz(keyword) != nullptr;
+            },
+            iterations,
+            false);
+        run_benchmark(
+            "  Binary search",
+            [](std::string_view keyword) {
+                return dicom::lookup::keyword_to_entry_binary(keyword) != nullptr;
+            },
+            iterations,
+            false);
+    }
 
     std::cout << "Cold-ish cache runs (flush before every iteration)\n";
-    run_benchmark(
-        "  CHD (hash + G[x1])",
-        [](std::string_view keyword) {
-            return dicom::lookup::keyword_to_entry_chd(keyword) != nullptr;
-        },
-        iterations,
-        true);
-    run_benchmark(
-        "  CHM (hash + G[x2])",
-        [](std::string_view keyword) {
-            return dicom::lookup::keyword_to_entry_chm(keyword) != nullptr;
-        },
-        iterations,
-        true);
-    run_benchmark(
-        "  BDZ (hash + G[x3])",
-        [](std::string_view keyword) {
-            return dicom::lookup::keyword_to_entry_bdz(keyword) != nullptr;
-        },
-        iterations,
-        true);
-    run_benchmark(
-        "  Binary search",
-        [](std::string_view keyword) {
-            return dicom::lookup::keyword_to_entry_binary(keyword) != nullptr;
-        },
-        iterations,
-        true);
+    for (int i = 0; i < 2; i++) {
+        run_benchmark(
+            "  CHD (hash + G[x1])",
+            [](std::string_view keyword) {
+                return dicom::lookup::keyword_to_entry_chd(keyword) != nullptr;
+            },
+            iterations,
+            true);
+        run_benchmark(
+            "  CHM (hash + G[x2])",
+            [](std::string_view keyword) {
+                return dicom::lookup::keyword_to_entry_chm(keyword) != nullptr;
+            },
+            iterations,
+            true);
+        run_benchmark(
+            "  BDZ (hash + G[x3])",
+            [](std::string_view keyword) {
+                return dicom::lookup::keyword_to_entry_bdz(keyword) != nullptr;
+            },
+            iterations,
+            true);
+        run_benchmark(
+            "  Binary search",
+            [](std::string_view keyword) {
+                return dicom::lookup::keyword_to_entry_binary(keyword) != nullptr;
+            },
+            iterations,
+            true);
+    }
     return 0;
 }
