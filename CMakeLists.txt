@@ -5,23 +5,19 @@ project(DicomProject VERSION 0.1.0 LANGUAGES CXX)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 if(MSVC)
-    add_compile_options(
-        $<$<CONFIG:Release>:/Ox;/Ob2;/Oi;/Ot;/GL;/DNDEBUG>
-        $<$<CONFIG:RelWithDebInfo>:/Ox;/Ob2;/Oi;/Ot;/GL;/DNDEBUG>
-    )
-    add_link_options(
-        $<$<CONFIG:Release>:/LTCG>
-        $<$<CONFIG:RelWithDebInfo>:/LTCG>
-    )
+    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /Ox /Ob2 /Oi /Ot /GL /DNDEBUG")
+    set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} /Ox /Ob2 /Oi /Ot /GL /DNDEBUG")
+    set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} /LTCG")
+    set(CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO "${CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO} /LTCG")
+    set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "${CMAKE_SHARED_LINKER_FLAGS_RELEASE} /LTCG")
+    set(CMAKE_SHARED_LINKER_FLAGS_RELWITHDEBINFO "${CMAKE_SHARED_LINKER_FLAGS_RELWITHDEBINFO} /LTCG")
 else()
-    add_compile_options(
-        $<$<CONFIG:Release>:-O3;-ffast-math;-fstrict-aliasing;-funroll-loops>
-        $<$<CONFIG:RelWithDebInfo>:-O3;-ffast-math;-fstrict-aliasing;-funroll-loops>
-    )
-    add_link_options(
-        $<$<CONFIG:Release>:-O3>
-        $<$<CONFIG:RelWithDebInfo>:-O3>
-    )
+    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -ffast-math -fstrict-aliasing -funroll-loops")
+    set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -O3 -ffast-math -fstrict-aliasing -funroll-loops")
+    set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} -O3")
+    set(CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO "${CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO} -O3")
+    set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "${CMAKE_SHARED_LINKER_FLAGS_RELEASE} -O3")
+    set(CMAKE_SHARED_LINKER_FLAGS_RELWITHDEBINFO "${CMAKE_SHARED_LINKER_FLAGS_RELWITHDEBINFO} -O3")
 endif()
 
 set(DICOM_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
