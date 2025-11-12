@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 import sys
 import urllib.error
-import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path

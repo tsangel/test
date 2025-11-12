@@ -3,7 +3,7 @@
 #include <limits>
 #include <string_view>
 
-#include "dictionary_lookup.hpp"
+#include <dicom.h>
 
 namespace {
 

@@ -1,11 +1,16 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <utility>
+
+#include "dictionary_lookup_detail.hpp"
 
 namespace dicom {
 
@@ -19,6 +24,8 @@ struct Tag {
 	constexpr Tag(std::uint16_t group, std::uint16_t element)
 	    : packed((static_cast<std::uint32_t>(group) << 16) | static_cast<std::uint32_t>(element)) {}
 	constexpr explicit Tag(std::uint32_t value) : packed(value) {}
+	constexpr explicit Tag(std::string_view keyword)
+	    : packed(tag_value_from_keyword(keyword)) {}
 
 	static constexpr Tag from_value(std::uint32_t value) { return Tag(value); }
 
@@ -41,6 +48,14 @@ struct Tag {
     constexpr explicit operator uint32_t() const noexcept { return packed; }
     constexpr auto operator<=>(const Tag&) const noexcept = default;
     constexpr bool operator==(const Tag&) const noexcept = default;
+
+private:
+	static constexpr std::uint32_t tag_value_from_keyword(std::string_view keyword) {
+		if (const auto* entry = lookup::keyword_to_entry_chd(keyword)) {
+			return entry->tag_value;
+		}
+		throw std::invalid_argument("Unknown DICOM keyword");
+	}
 };
 
 static_assert(sizeof(Tag) == 4, "Tag must remain 4 bytes");
@@ -100,30 +115,29 @@ struct VR {
     constexpr char     first()    const noexcept { return char(raw_code() >> 8); }
     constexpr char     second()   const noexcept { return char(raw_code() & 0xFF); }
 
-    /// Returns the two-character VR string or "??" for unknown
-    constexpr std::string_view str() const noexcept {
-        if (!is_known()) return "??";
-        switch (val_to_raw[value]) {
-            case pack2('A','E'): return "AE"; case pack2('A','S'): return "AS";
-            case pack2('A','T'): return "AT"; case pack2('C','S'): return "CS";
-            case pack2('D','A'): return "DA"; case pack2('D','S'): return "DS";
-            case pack2('D','T'): return "DT"; case pack2('F','D'): return "FD";
-            case pack2('F','L'): return "FL"; case pack2('I','S'): return "IS";
-            case pack2('L','O'): return "LO"; case pack2('L','T'): return "LT";
-            case pack2('O','B'): return "OB"; case pack2('O','D'): return "OD";
-            case pack2('O','F'): return "OF"; case pack2('O','V'): return "OV";
-            case pack2('O','L'): return "OL"; case pack2('O','W'): return "OW";
-            case pack2('P','N'): return "PN"; case pack2('S','H'): return "SH";
-            case pack2('S','L'): return "SL"; case pack2('S','Q'): return "SQ";
-            case pack2('S','S'): return "SS"; case pack2('S','T'): return "ST";
-            case pack2('S','V'): return "SV"; case pack2('T','M'): return "TM";
-            case pack2('U','C'): return "UC"; case pack2('U','I'): return "UI";
-            case pack2('U','L'): return "UL"; case pack2('U','N'): return "UN";
-            case pack2('U','R'): return "UR"; case pack2('U','S'): return "US";
-            case pack2('U','T'): return "UT"; case pack2('U','V'): return "UV";
-            default: return "??";
-        }
-    }
+	/// Returns the two-character VR string or "??" for unknown
+	constexpr std::string_view str() const noexcept {
+		switch (value) {
+			case AE_val: return "AE"; case AS_val: return "AS";
+			case AT_val: return "AT"; case CS_val: return "CS";
+			case DA_val: return "DA"; case DS_val: return "DS";
+			case DT_val: return "DT"; case FD_val: return "FD";
+			case FL_val: return "FL"; case IS_val: return "IS";
+			case LO_val: return "LO"; case LT_val: return "LT";
+			case OB_val: return "OB"; case OD_val: return "OD";
+			case OF_val: return "OF"; case OV_val: return "OV";
+			case OL_val: return "OL"; case OW_val: return "OW";
+			case PN_val: return "PN"; case SH_val: return "SH";
+			case SL_val: return "SL"; case SQ_val: return "SQ";
+			case SS_val: return "SS"; case ST_val: return "ST";
+			case SV_val: return "SV"; case TM_val: return "TM";
+			case UC_val: return "UC"; case UI_val: return "UI";
+			case UL_val: return "UL"; case UN_val: return "UN";
+			case UR_val: return "UR"; case US_val: return "US";
+			case UT_val: return "UT"; case UV_val: return "UV";
+			default: return "??";
+		}
+	}
 
     // ------------------------------------------------------------
     // VR classification
@@ -180,14 +194,22 @@ struct VR {
     // Explicit VR encoding: 32-bit VL usage
     // ------------------------------------------------------------
     /// Returns true if this VR uses 32-bit VL field in explicit encoding
+    // Table 7.1-1. Data Element with Explicit VR other than as shown in Table 7.1-2
+    //      -> use 32-bit VL field
+    // Table 7.1-2. Data Element with Explicit VR of AE, AS, AT, CS, DA, DS, DT,
+    // FL, FD, IS, LO, LT, PN, SH, SL, SS, ST, TM, UI, UL and US
+    //      -> use 16-bit VL field
     constexpr bool uses_explicit_32bit_vl() const noexcept {
         if (!is_known()) return false;
         switch (value) {
-            case OB_val: case OD_val: case OF_val:
-            case OL_val: case OV_val: case OW_val: case SQ_val:
-            case UC_val: case UR_val: case UN_val: case UT_val:
-                return true;
-            default: return false;
+            case AE_val: case AS_val: case AT_val: case CS_val:
+            case DA_val: case DS_val: case DT_val: case FL_val:
+            case FD_val: case IS_val: case LO_val: case LT_val:
+            case PN_val: case SH_val: case SL_val: case SS_val:
+            case ST_val: case TM_val: case UI_val: case UL_val:
+            case US_val:
+                return false;
+            default: return true;
         }
     }
 
@@ -274,7 +296,7 @@ private:
         pack2('U','T'), pack2('U','V'), 0
     };
 
-    /// Maps raw 16-bit code -> small integer (1..32) or 0 if unknown.
+    /// Maps raw 16-bit code -> small integer (1..34) or 0 if unknown.
     static constexpr uint16_t raw_to_val(uint16_t raw) noexcept {
         switch (raw) {
             case pack2('A','E'): return AE_val; case pack2('A','S'): return AS_val;
@@ -339,6 +361,39 @@ inline constexpr VR VR::UR{uint16_t(VR::UR_val)};
 inline constexpr VR VR::US{uint16_t(VR::US_val)};
 inline constexpr VR VR::UT{uint16_t(VR::UT_val)};
 inline constexpr VR VR::UV{uint16_t(VR::UV_val)};
+
+namespace lookup {
+
+constexpr std::pair<Tag, VR> keyword_to_tag_vr(std::string_view keyword) {
+	if (const auto* entry = keyword_to_entry_chd(keyword)) {
+		return {Tag::from_value(entry->tag_value), VR(entry->vr_value)};
+	}
+	return {Tag{}, VR{}};
+}
+
+constexpr std::string_view keyword_to_tag(std::string_view keyword) {
+	if (const auto* entry = keyword_to_entry_chd(keyword)) {
+		return entry->tag;
+	}
+	return {};
+}
+
+constexpr std::string_view tag_to_keyword(std::uint32_t tag_value) {
+	if (const auto* entry = tag_to_entry(tag_value)) {
+		return entry->keyword;
+	}
+	return {};
+}
+
+} // namespace lookup
+
+namespace literals {
+
+inline constexpr Tag operator"" _tag(const char* text, std::size_t len) {
+	return Tag(std::string_view{text, len});
+}
+
+} // namespace literals
 
 
 class DicomFile {

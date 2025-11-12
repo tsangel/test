@@ -7,7 +7,6 @@
 #include <pybind11/pybind11.h>
 
 #include <dicom.h>
-#include <dictionary_lookup.hpp>
 
 namespace py = pybind11;
 
@@ -46,6 +45,7 @@ PYBIND11_MODULE(_dicomsdl, m) {
 	py::class_<Tag>(m, "Tag")
 		.def(py::init<>())
 		.def(py::init<std::uint16_t, std::uint16_t>(), py::arg("group"), py::arg("element"))
+		.def(py::init([](const std::string& keyword) { return Tag(keyword); }), py::arg("keyword"))
 		.def_static("from_value", &Tag::from_value, py::arg("value"))
 		.def_property_readonly("group", &Tag::group)
 		.def_property_readonly("element", &Tag::element)
