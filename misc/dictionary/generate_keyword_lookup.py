@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate keyword lookup tables plus CHD/CHM data from the DICOM registry."""
+"""Generate keyword and tag lookup tables using CHD perfect hashes."""
 
 from __future__ import annotations
 
@@ -28,6 +28,7 @@ class KeywordEntry:
     keyword: str
     tag: str
     vr: str
+    tag_value: int | None
 
 
 @dataclass(frozen=True)
@@ -38,31 +39,6 @@ class ChdTables:
     bucket_count: int
     slots: List[int]
     displacements: List[int]
-
-
-@dataclass(frozen=True)
-class ChmTables:
-    seed: int
-    vertex_count: int
-    vertex_mask: int
-    table_size: int
-    table_mask: int
-    hash_shift: int
-    g_values: List[int]
-    slots: List[int]
-
-
-@dataclass(frozen=True)
-class BdzTables:
-    seed: int
-    vertex_count: int
-    vertex_mask: int
-    table_size: int
-    table_mask: int
-    hash_shift: int
-    hash_double_shift: int
-    g_values: List[int]
-    slots: List[int]
 
 
 def should_include(keyword: str, retired: str) -> bool:
@@ -96,6 +72,20 @@ def keyword_hash64(text: str, seed: int) -> int:
     return mix64(value ^ ((seed * GOLDEN_RATIO32) & MASK64))
 
 
+def strip_tag_separators(tag: str) -> str:
+    return tag.replace("(", "").replace(")", "").replace(",", "").replace(" ", "")
+
+
+def parse_tag_value(tag: str) -> int | None:
+    cleaned = strip_tag_separators(tag)
+    if len(cleaned) != 8:
+        return None
+    try:
+        return int(cleaned, 16)
+    except ValueError:
+        return None
+
+
 def load_entries(source: Path) -> List[KeywordEntry]:
     rows = parse_rows(source)
     entries: List[KeywordEntry] = []
@@ -104,7 +94,8 @@ def load_entries(source: Path) -> List[KeywordEntry]:
         keyword = keyword.strip()
         retired = retired.strip()
         if should_include(keyword, retired):
-            entries.append(KeywordEntry(idx, keyword, tag, vr))
+            tag_value = parse_tag_value(tag)
+            entries.append(KeywordEntry(idx, keyword, tag, vr, tag_value))
     return entries
 
 def next_power_of_two(value: int) -> int:
@@ -113,15 +104,17 @@ def next_power_of_two(value: int) -> int:
     return 1 << (value - 1).bit_length()
 
 
-def build_chd(entries: Sequence[KeywordEntry], load_factor: float = 2.0) -> ChdTables:
+def build_chd_from_hashes(
+    entries: Sequence[KeywordEntry],
+    hashed_values: Sequence[int],
+    load_factor: float = 2.0,
+) -> ChdTables:
     bucket_count = len(entries)
     if bucket_count == 0:
         raise ValueError("No entries available for CHD table generation")
     table_target = max(bucket_count + 1, int(math.ceil(bucket_count * load_factor)))
     table_size = next_power_of_two(table_target)
     mask = table_size - 1
-
-    hashed_values = [base_hash64(entry.keyword) for entry in entries]
 
     # Try deterministic set of seeds until a perfect placement is found.
     for seed in range(1, 1 << 16):
@@ -164,215 +157,25 @@ def build_chd(entries: Sequence[KeywordEntry], load_factor: float = 2.0) -> ChdT
     raise RuntimeError("Unable to build CHD tables with the given configuration")
 
 
-def build_chm(entries: Sequence[KeywordEntry]) -> ChmTables:
-    count = len(entries)
-    if count == 0:
-        raise ValueError("No entries available for CHM table generation")
-    table_size = next_power_of_two(count)
-    table_mask = table_size - 1
-    vertex_count = table_size * 2
-    vertex_mask = vertex_count - 1
-    hash_shift = vertex_mask.bit_length()
-
-    class Edge:
-        __slots__ = ("u", "v", "slot", "registry_index")
-
-        def __init__(self, u: int, v: int, slot: int, registry_index: int) -> None:
-            self.u = u
-            self.v = v
-            self.slot = slot
-            self.registry_index = registry_index
-
-    def try_seed(seed: int) -> ChmTables | None:
-        edges: List[Edge] = []
-        adjacency: List[List[int]] = [[] for _ in range(vertex_count)]
-        for slot, entry in enumerate(entries):
-            hashed = keyword_hash64(entry.keyword, seed)
-            u = hashed & vertex_mask
-            v = (hashed >> hash_shift) & vertex_mask
-            if u == v:
-                return None
-            edge = Edge(u, v, slot, entry.registry_index)
-            idx = len(edges)
-            edges.append(edge)
-            adjacency[u].append(idx)
-            adjacency[v].append(idx)
-
-        degrees = [len(lst) for lst in adjacency]
-        queue: List[int] = [idx for idx, deg in enumerate(degrees) if deg == 1]
-        used_edges = [False] * len(edges)
-        processed = 0
-
-        while queue:
-            vertex = queue.pop()
-            if degrees[vertex] != 1:
-                continue
-            for edge_idx in adjacency[vertex]:
-                if used_edges[edge_idx]:
-                    continue
-                used_edges[edge_idx] = True
-                processed += 1
-                edge = edges[edge_idx]
-                other = edge.v if edge.u == vertex else edge.u
-                degrees[vertex] -= 1
-                degrees[other] -= 1
-                if degrees[other] == 1:
-                    queue.append(other)
-                break
-
-        if processed != len(edges):
-            return None
-
-        slots = [SENTINEL] * table_size
-        for edge in edges:
-            slots[edge.slot] = edge.registry_index
-
-        g_values = [-1] * vertex_count
-        visited_edges = [False] * len(edges)
-        graph: List[List[tuple[int, int]]] = [[] for _ in range(vertex_count)]
-        for idx, edge in enumerate(edges):
-            graph[edge.u].append((edge.v, idx))
-            graph[edge.v].append((edge.u, idx))
-
-        for vertex in range(vertex_count):
-            if g_values[vertex] != -1 or not graph[vertex]:
-                if g_values[vertex] == -1:
-                    g_values[vertex] = 0
-                continue
-            g_values[vertex] = 0
-            stack = [vertex]
-            while stack:
-                current = stack.pop()
-                for neighbor, edge_idx in graph[current]:
-                    if visited_edges[edge_idx]:
-                        continue
-                    visited_edges[edge_idx] = True
-                    slot = edges[edge_idx].slot
-                    if g_values[neighbor] == -1:
-                        g_values[neighbor] = slot ^ g_values[current]
-                        stack.append(neighbor)
-
-        slot_mask = table_mask
-        for edge in edges:
-            idx = (g_values[edge.u] ^ g_values[edge.v]) & slot_mask
-            if idx != edge.slot:
-                return None
-
-        return ChmTables(
-            seed=seed,
-            vertex_count=vertex_count,
-            vertex_mask=vertex_mask,
-            table_size=table_size,
-            table_mask=table_mask,
-            hash_shift=hash_shift,
-            g_values=g_values,
-            slots=slots,
-        )
-
-    for seed in range(1, 1 << 16):
-        tables = try_seed(seed)
-        if tables is not None:
-            return tables
-    raise RuntimeError("Unable to build CHM tables with the given configuration")
+def build_keyword_chd(entries: Sequence[KeywordEntry], load_factor: float = 2.0) -> ChdTables:
+    hashed_values = [base_hash64(entry.keyword) for entry in entries]
+    return build_chd_from_hashes(entries, hashed_values, load_factor)
 
 
-def build_bdz(entries: Sequence[KeywordEntry]) -> BdzTables:
-    count = len(entries)
-    if count == 0:
-        raise ValueError("No entries available for BDZ table generation")
+def tag_base_hash(value: int) -> int:
+    hashed = HASH_OFFSET64
+    for shift in range(0, 32, 8):
+        byte = (value >> shift) & 0xFF
+        hashed = (hashed + byte + HASH_INCR64) & MASK64
+        hashed = mix64(hashed)
+    return hashed
 
-    table_size = next_power_of_two(count)
-    table_mask = table_size - 1
-    vertex_target = max(count + 1, int(math.ceil(count * 1.3)))
-    vertex_count = next_power_of_two(vertex_target)
-    vertex_mask = vertex_count - 1
-    hash_shift = vertex_mask.bit_length()
-    hash_double_shift = hash_shift * 2
-    if hash_double_shift >= 64:
-        raise RuntimeError("BDZ vertex configuration exceeds hashing capacity")
 
-    class HyperEdge:
-        __slots__ = ("vertices", "slot", "registry_index")
+def build_tag_chd(entries: Sequence[KeywordEntry], load_factor: float = 2.0) -> ChdTables:
+    hashed_values = [tag_base_hash(entry.tag_value) for entry in entries]  # type: ignore[arg-type]
+    return build_chd_from_hashes(entries, hashed_values, load_factor)
 
-        def __init__(self, vertices: tuple[int, int, int], slot: int, registry_index: int) -> None:
-            self.vertices = vertices
-            self.slot = slot
-            self.registry_index = registry_index
 
-    def try_seed(seed: int) -> BdzTables | None:
-        edges: List[HyperEdge] = []
-        adjacency: List[List[int]] = [[] for _ in range(vertex_count)]
-        for slot, entry in enumerate(entries):
-            hashed = keyword_hash64(entry.keyword, seed)
-            v0 = hashed & vertex_mask
-            v1 = (hashed >> hash_shift) & vertex_mask
-            v2 = (hashed >> hash_double_shift) & vertex_mask
-            if v0 == v1 or v0 == v2 or v1 == v2:
-                return None
-            index = len(edges)
-            edge = HyperEdge((v0, v1, v2), slot, entry.registry_index)
-            edges.append(edge)
-            adjacency[v0].append(index)
-            adjacency[v1].append(index)
-            adjacency[v2].append(index)
-
-        degrees = [len(neighbors) for neighbors in adjacency]
-        stack: List[int] = [idx for idx, deg in enumerate(degrees) if deg == 1]
-        removed_edge_vertex: List[tuple[int, int]] = []
-        used_edges = [False] * len(edges)
-
-        while stack:
-            vertex = stack.pop()
-            if degrees[vertex] == 0:
-                continue
-            edge_idx = -1
-            for candidate in adjacency[vertex]:
-                if not used_edges[candidate]:
-                    edge_idx = candidate
-                    break
-            if edge_idx == -1:
-                continue
-            used_edges[edge_idx] = True
-            removed_edge_vertex.append((edge_idx, vertex))
-            for neighbor in edges[edge_idx].vertices:
-                degrees[neighbor] -= 1
-                if degrees[neighbor] == 1:
-                    stack.append(neighbor)
-
-        if len(removed_edge_vertex) != len(edges):
-            return None
-
-        g_values = [0] * vertex_count
-        slots = [SENTINEL] * table_size
-
-        for edge_idx, free_vertex in reversed(removed_edge_vertex):
-            edge = edges[edge_idx]
-            v0, v1, v2 = edge.vertices
-            total = 0
-            for vertex in (v0, v1, v2):
-                if vertex == free_vertex:
-                    continue
-                total = (total + g_values[vertex]) & table_mask
-            g_values[free_vertex] = (edge.slot - total) & table_mask
-            slots[edge.slot] = edge.registry_index
-
-        return BdzTables(
-            seed=seed,
-            vertex_count=vertex_count,
-            vertex_mask=vertex_mask,
-            table_size=table_size,
-            table_mask=table_mask,
-            hash_shift=hash_shift,
-            hash_double_shift=hash_double_shift,
-            g_values=g_values,
-            slots=slots,
-        )
-
-    for seed in range(1, 1 << 16):
-        tables = try_seed(seed)
-        if tables is not None:
-            return tables
-    raise RuntimeError("Unable to build BDZ tables with the given configuration")
 
 
 def escape(value: str) -> str:
@@ -389,9 +192,9 @@ def format_array(values: Sequence[str], indent: str = "    ", per_line: int = 4)
 
 def render(
     entries: Sequence[KeywordEntry],
-    chd: ChdTables,
-    chm: ChmTables,
-    bdz: BdzTables,
+    keyword_chd: ChdTables,
+    tag_entries: Sequence[KeywordEntry],
+    tag_chd: ChdTables,
 ) -> str:
     lines: List[str] = []
     lines.append("// Auto-generated keyword lookup tables. Do not edit manually.")
@@ -410,72 +213,51 @@ def render(
     lines.append("};")
     lines.append("")
 
-    sorted_indices = sorted(entries, key=lambda entry: entry.keyword)
-    lines.append(f"constexpr std::array<std::uint16_t, {len(entries)}> kKeywordSortedRegistryIndices = {{")
-    lines.extend(format_array([str(entry.registry_index) for entry in sorted_indices]))
-    lines.append("};")
-    lines.append("")
-    lines.append(f"constexpr std::uint32_t kPerfectHashSeed = {chd.seed}u;")
-    lines.append(f"constexpr std::size_t kPerfectHashTableSize = {chd.table_size};")
-    lines.append(f"constexpr std::size_t kPerfectHashMask = {chd.mask};")
-    lines.append(f"constexpr std::size_t kPerfectHashBucketCount = {chd.bucket_count};")
+    lines.append(f"constexpr std::uint32_t kPerfectHashSeed = {keyword_chd.seed}u;")
+    lines.append(f"constexpr std::size_t kPerfectHashTableSize = {keyword_chd.table_size};")
+    lines.append(f"constexpr std::size_t kPerfectHashMask = {keyword_chd.mask};")
+    lines.append(f"constexpr std::size_t kPerfectHashBucketCount = {keyword_chd.bucket_count};")
     lines.append("")
     slot_values = [
         "std::numeric_limits<std::uint16_t>::max()" if value == SENTINEL else str(value)
-        for value in chd.slots
+        for value in keyword_chd.slots
     ]
     lines.append("constexpr std::array<std::uint16_t, kPerfectHashTableSize> kPerfectHashSlots = {")
     lines.extend(format_array(slot_values))
     lines.append("};")
     lines.append("")
-    displacement_values = [str(val) for val in chd.displacements]
+    displacement_values = [str(val) for val in keyword_chd.displacements]
     lines.append("constexpr std::array<std::uint32_t, kPerfectHashBucketCount> kPerfectHashDisplacements = {")
     lines.extend(format_array(displacement_values, per_line=8))
     lines.append("};")
     lines.append("")
 
-    lines.append(f"constexpr std::uint32_t kChmSeed = {chm.seed}u;")
-    lines.append(f"constexpr std::size_t kChmVertexCount = {chm.vertex_count};")
-    lines.append(f"constexpr std::size_t kChmVertexMask = {chm.vertex_mask};")
-    lines.append(f"constexpr std::size_t kChmTableSize = {chm.table_size};")
-    lines.append(f"constexpr std::size_t kChmTableMask = {chm.table_mask};")
-    lines.append(f"constexpr std::uint32_t kChmHashShift = {chm.hash_shift};")
+    lines.append(f"constexpr std::uint32_t kTagPerfectHashSeed = {tag_chd.seed}u;")
+    lines.append(f"constexpr std::size_t kTagPerfectHashTableSize = {tag_chd.table_size};")
+    lines.append(f"constexpr std::size_t kTagPerfectHashMask = {tag_chd.mask};")
+    lines.append(f"constexpr std::size_t kTagPerfectHashBucketCount = {tag_chd.bucket_count};")
     lines.append("")
 
-    lines.append("constexpr std::array<std::uint32_t, kChmVertexCount> kChmGValues = {")
-    lines.extend(format_array([str(value) for value in chm.g_values]))
+    tag_sorted = sorted(tag_entries, key=lambda entry: entry.tag_value)  # type: ignore[arg-type]
+    lines.append(f"constexpr std::array<std::uint16_t, {len(tag_sorted)}> kTagSortedRegistryIndices = {{")
+    lines.extend(format_array([str(entry.registry_index) for entry in tag_sorted]))
     lines.append("};")
     lines.append("")
 
-    chm_slot_values = [
+    tag_slot_values = [
         "std::numeric_limits<std::uint16_t>::max()" if value == SENTINEL else str(value)
-        for value in chm.slots
+        for value in tag_chd.slots
     ]
-    lines.append("constexpr std::array<std::uint16_t, kChmTableSize> kChmSlots = {")
-    lines.extend(format_array(chm_slot_values))
+    lines.append("constexpr std::array<std::uint16_t, kTagPerfectHashTableSize> kTagPerfectHashSlots = {")
+    lines.extend(format_array(tag_slot_values))
     lines.append("};")
     lines.append("")
 
-    lines.append(f"constexpr std::uint32_t kBdzSeed = {bdz.seed}u;")
-    lines.append(f"constexpr std::size_t kBdzVertexCount = {bdz.vertex_count};")
-    lines.append(f"constexpr std::size_t kBdzVertexMask = {bdz.vertex_mask};")
-    lines.append(f"constexpr std::size_t kBdzTableSize = {bdz.table_size};")
-    lines.append(f"constexpr std::size_t kBdzTableMask = {bdz.table_mask};")
-    lines.append(f"constexpr std::uint32_t kBdzHashShift = {bdz.hash_shift};")
-    lines.append(f"constexpr std::uint32_t kBdzHashDoubleShift = {bdz.hash_double_shift};")
-    lines.append("")
-
-    lines.append("constexpr std::array<std::uint32_t, kBdzVertexCount> kBdzGValues = {")
-    lines.extend(format_array([str(value) for value in bdz.g_values]))
-    lines.append("};")
-    lines.append("")
-
-    bdz_slot_values = [
-        "std::numeric_limits<std::uint16_t>::max()" if value == SENTINEL else str(value)
-        for value in bdz.slots
-    ]
-    lines.append("constexpr std::array<std::uint16_t, kBdzTableSize> kBdzSlots = {")
-    lines.extend(format_array(bdz_slot_values))
+    tag_displacement_values = [str(val) for val in tag_chd.displacements]
+    lines.append(
+        "constexpr std::array<std::uint32_t, kTagPerfectHashBucketCount> kTagPerfectHashDisplacements = {"
+    )
+    lines.extend(format_array(tag_displacement_values, per_line=8))
     lines.append("};")
     lines.append("")
 
@@ -491,11 +273,13 @@ def main() -> None:
     args = parser.parse_args()
 
     entries = load_entries(args.registry)
-    chd = build_chd(entries)
-    chm = build_chm(entries)
-    bdz = build_bdz(entries)
+    keyword_chd = build_keyword_chd(entries)
+    tag_entries = [entry for entry in entries if entry.tag_value is not None]
+    if not tag_entries:
+        raise ValueError("No entries have numeric tag values for tag lookup generation")
+    tag_chd = build_tag_chd(tag_entries)
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(render(entries, chd, chm, bdz), encoding="utf-8")
+    args.output.write_text(render(entries, keyword_chd, tag_entries, tag_chd), encoding="utf-8")
 
 
 if __name__ == "__main__":

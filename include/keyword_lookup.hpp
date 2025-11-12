@@ -1,6 +1,7 @@
 // Lookup helpers for keyword -> DataElementEntry mappings.
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <limits>
 #include <string_view>
@@ -24,22 +25,6 @@ constexpr bool sv_equal(std::string_view lhs, std::string_view rhs) {
         }
     }
     return true;
-}
-
-constexpr int sv_compare(std::string_view lhs, std::string_view rhs) {
-    const std::size_t min_size = lhs.size() < rhs.size() ? lhs.size() : rhs.size();
-    for (std::size_t i = 0; i < min_size; ++i) {
-        if (lhs[i] < rhs[i]) {
-            return -1;
-        }
-        if (lhs[i] > rhs[i]) {
-            return 1;
-        }
-    }
-    if (lhs.size() == rhs.size()) {
-        return 0;
-    }
-    return lhs.size() < rhs.size() ? -1 : 1;
 }
 
 constexpr const DataElementEntry* entry_from_index(std::uint16_t index) {
@@ -69,6 +54,55 @@ constexpr std::uint64_t keyword_hash64(std::string_view text, std::uint32_t seed
     return mix64(base_hash64(text) ^ seed_mix);
 }
 
+constexpr std::uint64_t tag_base_hash32(std::uint32_t tag_value) {
+    std::uint64_t value = 0x6A09E667F3BCC909ull;
+    for (int shift = 0; shift < 32; shift += 8) {
+        const auto byte = static_cast<unsigned char>((tag_value >> shift) & 0xFFu);
+        value = (value + static_cast<std::uint64_t>(byte) + 0x9E3779B97F4A7C15ull) & 0xFFFFFFFFFFFFFFFFull;
+        value = mix64(value);
+    }
+    return value;
+}
+
+constexpr std::uint64_t tag_hash64(std::uint32_t tag_value, std::uint32_t seed) {
+    const auto seed_mix = static_cast<std::uint64_t>(seed) * 0x9E3779B1u;
+    return mix64(tag_base_hash32(tag_value) ^ seed_mix);
+}
+
+constexpr std::uint32_t hex_value(char ch) {
+    if (ch >= '0' && ch <= '9') {
+        return static_cast<std::uint32_t>(ch - '0');
+    }
+    if (ch >= 'A' && ch <= 'F') {
+        return static_cast<std::uint32_t>(10 + (ch - 'A'));
+    }
+    if (ch >= 'a' && ch <= 'f') {
+        return static_cast<std::uint32_t>(10 + (ch - 'a'));
+    }
+    return 0;
+}
+
+constexpr std::uint32_t tag_string_to_u32(std::string_view tag) {
+    std::uint32_t value = 0;
+    for (char ch : tag) {
+        if (ch == '(' || ch == ')' || ch == ',' || ch == ' ') {
+            continue;
+        }
+        value = (value << 4) | hex_value(ch);
+    }
+    return value;
+}
+
+constexpr auto build_registry_tag_values() {
+    std::array<std::uint32_t, kDataElementRegistry.size()> values{};
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        values[i] = tag_string_to_u32(kDataElementRegistry[i].tag);
+    }
+    return values;
+}
+
+constexpr auto kRegistryTagValues = build_registry_tag_values();
+
 }  // namespace detail
 
 constexpr std::uint16_t keyword_to_registry_index_chd(std::string_view keyword) {
@@ -92,76 +126,6 @@ constexpr const DataElementEntry* keyword_to_entry_chd(std::string_view keyword)
     return index == detail::kInvalidRegistryIndex ? nullptr : detail::entry_from_index(index);
 }
 
-constexpr std::uint16_t keyword_to_registry_index_chm(std::string_view keyword) {
-    if (keyword.empty()) {
-        return detail::kInvalidRegistryIndex;
-    }
-    const auto hash = detail::keyword_hash64(keyword, kChmSeed);
-    const auto u = static_cast<std::size_t>(hash & kChmVertexMask);
-    const auto v = static_cast<std::size_t>((hash >> kChmHashShift) & kChmVertexMask);
-    const auto slot = static_cast<std::size_t>((kChmGValues[u] ^ kChmGValues[v]) & kChmTableMask);
-    const auto index = kChmSlots[slot];
-    if (index == detail::kInvalidRegistryIndex) {
-        return detail::kInvalidRegistryIndex;
-    }
-    const auto* entry = detail::entry_from_index(index);
-    return entry && detail::sv_equal(entry->keyword, keyword) ? index : detail::kInvalidRegistryIndex;
-}
-
-constexpr const DataElementEntry* keyword_to_entry_chm(std::string_view keyword) {
-    const auto index = keyword_to_registry_index_chm(keyword);
-    return index == detail::kInvalidRegistryIndex ? nullptr : detail::entry_from_index(index);
-}
-
-constexpr std::uint16_t keyword_to_registry_index_bdz(std::string_view keyword) {
-    if (keyword.empty()) {
-        return detail::kInvalidRegistryIndex;
-    }
-    const auto hash = detail::keyword_hash64(keyword, kBdzSeed);
-    const auto v0 = static_cast<std::size_t>(hash & kBdzVertexMask);
-    const auto v1 = static_cast<std::size_t>((hash >> kBdzHashShift) & kBdzVertexMask);
-    const auto v2 = static_cast<std::size_t>((hash >> kBdzHashDoubleShift) & kBdzVertexMask);
-    const auto slot = static_cast<std::size_t>(
-        (kBdzGValues[v0] + kBdzGValues[v1] + kBdzGValues[v2]) & kBdzTableMask);
-    const auto index = kBdzSlots[slot];
-    if (index == detail::kInvalidRegistryIndex) {
-        return detail::kInvalidRegistryIndex;
-    }
-    const auto* entry = detail::entry_from_index(index);
-    return entry && detail::sv_equal(entry->keyword, keyword) ? index : detail::kInvalidRegistryIndex;
-}
-
-constexpr const DataElementEntry* keyword_to_entry_bdz(std::string_view keyword) {
-    const auto index = keyword_to_registry_index_bdz(keyword);
-    return index == detail::kInvalidRegistryIndex ? nullptr : detail::entry_from_index(index);
-}
-
-constexpr const DataElementEntry* keyword_to_entry_binary(std::string_view keyword) {
-    if (keyword.empty()) {
-        return nullptr;
-    }
-    std::size_t left = 0;
-    std::size_t right = kKeywordSortedRegistryIndices.size();
-    while (left < right) {
-        const std::size_t mid = left + (right - left) / 2;
-        const auto entry_index = kKeywordSortedRegistryIndices[mid];
-        const auto* candidate = detail::entry_from_index(entry_index);
-        if (!candidate) {
-            return nullptr;
-        }
-        const int cmp = detail::sv_compare(keyword, candidate->keyword);
-        if (cmp == 0) {
-            return candidate;
-        }
-        if (cmp < 0) {
-            right = mid;
-        } else {
-            left = mid + 1;
-        }
-    }
-    return nullptr;
-}
-
 constexpr std::uint16_t keyword_to_registry_index_perfect(std::string_view keyword) {
     return keyword_to_registry_index_chd(keyword);
 }
@@ -177,27 +141,70 @@ constexpr std::string_view keyword_to_tag_chd(std::string_view keyword) {
     return {};
 }
 
-constexpr std::string_view keyword_to_tag_chm(std::string_view keyword) {
-    if (const auto* entry = keyword_to_entry_chm(keyword)) {
-        return entry->tag;
-    }
-    return {};
-}
-
-constexpr std::string_view keyword_to_tag_bdz(std::string_view keyword) {
-    if (const auto* entry = keyword_to_entry_bdz(keyword)) {
-        return entry->tag;
-    }
-    return {};
-}
-
 constexpr std::string_view keyword_to_tag_perfect(std::string_view keyword) {
     return keyword_to_tag_chd(keyword);
 }
 
-constexpr std::string_view keyword_to_tag_binary(std::string_view keyword) {
-    if (const auto* entry = keyword_to_entry_binary(keyword)) {
-        return entry->tag;
+constexpr std::uint32_t make_tag(std::uint16_t group, std::uint16_t element) {
+    return (static_cast<std::uint32_t>(group) << 16) | static_cast<std::uint32_t>(element);
+}
+
+constexpr std::uint16_t tag_to_registry_index_linear(std::uint32_t tag_value) {
+    for (std::size_t idx = 0; idx < detail::kRegistryTagValues.size(); ++idx) {
+        if (detail::kRegistryTagValues[idx] == tag_value) {
+            return static_cast<std::uint16_t>(idx);
+        }
+    }
+    return detail::kInvalidRegistryIndex;
+}
+
+constexpr std::uint16_t tag_to_registry_index_binary(std::uint32_t tag_value) {
+    std::size_t left = 0;
+    std::size_t right = kTagSortedRegistryIndices.size();
+    while (left < right) {
+        const std::size_t mid = left + (right - left) / 2;
+        const auto entry_index = kTagSortedRegistryIndices[mid];
+        const auto candidate = detail::kRegistryTagValues[entry_index];
+        if (candidate == tag_value) {
+            return entry_index;
+        }
+        if (candidate < tag_value) {
+            left = mid + 1;
+        } else {
+            right = mid;
+        }
+    }
+    return detail::kInvalidRegistryIndex;
+}
+
+constexpr std::uint16_t tag_to_registry_index_chd(std::uint32_t tag_value) {
+    const auto hash = detail::tag_hash64(tag_value, kTagPerfectHashSeed);
+    const auto bucket = static_cast<std::size_t>(hash % kTagPerfectHashBucketCount);
+    const auto displacement = kTagPerfectHashDisplacements[bucket];
+    const auto slot = static_cast<std::size_t>((hash + displacement) & kTagPerfectHashMask);
+    const auto index = kTagPerfectHashSlots[slot];
+    if (index == detail::kInvalidRegistryIndex) {
+        return detail::kInvalidRegistryIndex;
+    }
+    return detail::kRegistryTagValues[index] == tag_value ? index : detail::kInvalidRegistryIndex;
+}
+
+constexpr std::uint16_t tag_to_registry_index_perfect(std::uint32_t tag_value) {
+    return tag_to_registry_index_chd(tag_value);
+}
+
+constexpr std::uint16_t tag_to_registry_index(std::uint32_t tag_value) {
+    return tag_to_registry_index_chd(tag_value);
+}
+
+constexpr const DataElementEntry* tag_to_entry(std::uint32_t tag_value) {
+    const auto index = tag_to_registry_index(tag_value);
+    return index == detail::kInvalidRegistryIndex ? nullptr : detail::entry_from_index(index);
+}
+
+constexpr std::string_view tag_to_keyword(std::uint32_t tag_value) {
+    if (const auto* entry = tag_to_entry(tag_value)) {
+        return entry->keyword;
     }
     return {};
 }

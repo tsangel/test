@@ -6,6 +6,8 @@
 
 namespace py = pybind11;
 
+using dicom::DicomFile;
+
 PYBIND11_MODULE(_dicomsdl, m) {
 	m.doc() = "pybind11 bindings for DicomFile";
 
