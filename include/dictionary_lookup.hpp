@@ -5,7 +5,9 @@
 #include <cstdint>
 #include <limits>
 #include <string_view>
+#include <utility>
 
+#include "dicom.h"
 #include "dataelement_registry.hpp"
 #include "dictionary_lookup_tables.hpp"
 
@@ -69,34 +71,10 @@ constexpr std::uint64_t tag_hash64(std::uint32_t tag_value, std::uint32_t seed) 
     return mix64(tag_base_hash32(tag_value) ^ seed_mix);
 }
 
-constexpr std::uint32_t hex_value(char ch) {
-    if (ch >= '0' && ch <= '9') {
-        return static_cast<std::uint32_t>(ch - '0');
-    }
-    if (ch >= 'A' && ch <= 'F') {
-        return static_cast<std::uint32_t>(10 + (ch - 'A'));
-    }
-    if (ch >= 'a' && ch <= 'f') {
-        return static_cast<std::uint32_t>(10 + (ch - 'a'));
-    }
-    return 0;
-}
-
-constexpr std::uint32_t tag_string_to_u32(std::string_view tag) {
-    std::uint32_t value = 0;
-    for (char ch : tag) {
-        if (ch == '(' || ch == ')' || ch == ',' || ch == ' ') {
-            continue;
-        }
-        value = (value << 4) | hex_value(ch);
-    }
-    return value;
-}
-
 constexpr auto build_registry_tag_values() {
     std::array<std::uint32_t, kDataElementRegistry.size()> values{};
     for (std::size_t i = 0; i < values.size(); ++i) {
-        values[i] = tag_string_to_u32(kDataElementRegistry[i].tag);
+        values[i] = kDataElementRegistry[i].tag_value;
     }
     return values;
 }
@@ -143,6 +121,13 @@ constexpr std::string_view keyword_to_tag_chd(std::string_view keyword) {
 
 constexpr std::string_view keyword_to_tag_perfect(std::string_view keyword) {
     return keyword_to_tag_chd(keyword);
+}
+
+constexpr std::pair<Tag, VR> keyword_to_tag_vr(std::string_view keyword) {
+    if (const auto* entry = keyword_to_entry_chd(keyword)) {
+        return {Tag::from_value(entry->tag_value), VR(entry->vr_value)};
+    }
+    return {Tag{}, VR{}};
 }
 
 constexpr std::uint32_t make_tag(std::uint16_t group, std::uint16_t element) {

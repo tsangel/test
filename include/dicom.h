@@ -109,15 +109,16 @@ struct VR {
             case pack2('F','L'): return "FL"; case pack2('I','S'): return "IS";
             case pack2('L','O'): return "LO"; case pack2('L','T'): return "LT";
             case pack2('O','B'): return "OB"; case pack2('O','D'): return "OD";
-            case pack2('O','F'): return "OF"; case pack2('O','L'): return "OL";
-            case pack2('O','W'): return "OW"; case pack2('P','N'): return "PN";
-            case pack2('S','H'): return "SH"; case pack2('S','L'): return "SL";
-            case pack2('S','Q'): return "SQ"; case pack2('S','S'): return "SS";
-            case pack2('S','T'): return "ST"; case pack2('T','M'): return "TM";
+            case pack2('O','F'): return "OF"; case pack2('O','V'): return "OV";
+            case pack2('O','L'): return "OL"; case pack2('O','W'): return "OW";
+            case pack2('P','N'): return "PN"; case pack2('S','H'): return "SH";
+            case pack2('S','L'): return "SL"; case pack2('S','Q'): return "SQ";
+            case pack2('S','S'): return "SS"; case pack2('S','T'): return "ST";
+            case pack2('S','V'): return "SV"; case pack2('T','M'): return "TM";
             case pack2('U','C'): return "UC"; case pack2('U','I'): return "UI";
             case pack2('U','L'): return "UL"; case pack2('U','N'): return "UN";
             case pack2('U','R'): return "UR"; case pack2('U','S'): return "US";
-            case pack2('U','T'): return "UT";
+            case pack2('U','T'): return "UT"; case pack2('U','V'): return "UV";
             default: return "??";
         }
     }
@@ -142,9 +143,9 @@ struct VR {
     constexpr bool is_binary() const noexcept {
         if (!is_known()) return false;
         switch (value) {
-			case AT_val:
-            case OB_val: case OD_val: case OF_val: case OL_val: case OW_val:
-            case UN_val: case US_val: case SS_val:
+		case AT_val:
+            case OB_val: case OD_val: case OF_val: case OV_val: case OL_val: case OW_val:
+            case UN_val: case US_val: case SS_val: case SV_val: case UV_val:
             case UL_val: case SL_val: case FL_val: case FD_val:
                 return true;
             default: return false;
@@ -181,7 +182,7 @@ struct VR {
         if (!is_known()) return false;
         switch (value) {
             case OB_val: case OD_val: case OF_val:
-            case OL_val: case OW_val: case SQ_val:
+            case OL_val: case OV_val: case OW_val: case SQ_val:
             case UC_val: case UR_val: case UN_val: case UT_val:
                 return true;
             default: return false;
@@ -196,7 +197,7 @@ struct VR {
         switch (value) {
             case US_val: case SS_val: return 2;
             case AT_val: case UL_val: case SL_val: case FL_val: return 4;
-            case FD_val: return 8;
+            case FD_val: case SV_val: case UV_val: return 8;
             default: return 0;
         }
     }
@@ -212,9 +213,10 @@ struct VR {
     // ------------------------------------------------------------
     enum : uint16_t {
         AE_val=1, AS_val, AT_val, CS_val, DA_val, DS_val, DT_val, FD_val,
-        FL_val, IS_val, LO_val, LT_val, OB_val, OD_val, OF_val, OL_val,
-        OW_val, PN_val, SH_val, SL_val, SQ_val, SS_val, ST_val, TM_val,
-        UC_val, UI_val, UL_val, UN_val, UR_val, US_val, UT_val, _UNKNOWN_val
+        FL_val, IS_val, LO_val, LT_val, OB_val, OD_val, OF_val, OV_val,
+        OL_val, OW_val, PN_val, SH_val, SL_val, SQ_val, SS_val, ST_val,
+        SV_val, TM_val, UC_val, UI_val, UL_val, UN_val, UR_val, US_val,
+        UT_val, UV_val, _UNKNOWN_val
     };
 
     // ------------------------------------------------------------
@@ -235,6 +237,7 @@ struct VR {
     static const VR OB;
     static const VR OD;
     static const VR OF;
+    static const VR OV;
     static const VR OL;
     static const VR OW;
     static const VR PN;
@@ -243,6 +246,7 @@ struct VR {
     static const VR SQ;
     static const VR SS;
     static const VR ST;
+    static const VR SV;
     static const VR TM;
     static const VR UC;
     static const VR UI;
@@ -251,19 +255,21 @@ struct VR {
     static const VR UR;
     static const VR US;
     static const VR UT;
+    static const VR UV;
 
 private:
     // Mapping table from compact ID -> raw 2-char code
-    inline static constexpr std::array<uint16_t, 33> val_to_raw = {
+    inline static constexpr std::array<uint16_t, UV_val + 2> val_to_raw = {
         0,
         pack2('A','E'), pack2('A','S'), pack2('A','T'), pack2('C','S'),
         pack2('D','A'), pack2('D','S'), pack2('D','T'), pack2('F','D'),
         pack2('F','L'), pack2('I','S'), pack2('L','O'), pack2('L','T'),
-        pack2('O','B'), pack2('O','D'), pack2('O','F'), pack2('O','L'),
-        pack2('O','W'), pack2('P','N'), pack2('S','H'), pack2('S','L'),
-        pack2('S','Q'), pack2('S','S'), pack2('S','T'), pack2('T','M'),
-        pack2('U','C'), pack2('U','I'), pack2('U','L'), pack2('U','N'),
-        pack2('U','R'), pack2('U','S'), pack2('U','T'), 0
+        pack2('O','B'), pack2('O','D'), pack2('O','F'), pack2('O','V'),
+        pack2('O','L'), pack2('O','W'), pack2('P','N'), pack2('S','H'),
+        pack2('S','L'), pack2('S','Q'), pack2('S','S'), pack2('S','T'),
+        pack2('S','V'), pack2('T','M'), pack2('U','C'), pack2('U','I'),
+        pack2('U','L'), pack2('U','N'), pack2('U','R'), pack2('U','S'),
+        pack2('U','T'), pack2('U','V'), 0
     };
 
     /// Maps raw 16-bit code -> small integer (1..32) or 0 if unknown.
@@ -276,15 +282,16 @@ private:
             case pack2('F','L'): return FL_val; case pack2('I','S'): return IS_val;
             case pack2('L','O'): return LO_val; case pack2('L','T'): return LT_val;
             case pack2('O','B'): return OB_val; case pack2('O','D'): return OD_val;
-            case pack2('O','F'): return OF_val; case pack2('O','L'): return OL_val;
-            case pack2('O','W'): return OW_val; case pack2('P','N'): return PN_val;
-            case pack2('S','H'): return SH_val; case pack2('S','L'): return SL_val;
-            case pack2('S','Q'): return SQ_val; case pack2('S','S'): return SS_val;
-            case pack2('S','T'): return ST_val; case pack2('T','M'): return TM_val;
+            case pack2('O','F'): return OF_val; case pack2('O','V'): return OV_val;
+            case pack2('O','L'): return OL_val; case pack2('O','W'): return OW_val;
+            case pack2('P','N'): return PN_val; case pack2('S','H'): return SH_val;
+            case pack2('S','L'): return SL_val; case pack2('S','Q'): return SQ_val;
+            case pack2('S','S'): return SS_val; case pack2('S','T'): return ST_val;
+            case pack2('S','V'): return SV_val; case pack2('T','M'): return TM_val;
             case pack2('U','C'): return UC_val; case pack2('U','I'): return UI_val;
             case pack2('U','L'): return UL_val; case pack2('U','N'): return UN_val;
             case pack2('U','R'): return UR_val; case pack2('U','S'): return US_val;
-            case pack2('U','T'): return UT_val;
+            case pack2('U','T'): return UT_val; case pack2('U','V'): return UV_val;
             default: return 0;
         }
     }
@@ -311,6 +318,7 @@ inline constexpr VR VR::LT{uint16_t(VR::LT_val)};
 inline constexpr VR VR::OB{uint16_t(VR::OB_val)};
 inline constexpr VR VR::OD{uint16_t(VR::OD_val)};
 inline constexpr VR VR::OF{uint16_t(VR::OF_val)};
+inline constexpr VR VR::OV{uint16_t(VR::OV_val)};
 inline constexpr VR VR::OL{uint16_t(VR::OL_val)};
 inline constexpr VR VR::OW{uint16_t(VR::OW_val)};
 inline constexpr VR VR::PN{uint16_t(VR::PN_val)};
@@ -319,6 +327,7 @@ inline constexpr VR VR::SL{uint16_t(VR::SL_val)};
 inline constexpr VR VR::SQ{uint16_t(VR::SQ_val)};
 inline constexpr VR VR::SS{uint16_t(VR::SS_val)};
 inline constexpr VR VR::ST{uint16_t(VR::ST_val)};
+inline constexpr VR VR::SV{uint16_t(VR::SV_val)};
 inline constexpr VR VR::TM{uint16_t(VR::TM_val)};
 inline constexpr VR VR::UC{uint16_t(VR::UC_val)};
 inline constexpr VR VR::UI{uint16_t(VR::UI_val)};
@@ -327,6 +336,7 @@ inline constexpr VR VR::UN{uint16_t(VR::UN_val)};
 inline constexpr VR VR::UR{uint16_t(VR::UR_val)};
 inline constexpr VR VR::US{uint16_t(VR::US_val)};
 inline constexpr VR VR::UT{uint16_t(VR::UT_val)};
+inline constexpr VR VR::UV{uint16_t(VR::UV_val)};
 
 
 class DicomFile {

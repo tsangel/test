@@ -13,11 +13,14 @@ HEADER_TEMPLATE = r"""
 #pragma once
 
 #include <array>
+#include <cstdint>
 #include <string_view>
 
 namespace dicom {{
 
 struct DataElementEntry {{
+    std::uint32_t tag_value;
+    std::uint16_t vr_value;
     std::string_view tag;
     std::string_view name;
     std::string_view keyword;
@@ -58,6 +61,63 @@ def escape(value: str) -> str:
     return value.replace('"', r"\"")
 
 
+VR_MAP = {
+    "AE": 1,
+    "AS": 2,
+    "AT": 3,
+    "CS": 4,
+    "DA": 5,
+    "DS": 6,
+    "DT": 7,
+    "FD": 8,
+    "FL": 9,
+    "IS": 10,
+    "LO": 11,
+    "LT": 12,
+    "OB": 13,
+    "OD": 14,
+    "OF": 15,
+    "OV": 16,
+    "OL": 17,
+    "OW": 18,
+    "PN": 19,
+    "SH": 20,
+    "SL": 21,
+    "SQ": 22,
+    "SS": 23,
+    "ST": 24,
+    "SV": 25,
+    "TM": 26,
+    "UC": 27,
+    "UI": 28,
+    "UL": 29,
+    "UN": 30,
+    "UR": 31,
+    "US": 32,
+    "UT": 33,
+    "UV": 34,
+}
+
+
+def parse_tag_value(tag: str) -> int | None:
+    cleaned = tag.replace("(", "").replace(")", "").replace(",", "").replace(" ", "")
+    if len(cleaned) != 8:
+        return None
+    cleaned = "".join("0" if ch in "xX" else ch for ch in cleaned)
+    try:
+        return int(cleaned, 16)
+    except ValueError:
+        return None
+
+
+def parse_vr_value(vr: str) -> int:
+    code = vr.strip().upper()
+    if len(code) >= 2:
+        code = code[:2]
+        return VR_MAP.get(code, 0)
+    return 0
+
+
 def write_header(rows: list[list[str]], dest: Path, source_path: Path) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     with dest.open("w", encoding="utf-8") as fh:
@@ -67,9 +127,23 @@ def write_header(rows: list[list[str]], dest: Path, source_path: Path) -> None:
             )
         )
         for idx, row in enumerate(rows):
-            tag, name, keyword, vr, vm, retired = (escape(v) for v in row)
+            raw_tag, raw_name, raw_keyword, raw_vr, raw_vm, raw_retired = row
+            tag_value = parse_tag_value(raw_tag)
+            vr_value = parse_vr_value(raw_vr)
+            tag_literal = (
+                f"0x{tag_value:08X}u" if tag_value is not None else "0u"
+            )
+            vr_literal = f"{vr_value}u"
+            tag, name, keyword, vr, vm, retired = (
+                escape(raw_tag),
+                escape(raw_name),
+                escape(raw_keyword),
+                escape(raw_vr),
+                escape(raw_vm),
+                escape(raw_retired),
+            )
             fh.write(
-                f'    /* {idx:4d} */ DataElementEntry{{"{tag}", "{name}", "{keyword}", "{vr}", "{vm}", "{retired}"}},\n'
+                f'    /* {idx:4d} */ DataElementEntry{{{tag_literal}, {vr_literal}, "{tag}", "{name}", "{keyword}", "{vr}", "{vm}", "{retired}"}},\n'
             )
         fh.write(FOOTER)
 
