@@ -32,6 +32,14 @@ class KeywordEntry:
 
 
 @dataclass(frozen=True)
+class TagWildcardEntry:
+    registry_index: int
+    value: int
+    mask: int
+    retired: bool
+
+
+@dataclass(frozen=True)
 class ChdTables:
     seed: int
     table_size: int
@@ -48,6 +56,10 @@ def should_include(keyword: str, retired: str) -> bool:
     if match and int(match.group(1)) < 2010:
         return False
     return True
+
+
+def is_retired_entry(retired: str) -> bool:
+    return "RET" in retired.upper()
 
 
 def mix64(value: int) -> int:
@@ -76,27 +88,52 @@ def strip_tag_separators(tag: str) -> str:
     return tag.replace("(", "").replace(")", "").replace(",", "").replace(" ", "")
 
 
-def parse_tag_value(tag: str) -> int | None:
+def parse_tag_pattern(tag: str) -> tuple[int, int, bool] | None:
     cleaned = strip_tag_separators(tag)
     if len(cleaned) != 8:
         return None
-    try:
-        return int(cleaned, 16)
-    except ValueError:
-        return None
+    value = 0
+    mask = 0
+    has_wildcard = False
+    for ch in cleaned:
+        value <<= 4
+        mask <<= 4
+        if "0" <= ch <= "9" or "A" <= ch <= "F" or "a" <= ch <= "f":
+            digit = int(ch, 16)
+            value |= digit
+            mask |= 0xF
+        elif ch in {"x", "X"}:
+            has_wildcard = True
+            # Wildcard nibble: mask stays zero, value already shifted.
+        else:
+            return None
+    return value, mask, has_wildcard
 
 
-def load_entries(source: Path) -> List[KeywordEntry]:
+def load_entries(source: Path) -> tuple[List[KeywordEntry], List[KeywordEntry], List[TagWildcardEntry]]:
     rows = parse_rows(source)
-    entries: List[KeywordEntry] = []
+    keyword_entries: List[KeywordEntry] = []
+    tag_entries: List[KeywordEntry] = []
+    wildcard_entries: List[TagWildcardEntry] = []
     for idx, row in enumerate(rows):
         tag, _name, keyword, vr, _vm, retired = row
         keyword = keyword.strip()
         retired = retired.strip()
+        retired_flag = is_retired_entry(retired)
+        pattern = parse_tag_pattern(tag)
+        tag_value: int | None = None
+        if pattern is not None:
+            value, mask, has_wildcard = pattern
+            if has_wildcard:
+                wildcard_entries.append(TagWildcardEntry(idx, value, mask, retired_flag))
+            else:
+                tag_value = value
+        entry = KeywordEntry(idx, keyword, tag, vr, tag_value)
         if should_include(keyword, retired):
-            tag_value = parse_tag_value(tag)
-            entries.append(KeywordEntry(idx, keyword, tag, vr, tag_value))
-    return entries
+            keyword_entries.append(entry)
+        if tag_value is not None:
+            tag_entries.append(entry)
+    return keyword_entries, tag_entries, wildcard_entries
 
 def next_power_of_two(value: int) -> int:
     if value <= 0:
@@ -172,7 +209,11 @@ def tag_base_hash(value: int) -> int:
 
 
 def build_tag_chd(entries: Sequence[KeywordEntry], load_factor: float = 2.0) -> ChdTables:
-    hashed_values = [tag_base_hash(entry.tag_value) for entry in entries]  # type: ignore[arg-type]
+    hashed_values: List[int] = []
+    for entry in entries:
+        if entry.tag_value is None:
+            raise ValueError("Tag entry missing numeric value")
+        hashed_values.append(tag_base_hash(entry.tag_value))
     return build_chd_from_hashes(entries, hashed_values, load_factor)
 
 
@@ -195,6 +236,7 @@ def render(
     keyword_chd: ChdTables,
     tag_entries: Sequence[KeywordEntry],
     tag_chd: ChdTables,
+    wildcard_entries: Sequence[TagWildcardEntry],
 ) -> str:
     lines: List[str] = []
     lines.append("// Auto-generated keyword lookup tables. Do not edit manually.")
@@ -238,12 +280,6 @@ def render(
     lines.append(f"constexpr std::size_t kTagPerfectHashBucketCount = {tag_chd.bucket_count};")
     lines.append("")
 
-    tag_sorted = sorted(tag_entries, key=lambda entry: entry.tag_value)  # type: ignore[arg-type]
-    lines.append(f"constexpr std::array<std::uint16_t, {len(tag_sorted)}> kTagSortedRegistryIndices = {{")
-    lines.extend(format_array([str(entry.registry_index) for entry in tag_sorted]))
-    lines.append("};")
-    lines.append("")
-
     tag_slot_values = [
         "std::numeric_limits<std::uint16_t>::max()" if value == SENTINEL else str(value)
         for value in tag_chd.slots
@@ -261,6 +297,23 @@ def render(
     lines.append("};")
     lines.append("")
 
+    sorted_wildcards = sorted(wildcard_entries, key=lambda entry: (entry.retired, entry.registry_index))
+
+    lines.append(f"constexpr std::array<std::uint32_t, {len(sorted_wildcards)}> kTagWildcardValues = {{")
+    lines.extend(format_array([str(entry.value) for entry in sorted_wildcards]))
+    lines.append("};")
+    lines.append("")
+
+    lines.append(f"constexpr std::array<std::uint32_t, {len(sorted_wildcards)}> kTagWildcardMasks = {{")
+    lines.extend(format_array([str(entry.mask) for entry in sorted_wildcards]))
+    lines.append("};")
+    lines.append("")
+
+    lines.append(f"constexpr std::array<std::uint16_t, {len(sorted_wildcards)}> kTagWildcardRegistryIndices = {{")
+    lines.extend(format_array([str(entry.registry_index) for entry in sorted_wildcards]))
+    lines.append("};")
+    lines.append("")
+
     lines.append("}  // namespace dicom::lookup")
     lines.append("")
     return "\n".join(lines)
@@ -269,17 +322,19 @@ def render(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--registry", type=Path, default=Path("misc/dictionary/_dataelement_registry.txt"))
-    parser.add_argument("--output", type=Path, default=Path("include/keyword_lookup_tables.hpp"))
+    parser.add_argument("--output", type=Path, default=Path("include/dictionary_lookup_tables.hpp"))
     args = parser.parse_args()
 
-    entries = load_entries(args.registry)
-    keyword_chd = build_keyword_chd(entries)
-    tag_entries = [entry for entry in entries if entry.tag_value is not None]
+    keyword_entries, tag_entries, wildcard_entries = load_entries(args.registry)
+    keyword_chd = build_keyword_chd(keyword_entries)
     if not tag_entries:
         raise ValueError("No entries have numeric tag values for tag lookup generation")
     tag_chd = build_tag_chd(tag_entries)
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(render(entries, keyword_chd, tag_entries, tag_chd), encoding="utf-8")
+    args.output.write_text(
+        render(keyword_entries, keyword_chd, tag_entries, tag_chd, wildcard_entries),
+        encoding="utf-8",
+    )
 
 
 if __name__ == "__main__":

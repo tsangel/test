@@ -7,7 +7,7 @@
 #include <string_view>
 
 #include "dataelement_registry.hpp"
-#include "keyword_lookup_tables.hpp"
+#include "dictionary_lookup_tables.hpp"
 
 namespace dicom::lookup {
 
@@ -149,34 +149,6 @@ constexpr std::uint32_t make_tag(std::uint16_t group, std::uint16_t element) {
     return (static_cast<std::uint32_t>(group) << 16) | static_cast<std::uint32_t>(element);
 }
 
-constexpr std::uint16_t tag_to_registry_index_linear(std::uint32_t tag_value) {
-    for (std::size_t idx = 0; idx < detail::kRegistryTagValues.size(); ++idx) {
-        if (detail::kRegistryTagValues[idx] == tag_value) {
-            return static_cast<std::uint16_t>(idx);
-        }
-    }
-    return detail::kInvalidRegistryIndex;
-}
-
-constexpr std::uint16_t tag_to_registry_index_binary(std::uint32_t tag_value) {
-    std::size_t left = 0;
-    std::size_t right = kTagSortedRegistryIndices.size();
-    while (left < right) {
-        const std::size_t mid = left + (right - left) / 2;
-        const auto entry_index = kTagSortedRegistryIndices[mid];
-        const auto candidate = detail::kRegistryTagValues[entry_index];
-        if (candidate == tag_value) {
-            return entry_index;
-        }
-        if (candidate < tag_value) {
-            left = mid + 1;
-        } else {
-            right = mid;
-        }
-    }
-    return detail::kInvalidRegistryIndex;
-}
-
 constexpr std::uint16_t tag_to_registry_index_chd(std::uint32_t tag_value) {
     const auto hash = detail::tag_hash64(tag_value, kTagPerfectHashSeed);
     const auto bucket = static_cast<std::size_t>(hash % kTagPerfectHashBucketCount);
@@ -193,8 +165,21 @@ constexpr std::uint16_t tag_to_registry_index_perfect(std::uint32_t tag_value) {
     return tag_to_registry_index_chd(tag_value);
 }
 
+constexpr std::uint16_t tag_to_registry_index_wildcard(std::uint32_t tag_value) {
+    for (std::size_t i = 0; i < kTagWildcardRegistryIndices.size(); ++i) {
+        if ((tag_value & kTagWildcardMasks[i]) == kTagWildcardValues[i]) {
+            return kTagWildcardRegistryIndices[i];
+        }
+    }
+    return detail::kInvalidRegistryIndex;
+}
+
 constexpr std::uint16_t tag_to_registry_index(std::uint32_t tag_value) {
-    return tag_to_registry_index_chd(tag_value);
+    const auto exact = tag_to_registry_index_chd(tag_value);
+    if (exact != detail::kInvalidRegistryIndex) {
+        return exact;
+    }
+    return tag_to_registry_index_wildcard(tag_value);
 }
 
 constexpr const DataElementEntry* tag_to_entry(std::uint32_t tag_value) {

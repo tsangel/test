@@ -50,15 +50,11 @@ if(DICOM_BUILD_EXAMPLES)
 		examples/keyword_lookup_example.cpp
 	)
 	target_link_libraries(keyword_lookup_example PRIVATE dicomsdl)
-endif()
 
-option(DICOM_BUILD_BENCHMARKS "Build lookup benchmarks" ON)
-
-if(DICOM_BUILD_BENCHMARKS)
-	add_executable(tag_lookup_bench
-		examples/tag_lookup_bench.cpp
+	add_executable(tag_lookup_example
+		examples/tag_lookup_example.cpp
 	)
-	target_link_libraries(tag_lookup_bench PRIVATE dicomsdl)
+	target_link_libraries(tag_lookup_example PRIVATE dicomsdl)
 endif()
 
 option(DICOM_BUILD_PYTHON "Build Python bindings with pybind11" ON)

@@ -1,7 +1,7 @@
 #include <iostream>
 #include <string_view>
 
-#include "keyword_lookup.hpp"
+#include "dictionary_lookup.hpp"
 
 int main(int argc, char** argv) {
     if (argc < 2) {
