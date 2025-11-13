@@ -28,21 +28,7 @@ std::unique_ptr<InStringStream> make_memory_stream(std::vector<std::uint8_t>&& b
 
 }  // namespace
 
-DataSet::DataSet()
-	    : DataSet(std::pmr::get_default_resource()) {}
-
-DataSet::DataSet(std::pmr::memory_resource* upstream)
-	    : root_dataset_(this),
-	      element_resource_(element_arena_.data(), element_arena_.size(), upstream),
-	      elements_(&element_resource_) {}
-
-DataSet::DataSet(DataSet* parent)
-	    : DataSet(parent, std::pmr::get_default_resource()) {}
-
-DataSet::DataSet(DataSet* parent, std::pmr::memory_resource* upstream)
-	    : root_dataset_(parent ? parent->root_dataset_ : this),
-	      element_resource_(element_arena_.data(), element_arena_.size(), upstream),
-	      elements_(root_dataset_ == this ? &element_resource_ : &root_dataset_->element_resource_) {}
+DataSet::DataSet() = default;
 
 DataSet::~DataSet() = default;
 
@@ -92,16 +78,7 @@ bool DataSet::is_memory_backed() const noexcept {
 }
 
 DataElement* DataSet::add_dataelement(Tag tag, VR vr, std::size_t length, std::size_t offset) {
-	std::pmr::memory_resource* resource = &root_dataset_->element_resource_;
-	void* storage = resource->allocate(sizeof(DataElement), alignof(DataElement));
-	auto* element = std::construct_at(static_cast<DataElement*>(storage), tag, vr, length, offset, this);
-	DataElementPtr ptr{element, DataElementDeleter{resource}};
-	elements_.emplace_back(tag, std::move(ptr));
-	return element;
-}
-
-DataElement* DataSet2::add_dataelement(Tag tag, VR vr, std::size_t length, std::size_t offset) {
-	auto element = std::make_unique<DataElement>(tag, vr, length, offset, nullptr);
+	auto element = std::make_unique<DataElement>(tag, vr, length, offset, this);
 	auto* raw = element.get();
 	elements_.emplace_back(tag, std::move(element));
 	return raw;

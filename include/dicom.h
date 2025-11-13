@@ -4,7 +4,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <memory_resource>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -501,14 +500,11 @@ private:
 class DataSet {
 public:
 	DataSet();
-	explicit DataSet(std::pmr::memory_resource* upstream);
-	explicit DataSet(DataSet* parent);
-	DataSet(DataSet* parent, std::pmr::memory_resource* upstream);
 	~DataSet();
 	DataSet(const DataSet&) = delete;
 	DataSet& operator=(const DataSet&) = delete;
-	DataSet(DataSet&&) noexcept = delete;
-	DataSet& operator=(DataSet&&) noexcept = delete;
+	DataSet(DataSet&&) noexcept = default;
+	DataSet& operator=(DataSet&&) noexcept = default;
 
 	void attach_to_file(const std::string& path);
 	void attach_to_memory(const std::uint8_t* data, std::size_t size, bool copy = true);
@@ -533,37 +529,6 @@ private:
 	std::string path_;
 	std::unique_ptr<InStream> stream_;
 	Backing backing_{Backing::File};
-	struct DataElementDeleter {
-		std::pmr::memory_resource* resource{};
-		void operator()(DataElement* ptr) const noexcept {
-			if (!ptr || !resource) {
-				return;
-			}
-			std::destroy_at(ptr);
-			resource->deallocate(ptr, sizeof(DataElement), alignof(DataElement));
-		}
-	};
-	using DataElementPtr = std::unique_ptr<DataElement, DataElementDeleter>;
-	using ElementEntry = std::pair<Tag, DataElementPtr>;
-	DataSet* root_dataset_{this};
-	static constexpr std::size_t kElementArenaSize = 64 * 1024;
-	alignas(std::max_align_t) std::array<std::byte, kElementArenaSize> element_arena_{};
-	std::pmr::monotonic_buffer_resource element_resource_;
-	std::pmr::vector<ElementEntry> elements_;
-};
-
-class DataSet2 {
-public:
-	DataSet2() = default;
-	~DataSet2() = default;
-	DataSet2(const DataSet2&) = delete;
-	DataSet2& operator=(const DataSet2&) = delete;
-	DataSet2(DataSet2&&) noexcept = default;
-	DataSet2& operator=(DataSet2&&) noexcept = default;
-
-	DataElement* add_dataelement(Tag tag, VR vr, std::size_t length, std::size_t offset);
-
-private:
 	using ElementEntry = std::pair<Tag, std::unique_ptr<DataElement>>;
 	std::vector<ElementEntry> elements_;
 };

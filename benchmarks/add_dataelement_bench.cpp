@@ -13,6 +13,20 @@ namespace {
 constexpr std::size_t kElementCount = 3000;
 constexpr int kIterations = 200;
 
+class DataSetNoPool {
+public:
+	dicom::DataElement* add_dataelement(dicom::Tag tag, dicom::VR vr,
+	    std::size_t length, std::size_t offset) {
+		auto element = std::make_unique<dicom::DataElement>(tag, vr, length, offset, nullptr);
+		auto* raw = element.get();
+		elements_.emplace_back(tag, std::move(element));
+		return raw;
+	}
+
+private:
+	std::vector<std::pair<dicom::Tag, std::unique_ptr<dicom::DataElement>>> elements_;
+};
+
 template <typename Fn>
 auto measure_ns(Fn&& fn) {
 	const auto start = steady_clock::now();
@@ -34,7 +48,7 @@ void run_benchmark() {
 		});
 
 		plain_total += measure_ns([] {
-			dicom::DataSet2 data_set;
+			DataSetNoPool data_set;
 			for (std::size_t idx = 0; idx < kElementCount; ++idx) {
 				const auto tag = dicom::Tag(static_cast<std::uint16_t>(0x0010 + idx), 0x0001);
 				data_set.add_dataelement(tag, dicom::VR::SQ, 0, idx);
@@ -48,7 +62,7 @@ void run_benchmark() {
 	std::cout << "Benchmark results for adding " << kElementCount << " elements\n";
 	std::cout << "Iterations\t: " << kIterations << "\n";
 	std::cout << "DataSet (pmr)\tavg: " << pooled_avg_us << " us\n";
-	std::cout << "DataSet2 (no pmr)\tavg: " << plain_avg_us << " us\n";
+	std::cout << "DataSetNoPool\tavg: " << plain_avg_us << " us\n";
 }
 
 } // namespace
