@@ -28,7 +28,34 @@ std::unique_ptr<InStringStream> make_memory_stream(std::vector<std::uint8_t>&& b
 
 }  // namespace
 
-DataSet::DataSet() = default;
+namespace {
+
+std::pmr::memory_resource* default_upstream() {
+	return std::pmr::get_default_resource();
+}
+
+}  // namespace
+
+DataSet::DataSet()
+	    : DataSet(default_upstream()) {}
+
+DataSet::DataSet(std::pmr::memory_resource* upstream)
+	    : root_dataset_(this),
+	      pool_owner_(std::make_unique<std::pmr::unsynchronized_pool_resource>(upstream)),
+	      element_resource_(pool_owner_.get()),
+	      elements_(element_resource_) {}
+
+DataSet::DataSet(DataSet* parent)
+	    : DataSet(parent, default_upstream()) {}
+
+DataSet::DataSet(DataSet* parent, std::pmr::memory_resource* upstream)
+	    : root_dataset_(parent ? parent->root_dataset_ : this),
+	      pool_owner_(root_dataset_ == this
+	              ? std::make_unique<std::pmr::unsynchronized_pool_resource>(upstream)
+	              : nullptr),
+	      element_resource_(root_dataset_ == this ? pool_owner_.get()
+	          : root_dataset_->element_resource_),
+	      elements_(element_resource_) {}
 
 DataSet::~DataSet() = default;
 
@@ -78,10 +105,8 @@ bool DataSet::is_memory_backed() const noexcept {
 }
 
 DataElement* DataSet::add_dataelement(Tag tag, VR vr, std::size_t length, std::size_t offset) {
-	auto element = std::make_unique<DataElement>(tag, vr, length, offset, this);
-	auto* raw = element.get();
-	elements_.emplace_back(tag, std::move(element));
-	return raw;
+	elements_.emplace_back(tag, vr, length, offset, this);
+	return &elements_.back();
 }
 
 std::unique_ptr<DataSet> read_file(const std::string& path) {
