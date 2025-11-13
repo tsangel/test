@@ -20,6 +20,9 @@ else()
         add_compile_options($<$<CONFIG:Release>:${flag}>)
         add_compile_options($<$<CONFIG:RelWithDebInfo>:${flag}>)
     endforeach()
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        add_compile_options(-fconstexpr-steps=16777216)
+    endif()
     add_link_options(
         $<$<CONFIG:Release>:-O3>
         $<$<CONFIG:RelWithDebInfo>:-O3>
