@@ -1,8 +1,8 @@
-import dicomsdl
+import dicomsdl as dicom
 
 
 def main() -> None:
-    df = dicomsdl.DicomFile.attach("/tmp/sample.dcm")
+	df = dicom.DicomFile.attach("/tmp/sample.dcm")
     print(f"Dicom path: {df.path}")
 
 

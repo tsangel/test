@@ -80,7 +80,9 @@ setup(
     python_requires=">=3.8",
     packages=["dicomsdl"],
     package_dir={"dicomsdl": "bindings/python/dicomsdl"},
+    package_data={"dicomsdl": ["py.typed", "*.pyi"]},
     ext_modules=[CMakeExtension("dicomsdl._dicomsdl")],
     cmdclass={"build_ext": CMakeBuild},
+    include_package_data=True,
     zip_safe=False,
 )

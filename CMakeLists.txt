@@ -28,6 +28,8 @@ endif()
 
 set(DICOM_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
+include(CTest)
+
 add_library(dicomsdl STATIC
 	src/dicomfile.cpp
 )
@@ -66,4 +68,18 @@ if(DICOM_BUILD_PYTHON)
 		bindings/python/dicom_module.cpp
 	)
 	target_link_libraries(_dicomsdl PRIVATE dicomsdl)
+endif()
+
+if(BUILD_TESTING)
+	add_executable(dicomsdl_dictionary_consistency
+		tests/dictionary_consistency.cpp
+	)
+	target_link_libraries(dicomsdl_dictionary_consistency PRIVATE dicomsdl)
+	add_test(NAME dictionary_consistency COMMAND dicomsdl_dictionary_consistency)
+
+	add_executable(dicomsdl_basic_smoke
+		tests/basic_smoke.cpp
+	)
+	target_link_libraries(dicomsdl_basic_smoke PRIVATE dicomsdl)
+	add_test(NAME basic_smoke COMMAND dicomsdl_basic_smoke)
 endif()

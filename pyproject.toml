@@ -5,4 +5,5 @@ build-backend = "setuptools.build_meta"
 [tool.cibuildwheel]
 build = "cp38-* cp39-* cp310-* cp311-* cp312-* cp313-* cp314-*"
 skip = "pp* *-musllinux*"
-test-command = "python -c \"import dicomsdl, pathlib; d = dicomsdl.DicomFile.attach(str(pathlib.Path('.').resolve())); print(d.path)\""
+test-requires = ["pytest"]
+test-command = "pytest -q tests/python"

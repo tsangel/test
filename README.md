@@ -43,6 +43,51 @@ pip install dist/dicomsdl-*.whl
 python examples/python/dicom_example.py
 ```
 
+Python 코드에서는 일관되게 `import dicomsdl as dicom` 형식의 alias를 사용합니다.
+
+### Run Python Tests
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+python -m pip install --upgrade pip cmake pytest
+pip install -e .
+pytest -q tests/python
+```
+
+Windows에서는 PowerShell/`cmd`에서 가상환경 활성화만 플랫폼에 맞게 바꿔주면 동일합니다.
+
+## Python Wheel Quick Commands
+
+### macOS / Linux
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+python -m pip install --upgrade pip cmake
+pip wheel . --no-build-isolation --no-deps -w dist
+pip install --force-reinstall dist/dicomsdl-*.whl
+python -c "import dicomsdl as dicom; tag, vr = dicom.keyword_to_tag_vr('PatientName'); print(int(tag), vr.str())"
+```
+
+### Windows (PowerShell)
+
+```powershell
+py -m venv .venv; .\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip cmake
+pip wheel . --no-build-isolation --no-deps -w dist
+pip install --force-reinstall dist\dicomsdl-*.whl
+python -c "import dicomsdl as dicom; tag, vr = dicom.keyword_to_tag_vr('PatientName'); print(int(tag), vr.str())"
+```
+
+### Windows (cmd.exe)
+
+```cmd
+py -m venv .venv && .\.venv\Scripts\activate
+python -m pip install --upgrade pip cmake
+pip wheel . --no-build-isolation --no-deps -w dist
+pip install --force-reinstall dist\dicomsdl-*.whl
+python -c "import dicomsdl as dicom; tag, vr = dicom.keyword_to_tag_vr('PatientName'); print(int(tag), vr.str())"
+```
+
 ## Continuous Integration
 
 GitHub Actions builds Python wheels for Linux, macOS (x86_64 & arm64), and Windows
