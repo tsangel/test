@@ -1,6 +1,7 @@
 #include <dicom.h>
 #include <instream.h>
 
+#include <algorithm>
 #include <stdexcept>
 #include <vector>
 
@@ -27,6 +28,11 @@ std::unique_ptr<InStringStream> make_memory_stream(std::vector<std::uint8_t>&& b
 }
 
 }  // namespace
+
+DataElement* NullElement() {
+	static DataElement null(Tag(0x0000, 0x0000), VR::NONE, 0, 0, nullptr);
+	return &null;
+}
 
 DataSet::DataSet() = default;
 
@@ -77,9 +83,101 @@ bool DataSet::is_memory_backed() const noexcept {
 	return backing_ == Backing::Memory;
 }
 
+DataSet::iterator DataSet::begin() {
+	return iterator(elements_.begin(), elements_.end(), element_map_.begin(), element_map_.end());
+}
+
+DataSet::iterator DataSet::end() {
+	return iterator(elements_.end(), elements_.end(), element_map_.end(), element_map_.end());
+}
+
+DataSet::const_iterator DataSet::begin() const {
+	return cbegin();
+}
+
+DataSet::const_iterator DataSet::end() const {
+	return cend();
+}
+
+DataSet::const_iterator DataSet::cbegin() const {
+	return const_iterator(elements_.cbegin(), elements_.cend(),
+	    element_map_.cbegin(), element_map_.cend());
+}
+
+DataSet::const_iterator DataSet::cend() const {
+	return const_iterator(elements_.cend(), elements_.cend(),
+	    element_map_.cend(), element_map_.cend());
+}
+
+// Keeps elements_ strictly sorted for common sequential inserts, while element_map_
+// stores out-of-order tags so we never duplicate storage for the same tag.
 DataElement* DataSet::add_dataelement(Tag tag, VR vr, std::size_t length, std::size_t offset) {
-	elements_.emplace_back(tag, vr, length, offset, this);
-	return &elements_.back();
+	const auto tag_value = tag.value();
+
+	if (elements_.empty() || elements_.back().tag().value() < tag_value) {
+		elements_.emplace_back(tag, vr, length, offset, this);
+		return &elements_.back();
+	}
+
+	const auto find_in_elements = [&](std::uint32_t value) -> DataElement* {
+		auto it = std::lower_bound(elements_.begin(), elements_.end(), value,
+		    [](const DataElement& element, std::uint32_t v) {
+			return element.tag().value() < v;
+		});
+		if (it != elements_.end() && it->tag().value() == value) {
+			return &(*it);
+		}
+		return nullptr;
+	};
+
+	if (auto* elem = find_in_elements(tag_value)) {
+		*elem = DataElement(tag, vr, length, offset, this);
+		return elem;
+	}
+
+	auto map_it = element_map_.lower_bound(tag_value);
+	if (map_it != element_map_.end() && map_it->first == tag_value) {
+		map_it->second = DataElement(tag, vr, length, offset, this);
+		return &map_it->second;
+	}
+
+	auto insert_it = element_map_.emplace_hint(
+	    map_it, tag_value, DataElement(tag, vr, length, offset, this));
+	return &insert_it->second;
+}
+
+DataElement* DataSet::get_dataelement(Tag tag) {
+	const auto tag_value = tag.value();
+
+	auto it = std::lower_bound(elements_.begin(), elements_.end(), tag_value,
+	    [](const DataElement& element, std::uint32_t value) {
+		return element.tag().value() < value;
+	});
+	if (it != elements_.end() && it->tag().value() == tag_value) {
+		return &(*it);
+	}
+
+	if (auto map_it = element_map_.find(tag_value); map_it != element_map_.end()) {
+		return &map_it->second;
+	}
+	return NullElement();
+}
+
+const DataElement* DataSet::get_dataelement(Tag tag) const {
+	const auto tag_value = tag.value();
+
+	auto it = std::lower_bound(elements_.begin(), elements_.end(), tag_value,
+	    [](const DataElement& element, std::uint32_t value) {
+		return element.tag().value() < value;
+	});
+	if (it != elements_.end() && it->tag().value() == tag_value) {
+		return &(*it);
+	}
+
+	if (auto map_it = element_map_.find(tag_value); map_it != element_map_.end()) {
+		return &map_it->second;
+	}
+	return NullElement();
 }
 
 std::unique_ptr<DataSet> read_file(const std::string& path) {

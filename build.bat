@@ -7,6 +7,16 @@ if "%ROOT_DIR:~-1%"=="\" set "ROOT_DIR=%ROOT_DIR:~0,-1%"
 if not defined BUILD_DIR set "BUILD_DIR=%ROOT_DIR%\build"
 if not defined BUILD_TYPE set "BUILD_TYPE=Release"
 if not defined DICOM_BUILD_EXAMPLES set "DICOM_BUILD_EXAMPLES=ON"
+if not defined BUILD_WHEEL set "BUILD_WHEEL=1"
+if not defined WHEEL_DIR set "WHEEL_DIR=%ROOT_DIR%\dist"
+if not defined PYTHON_BIN (
+	where py >nul 2>&1
+	if errorlevel 1 (
+		set "PYTHON_BIN=python"
+	) else (
+		set "PYTHON_BIN=py -3"
+	)
+)
 
 where cmake >nul 2>&1
 if errorlevel 1 (
@@ -58,6 +68,13 @@ if not "%RUN_TESTS%"=="0" (
 	set "CTEST_ERROR=%errorlevel%"
 	popd
 	if not "%CTEST_ERROR%"=="0" exit /b %CTEST_ERROR%
+)
+
+if not "%BUILD_WHEEL%"=="0" (
+	echo Building Python wheel into %WHEEL_DIR%
+	if not exist "%WHEEL_DIR%" mkdir "%WHEEL_DIR%"
+	%PYTHON_BIN% -m pip wheel "%ROOT_DIR%" --no-build-isolation --no-deps -w "%WHEEL_DIR%"
+	if errorlevel 1 exit /b %errorlevel%
 )
 
 exit /b 0

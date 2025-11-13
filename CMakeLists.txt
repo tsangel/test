@@ -74,15 +74,6 @@ if(DICOM_BUILD_PYTHON)
 	target_link_libraries(_dicomsdl PRIVATE dicomsdl)
 endif()
 
-option(DICOM_BUILD_BENCHMARKS "Build benchmark executables" OFF)
-
-if(DICOM_BUILD_BENCHMARKS)
-	add_executable(add_dataelement_bench
-		benchmarks/add_dataelement_bench.cpp
-	)
-	target_link_libraries(add_dataelement_bench PRIVATE dicomsdl)
-endif()
-
 if(BUILD_TESTING)
 	add_executable(dicomsdl_dictionary_consistency
 		tests/dictionary_consistency.cpp

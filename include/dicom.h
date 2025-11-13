@@ -3,6 +3,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
+#include <map>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -78,19 +80,19 @@ constexpr uint16_t pack2(char a, char b) noexcept {
 ///  - known VR -> small integer 1..32
 ///  - unknown VR -> 16-bit raw two-character code ('X''Y')
 struct VR {
-    uint16_t value = 0;  ///< compact encoded value (1..32 or raw 16-bit code)
+    uint16_t value = 0;  ///< compact encoded value (0 = NONE, 1..32 = known VR, otherwise raw code)
 
     // ------------------------------------------------------------
     // Constructors
     // ------------------------------------------------------------
     constexpr VR() noexcept = default;
-    constexpr explicit VR(uint16_t v) noexcept : value(v) {}
+    constexpr explicit VR(uint16_t v) noexcept : value(v ? v : NONE_val) {}
 
     /// Construct from two VR characters, e.g. VR('P','N')
     constexpr VR(char a, char b) noexcept {
         const uint16_t raw = pack2(a,b);
         const uint16_t val = raw_to_val(raw);
-        value = val ? val : raw;
+        value = val ? val : (raw ? raw : NONE_val);
     }
 
     /// Construct from string_view (uses first two chars)
@@ -98,8 +100,10 @@ struct VR {
         if (s.size() >= 2) {
             const uint16_t raw = pack2(s[0], s[1]);
             const uint16_t val = raw_to_val(raw);
-            value = val ? val : raw;
-        } else value = 0;
+            value = val ? val : (raw ? raw : NONE_val);
+        } else {
+            value = NONE_val;
+        }
     }
 
     // ------------------------------------------------------------
@@ -244,6 +248,7 @@ struct VR {
     // Compact integer IDs (1..32)
     // ------------------------------------------------------------
     enum : uint16_t {
+        NONE_val = 0,
         AE_val=1, AS_val, AT_val, CS_val, DA_val, DS_val, DT_val, FD_val,
         FL_val, IS_val, LO_val, LT_val, OB_val, OD_val, OF_val, OV_val,
         OL_val, OW_val, PN_val, SH_val, SL_val, SQ_val, SS_val, ST_val,
@@ -287,8 +292,9 @@ struct VR {
 	static const VR UR;
 	static const VR US;
 	static const VR UT;
-	static const VR UV;
-	static const VR PX;
+    static const VR UV;
+    static const VR PX;
+    static const VR NONE;
 
 private:
     // Mapping table from compact ID -> raw 2-char code
@@ -372,6 +378,7 @@ inline constexpr VR VR::US{uint16_t(VR::US_val)};
 inline constexpr VR VR::UT{uint16_t(VR::UT_val)};
 inline constexpr VR VR::UV{uint16_t(VR::UV_val)};
 inline constexpr VR VR::PX{uint16_t(VR::PX_val)};
+inline constexpr VR VR::NONE{uint16_t(VR::NONE_val)};
 
 namespace lookup {
 
@@ -496,9 +503,92 @@ private:
 	}
 };
 
+DataElement* NullElement();
+
+template <typename VecIter, typename MapIter, typename Ref, typename Ptr>
+class DataElementIterator {
+public:
+	using iterator_category = std::forward_iterator_tag;
+	using value_type = std::remove_reference_t<Ref>;
+	using difference_type = std::ptrdiff_t;
+	using reference = Ref;
+	using pointer = Ptr;
+
+	constexpr DataElementIterator() = default;
+
+	DataElementIterator(VecIter vec_it, VecIter vec_end, MapIter map_it, MapIter map_end)
+	    : vec_it_(vec_it), vec_end_(vec_end), map_it_(map_it), map_end_(map_end) {
+		select_source();
+	}
+
+	reference operator*() const {
+		return use_vector_ ? *vec_it_ : map_it_->second;
+	}
+
+	pointer operator->() const {
+		return &(**this);
+	}
+
+	DataElementIterator& operator++() {
+		advance_active();
+		select_source();
+		return *this;
+	}
+
+	DataElementIterator operator++(int) {
+		auto tmp = *this;
+		++(*this);
+		return tmp;
+	}
+
+	friend bool operator==(const DataElementIterator& lhs, const DataElementIterator& rhs) {
+		return lhs.vec_it_ == rhs.vec_it_ && lhs.map_it_ == rhs.map_it_;
+	}
+
+	friend bool operator!=(const DataElementIterator& lhs, const DataElementIterator& rhs) {
+		return !(lhs == rhs);
+	}
+
+private:
+	void advance_active() {
+		if (use_vector_) {
+			if (vec_it_ != vec_end_) {
+				++vec_it_;
+			}
+		} else if (map_it_ != map_end_) {
+			++map_it_;
+		}
+	}
+
+	void select_source() {
+		if (vec_it_ == vec_end_) {
+			use_vector_ = false;
+			return;
+		}
+		if (map_it_ == map_end_) {
+			use_vector_ = true;
+			return;
+		}
+		const auto vec_tag = vec_it_->tag().value();
+		const auto map_tag = map_it_->first;
+		use_vector_ = vec_tag <= map_tag;
+	}
+
+	VecIter vec_it_{};
+	VecIter vec_end_{};
+	MapIter map_it_{};
+	MapIter map_end_{};
+	bool use_vector_{false};
+};
+
 
 class DataSet {
 public:
+	using iterator = DataElementIterator<std::vector<DataElement>::iterator,
+	    std::map<std::uint32_t, DataElement>::iterator, DataElement&, DataElement*>;
+	using const_iterator = DataElementIterator<std::vector<DataElement>::const_iterator,
+	    std::map<std::uint32_t, DataElement>::const_iterator, const DataElement&, const DataElement*>;
+
 	DataSet();
 	~DataSet();
 	DataSet(const DataSet&) = delete;
@@ -521,8 +611,16 @@ public:
 	const InStream& stream() const;
 	bool is_memory_backed() const noexcept;
 	DataElement* add_dataelement(Tag tag, VR vr, std::size_t length, std::size_t offset);
+	DataElement* get_dataelement(Tag tag);
+	const DataElement* get_dataelement(Tag tag) const;
+	iterator begin();
+	iterator end();
+	const_iterator begin() const;
+	const_iterator end() const;
+	const_iterator cbegin() const;
+	const_iterator cend() const;
 
-private:   
+private:
 	enum class Backing { File, Memory };
 	void reset_stream(std::string identifier, std::unique_ptr<InStream> stream, Backing backing);
 
@@ -530,6 +628,7 @@ private:
 	std::unique_ptr<InStream> stream_;
 	Backing backing_{Backing::File};
 	std::vector<DataElement> elements_;
+	std::map<std::uint32_t, DataElement> element_map_;
 };
 
 std::unique_ptr<DataSet> read_file(const std::string& path);

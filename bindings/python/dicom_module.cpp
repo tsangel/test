@@ -14,6 +14,7 @@
 namespace py = pybind11;
 
 using dicom::DataSet;
+using dicom::DataElement;
 using dicom::Tag;
 using dicom::VR;
 
@@ -36,13 +37,83 @@ std::string_view vr_to_string_view(const VR& vr) {
 	return vr.str();
 }
 
+std::string dataelement_repr(const DataElement& element) {
+	std::ostringstream oss;
+	oss << "DataElement(tag=" << tag_repr(element.tag())
+	    << ", vr=" << vr_repr(element.vr())
+	    << ", length=" << element.length()
+	    << ", offset=" << element.offset()
+	    << ")";
+	return oss.str();
+}
+
+struct PyDataElementIterator {
+	explicit PyDataElementIterator(DataSet& data_set)
+	    : data_set_(&data_set), current_(data_set.begin()), end_(data_set.end()) {}
+
+	DataElement& next() {
+		if (current_ == end_) {
+			throw py::stop_iteration();
+		}
+		DataElement& element = *current_;
+		++current_;
+		return element;
+	}
+
+	DataSet* data_set_;
+	DataSet::iterator current_;
+	DataSet::iterator end_;
+};
+
 }  // namespace
 
 PYBIND11_MODULE(_dicomsdl, m) {
 	m.doc() = "pybind11 bindings for DataSet";
 
+	py::class_<DataElement>(m, "DataElement")
+		.def_property_readonly("tag", &DataElement::tag)
+		.def_property_readonly("vr", &DataElement::vr)
+		.def_property_readonly("length", &DataElement::length)
+		.def_property_readonly("offset", &DataElement::offset)
+		.def_property_readonly("is_sequence",
+		    [](const DataElement& element) { return element.vr().is_sequence(); })
+		.def_property_readonly("is_pixel_sequence",
+		    [](const DataElement& element) { return element.vr().is_pixel_sequence(); })
+		.def("__repr__", &dataelement_repr);
+
+	py::class_<PyDataElementIterator>(m, "DataElementIterator")
+		.def("__iter__", [](PyDataElementIterator& self) -> PyDataElementIterator& { return self; })
+		.def("__next__",
+		    [](PyDataElementIterator& self) -> DataElement& { return self.next(); },
+		    py::return_value_policy::reference_internal);
+
 	py::class_<DataSet, std::unique_ptr<DataSet>>(m, "DataSet")
-		.def_property_readonly("path", &DataSet::path, "Return the stored file path");
+		.def(py::init<>())
+		.def_property_readonly("path", &DataSet::path, "Return the stored file path")
+		.def_property_readonly("is_memory_backed", &DataSet::is_memory_backed,
+		    "Return True if the DataSet owns in-memory data")
+		.def("add_dataelement",
+		    [](DataSet& self, const Tag& tag, const VR& vr, std::size_t length, std::size_t offset) {
+		        DataElement* element = self.add_dataelement(tag, vr, length, offset);
+		        return element ? element : dicom::NullElement();
+		    },
+		    py::arg("tag"), py::arg("vr"), py::arg("length"), py::arg("offset"),
+		    py::return_value_policy::reference_internal,
+		    "Add or update a DataElement and return a reference to it")
+		.def("get_dataelement",
+		    [](DataSet& self, const Tag& tag) -> DataElement& {
+		        DataElement* element = self.get_dataelement(tag);
+		        if (element == dicom::NullElement()) {
+			        throw py::key_error("Tag not found in DataSet");
+		        }
+		        return *element;
+		    },
+		    py::arg("tag"), py::return_value_policy::reference_internal)
+		.def("__iter__",
+		    [](DataSet& self) {
+			    return PyDataElementIterator(self);
+		    },
+		    py::keep_alive<0, 1>(), "Iterate over DataElements in tag order");
 
 	m.def("read_file", &dicom::read_file, py::arg("path"),
 	    "Read a DICOM file from disk and return a DataSet");
