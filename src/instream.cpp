@@ -53,23 +53,6 @@ std::size_t file_size_from_descriptor(int fd) {
 
 }  // namespace
 
-InStream::InStream(InStream* basestream, std::size_t size)
-	: basestream_(basestream), rootstream_(basestream ? basestream->rootstream_ : this) {
-	if (!basestream) {
-		throw std::invalid_argument("Basestream cannot be null");
-	}
-	if (size > basestream->bytes_remaining()) {
-		throw std::out_of_range("Requested substream exceeds available bytes");
-	}
-	startoffset_ = basestream->offset_;
-	endoffset_ = startoffset_ + size;
-	offset_ = startoffset_;
-	filesize_ = basestream->filesize_;
-	loaded_bytes_ = basestream->loaded_bytes_;
-	data_ = rootstream_->data_ ? rootstream_->data_ : empty_sentinel();
-	own_data_ = false;
-}
-
 InStream::~InStream() {
 	reset_internal_buffer();
 }
@@ -81,7 +64,6 @@ void InStream::reset_internal_buffer() {
 		startoffset_ = offset_ = endoffset_ = 0;
 		data_ = nullptr;
 		filesize_ = 0;
-		loaded_bytes_ = 0;
 		own_data_ = false;
 		basestream_ = this;
 		rootstream_ = this;
@@ -92,26 +74,22 @@ void InStream::reset_internal_buffer() {
 	}
 	data_ = nullptr;
 	filesize_ = 0;
-	loaded_bytes_ = 0;
 	startoffset_ = offset_ = endoffset_ = 0;
 	own_data_ = false;
 	basestream_ = this;
 	rootstream_ = this;
 }
 
-std::size_t InStream::read(std::uint8_t* ptr, std::size_t size) {
-	if (!ptr || size == 0) {
-		return 0;
+std::span<const std::uint8_t> InStream::read(std::size_t size) {
+	if (size == 0 || is_eof()) {
+		return std::span<const std::uint8_t>();
 	}
 	const std::size_t available = bytes_remaining();
 	const std::size_t to_read = std::min(size, available);
-	if (to_read == 0) {
-		return 0;
-	}
 	std::uint8_t* base = data_ ? data_ : empty_sentinel();
-	std::memcpy(ptr, base + offset_, to_read);
+	std::span<const std::uint8_t> view(base + offset_, to_read);
 	offset_ += to_read;
-	return to_read;
+	return view;
 }
 
 std::size_t InStream::skip(std::size_t size) {
@@ -159,7 +137,7 @@ void InStringStream::release_storage() {
 	owned_buffer_.clear();
 }
 
-void InStringStream::attachmemory(std::vector<std::uint8_t>&& buffer) {
+void InStringStream::attach_memory(std::vector<std::uint8_t>&& buffer) {
 	reset_internal_buffer();
 	owned_buffer_ = std::move(buffer);
 	data_ = owned_buffer_.empty() ? nullptr : owned_buffer_.data();
@@ -167,13 +145,12 @@ void InStringStream::attachmemory(std::vector<std::uint8_t>&& buffer) {
 	offset_ = 0;
 	endoffset_ = owned_buffer_.size();
 	filesize_ = owned_buffer_.size();
-	loaded_bytes_ = owned_buffer_.size();
 	basestream_ = this;
 	rootstream_ = this;
 	own_data_ = true;
 }
 
-void InStringStream::attachmemory(const std::uint8_t* data, std::size_t datasize, bool copydata) {
+void InStringStream::attach_memory(const std::uint8_t* data, std::size_t datasize, bool copydata) {
 	if (datasize > 0 && data == nullptr) {
 		throw std::invalid_argument("Data pointer cannot be null when datasize > 0");
 	}
@@ -182,7 +159,7 @@ void InStringStream::attachmemory(const std::uint8_t* data, std::size_t datasize
 		if (datasize > 0) {
 			std::memcpy(buffer.data(), data, datasize);
 		}
-		attachmemory(std::move(buffer));
+		attach_memory(std::move(buffer));
 		return;
 	}
 	reset_internal_buffer();
@@ -191,7 +168,6 @@ void InStringStream::attachmemory(const std::uint8_t* data, std::size_t datasize
 	offset_ = 0;
 	endoffset_ = datasize;
 	filesize_ = datasize;
-	loaded_bytes_ = datasize;
 	basestream_ = this;
 	rootstream_ = this;
 	own_data_ = false;
@@ -234,8 +210,8 @@ void InFileStream::release_storage() {
 #endif
 }
 
-void InFileStream::attachfile(const std::string& filename) {
-	detachfile();
+void InFileStream::attach_file(const std::string& filename) {
+	detach_file();
 	if (filename.empty()) {
 		throw std::invalid_argument("Filename cannot be empty");
 	}
@@ -269,7 +245,6 @@ void InFileStream::attachfile(const std::string& filename) {
 		data_ = nullptr;
 	}
 	filesize_ = filesize;
-	loaded_bytes_ = filesize;
 	startoffset_ = 0;
 	offset_ = 0;
 	endoffset_ = filesize;
@@ -299,7 +274,6 @@ void InFileStream::attachfile(const std::string& filename) {
 	mapped_view_ = mapped == MAP_FAILED ? nullptr : mapped;
 	data_ = static_cast<std::uint8_t*>(mapped_view_);
 	filesize_ = filesize;
-	loaded_bytes_ = filesize;
 	startoffset_ = 0;
 	offset_ = 0;
 	endoffset_ = filesize;
@@ -310,12 +284,27 @@ void InFileStream::attachfile(const std::string& filename) {
 #endif
 }
 
-void InFileStream::detachfile() {
+void InFileStream::detach_file() {
 	reset_internal_buffer();
 	filename_.clear();
 }
 
-InSubStream::InSubStream(InStream* basestream, std::size_t size)
-	: InStream(basestream, size) {}
+InSubStream::InSubStream(InStream* basestream, std::size_t size) {
+	if (!basestream) {
+		throw std::invalid_argument("Basestream cannot be null");
+	}
+	if (size > basestream->bytes_remaining()) {
+		throw std::out_of_range("Requested substream exceeds available bytes");
+	}
+	basestream_ = basestream;
+	rootstream_ = basestream->rootstream();
+	startoffset_ = basestream->tell();
+	endoffset_ = startoffset_ + size;
+	offset_ = startoffset_;
+	filesize_ = size;
+	std::uint8_t* root_data = rootstream_ ? rootstream_->data() : nullptr;
+	data_ = root_data ? root_data : empty_sentinel();
+	own_data_ = false;
+}
 
 }  // namespace dicom

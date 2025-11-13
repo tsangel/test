@@ -38,7 +38,7 @@ int main() {
 		assert(file->stream().datasize() == 4);
 
 		DataSet manual;
-		manual.attachToFile(file_path.string());
+		manual.attach_to_file(file_path.string());
 		assert(manual.path() == file_path.string());
 		assert(manual.stream().datasize() == 4);
 	}
@@ -54,7 +54,7 @@ int main() {
 	assert(mem_owned->stream().datasize() == 2);
 
 	DataSet manual_mem;
-	manual_mem.attachToMemory("manual-buffer", buffer.data(), buffer.size());
+	manual_mem.attach_to_memory("manual-buffer", buffer.data(), buffer.size());
 	assert(manual_mem.is_memory_backed());
 	assert(manual_mem.stream().datasize() == buffer.size());
 

@@ -10,19 +10,19 @@ namespace {
 
 std::unique_ptr<InFileStream> make_file_stream(const std::string& path) {
 	auto stream = std::make_unique<InFileStream>();
-	stream->attachfile(path);
+	stream->attach_file(path);
 	return stream;
 }
 
 std::unique_ptr<InStringStream> make_memory_stream(const std::uint8_t* data, std::size_t size, bool copy) {
 	auto stream = std::make_unique<InStringStream>();
-	stream->attachmemory(data, size, copy);
+	stream->attach_memory(data, size, copy);
 	return stream;
 }
 
 std::unique_ptr<InStringStream> make_memory_stream(std::vector<std::uint8_t>&& buffer) {
 	auto stream = std::make_unique<InStringStream>();
-	stream->attachmemory(std::move(buffer));
+	stream->attach_memory(std::move(buffer));
 	return stream;
 }
 
@@ -31,27 +31,27 @@ std::unique_ptr<InStringStream> make_memory_stream(std::vector<std::uint8_t>&& b
 DataSet::DataSet() = default;
 
 DataSet::DataSet(const std::string& path) {
-	attachToFile(path);
+	attach_to_file(path);
 }
 
 DataSet::~DataSet() = default;
 
-void DataSet::attachToFile(const std::string& path) {
+void DataSet::attach_to_file(const std::string& path) {
 	auto stream = make_file_stream(path);
 	reset_stream(path, std::move(stream), Backing::File);
 }
 
-void DataSet::attachToMemory(const std::uint8_t* data, std::size_t size, bool copy) {
+void DataSet::attach_to_memory(const std::uint8_t* data, std::size_t size, bool copy) {
 	auto stream = make_memory_stream(data, size, copy);
 	reset_stream(std::string{"<memory>"}, std::move(stream), Backing::Memory);
 }
 
-void DataSet::attachToMemory(const std::string& name, const std::uint8_t* data, std::size_t size, bool copy) {
+void DataSet::attach_to_memory(const std::string& name, const std::uint8_t* data, std::size_t size, bool copy) {
 	auto stream = make_memory_stream(data, size, copy);
 	reset_stream(name, std::move(stream), Backing::Memory);
 }
 
-void DataSet::attachToMemory(std::string name, std::vector<std::uint8_t>&& buffer) {
+void DataSet::attach_to_memory(std::string name, std::vector<std::uint8_t>&& buffer) {
 	auto stream = make_memory_stream(std::move(buffer));
 	reset_stream(std::move(name), std::move(stream), Backing::Memory);
 }
@@ -83,7 +83,7 @@ bool DataSet::is_memory_backed() const noexcept {
 
 std::unique_ptr<DataSet> read_file(const std::string& path) {
 	auto data_set = std::make_unique<DataSet>();
-	data_set->attachToFile(path);
+	data_set->attach_to_file(path);
 	return data_set;
 }
 
@@ -94,7 +94,7 @@ std::unique_ptr<DataSet> read_bytes(const std::uint8_t* data, std::size_t size, 
 std::unique_ptr<DataSet> read_bytes(const std::string& name, const std::uint8_t* data,
 	    std::size_t size, bool copy) {
 	auto data_set = std::make_unique<DataSet>();
-	data_set->attachToMemory(name, data, size, copy);
+	data_set->attach_to_memory(name, data, size, copy);
 	return data_set;
 }
 
@@ -102,7 +102,7 @@ std::unique_ptr<DataSet> read_bytes(std::string name, std::vector<std::uint8_t>&
 	// Use this overload when the caller already owns the bytes in a std::vector and wants to
 	// transfer ownership to dicomsdl without an extra copy.
 	auto data_set = std::make_unique<DataSet>();
-	data_set->attachToMemory(std::move(name), std::move(buffer));
+	data_set->attach_to_memory(std::move(name), std::move(buffer));
 	return data_set;
 }
 

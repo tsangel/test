@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -17,7 +18,6 @@ protected:
 	std::uint8_t* data_{nullptr};
 	bool own_data_{false};
 	std::size_t filesize_{0};
-	std::size_t loaded_bytes_{0};
 
 	InStream* basestream_{this};
 	InStream* rootstream_{this};
@@ -26,7 +26,6 @@ protected:
 	void reset_internal_buffer();
 
 	InStream() = default;
-	InStream(InStream* basestream, std::size_t size);
 
 public:
 	virtual ~InStream();
@@ -42,9 +41,7 @@ public:
 	[[nodiscard]] inline std::size_t bytes_remaining() const { return endoffset_ - offset_; }
 	[[nodiscard]] inline std::size_t begin() const { return startoffset_; }
 	[[nodiscard]] inline std::size_t end() const { return endoffset_; }
-	[[nodiscard]] inline std::size_t loaded_bytes() const { return rootstream_->loaded_bytes_; }
-
-	std::size_t read(std::uint8_t* ptr, std::size_t size);
+	std::span<const std::uint8_t> read(std::size_t size);
 	std::size_t skip(std::size_t size);
 	void* get_pointer(std::size_t offset, std::size_t size);
 	std::size_t seek(std::size_t pos);
@@ -64,8 +61,8 @@ public:
 	InStringStream();
 	~InStringStream() override;
 
-	void attachmemory(const std::uint8_t* data, std::size_t datasize, bool copydata);
-	void attachmemory(std::vector<std::uint8_t>&& buffer);
+	void attach_memory(const std::uint8_t* data, std::size_t datasize, bool copydata);
+	void attach_memory(std::vector<std::uint8_t>&& buffer);
 
 protected:
 	void release_storage() override;
@@ -79,8 +76,8 @@ public:
 	InFileStream();
 	~InFileStream() override;
 
-	void attachfile(const std::string& filename);
-	void detachfile();
+	void attach_file(const std::string& filename);
+	void detach_file();
 
 protected:
 	void release_storage() override;

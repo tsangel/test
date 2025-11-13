@@ -409,11 +409,15 @@ public:
 	DataSet(DataSet&&) noexcept = default;
 	DataSet& operator=(DataSet&&) noexcept = default;
 
-	void attachToFile(const std::string& path);
-	void attachToMemory(const std::uint8_t* data, std::size_t size, bool copy = true);
-	void attachToMemory(const std::string& name, const std::uint8_t* data,
+	void attach_to_file(const std::string& path);
+	void attach_to_memory(const std::uint8_t* data, std::size_t size, bool copy = true);
+	void attach_to_memory(const std::string& name, const std::uint8_t* data,
 	    std::size_t size, bool copy = true);
-	void attachToMemory(std::string name, std::vector<std::uint8_t>&& buffer);
+	void attach_to_memory(std::string name, std::vector<std::uint8_t>&& buffer);
+	// NOTE: DataSet keeps file/memory mappings alive for as long as the instance exists.
+	// Make sure all DataSet objects that reference a path go out of scope (or are reset)
+	// before you delete or overwrite the underlying file, otherwise Windows will refuse
+	// to remove it while the mapping handle is still open.
 
 	const std::string& path() const;
 	InStream& stream();
