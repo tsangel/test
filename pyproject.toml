@@ -6,4 +6,4 @@ build-backend = "setuptools.build_meta"
 build = "cp38-* cp39-* cp310-* cp311-* cp312-* cp313-* cp314-*"
 skip = "pp* *-musllinux*"
 test-requires = ["pytest"]
-test-command = "pytest -q tests/python"
+test-command = "pytest -q {project}/tests/python"
