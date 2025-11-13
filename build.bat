@@ -49,4 +49,15 @@ goto target_loop
 :build
 echo Building dicomsdl (%BUILD_TYPE%)
 cmake --build "%BUILD_DIR%" --config %BUILD_TYPE% %PARALLEL_SWITCH% %TARGET_SWITCH%
-exit /b %errorlevel%
+if errorlevel 1 exit /b %errorlevel%
+
+if not "%RUN_TESTS%"=="0" (
+	echo Running CTest suite (%BUILD_TYPE%)
+	pushd "%BUILD_DIR%"
+	ctest --output-on-failure -C %BUILD_TYPE%
+	set "CTEST_ERROR=%errorlevel%"
+	popd
+	if not "%CTEST_ERROR%"=="0" exit /b %CTEST_ERROR%
+)
+
+exit /b 0

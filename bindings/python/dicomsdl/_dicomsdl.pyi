@@ -3,7 +3,9 @@ from __future__ import annotations
 from typing import Optional, overload
 
 __all__ = [
-    "DicomFile",
+    "DataSet",
+    "read_file",
+    "read_bytes",
     "Tag",
     "VR",
     "keyword_to_tag_vr",
@@ -11,10 +13,7 @@ __all__ = [
 ]
 
 
-class DicomFile:
-    @staticmethod
-    def attach(path: str, /) -> DicomFile: ...
-
+class DataSet:
     @property
     def path(self) -> str: ...
 
@@ -87,6 +86,12 @@ class VR:
 
 
 def keyword_to_tag_vr(keyword: str, /) -> Optional[tuple[Tag, VR]]: ...
+
+
+def read_file(path: str, /) -> DataSet: ...
+
+
+def read_bytes(data: bytes | bytearray | memoryview, name: str = "<memory>", /) -> DataSet: ...
 
 
 @overload

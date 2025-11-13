@@ -34,7 +34,8 @@ set(DICOM_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
 include(CTest)
 
 add_library(dicomsdl STATIC
-	src/dicomfile.cpp
+	src/dataset.cpp
+	src/instream.cpp
 )
 set_target_properties(dicomsdl PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(dicomsdl

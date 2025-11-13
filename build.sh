@@ -43,3 +43,10 @@ fi
 
 echo "Building dicomsdl (${BUILD_TYPE})"
 "${build_cmd[@]}"
+
+if [[ "${RUN_TESTS:-1}" != "0" ]]; then
+	echo "Running CTest suite (${BUILD_TYPE})"
+	pushd "$BUILD_DIR" >/dev/null
+	ctest --output-on-failure --build-config "$BUILD_TYPE"
+	popd >/dev/null
+fi

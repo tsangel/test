@@ -9,6 +9,7 @@
 #include <string_view>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 #include "dictionary_lookup_detail.hpp"
 
@@ -16,6 +17,8 @@ namespace dicom {
 
 using std::uint8_t;
 using std::uint16_t;
+
+class InStream;
 
 struct Tag {
 	std::uint32_t packed{0};
@@ -396,19 +399,40 @@ inline constexpr Tag operator"" _tag(const char* text, std::size_t len) {
 } // namespace literals
 
 
-class DicomFile {
+class DataSet {
 public:
-	explicit DicomFile(const std::string& path);
-	DicomFile(const DicomFile&) = delete;
-	DicomFile& operator=(const DicomFile&) = delete;
-	DicomFile(DicomFile&&) noexcept = default;
-	DicomFile& operator=(DicomFile&&) noexcept = default;
+	DataSet();
+	explicit DataSet(const std::string& path);
+	~DataSet();
+	DataSet(const DataSet&) = delete;
+	DataSet& operator=(const DataSet&) = delete;
+	DataSet(DataSet&&) noexcept = default;
+	DataSet& operator=(DataSet&&) noexcept = default;
 
-	static std::unique_ptr<DicomFile> attach(const std::string& path);
+	void attachToFile(const std::string& path);
+	void attachToMemory(const std::uint8_t* data, std::size_t size, bool copy = true);
+	void attachToMemory(const std::string& name, const std::uint8_t* data,
+	    std::size_t size, bool copy = true);
+	void attachToMemory(std::string name, std::vector<std::uint8_t>&& buffer);
+
 	const std::string& path() const;
+	InStream& stream();
+	const InStream& stream() const;
+	bool is_memory_backed() const noexcept;
 
 private:
+	enum class Backing { File, Memory };
+	void reset_stream(std::string identifier, std::unique_ptr<InStream> stream, Backing backing);
+
 	std::string path_;
+	std::unique_ptr<InStream> stream_;
+	Backing backing_{Backing::File};
 };
+
+std::unique_ptr<DataSet> read_file(const std::string& path);
+std::unique_ptr<DataSet> read_bytes(const std::uint8_t* data, std::size_t size, bool copy = true);
+std::unique_ptr<DataSet> read_bytes(const std::string& name, const std::uint8_t* data,
+    std::size_t size, bool copy = true);
+std::unique_ptr<DataSet> read_bytes(std::string name, std::vector<std::uint8_t>&& buffer);
 
 } // namespace dicom

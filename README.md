@@ -66,6 +66,8 @@ python -m pip install --upgrade pip cmake
 pip wheel . --no-build-isolation --no-deps -w dist
 pip install --force-reinstall dist/dicomsdl-*.whl
 python -c "import dicomsdl as dicom; tag, vr = dicom.keyword_to_tag_vr('PatientName'); print(int(tag), vr.str())"
+python -c "import dicomsdl as dicom; ds = dicom.read_file('sample.dcm'); print(ds.path)"
+python -c "import dicomsdl as dicom; data = b'DICM'; ds = dicom.read_bytes(data, name='inline'); print(ds.path, len(data))"
 ```
 
 ### Windows (PowerShell)

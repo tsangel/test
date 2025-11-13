@@ -1,7 +1,10 @@
+#include <cstring>
 #include <memory>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <pybind11/operators.h>
 #include <pybind11/pybind11.h>
@@ -10,7 +13,7 @@
 
 namespace py = pybind11;
 
-using dicom::DicomFile;
+using dicom::DataSet;
 using dicom::Tag;
 using dicom::VR;
 
@@ -36,11 +39,32 @@ std::string_view vr_to_string_view(const VR& vr) {
 }  // namespace
 
 PYBIND11_MODULE(_dicomsdl, m) {
-	m.doc() = "pybind11 bindings for DicomFile";
+	m.doc() = "pybind11 bindings for DataSet";
 
-	py::class_<DicomFile, std::unique_ptr<DicomFile>>(m, "DicomFile")
-		.def_static("attach", &DicomFile::attach, py::arg("path"), "Attach to a DICOM file at the given path")
-		.def_property_readonly("path", &DicomFile::path, "Return the stored file path");
+	py::class_<DataSet, std::unique_ptr<DataSet>>(m, "DataSet")
+		.def_property_readonly("path", &DataSet::path, "Return the stored file path");
+
+	m.def("read_file", &dicom::read_file, py::arg("path"),
+	    "Read a DICOM file from disk and return a DataSet");
+
+	m.def("read_bytes",
+	    [] (py::buffer buffer, const std::string& name) {
+	        py::buffer_info info = buffer.request();
+	        if (info.ndim != 1) {
+	            throw std::invalid_argument("read_bytes expects a 1-D bytes-like object");
+	        }
+	        const std::size_t elem_size = static_cast<std::size_t>(info.itemsize);
+	        const std::size_t count = static_cast<std::size_t>(info.size);
+	        const std::size_t total = elem_size * count;
+	        std::vector<std::uint8_t> owned(total);
+	        if (total > 0) {
+	            std::memcpy(owned.data(), info.ptr, total);
+	        }
+	        return dicom::read_bytes(std::string{name}, std::move(owned));
+	    },
+	    py::arg("data"),
+	    py::arg("name") = std::string{"<memory>"},
+	    "Read a DataSet from a bytes-like object");
 
 	py::class_<Tag>(m, "Tag")
 		.def(py::init<>())

@@ -16,5 +16,9 @@ def test_literal_and_file(tmp_path):
 	assert int(using_literal) == 0x00280010
 
 	dcm_path = tmp_path / "dummy.dcm"
-	obj = dicom.DicomFile.attach(str(dcm_path))
+	dcm_path.write_bytes(b"DICM")
+	obj = dicom.read_file(str(dcm_path))
 	assert pathlib.Path(obj.path).resolve() == dcm_path.resolve()
+
+	mem = dicom.read_bytes(b"TEST", name="memory-buffer")
+	assert mem.path == "memory-buffer"
