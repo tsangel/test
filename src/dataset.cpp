@@ -2,6 +2,7 @@
 #include <instream.h>
 
 #include <algorithm>
+#include <iostream>
 #include <stdexcept>
 #include <vector>
 
@@ -108,6 +109,13 @@ DataSet::const_iterator DataSet::cend() const {
 // stores out-of-order tags so we never duplicate storage for the same tag.
 DataElement* DataSet::add_dataelement(Tag tag, VR vr, std::size_t length, std::size_t offset) {
 	const auto tag_value = tag.value();
+	if (vr == VR::NONE) {
+		const auto vr_value = lookup::tag_to_vr(tag_value);
+		if (vr_value == 0) {
+			throw std::invalid_argument("VR is required for unknown tag");
+		}
+		vr = VR(vr_value);
+	}
 
 	if (elements_.empty() || elements_.back().tag().value() < tag_value) {
 		elements_.emplace_back(tag, vr, length, offset, this);
@@ -145,11 +153,14 @@ DataElement* DataSet::get_dataelement(Tag tag) {
 	const auto tag_value = tag.value();
 
 	auto it = std::lower_bound(elements_.begin(), elements_.end(), tag_value,
-	    [](const DataElement& element, std::uint32_t value) {
+ 	    [](const DataElement& element, std::uint32_t value) {
 		return element.tag().value() < value;
 	});
 	if (it != elements_.end() && it->tag().value() == tag_value) {
-		return &(*it);
+		if (it->vr() != VR::NONE)
+			return &(*it);
+		else
+			return NullElement();
 	}
 
 	if (auto map_it = element_map_.find(tag_value); map_it != element_map_.end()) {
@@ -166,13 +177,43 @@ const DataElement* DataSet::get_dataelement(Tag tag) const {
 		return element.tag().value() < value;
 	});
 	if (it != elements_.end() && it->tag().value() == tag_value) {
-		return &(*it);
+		if (it->vr() != VR::NONE)
+			return &(*it);
+		else
+			return NullElement();
 	}
 
 	if (auto map_it = element_map_.find(tag_value); map_it != element_map_.end()) {
 		return &map_it->second;
 	}
 	return NullElement();
+}
+
+void DataSet::remove_dataelement(Tag tag) {
+	const auto tag_value = tag.value();
+
+	auto vec_it = std::lower_bound(elements_.begin(), elements_.end(), tag_value,
+	    [](const DataElement& element, std::uint32_t value) {
+		return element.tag().value() < value;
+	});
+	if (vec_it != elements_.end() && vec_it->tag().value() == tag_value) {
+		// just set VR::NONE instead remove from elements_
+		*vec_it = DataElement(tag, VR::NONE, 0, 0, this);
+	} else
+	if (auto map_it = element_map_.find(tag_value); map_it != element_map_.end()) {
+		element_map_.erase(map_it);
+	}
+}
+
+void DataSet::dump_elements() const {
+	std::cout << "-- elements_ --\n";
+	for (const auto& element : elements_) {
+		std::cout << element.tag().value() << " VR=" << element.vr().str() << " len=" << element.length() << " off=" << element.offset() << "\n";
+	}
+	std::cout << "-- element_map_ --\n";
+	for (const auto& kv : element_map_) {
+		std::cout << kv.first << " VR=" << kv.second.vr().str() << " len=" << kv.second.length() << " off=" << kv.second.offset() << "\n";
+	}
 }
 
 std::unique_ptr<DataSet> read_file(const std::string& path) {

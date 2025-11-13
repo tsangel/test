@@ -1,5 +1,6 @@
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -8,6 +9,7 @@
 
 #include <pybind11/operators.h>
 #include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
 
 #include <dicom.h>
 
@@ -94,13 +96,24 @@ PYBIND11_MODULE(_dicomsdl, m) {
 		.def(py::init<>())
 		.def_property_readonly("path", &DataSet::path, "Return the stored file path")
 		.def("add_dataelement",
-		    [](DataSet& self, const Tag& tag, const VR& vr, std::size_t length, std::size_t offset) {
-		        DataElement* element = self.add_dataelement(tag, vr, length, offset);
+		    [](DataSet& self, const Tag& tag, std::optional<VR> vr,
+		        std::size_t length, std::size_t offset) {
+		        const VR resolved = vr.value_or(VR::NONE);
+		        DataElement* element = self.add_dataelement(tag, resolved, length, offset);
 		        return element ? element : dicom::NullElement();
 		    },
-		    py::arg("tag"), py::arg("vr"), py::arg("length"), py::arg("offset"),
+		    py::arg("tag"), py::arg("vr") = py::none(),
+		    py::arg("length") = 0, py::arg("offset") = 0,
 		    py::return_value_policy::reference_internal,
 		    "Add or update a DataElement and return a reference to it")
+		.def("remove_dataelement",
+		    [](DataSet& self, const Tag& tag) {
+		        self.remove_dataelement(tag);
+		    },
+		    py::arg("tag"),
+		    "Remove a DataElement by tag if it exists")
+		.def("dump_elements", &DataSet::dump_elements,
+		    "Print internal element storage for debugging")
 		.def("get_dataelement",
 		    [](DataSet& self, const Tag& tag) -> DataElement& {
 		        DataElement* element = self.get_dataelement(tag);

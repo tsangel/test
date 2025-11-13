@@ -401,6 +401,13 @@ constexpr std::string_view tag_to_keyword(std::uint32_t tag_value) {
 	return {};
 }
 
+constexpr std::uint16_t tag_to_vr(std::uint32_t tag_value) {
+	if (const auto* entry = tag_to_entry(tag_value)) {
+		return entry->vr_value;
+	}
+	return 0;
+}
+
 } // namespace lookup
 
 namespace literals {
@@ -559,17 +566,33 @@ private:
 	}
 
 	void select_source() {
-		if (vec_it_ == vec_end_) {
-			use_vector_ = false;
-			return;
+		while (true) {
+			const bool vec_done = vec_it_ == vec_end_;
+			const bool map_done = map_it_ == map_end_;
+
+			if (vec_done && map_done) {
+				use_vector_ = false;
+				return;
+			}
+
+			if (!vec_done && (map_done || vec_it_->tag().value() <= map_it_->first)) {
+				if (vec_it_->vr() == VR::NONE) {
+					++vec_it_;
+					continue;
+				}
+				use_vector_ = true;
+				return;
+			}
+
+			if (!map_done) {
+				if (map_it_->second.vr() == VR::NONE) {
+					++map_it_;
+					continue;
+				}
+				use_vector_ = false;
+				return;
+			}
 		}
-		if (map_it_ == map_end_) {
-			use_vector_ = true;
-			return;
-		}
-		const auto vec_tag = vec_it_->tag().value();
-		const auto map_tag = map_it_->first;
-		use_vector_ = vec_tag <= map_tag;
 	}
 
 	VecIter vec_it_{};
@@ -607,9 +630,11 @@ public:
 	const std::string& path() const;
 	InStream& stream();
 	const InStream& stream() const;
-	DataElement* add_dataelement(Tag tag, VR vr, std::size_t length, std::size_t offset);
+	DataElement* add_dataelement(Tag tag, VR vr=VR::NONE, std::size_t length=0, std::size_t offset=0);
+	void remove_dataelement(Tag tag);
 	DataElement* get_dataelement(Tag tag);
 	const DataElement* get_dataelement(Tag tag) const;
+	void dump_elements() const;
 	iterator begin();
 	iterator end();
 	const_iterator begin() const;
