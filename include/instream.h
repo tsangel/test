@@ -42,6 +42,7 @@ public:
 	[[nodiscard]] inline std::size_t begin() const { return startoffset_; }
 	[[nodiscard]] inline std::size_t end() const { return endoffset_; }
 	std::span<const std::uint8_t> read(std::size_t size);
+	std::span<const std::uint8_t> peek(std::size_t size) const;
 	std::size_t skip(std::size_t size);
 	void* get_pointer(std::size_t offset, std::size_t size);
 	std::size_t seek(std::size_t pos);

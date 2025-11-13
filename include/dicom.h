@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <memory_resource>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -112,7 +113,7 @@ struct VR {
     // ------------------------------------------------------------
     // Basic utilities
     // ------------------------------------------------------------
-    constexpr bool     is_known() const noexcept { return value >= 1 && value <= 32; }
+    constexpr bool     is_known() const noexcept { return value >= AE_val && value < _UNKNOWN_val; }
     constexpr uint16_t val()      const noexcept { return is_known() ? value : 0; }
     constexpr uint16_t raw_code() const noexcept { return is_known() ? val_to_raw[value] : value; }
     constexpr char     first()    const noexcept { return char(raw_code() >> 8); }
@@ -138,6 +139,7 @@ struct VR {
 			case UL_val: return "UL"; case UN_val: return "UN";
 			case UR_val: return "UR"; case US_val: return "US";
 			case UT_val: return "UT"; case UV_val: return "UV";
+			case PX_val: return "PX";
 			default: return "??";
 		}
 	}
@@ -159,21 +161,25 @@ struct VR {
         }
     }
 
-    constexpr bool is_binary() const noexcept {
-        if (!is_known()) return false;
-        switch (value) {
-		case AT_val:
-            case OB_val: case OD_val: case OF_val: case OV_val: case OL_val: case OW_val:
-            case UN_val: case US_val: case SS_val: case SV_val: case UV_val:
-            case UL_val: case SL_val: case FL_val: case FD_val:
-                return true;
-            default: return false;
-        }
-    }
+	constexpr bool is_binary() const noexcept {
+		if (!is_known()) return false;
+		switch (value) {
+	case AT_val:
+			case OB_val: case OD_val: case OF_val: case OV_val: case OL_val: case OW_val:
+			case UN_val: case US_val: case SS_val: case SV_val: case UV_val: case PX_val:
+			case UL_val: case SL_val: case FL_val: case FD_val:
+				return true;
+			default: return false;
+		}
+	}
 
-    constexpr bool is_sequence() const noexcept {
-        return is_known() && value == SQ_val;
-    }
+	constexpr bool is_sequence() const noexcept {
+		return is_known() && value == SQ_val;
+	}
+
+	constexpr bool is_pixel_sequence() const noexcept {
+		return is_known() && value == PX_val;
+	}
 
     // ------------------------------------------------------------
     // Padding rules
@@ -182,16 +188,16 @@ struct VR {
     static constexpr bool pad_to_even() noexcept { return true; }
 
     /// Returns the padding byte (0x20 for text, 0x00 for binary/UI)
-    constexpr uint8_t padding_byte() const noexcept {
-        if (!is_known()) return 0x00;
-        switch (value) {
-            case UI_val: return 0x00;
-            case AT_val: case OB_val: case OD_val: case OF_val:
-            case OL_val: case OW_val: case UN_val: case SQ_val:
-                return 0x00;
-            default: return 0x20;
-        }
-    }
+	constexpr uint8_t padding_byte() const noexcept {
+		if (!is_known()) return 0x00;
+		switch (value) {
+			case UI_val: return 0x00;
+			case AT_val: case OB_val: case OD_val: case OF_val:
+			case OL_val: case OW_val: case UN_val: case SQ_val: case PX_val:
+				return 0x00;
+			default: return 0x20;
+		}
+	}
 
     // ------------------------------------------------------------
     // Explicit VR encoding: 32-bit VL usage
@@ -243,7 +249,7 @@ struct VR {
         FL_val, IS_val, LO_val, LT_val, OB_val, OD_val, OF_val, OV_val,
         OL_val, OW_val, PN_val, SH_val, SL_val, SQ_val, SS_val, ST_val,
         SV_val, TM_val, UC_val, UI_val, UL_val, UN_val, UR_val, US_val,
-        UT_val, UV_val, _UNKNOWN_val
+        UT_val, UV_val, PX_val, _UNKNOWN_val
     };
 
     // ------------------------------------------------------------
@@ -278,15 +284,16 @@ struct VR {
     static const VR UC;
     static const VR UI;
     static const VR UL;
-    static const VR UN;
-    static const VR UR;
-    static const VR US;
-    static const VR UT;
-    static const VR UV;
+	static const VR UN;
+	static const VR UR;
+	static const VR US;
+	static const VR UT;
+	static const VR UV;
+	static const VR PX;
 
 private:
     // Mapping table from compact ID -> raw 2-char code
-    inline static constexpr std::array<uint16_t, UV_val + 2> val_to_raw = {
+    inline static constexpr std::array<uint16_t, PX_val + 2> val_to_raw = {
         0,
         pack2('A','E'), pack2('A','S'), pack2('A','T'), pack2('C','S'),
         pack2('D','A'), pack2('D','S'), pack2('D','T'), pack2('F','D'),
@@ -296,7 +303,7 @@ private:
         pack2('S','L'), pack2('S','Q'), pack2('S','S'), pack2('S','T'),
         pack2('S','V'), pack2('T','M'), pack2('U','C'), pack2('U','I'),
         pack2('U','L'), pack2('U','N'), pack2('U','R'), pack2('U','S'),
-        pack2('U','T'), pack2('U','V'), 0
+        pack2('U','T'), pack2('U','V'), pack2('P','X'), 0
     };
 
     /// Maps raw 16-bit code -> small integer (1..34) or 0 if unknown.
@@ -319,6 +326,7 @@ private:
             case pack2('U','L'): return UL_val; case pack2('U','N'): return UN_val;
             case pack2('U','R'): return UR_val; case pack2('U','S'): return US_val;
             case pack2('U','T'): return UT_val; case pack2('U','V'): return UV_val;
+            case pack2('P','X'): return PX_val;
             default: return 0;
         }
     }
@@ -364,6 +372,7 @@ inline constexpr VR VR::UR{uint16_t(VR::UR_val)};
 inline constexpr VR VR::US{uint16_t(VR::US_val)};
 inline constexpr VR VR::UT{uint16_t(VR::UT_val)};
 inline constexpr VR VR::UV{uint16_t(VR::UV_val)};
+inline constexpr VR VR::PX{uint16_t(VR::PX_val)};
 
 namespace lookup {
 
@@ -398,16 +407,108 @@ inline constexpr Tag operator"" _tag(const char* text, std::size_t len) {
 
 } // namespace literals
 
+class Sequence {};
+class PixelSequence {};
+
+class DataSet;
+
+class DataElement {
+public:
+	constexpr DataElement() noexcept = default;
+	~DataElement() { release_storage(); }
+
+	DataElement(const DataElement&) = delete;
+	DataElement(const DataElement&&) = delete;
+	DataElement& operator=(const DataElement&) = delete;
+
+	DataElement(DataElement&& other) noexcept { move_from(std::move(other)); }
+	DataElement& operator=(DataElement&& other) noexcept {
+		if (this != &other) {
+			release_storage();
+			move_from(std::move(other));
+		}
+		return *this;
+	}
+
+	constexpr DataElement(Tag tag, VR vr, std::size_t length, std::size_t offset,
+ 	    DataSet* parent = nullptr) noexcept
+	    : tag_(tag), vr_(vr), length_(length), offset_(offset), storage_(), parent_(parent) {}
+
+	[[nodiscard]] constexpr Tag tag() const noexcept { return tag_; }
+	[[nodiscard]] constexpr VR vr() const noexcept { return vr_; }
+	[[nodiscard]] constexpr std::size_t length() const noexcept { return length_; }
+	[[nodiscard]] constexpr std::size_t offset() const noexcept { return offset_; }
+	[[nodiscard]] constexpr DataSet* parent() const noexcept { return parent_; }
+	[[nodiscard]] constexpr void* data() const noexcept { return storage_.ptr; }
+	[[nodiscard]] constexpr Sequence* sequence() const noexcept {
+		return vr_.is_sequence() ? storage_.seq : nullptr;
+	}
+	[[nodiscard]] constexpr PixelSequence* pixel_sequence() const noexcept {
+		return vr_.is_pixel_sequence() ? storage_.pixseq : nullptr;
+	}
+
+	constexpr void set_tag(Tag tag) noexcept { tag_ = tag; }
+	constexpr void set_vr(VR vr) noexcept { vr_ = vr; }
+	constexpr void set_length(std::size_t length) noexcept { length_ = length; }
+	constexpr void set_offset(std::size_t offset) noexcept { offset_ = offset; }
+	constexpr void set_parent(DataSet* parent) noexcept { parent_ = parent; }
+
+	constexpr void set_data(void* ptr) noexcept { storage_.ptr = ptr; }
+	constexpr void set_sequence(Sequence* seq) noexcept { storage_.seq = seq; }
+	constexpr void set_pixel_sequence(PixelSequence* pixseq) noexcept {
+		storage_.pixseq = pixseq;
+	}
+
+private:
+	Tag tag_{};
+	VR vr_{};
+	std::size_t length_{0};
+	std::size_t offset_{0};
+	union Storage {
+		void* ptr;
+		Sequence* seq;
+		PixelSequence* pixseq;
+		constexpr Storage() noexcept : ptr(nullptr) {}
+	} storage_{};
+	DataSet* parent_{nullptr};
+
+	void release_storage() noexcept {
+		if (!storage_.ptr) {
+			return;
+		}
+		if (vr_.is_sequence()) {
+			delete storage_.seq;
+		} else if (vr_.is_pixel_sequence()) {
+			delete storage_.pixseq;
+		} else {
+			::operator delete(storage_.ptr);
+		}
+		storage_.ptr = nullptr;
+	}
+
+	void move_from(DataElement&& other) noexcept {
+		tag_ = other.tag_;
+		vr_ = other.vr_;
+		length_ = other.length_;
+		offset_ = other.offset_;
+		storage_.ptr = other.storage_.ptr;
+		parent_ = other.parent_;
+		other.storage_.ptr = nullptr;
+	}
+};
+
 
 class DataSet {
 public:
 	DataSet();
-	explicit DataSet(const std::string& path);
+	explicit DataSet(std::pmr::memory_resource* upstream);
+	explicit DataSet(DataSet* parent);
+	DataSet(DataSet* parent, std::pmr::memory_resource* upstream);
 	~DataSet();
 	DataSet(const DataSet&) = delete;
 	DataSet& operator=(const DataSet&) = delete;
-	DataSet(DataSet&&) noexcept = default;
-	DataSet& operator=(DataSet&&) noexcept = default;
+	DataSet(DataSet&&) noexcept = delete;
+	DataSet& operator=(DataSet&&) noexcept = delete;
 
 	void attach_to_file(const std::string& path);
 	void attach_to_memory(const std::uint8_t* data, std::size_t size, bool copy = true);
@@ -423,14 +524,48 @@ public:
 	InStream& stream();
 	const InStream& stream() const;
 	bool is_memory_backed() const noexcept;
+	DataElement* add_dataelement(Tag tag, VR vr, std::size_t length, std::size_t offset);
 
-private:
+private:   
 	enum class Backing { File, Memory };
 	void reset_stream(std::string identifier, std::unique_ptr<InStream> stream, Backing backing);
 
 	std::string path_;
 	std::unique_ptr<InStream> stream_;
 	Backing backing_{Backing::File};
+	struct DataElementDeleter {
+		std::pmr::memory_resource* resource{};
+		void operator()(DataElement* ptr) const noexcept {
+			if (!ptr || !resource) {
+				return;
+			}
+			std::destroy_at(ptr);
+			resource->deallocate(ptr, sizeof(DataElement), alignof(DataElement));
+		}
+	};
+	using DataElementPtr = std::unique_ptr<DataElement, DataElementDeleter>;
+	using ElementEntry = std::pair<Tag, DataElementPtr>;
+	DataSet* root_dataset_{this};
+	static constexpr std::size_t kElementArenaSize = 64 * 1024;
+	alignas(std::max_align_t) std::array<std::byte, kElementArenaSize> element_arena_{};
+	std::pmr::monotonic_buffer_resource element_resource_;
+	std::pmr::vector<ElementEntry> elements_;
+};
+
+class DataSet2 {
+public:
+	DataSet2() = default;
+	~DataSet2() = default;
+	DataSet2(const DataSet2&) = delete;
+	DataSet2& operator=(const DataSet2&) = delete;
+	DataSet2(DataSet2&&) noexcept = default;
+	DataSet2& operator=(DataSet2&&) noexcept = default;
+
+	DataElement* add_dataelement(Tag tag, VR vr, std::size_t length, std::size_t offset);
+
+private:
+	using ElementEntry = std::pair<Tag, std::unique_ptr<DataElement>>;
+	std::vector<ElementEntry> elements_;
 };
 
 std::unique_ptr<DataSet> read_file(const std::string& path);

@@ -22,11 +22,6 @@ namespace dicom {
 
 namespace {
 
-std::uint8_t* empty_sentinel() {
-	static std::uint8_t sentinel{};
-	return &sentinel;
-}
-
 #if defined(_WIN32)
 std::size_t file_size_from_handle(void* handle) {
 	LARGE_INTEGER size;
@@ -81,15 +76,22 @@ void InStream::reset_internal_buffer() {
 }
 
 std::span<const std::uint8_t> InStream::read(std::size_t size) {
-	if (size == 0 || is_eof()) {
+	auto view = peek(size);
+	if (!view.empty()) {
+		offset_ += size;
+	}
+	return view;
+}
+
+std::span<const std::uint8_t> InStream::peek(std::size_t size) const {
+	const std::size_t available = bytes_remaining();
+	if (size == 0 || available < size) {
 		return std::span<const std::uint8_t>();
 	}
-	const std::size_t available = bytes_remaining();
-	const std::size_t to_read = std::min(size, available);
-	std::uint8_t* base = data_ ? data_ : empty_sentinel();
-	std::span<const std::uint8_t> view(base + offset_, to_read);
-	offset_ += to_read;
-	return view;
+	if (!data_) {
+		throw std::logic_error("InStream has no backing data");
+	}
+	return std::span<const std::uint8_t>(data_ + offset_, size);
 }
 
 std::size_t InStream::skip(std::size_t size) {
@@ -103,8 +105,10 @@ void* InStream::get_pointer(std::size_t relative_offset, std::size_t size) {
 	if (relative_offset > datasize() || relative_offset + size > datasize()) {
 		throw std::out_of_range("InStream::get_pointer out of range");
 	}
-	std::uint8_t* base = data_ ? data_ : empty_sentinel();
-	return base + startoffset_ + relative_offset;
+	if (!data_) {
+		throw std::logic_error("InStream has no backing data");
+	}
+	return data_ + startoffset_ + relative_offset;
 }
 
 std::size_t InStream::seek(std::size_t pos) {
@@ -303,7 +307,10 @@ InSubStream::InSubStream(InStream* basestream, std::size_t size) {
 	offset_ = startoffset_;
 	filesize_ = size;
 	std::uint8_t* root_data = rootstream_ ? rootstream_->data() : nullptr;
-	data_ = root_data ? root_data : empty_sentinel();
+	if (!root_data) {
+		throw std::logic_error("Basestream has no backing data");
+	}
+	data_ = root_data;
 	own_data_ = false;
 }
 

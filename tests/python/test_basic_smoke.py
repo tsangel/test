@@ -11,6 +11,14 @@ def test_keyword_roundtrip():
 	assert dicom.tag_to_keyword(int(tag)) == "PatientName"
 
 
+def test_custom_px_vr():
+	px = dicom.VR.from_string("PX")
+	assert not px.is_sequence()
+	assert px.is_pixel_sequence()
+	assert px.is_binary()
+	assert px.str() == "PX"
+
+
 def test_literal_and_file(tmp_path):
 	using_literal = dicom.Tag("Rows")
 	assert int(using_literal) == 0x00280010

@@ -91,6 +91,7 @@ PYBIND11_MODULE(_dicomsdl, m) {
 		.def("is_string", &VR::is_string)
 		.def("is_binary", &VR::is_binary)
 		.def("is_sequence", &VR::is_sequence)
+		.def("is_pixel_sequence", &VR::is_pixel_sequence)
 		.def("padding_byte", &VR::padding_byte)
 		.def("uses_explicit_32bit_vl", &VR::uses_explicit_32bit_vl)
 		.def("fixed_length", &VR::fixed_length)

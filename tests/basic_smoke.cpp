@@ -22,6 +22,16 @@ int main() {
 	assert(vr.str() == std::string_view("PN"));
 	assert(tag_to_keyword(tag.value()) == std::string_view("PatientName"));
 
+	const auto seq_vr = dicom::VR::SQ;
+	assert(seq_vr.is_sequence());
+	assert(!seq_vr.is_pixel_sequence());
+
+	const auto px_vr = dicom::VR::PX;
+	assert(!px_vr.is_sequence());
+	assert(px_vr.is_pixel_sequence());
+	assert(px_vr.is_binary());
+	assert(px_vr.str() == std::string_view("PX"));
+
 	const dicom::Tag literal_tag = "Rows"_tag;
 	assert(literal_tag.value() == 0x00280010u);
 
