@@ -4,7 +4,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <memory_resource>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -501,14 +500,11 @@ private:
 class DataSet {
 public:
 	DataSet();
-	explicit DataSet(std::pmr::memory_resource* upstream);
-	explicit DataSet(DataSet* parent);
-	DataSet(DataSet* parent, std::pmr::memory_resource* upstream);
 	~DataSet();
 	DataSet(const DataSet&) = delete;
 	DataSet& operator=(const DataSet&) = delete;
-	DataSet(DataSet&&) noexcept = delete;
-	DataSet& operator=(DataSet&&) noexcept = delete;
+	DataSet(DataSet&&) noexcept = default;
+	DataSet& operator=(DataSet&&) noexcept = default;
 
 	void attach_to_file(const std::string& path);
 	void attach_to_memory(const std::uint8_t* data, std::size_t size, bool copy = true);
@@ -533,10 +529,7 @@ private:
 	std::string path_;
 	std::unique_ptr<InStream> stream_;
 	Backing backing_{Backing::File};
-	DataSet* root_dataset_{this};
-	std::unique_ptr<std::pmr::unsynchronized_pool_resource> pool_owner_;
-	std::pmr::memory_resource* element_resource_{nullptr};
-	std::pmr::vector<DataElement> elements_;
+	std::vector<DataElement> elements_;
 };
 
 std::unique_ptr<DataSet> read_file(const std::string& path);
