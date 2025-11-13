@@ -119,8 +119,6 @@ struct VR {
     constexpr bool     is_known() const noexcept { return value >= AE_val && value < _UNKNOWN_val; }
     constexpr uint16_t val()      const noexcept { return is_known() ? value : 0; }
     constexpr uint16_t raw_code() const noexcept { return is_known() ? val_to_raw[value] : value; }
-    constexpr char     first()    const noexcept { return char(raw_code() >> 8); }
-    constexpr char     second()   const noexcept { return char(raw_code() & 0xFF); }
 
 	/// Returns the two-character VR string or "??" for unknown
 	constexpr std::string_view str() const noexcept {
@@ -609,7 +607,6 @@ public:
 	const std::string& path() const;
 	InStream& stream();
 	const InStream& stream() const;
-	bool is_memory_backed() const noexcept;
 	DataElement* add_dataelement(Tag tag, VR vr, std::size_t length, std::size_t offset);
 	DataElement* get_dataelement(Tag tag);
 	const DataElement* get_dataelement(Tag tag) const;
@@ -621,12 +618,9 @@ public:
 	const_iterator cend() const;
 
 private:
-	enum class Backing { File, Memory };
-	void reset_stream(std::string identifier, std::unique_ptr<InStream> stream, Backing backing);
-
+	void reset_stream(std::string identifier, std::unique_ptr<InStream> stream);
 	std::string path_;
 	std::unique_ptr<InStream> stream_;
-	Backing backing_{Backing::File};
 	std::vector<DataElement> elements_;
 	std::map<std::uint32_t, DataElement> element_map_;
 };

@@ -20,6 +20,8 @@ using dicom::VR;
 
 namespace {
 
+std::string_view vr_to_string_view(const VR& vr);
+
 std::string tag_repr(const Tag& tag) {
 	std::ostringstream oss;
 	oss << "Tag(group=0x" << std::hex << std::uppercase << tag.group()
@@ -28,8 +30,9 @@ std::string tag_repr(const Tag& tag) {
 }
 
 std::string vr_repr(const VR& vr) {
+	std::string s = std::string(vr_to_string_view(vr));
 	std::ostringstream oss;
-	oss << "VR('" << vr.first() << vr.second() << "')";
+	oss << "VR('" << s << "')";
 	return oss.str();
 }
 
@@ -90,8 +93,6 @@ PYBIND11_MODULE(_dicomsdl, m) {
 	py::class_<DataSet, std::unique_ptr<DataSet>>(m, "DataSet")
 		.def(py::init<>())
 		.def_property_readonly("path", &DataSet::path, "Return the stored file path")
-		.def_property_readonly("is_memory_backed", &DataSet::is_memory_backed,
-		    "Return True if the DataSet owns in-memory data")
 		.def("add_dataelement",
 		    [](DataSet& self, const Tag& tag, const VR& vr, std::size_t length, std::size_t offset) {
 		        DataElement* element = self.add_dataelement(tag, vr, length, offset);
@@ -151,7 +152,7 @@ PYBIND11_MODULE(_dicomsdl, m) {
 		.def("__repr__", &tag_repr)
 		.def(py::self == py::self);
 
-	py::class_<VR>(m, "VR")
+	auto vr_cls = py::class_<VR>(m, "VR")
 		.def(py::init<>())
 		.def(py::init<std::uint16_t>(), py::arg("value"))
 		.def_static("from_string", &VR::from_string, py::arg("value"))
@@ -167,11 +168,46 @@ PYBIND11_MODULE(_dicomsdl, m) {
 		.def("uses_explicit_32bit_vl", &VR::uses_explicit_32bit_vl)
 		.def("fixed_length", &VR::fixed_length)
 		.def("str", [] (const VR& vr) { return std::string(vr_to_string_view(vr)); })
-		.def("first", &VR::first)
-		.def("second", &VR::second)
 		.def("__str__", [] (const VR& vr) { return std::string(vr_to_string_view(vr)); })
 		.def("__repr__", &vr_repr)
 		.def(py::self == py::self);
+
+	vr_cls.attr("NONE") = dicom::VR::NONE;
+	vr_cls.attr("AE") = dicom::VR::AE;
+	vr_cls.attr("AS") = dicom::VR::AS;
+	vr_cls.attr("AT") = dicom::VR::AT;
+	vr_cls.attr("CS") = dicom::VR::CS;
+	vr_cls.attr("DA") = dicom::VR::DA;
+	vr_cls.attr("DS") = dicom::VR::DS;
+	vr_cls.attr("DT") = dicom::VR::DT;
+	vr_cls.attr("FD") = dicom::VR::FD;
+	vr_cls.attr("FL") = dicom::VR::FL;
+	vr_cls.attr("IS") = dicom::VR::IS;
+	vr_cls.attr("LO") = dicom::VR::LO;
+	vr_cls.attr("LT") = dicom::VR::LT;
+	vr_cls.attr("OB") = dicom::VR::OB;
+	vr_cls.attr("OD") = dicom::VR::OD;
+	vr_cls.attr("OF") = dicom::VR::OF;
+	vr_cls.attr("OV") = dicom::VR::OV;
+	vr_cls.attr("OL") = dicom::VR::OL;
+	vr_cls.attr("OW") = dicom::VR::OW;
+	vr_cls.attr("PN") = dicom::VR::PN;
+	vr_cls.attr("SH") = dicom::VR::SH;
+	vr_cls.attr("SL") = dicom::VR::SL;
+	vr_cls.attr("SQ") = dicom::VR::SQ;
+	vr_cls.attr("SS") = dicom::VR::SS;
+	vr_cls.attr("ST") = dicom::VR::ST;
+	vr_cls.attr("SV") = dicom::VR::SV;
+	vr_cls.attr("TM") = dicom::VR::TM;
+	vr_cls.attr("UC") = dicom::VR::UC;
+	vr_cls.attr("UI") = dicom::VR::UI;
+	vr_cls.attr("UL") = dicom::VR::UL;
+	vr_cls.attr("UN") = dicom::VR::UN;
+	vr_cls.attr("UR") = dicom::VR::UR;
+	vr_cls.attr("US") = dicom::VR::US;
+	vr_cls.attr("UT") = dicom::VR::UT;
+	vr_cls.attr("UV") = dicom::VR::UV;
+	vr_cls.attr("PX") = dicom::VR::PX;
 
 	m.def("keyword_to_tag_vr",
 	    [] (const std::string& keyword) -> py::object {

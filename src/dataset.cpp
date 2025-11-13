@@ -40,31 +40,30 @@ DataSet::~DataSet() = default;
 
 void DataSet::attach_to_file(const std::string& path) {
 	auto stream = make_file_stream(path);
-	reset_stream(path, std::move(stream), Backing::File);
+	reset_stream(path, std::move(stream));
 }
 
 void DataSet::attach_to_memory(const std::uint8_t* data, std::size_t size, bool copy) {
 	auto stream = make_memory_stream(data, size, copy);
-	reset_stream(std::string{"<memory>"}, std::move(stream), Backing::Memory);
+	reset_stream(std::string{"<memory>"}, std::move(stream));
 }
 
 void DataSet::attach_to_memory(const std::string& name, const std::uint8_t* data, std::size_t size, bool copy) {
 	auto stream = make_memory_stream(data, size, copy);
-	reset_stream(name, std::move(stream), Backing::Memory);
+	reset_stream(name, std::move(stream));
 }
 
 void DataSet::attach_to_memory(std::string name, std::vector<std::uint8_t>&& buffer) {
 	auto stream = make_memory_stream(std::move(buffer));
-	reset_stream(std::move(name), std::move(stream), Backing::Memory);
+	reset_stream(std::move(name), std::move(stream));
 }
 
-void DataSet::reset_stream(std::string identifier, std::unique_ptr<InStream> stream, Backing backing) {
+void DataSet::reset_stream(std::string identifier, std::unique_ptr<InStream> stream) {
 	if (!stream) {
 		throw std::runtime_error("DataSet requires a valid stream");
 	}
 	path_ = std::move(identifier);
 	stream_ = std::move(stream);
-	backing_ = backing;
 }
 
 const std::string& DataSet::path() const {
@@ -77,10 +76,6 @@ InStream& DataSet::stream() {
 
 const InStream& DataSet::stream() const {
 	return *stream_;
-}
-
-bool DataSet::is_memory_backed() const noexcept {
-	return backing_ == Backing::Memory;
 }
 
 DataSet::iterator DataSet::begin() {

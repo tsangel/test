@@ -55,17 +55,14 @@ int main() {
 
 	const std::vector<std::uint8_t> buffer{0x01, 0x02, 0x03, 0x04};
 	const auto mem = read_bytes("buffer", buffer.data(), buffer.size());
-	assert(mem->is_memory_backed());
 	assert(mem->stream().datasize() == buffer.size());
 
 	auto owned_buffer = std::vector<std::uint8_t>{0x0A, 0x0B};
 	const auto mem_owned = read_bytes("owned-buffer", std::move(owned_buffer));
-	assert(mem_owned->is_memory_backed());
 	assert(mem_owned->stream().datasize() == 2);
 
 	DataSet manual_mem;
 	manual_mem.attach_to_memory("manual-buffer", buffer.data(), buffer.size());
-	assert(manual_mem.is_memory_backed());
 	assert(manual_mem.stream().datasize() == buffer.size());
 
 	std::filesystem::remove(file_path);
