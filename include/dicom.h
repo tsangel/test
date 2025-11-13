@@ -75,8 +75,8 @@ constexpr uint16_t pack2(char a, char b) noexcept {
 
 /// Represents a DICOM Value Representation (VR).
 /// Internally stores a compact encoded form:
-///  - known VR → small integer 1..32
-///  - unknown VR → 16-bit raw two-character code ('X''Y')
+///  - known VR -> small integer 1..32
+///  - unknown VR -> 16-bit raw two-character code ('X''Y')
 struct VR {
     uint16_t value = 0;  ///< compact encoded value (1..32 or raw 16-bit code)
 

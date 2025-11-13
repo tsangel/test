@@ -31,15 +31,17 @@ int main() {
 		std::ofstream os(file_path, std::ios::binary);
 		os << "DICM";
 	}
-	const auto file = read_file(file_path.string());
-	assert(file);
-	assert(file->path() == file_path.string());
-	assert(file->stream().datasize() == 4);
+	{
+		const auto file = read_file(file_path.string());
+		assert(file);
+		assert(file->path() == file_path.string());
+		assert(file->stream().datasize() == 4);
 
-	DataSet manual;
-	manual.attachToFile(file_path.string());
-	assert(manual.path() == file_path.string());
-	assert(manual.stream().datasize() == 4);
+		DataSet manual;
+		manual.attachToFile(file_path.string());
+		assert(manual.path() == file_path.string());
+		assert(manual.stream().datasize() == 4);
+	}
 
 	const std::vector<std::uint8_t> buffer{0x01, 0x02, 0x03, 0x04};
 	const auto mem = read_bytes("buffer", buffer.data(), buffer.size());
