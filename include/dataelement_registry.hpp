@@ -1,5 +1,5 @@
 
-// Auto-generated from misc/dictionary/_dataelement_registry.txt
+// Auto-generated from /Users/tsangel/Documents/workspace.dev/test.git/misc/dictionary/_dataelement_registry.tsv
 #pragma once
 
 #include <array>

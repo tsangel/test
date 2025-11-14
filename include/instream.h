@@ -35,7 +35,7 @@ public:
 	InStream(InStream&&) = delete;
 	InStream& operator=(InStream&&) = delete;
 
-	[[nodiscard]] inline bool is_valid() const { return data_ != nullptr || filesize_ == 0; }
+	[[nodiscard]] inline bool is_valid() const { return data_ != nullptr; }
 	[[nodiscard]] inline std::size_t tell() const { return offset_; }
 	[[nodiscard]] inline bool is_eof() const { return offset_ == endoffset_; }
 	[[nodiscard]] inline std::size_t bytes_remaining() const { return endoffset_ - offset_; }
@@ -45,6 +45,7 @@ public:
 	std::span<const std::uint8_t> peek(std::size_t size) const;
 	std::size_t skip(std::size_t size);
 	void* get_pointer(std::size_t offset, std::size_t size);
+	std::span<const std::uint8_t> get_span(std::size_t offset, std::size_t size) const;
 	std::size_t seek(std::size_t pos);
 	void unread(std::size_t size);
 	void rewind();

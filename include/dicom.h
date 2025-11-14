@@ -6,6 +6,7 @@
 #include <iterator>
 #include <map>
 #include <memory>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -14,6 +15,8 @@
 #include <vector>
 
 #include "dictionary_lookup_detail.hpp"
+#include "version.h"
+#include "uid_lookup_detail.hpp"
 
 namespace dicom {
 
@@ -68,6 +71,91 @@ static_assert(alignof(Tag) == alignof(std::uint32_t), "Tag alignment must match 
 static_assert(std::is_standard_layout_v<Tag>, "Tag should be standard-layout");
 static_assert(std::is_trivially_copyable_v<Tag>, "Tag should be trivially copyable");
 // static_assert(std::is_trivial_v<Tag>, "Tag should be trivial");
+
+struct Uid {
+	std::uint16_t index{uid_lookup::kInvalidUidIndex};
+
+	constexpr Uid() noexcept = default;
+
+	constexpr explicit Uid(std::string_view text) : index(uid_lookup::uid_index_from_text(text)) {
+		if (!valid()) {
+			throw std::invalid_argument("Unknown DICOM UID");
+		}
+	}
+
+	static constexpr Uid from_index(std::uint16_t idx) noexcept {
+		return Uid(idx, from_index_tag{});
+	}
+
+	static constexpr Uid lookup(std::string_view text) noexcept {
+		return from_index(uid_lookup::uid_index_from_text(text));
+	}
+
+	static constexpr Uid from_value(std::string_view value) noexcept {
+		return from_index(uid_lookup::uid_index_from_value(value));
+	}
+
+	static constexpr Uid from_keyword(std::string_view keyword) noexcept {
+		return from_index(uid_lookup::uid_index_from_keyword(keyword));
+	}
+
+	[[nodiscard]] constexpr bool valid() const noexcept {
+		return index != uid_lookup::kInvalidUidIndex;
+	}
+
+	[[nodiscard]] constexpr explicit operator bool() const noexcept { return valid(); }
+
+	[[nodiscard]] constexpr std::uint16_t raw_index() const noexcept { return index; }
+
+	[[nodiscard]] constexpr const UidEntry* entry() const noexcept {
+		return uid_lookup::entry_from_index(index);
+	}
+
+	[[nodiscard]] constexpr std::string_view value() const noexcept {
+		if (const auto* e = entry()) {
+			return e->value;
+		}
+		return {};
+	}
+
+	[[nodiscard]] constexpr std::string_view keyword() const noexcept {
+		if (const auto* e = entry()) {
+			return e->keyword;
+		}
+		return {};
+	}
+
+	[[nodiscard]] constexpr std::string_view name() const noexcept {
+		if (const auto* e = entry()) {
+			return e->name;
+		}
+		return {};
+	}
+
+	[[nodiscard]] constexpr std::string_view type() const noexcept {
+		if (const auto* e = entry()) {
+			return e->type;
+		}
+		return {};
+	}
+
+	[[nodiscard]] constexpr UidType uid_type() const noexcept {
+		if (const auto* e = entry()) {
+			return e->uid_type;
+		}
+		return UidType::Other;
+	}
+
+	constexpr auto operator<=>(const Uid&) const noexcept = default;
+	constexpr bool operator==(const Uid&) const noexcept = default;
+
+private:
+	struct from_index_tag {};
+	constexpr Uid(std::uint16_t idx, from_index_tag) noexcept : index(idx) {}
+};
+
+static_assert(sizeof(Uid) == sizeof(std::uint16_t), "Uid must remain a 16-bit wrapper");
+static_assert(std::is_trivially_copyable_v<Uid>, "Uid should be trivially copyable");
 
 /// Packs two ASCII characters into a 16-bit value.
 /// Example: 'A','E' -> 0x4145
@@ -416,12 +504,21 @@ inline constexpr Tag operator"" _tag(const char* text, std::size_t len) {
 	return Tag(std::string_view{text, len});
 }
 
+inline constexpr Uid operator"" _uid(const char* text, std::size_t len) {
+	return Uid(std::string_view{text, len});
+}
+
 } // namespace literals
 
 class Sequence {};
 class PixelSequence {};
 
 class DataSet;
+struct ReadOptions {
+	Tag load_until{Tag(0xFFFFu, 0xFFFFu)};
+	bool keep_on_error{false};
+	bool copy{true};
+};
 
 class DataElement {
 public:
@@ -450,6 +547,9 @@ public:
 	[[nodiscard]] constexpr std::size_t length() const noexcept { return length_; }
 	[[nodiscard]] constexpr std::size_t offset() const noexcept { return offset_; }
 	[[nodiscard]] constexpr DataSet* parent() const noexcept { return parent_; }
+	[[nodiscard]] std::span<const std::uint8_t> value_span() const;
+	void* value_ptr() const;
+	[[nodiscard]] int vm() const;
 	[[nodiscard]] constexpr void* data() const noexcept { return storage_.ptr; }
 	[[nodiscard]] constexpr Sequence* sequence() const noexcept {
 		return vr_.is_sequence() ? storage_.seq : nullptr;
@@ -611,6 +711,7 @@ public:
 	    std::map<std::uint32_t, DataElement>::const_iterator, const DataElement&, const DataElement*>;
 
 	DataSet();
+	explicit DataSet(DataSet* root_dataset);
 	~DataSet();
 	DataSet(const DataSet&) = delete;
 	DataSet& operator=(const DataSet&) = delete;
@@ -635,6 +736,8 @@ public:
 	DataElement* get_dataelement(Tag tag);
 	const DataElement* get_dataelement(Tag tag) const;
 	void dump_elements() const;
+	void read_attached_stream(const ReadOptions& options);
+	void read_elements_until(Tag load_until, InStream* stream);
 	iterator begin();
 	iterator end();
 	const_iterator begin() const;
@@ -646,14 +749,18 @@ private:
 	void reset_stream(std::string identifier, std::unique_ptr<InStream> stream);
 	std::string path_;
 	std::unique_ptr<InStream> stream_;
+	DataSet* root_dataset_{this};
+	Tag last_tag_loaded_{Tag::from_value(0)};
 	std::vector<DataElement> elements_;
 	std::map<std::uint32_t, DataElement> element_map_;
 };
 
-std::unique_ptr<DataSet> read_file(const std::string& path);
-std::unique_ptr<DataSet> read_bytes(const std::uint8_t* data, std::size_t size, bool copy = true);
+std::unique_ptr<DataSet> read_file(const std::string& path, ReadOptions options = {});
+std::unique_ptr<DataSet> read_bytes(const std::uint8_t* data, std::size_t size,
+    ReadOptions options = {});
 std::unique_ptr<DataSet> read_bytes(const std::string& name, const std::uint8_t* data,
-    std::size_t size, bool copy = true);
-std::unique_ptr<DataSet> read_bytes(std::string name, std::vector<std::uint8_t>&& buffer);
+    std::size_t size, ReadOptions options = {});
+std::unique_ptr<DataSet> read_bytes(std::string name, std::vector<std::uint8_t>&& buffer,
+    ReadOptions options = {});
 
 } // namespace dicom

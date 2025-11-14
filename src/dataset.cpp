@@ -2,9 +2,11 @@
 #include <instream.h>
 
 #include <algorithm>
+#include <cstring>
 #include <iostream>
 #include <stdexcept>
 #include <vector>
+#include <span>
 
 namespace dicom {
 
@@ -35,7 +37,73 @@ DataElement* NullElement() {
 	return &null;
 }
 
+std::span<const std::uint8_t> DataElement::value_span() const {
+	if (storage_.ptr) {
+		return std::span<const std::uint8_t>(
+		    static_cast<const std::uint8_t*>(storage_.ptr), length_);
+	}
+	if (!parent_) {
+		throw std::logic_error("DataElement is not attached to a DataSet");
+	}
+	return parent_->stream().get_span(offset_, length_);
+}
+
+void* DataElement::value_ptr() const {
+	if (storage_.ptr) {
+		return storage_.ptr;
+	}
+	if (!parent_) {
+		throw std::logic_error("DataElement is not attached to a DataSet");
+	}
+	return parent_->stream().get_pointer(offset_, length_);
+}
+
+int DataElement::vm() const {
+	// PS 3.5, 6.4 VALUE MULTIPLICITY (VM) AND DELIMITATION
+	if (length_ == 0) {
+		return 0;
+	}
+
+	const auto vr_value = static_cast<std::uint16_t>(vr_);
+	switch (vr_value) {
+	case VR::FD_val:
+	case VR::SV_val:
+	case VR::UV_val:
+		return static_cast<int>(length_ / 8);
+	case VR::AT_val:
+	case VR::FL_val:
+	case VR::UL_val:
+	case VR::SL_val:
+		return static_cast<int>(length_ / 4);
+	case VR::US_val:
+	case VR::SS_val:
+		return static_cast<int>(length_ / 2);
+	case VR::AE_val: case VR::AS_val: case VR::CS_val: case VR::DA_val:
+	case VR::DS_val: case VR::DT_val: case VR::IS_val: case VR::LO_val:
+	case VR::PN_val: case VR::SH_val: case VR::TM_val: case VR::UC_val:
+	case VR::UI_val: {
+		std::span<const std::uint8_t> data;
+		data = value_span();
+		if (data.empty()) {
+			return 0;
+		}
+		int delims = 0;
+		for (auto byte : data) {
+			if (byte == '\\') {
+				++delims;
+			}
+		}
+		return delims + 1;
+	}
+	// LT, OB, OD, OF, OL, OW, SQ, ST, UN, UR or UT -> always 1
+	default:
+		return 1;
+	}
+}
+
 DataSet::DataSet() = default;
+
+DataSet::DataSet(DataSet* root_dataset) : root_dataset_(root_dataset ? root_dataset : this) {}
 
 DataSet::~DataSet() = default;
 
@@ -205,6 +273,37 @@ void DataSet::remove_dataelement(Tag tag) {
 	}
 }
 
+void DataSet::read_attached_stream(const ReadOptions& options) {
+	if (this != root_dataset_) {
+		throw std::logic_error("read_attached_stream is only valid on the root DataSet");
+	}
+	if (!stream_ || !stream_->is_valid()) {
+		throw std::logic_error("DataSet has no valid attached stream");
+	}
+
+	elements_.clear();
+	element_map_.clear();
+	last_tag_loaded_ = Tag::from_value(0);
+
+	// parse DICOM stream, starting with skipping the 128-byte preamble.
+	stream_->rewind();
+	stream_->skip(128);
+	auto magic = stream_->peek(4);
+	if (magic.size() == 4 && std::memcmp(magic.data(), "DICM", 4) == 0) {
+		stream_->skip(4);
+	} else {
+		// Some files ship without the PART 10 preamble/magic; rewind to treat them as raw streams.
+		stream_->rewind();
+	}
+
+	read_elements_until(options.load_until, stream_.get());
+}
+
+void DataSet::read_elements_until(Tag load_until, InStream* stream) {
+	(void)load_until;
+	(void)stream;
+}
+
 void DataSet::dump_elements() const {
 	std::cout << "-- elements_ --\n";
 	for (const auto& element : elements_) {
@@ -216,28 +315,31 @@ void DataSet::dump_elements() const {
 	}
 }
 
-std::unique_ptr<DataSet> read_file(const std::string& path) {
+std::unique_ptr<DataSet> read_file(const std::string& path, ReadOptions options) {
 	auto data_set = std::make_unique<DataSet>();
 	data_set->attach_to_file(path);
+	data_set->read_attached_stream(options);
 	return data_set;
 }
 
-std::unique_ptr<DataSet> read_bytes(const std::uint8_t* data, std::size_t size, bool copy) {
-	return read_bytes(std::string{"<memory>"}, data, size, copy);
+std::unique_ptr<DataSet> read_bytes(const std::uint8_t* data, std::size_t size,
+    ReadOptions options) {
+	return read_bytes(std::string{"<memory>"}, data, size, options);
 }
 
 std::unique_ptr<DataSet> read_bytes(const std::string& name, const std::uint8_t* data,
-	    std::size_t size, bool copy) {
+    std::size_t size, ReadOptions options) {
 	auto data_set = std::make_unique<DataSet>();
-	data_set->attach_to_memory(name, data, size, copy);
+	data_set->attach_to_memory(name, data, size, options.copy);
+	data_set->read_attached_stream(options);
 	return data_set;
 }
 
-std::unique_ptr<DataSet> read_bytes(std::string name, std::vector<std::uint8_t>&& buffer) {
-	// Use this overload when the caller already owns the bytes in a std::vector and wants to
-	// transfer ownership to dicomsdl without an extra copy.
+std::unique_ptr<DataSet> read_bytes(std::string name, std::vector<std::uint8_t>&& buffer,
+    ReadOptions options) {
 	auto data_set = std::make_unique<DataSet>();
 	data_set->attach_to_memory(std::move(name), std::move(buffer));
+	data_set->read_attached_stream(options);
 	return data_set;
 }
 

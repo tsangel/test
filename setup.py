@@ -9,6 +9,15 @@ from setuptools import Extension, setup
 from setuptools.command.build_ext import build_ext
 
 ROOT_DIR = pathlib.Path(__file__).resolve().parent
+VERSION_FILE = ROOT_DIR / "VERSION"
+
+def load_version() -> str:
+    text = VERSION_FILE.read_text(encoding="utf-8").strip()
+    if not text:
+        raise RuntimeError(f"Version file {VERSION_FILE} is empty")
+    return text
+
+PACKAGE_VERSION = load_version()
 
 
 class CMakeExtension(Extension):
@@ -74,7 +83,7 @@ class CMakeBuild(build_ext):
 
 setup(
     name="dicomsdl",
-    version="0.1.0",
+    version=PACKAGE_VERSION,
     author="DicomProject Authors",
     description="Python bindings for dicomsdl",
     python_requires=">=3.8",

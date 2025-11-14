@@ -84,31 +84,41 @@ std::span<const std::uint8_t> InStream::read(std::size_t size) {
 }
 
 std::span<const std::uint8_t> InStream::peek(std::size_t size) const {
-	const std::size_t available = bytes_remaining();
-	if (size == 0 || available < size) {
-		return std::span<const std::uint8_t>();
-	}
 	if (!data_) {
 		throw std::logic_error("InStream has no backing data");
 	}
-	return std::span<const std::uint8_t>(data_ + offset_, size);
+	if (size > bytes_remaining()) {
+		return std::span<const std::uint8_t>();
+	}
+	return std::span<const std::uint8_t>(data_ + offset_, size);	
 }
 
 std::size_t InStream::skip(std::size_t size) {
-	const std::size_t current = offset_;
-	const std::size_t new_offset = std::min(endoffset_, current + size);
-	offset_ = new_offset;
-	return new_offset - current;
+	if (size < bytes_remaining()) {
+		offset_ += size;
+		return size;
+	}
+	return 0;
 }
 
-void* InStream::get_pointer(std::size_t relative_offset, std::size_t size) {
-	if (relative_offset > datasize() || relative_offset + size > datasize()) {
+void* InStream::get_pointer(std::size_t offset, std::size_t size) {
+	if (offset + size > endoffset_) {
 		throw std::out_of_range("InStream::get_pointer out of range");
 	}
 	if (!data_) {
 		throw std::logic_error("InStream has no backing data");
 	}
-	return data_ + startoffset_ + relative_offset;
+	return data_ + offset;
+}
+
+std::span<const std::uint8_t> InStream::get_span(std::size_t offset, std::size_t size) const {
+	if (offset + size > endoffset_) {
+		throw std::out_of_range("InStream::get_span out of range");
+	}
+	if (!data_) {
+		throw std::logic_error("InStream has no backing data");
+	}
+	return std::span<const std::uint8_t>(data_ + offset, size);
 }
 
 std::size_t InStream::seek(std::size_t pos) {

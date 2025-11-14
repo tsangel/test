@@ -1,0 +1,58 @@
+table_id	table_label	character_set_description	defined_term	standard_for_code_extension	esc_sequence	iso_registration_number	number_of_characters	code_element	character_set
+table_C.12-2	C.12-2	Default repertoire	none			ISO-IR 6	94	G0	
+table_C.12-2	C.12-2	Latin alphabet No. 1	ISO_IR 100			ISO-IR 100	96	G1	
+table_C.12-2	C.12-2	Latin alphabet No. 1	ISO_IR 100			ISO-IR 6	94	G0	
+table_C.12-2	C.12-2	Latin alphabet No. 2	ISO_IR 101			ISO-IR 101	96	G1	
+table_C.12-2	C.12-2	Latin alphabet No. 2	ISO_IR 101			ISO-IR 6	94	G0	
+table_C.12-2	C.12-2	Latin alphabet No. 3	ISO_IR 109			ISO-IR 109	96	G1	
+table_C.12-2	C.12-2	Latin alphabet No. 3	ISO_IR 109			ISO-IR 6	94	G0	
+table_C.12-2	C.12-2	Latin alphabet No. 4	ISO_IR 110			ISO-IR 110	96	G1	
+table_C.12-2	C.12-2	Latin alphabet No. 4	ISO_IR 110			ISO-IR 6	94	G0	
+table_C.12-2	C.12-2	Cyrillic	ISO_IR 144			ISO-IR 144	96	G1	
+table_C.12-2	C.12-2	Cyrillic	ISO_IR 144			ISO-IR 6	94	G0	
+table_C.12-2	C.12-2	Arabic	ISO_IR 127			ISO-IR 127	96	G1	
+table_C.12-2	C.12-2	Arabic	ISO_IR 127			ISO-IR 6	94	G0	
+table_C.12-2	C.12-2	Greek	ISO_IR 126			ISO-IR 126	96	G1	
+table_C.12-2	C.12-2	Greek	ISO_IR 126			ISO-IR 6	94	G0	
+table_C.12-2	C.12-2	Hebrew	ISO_IR 138			ISO-IR 138	96	G1	
+table_C.12-2	C.12-2	Hebrew	ISO_IR 138			ISO-IR 6	94	G0	
+table_C.12-2	C.12-2	Latin alphabet No. 5	ISO_IR 148			ISO-IR 148	96	G1	
+table_C.12-2	C.12-2	Latin alphabet No. 5	ISO_IR 148			ISO-IR 6	94	G0	
+table_C.12-2	C.12-2	Latin alphabet No. 9	ISO_IR 203			ISO-IR 203	96	G1	
+table_C.12-2	C.12-2	Latin alphabet No. 9	ISO_IR 203			ISO-IR 6	94	G0	
+table_C.12-2	C.12-2	Japanese	ISO_IR 13			ISO-IR 13	94	G1	: Katakana
+table_C.12-2	C.12-2	Japanese	ISO_IR 13			ISO-IR 14	94	G0	: Romaji
+table_C.12-2	C.12-2	Thai	ISO_IR 166			ISO-IR 166	88	G1	
+table_C.12-2	C.12-2	Thai	ISO_IR 166			ISO-IR 6	94	G0	
+table_C.12-3	C.12-3	Default repertoire	ISO 2022 IR 6	ISO 2022	ESC 02/08 04/02	ISO-IR 6	94	G0	
+table_C.12-3	C.12-3	Latin alphabet No. 1	ISO 2022 IR 100	ISO 2022	ESC 02/13 04/01	ISO-IR 100	96	G1	
+table_C.12-3	C.12-3	Latin alphabet No. 1	ISO 2022 IR 100	ISO 2022	ESC 02/08 04/02	ISO-IR 6	94	G0	
+table_C.12-3	C.12-3	Latin alphabet No. 2	ISO 2022 IR 101	ISO 2022	ESC 02/13 04/02	ISO-IR 101	96	G1	
+table_C.12-3	C.12-3	Latin alphabet No. 2	ISO 2022 IR 101	ISO 2022	ESC 02/08 04/02	ISO-IR 6	94	G0	
+table_C.12-3	C.12-3	Latin alphabet No. 3	ISO 2022 IR 109	ISO 2022	ESC 02/13 04/03	ISO-IR 109	96	G1	
+table_C.12-3	C.12-3	Latin alphabet No. 3	ISO 2022 IR 109	ISO 2022	ESC 02/08 04/02	ISO-IR 6	94	G0	
+table_C.12-3	C.12-3	Latin alphabet No. 4	ISO 2022 IR 110	ISO 2022	ESC 02/13 04/04	ISO-IR 110	96	G1	
+table_C.12-3	C.12-3	Latin alphabet No. 4	ISO 2022 IR 110	ISO 2022	ESC 02/08 04/02	ISO-IR 6	94	G0	
+table_C.12-3	C.12-3	Cyrillic	ISO 2022 IR 144	ISO 2022	ESC 02/13 04/12	ISO-IR 144	96	G1	
+table_C.12-3	C.12-3	Cyrillic	ISO 2022 IR 144	ISO 2022	ESC 02/08 04/02	ISO-IR 6	94	G0	
+table_C.12-3	C.12-3	Arabic	ISO 2022 IR 127	ISO 2022	ESC 02/13 04/07	ISO-IR 127	96	G1	
+table_C.12-3	C.12-3	Arabic	ISO 2022 IR 127	ISO 2022	ESC 02/08 04/02	ISO-IR 6	94	G0	
+table_C.12-3	C.12-3	Greek	ISO 2022 IR 126	ISO 2022	ESC 02/13 04/06	ISO-IR 126	96	G1	
+table_C.12-3	C.12-3	Greek	ISO 2022 IR 126	ISO 2022	ESC 02/08 04/02	ISO-IR 6	94	G0	
+table_C.12-3	C.12-3	Hebrew	ISO 2022 IR 138	ISO 2022	ESC 02/13 04/08	ISO-IR 138	96	G1	
+table_C.12-3	C.12-3	Hebrew	ISO 2022 IR 138	ISO 2022	ESC 02/08 04/02	ISO-IR 6	94	G0	
+table_C.12-3	C.12-3	Latin alphabet No. 5	ISO 2022 IR 148	ISO 2022	ESC 02/13 04/13	ISO-IR 148	96	G1	
+table_C.12-3	C.12-3	Latin alphabet No. 5	ISO 2022 IR 148	ISO 2022	ESC 02/08 04/02	ISO-IR 6	94	G0	
+table_C.12-3	C.12-3	Latin alphabet No. 9	ISO 2022 IR 203	ISO 2022	ESC 02/13 06/02	ISO-IR 203	96	G1	
+table_C.12-3	C.12-3	Latin alphabet No. 9	ISO 2022 IR 203	ISO 2022	ESC 02/08 04/02	ISO-IR 6	94	G0	
+table_C.12-3	C.12-3	Japanese	ISO 2022 IR 13	ISO 2022	ESC 02/09 04/09	ISO-IR 13	94	G1	: Katakana
+table_C.12-3	C.12-3	Japanese	ISO 2022 IR 13	ISO 2022	ESC 02/08 04/10	ISO-IR 14	94	G0	: Romaji
+table_C.12-3	C.12-3	Thai	ISO 2022 IR 166	ISO 2022	ESC 02/13 05/04	ISO-IR 166	88	G1	
+table_C.12-3	C.12-3	Thai	ISO 2022 IR 166	ISO 2022	ESC 02/08 04/02	ISO-IR 6	94	G0	
+table_C.12-4	C.12-4	Japanese	ISO 2022 IR 87	ISO 2022	ESC 02/04 04/02	ISO-IR 87	942	G0	: Kanji
+table_C.12-4	C.12-4	Japanese	ISO 2022 IR 159	ISO 2022	ESC 02/04 02/08 04/04	ISO-IR 159	942	G0	: Supplementary Kanji set
+table_C.12-4	C.12-4	Korean	ISO 2022 IR 149	ISO 2022	ESC 02/04 02/09 04/03	ISO-IR 149	942	G1	: Hangul and Hanja
+table_C.12-4	C.12-4	Simplified Chinese	ISO 2022 IR 58	ISO 2022	ESC 02/04 02/09 04/01	ISO-IR 58	6,763	G1	
+table_C.12-5	C.12-5	Unicode in UTF-8	ISO_IR 192						
+table_C.12-5	C.12-5	GB18030	GB18030						
+table_C.12-5	C.12-5	GBK	GBK						

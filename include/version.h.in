@@ -1,0 +1,14 @@
+// Auto-generated from @DICOM_VERSION_SOURCE@ and @DICOMSDL_VERSION_SOURCE@
+#pragma once
+
+#include <string_view>
+
+#define DICOMSDL_VERSION "@DICOMSDL_VERSION@"
+#define DICOM_STANDARD_VERSION "@DICOM_STANDARD_VERSION@"
+
+namespace dicom {
+
+inline constexpr std::string_view kDicomsdlVersion = DICOMSDL_VERSION;
+inline constexpr std::string_view kDicomStandardVersion = DICOM_STANDARD_VERSION;
+
+} // namespace dicom

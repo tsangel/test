@@ -30,3 +30,28 @@ def test_literal_and_file(tmp_path):
 
 	mem = dicom.read_bytes(b"TEST", name="memory-buffer")
 	assert mem.path == "memory-buffer"
+
+
+def test_uid_lookup_roundtrip():
+	uid = dicom.Uid("ImplicitVRLittleEndian")
+	assert uid.value == "1.2.840.10008.1.2"
+	assert uid.keyword == "ImplicitVRLittleEndian"
+
+	by_value = dicom.uid_from_value("1.2.840.10008.1.2")
+	assert by_value == uid
+
+	lookup_keyword = dicom.lookup_uid("ImplicitVRLittleEndian")
+	assert lookup_keyword == uid
+
+	lookup_value = dicom.lookup_uid("1.2.840.10008.1.2")
+	assert lookup_value == uid
+
+	assert dicom.lookup_uid("1.2.3.4.5.6.7.8.9") is None
+
+
+def test_uid_keyword_optional():
+	uid = dicom.uid_from_keyword("JPEGBaseline8Bit")
+	assert uid.value == "1.2.840.10008.1.2.4.50"
+	assert uid.keyword == "JPEGBaseline8Bit"
+	assert uid.name
+	assert uid.type

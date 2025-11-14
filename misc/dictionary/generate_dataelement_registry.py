@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 
-"""Generate include/dataelement_registry.hpp from _dataelement_registry.txt."""
+"""Generate include/dataelement_registry.hpp from _dataelement_registry.tsv."""
 
 from __future__ import annotations
 
 import argparse
+import csv
 from pathlib import Path
 
 
@@ -46,13 +47,19 @@ def tag_sort_key(tag: str) -> int:
 
 def parse_rows(source: Path) -> list[list[str]]:
     rows: list[list[str]] = []
-    for line in source.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        cols = line.split("\t")
-        if len(cols) != 6:
-            raise ValueError(f"expected 6 columns, got {len(cols)} in line: {line}")
-        rows.append(cols)
+    with source.open("r", encoding="utf-8", newline="") as fh:
+        reader = csv.reader(fh, delimiter="\t")
+        for line_no, cols in enumerate(reader, 1):
+            if not cols or all(not col.strip() for col in cols):
+                continue
+            if cols[0].strip().lower() == "tag":
+                # Header row
+                continue
+            if len(cols) != 6:
+                raise ValueError(
+                    f"expected 6 columns, got {len(cols)} (line {line_no})"
+                )
+            rows.append(cols)
     rows.sort(key=lambda row: tag_sort_key(row[0]))
     return rows
 
@@ -153,7 +160,7 @@ def main() -> None:
     parser.add_argument(
         "--source",
         type=Path,
-        default=Path("misc/dictionary/_dataelement_registry.txt"),
+        default=Path("misc/dictionary/_dataelement_registry.tsv"),
     )
     parser.add_argument(
         "--output",

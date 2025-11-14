@@ -1,6 +1,29 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(DicomProject VERSION 0.1.0 LANGUAGES CXX)
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" _dicomsdl_version_raw)
+string(STRIP "${_dicomsdl_version_raw}" DICOMPROJECT_VERSION)
+
+set(DICOMSDL_VERSION ${DICOMPROJECT_VERSION})
+
+set(_dicom_version_file "${CMAKE_CURRENT_SOURCE_DIR}/misc/dictionary/_dicom_version.txt")
+if(EXISTS "${_dicom_version_file}")
+    file(READ "${_dicom_version_file}" _dicom_standard_version_raw)
+    string(STRIP "${_dicom_standard_version_raw}" DICOM_STANDARD_VERSION)
+else()
+    set(DICOM_STANDARD_VERSION "unknown")
+endif()
+
+set(DICOM_VERSION_SOURCE "${_dicom_version_file}")
+set(DICOMSDL_VERSION_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/VERSION")
+
+project(DicomProject VERSION ${DICOMPROJECT_VERSION} LANGUAGES CXX)
+
+set(GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/include")
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/version.h.in"
+    "${GENERATED_INCLUDE_DIR}/version.h"
+    @ONLY
+)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
@@ -41,6 +64,7 @@ set_target_properties(dicomsdl PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(dicomsdl
 	PUBLIC
 		${DICOM_INCLUDE_DIR}
+		${GENERATED_INCLUDE_DIR}
 )
 target_compile_features(dicomsdl PUBLIC cxx_std_20)
 
@@ -61,6 +85,11 @@ if(DICOM_BUILD_EXAMPLES)
 		examples/tag_lookup_example.cpp
 	)
 	target_link_libraries(tag_lookup_example PRIVATE dicomsdl)
+
+	add_executable(uid_lookup_example
+		examples/uid_lookup_example.cpp
+	)
+	target_link_libraries(uid_lookup_example PRIVATE dicomsdl)
 endif()
 
 option(DICOM_BUILD_PYTHON "Build Python bindings with pybind11" ON)
@@ -86,4 +115,10 @@ if(BUILD_TESTING)
 	)
 	target_link_libraries(dicomsdl_basic_smoke PRIVATE dicomsdl)
 	add_test(NAME basic_smoke COMMAND dicomsdl_basic_smoke)
+
+	add_executable(dicomsdl_uid_consistency
+		tests/uid_consistency.cpp
+	)
+	target_link_libraries(dicomsdl_uid_consistency PRIVATE dicomsdl)
+	add_test(NAME uid_consistency COMMAND dicomsdl_uid_consistency)
 endif()

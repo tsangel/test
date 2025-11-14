@@ -1,16 +1,74 @@
-// Auto-generated from misc/dictionary/_uid_registry.txt
+// Auto-generated from /Users/tsangel/Documents/workspace.dev/test.git/misc/dictionary/_uid_registry.tsv
 #pragma once
 
 #include <array>
+#include <cstdint>
 #include <string_view>
 
 namespace dicom {
+
+enum class UidType : std::uint8_t {
+    TransferSyntax,
+    SopClass,
+    WellKnownSopInstance,
+    MetaSopClass,
+    ApplicationContextName,
+    ApplicationHostingModel,
+    CodingScheme,
+    DicomUidsAsCodingScheme,
+    MappingResource,
+    ServiceClass,
+    SynchronizationFrameOfReference,
+    LdapOid,
+    Other,
+};
+
+constexpr UidType DecodeUidType(std::string_view type) {
+    if (type == "Transfer Syntax") {
+        return UidType::TransferSyntax;
+    }
+    if (type == "SOP Class") {
+        return UidType::SopClass;
+    }
+    if (type == "Well-known SOP Instance") {
+        return UidType::WellKnownSopInstance;
+    }
+    if (type == "Meta SOP Class") {
+        return UidType::MetaSopClass;
+    }
+    if (type == "Application Context Name") {
+        return UidType::ApplicationContextName;
+    }
+    if (type == "Application Hosting Model") {
+        return UidType::ApplicationHostingModel;
+    }
+    if (type == "Coding Scheme") {
+        return UidType::CodingScheme;
+    }
+    if (type == "DICOM UIDs as a Coding Scheme") {
+        return UidType::DicomUidsAsCodingScheme;
+    }
+    if (type == "Mapping Resource") {
+        return UidType::MappingResource;
+    }
+    if (type == "Service Class") {
+        return UidType::ServiceClass;
+    }
+    if (type == "Synchronization Frame of Reference") {
+        return UidType::SynchronizationFrameOfReference;
+    }
+    if (type == "LDAP OID") {
+        return UidType::LdapOid;
+    }
+    return UidType::Other;
+}
 
 struct UidEntry {
     std::string_view value;
     std::string_view name;
     std::string_view keyword;
     std::string_view type;
+    UidType uid_type = DecodeUidType(type);
 };
 
 constexpr std::array<UidEntry, 465> kUidRegistry = {{
@@ -479,6 +537,6 @@ constexpr std::array<UidEntry, 465> kUidRegistry = {{
     UidEntry{"1.2.840.10008.15.0.4.7", "dicomUniqueAETitle", "dicomUniqueAETitle", "LDAP OID"},
     UidEntry{"1.2.840.10008.15.0.4.8", "dicomTransferCapability", "dicomTransferCapability", "LDAP OID"},
     UidEntry{"1.2.840.10008.15.1.1", "Universal Coordinated Time", "UTC", "Synchronization Frame of Reference"},
-};
+}};
 
 } // namespace dicom

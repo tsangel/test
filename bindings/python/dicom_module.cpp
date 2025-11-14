@@ -18,6 +18,7 @@ namespace py = pybind11;
 using dicom::DataSet;
 using dicom::DataElement;
 using dicom::Tag;
+using dicom::Uid;
 using dicom::VR;
 
 namespace {
@@ -52,6 +53,35 @@ std::string dataelement_repr(const DataElement& element) {
 	return oss.str();
 }
 
+std::string uid_repr(const Uid& uid) {
+	if (!uid) {
+		return "Uid(<invalid>)";
+	}
+	std::ostringstream oss;
+	oss << "Uid(value='" << uid.value() << "'";
+	if (!uid.keyword().empty()) {
+		oss << ", keyword='" << uid.keyword() << "'";
+	}
+	oss << ", type='" << uid.type() << "')";
+	return oss.str();
+}
+
+py::object uid_or_none(Uid uid) {
+	if (!uid) {
+		return py::none();
+	}
+	return py::cast(uid);
+}
+
+Uid require_uid(Uid uid, const char* origin, const std::string& text) {
+	if (!uid) {
+		std::ostringstream oss;
+		oss << "Unknown DICOM UID from " << origin << ": " << text;
+		throw py::value_error(oss.str());
+	}
+	return uid;
+}
+
 struct PyDataElementIterator {
 	explicit PyDataElementIterator(DataSet& data_set)
 	    : data_set_(&data_set), current_(data_set.begin()), end_(data_set.end()) {}
@@ -74,6 +104,10 @@ struct PyDataElementIterator {
 
 PYBIND11_MODULE(_dicomsdl, m) {
 	m.doc() = "pybind11 bindings for DataSet";
+
+	m.attr("DICOM_STANDARD_VERSION") = py::str(DICOM_STANDARD_VERSION);
+	m.attr("DICOMSDL_VERSION") = py::str(DICOMSDL_VERSION);
+	m.attr("__version__") = py::str(DICOMSDL_VERSION);
 
 	py::class_<DataElement>(m, "DataElement")
 		.def_property_readonly("tag", &DataElement::tag)
@@ -129,27 +163,71 @@ PYBIND11_MODULE(_dicomsdl, m) {
 		    },
 		    py::keep_alive<0, 1>(), "Iterate over DataElements in tag order");
 
-	m.def("read_file", &dicom::read_file, py::arg("path"),
-	    "Read a DICOM file from disk and return a DataSet");
+m.def("read_file",
+    [](const std::string& path, std::optional<Tag> load_until, std::optional<bool> keep_on_error) {
+	    dicom::ReadOptions opts;
+	    if (load_until) {
+		    opts.load_until = *load_until;
+	    }
+	    if (keep_on_error) {
+		    opts.keep_on_error = *keep_on_error;
+	    }
+	    return dicom::read_file(path, opts);
+    },
+    py::arg("path"),
+    py::arg("load_until") = py::none(),
+    py::arg("keep_on_error") = py::none(),
+    "Read a DICOM file from disk and return a DataSet");
 
-	m.def("read_bytes",
-	    [] (py::buffer buffer, const std::string& name) {
-	        py::buffer_info info = buffer.request();
-	        if (info.ndim != 1) {
-	            throw std::invalid_argument("read_bytes expects a 1-D bytes-like object");
-	        }
-	        const std::size_t elem_size = static_cast<std::size_t>(info.itemsize);
-	        const std::size_t count = static_cast<std::size_t>(info.size);
-	        const std::size_t total = elem_size * count;
+m.def("read_bytes",
+    [] (py::buffer buffer, const std::string& name, std::optional<Tag> load_until,
+        std::optional<bool> keep_on_error, bool copy) {
+        py::buffer_info info = buffer.request();
+        if (info.ndim != 1) {
+            throw std::invalid_argument("read_bytes expects a 1-D bytes-like object");
+        }
+        const std::size_t elem_size = static_cast<std::size_t>(info.itemsize);
+        const std::size_t count = static_cast<std::size_t>(info.size);
+        const std::size_t total = elem_size * count;
+        dicom::ReadOptions opts;
+        if (load_until) {
+	        opts.load_until = *load_until;
+        }
+        if (keep_on_error) {
+	        opts.keep_on_error = *keep_on_error;
+        }
+        opts.copy = copy;
+
+        std::unique_ptr<dicom::DataSet> dataset;
+        if (copy || total == 0) {
 	        std::vector<std::uint8_t> owned(total);
 	        if (total > 0) {
-	            std::memcpy(owned.data(), info.ptr, total);
+		        std::memcpy(owned.data(), info.ptr, total);
 	        }
-	        return dicom::read_bytes(std::string{name}, std::move(owned));
-	    },
-	    py::arg("data"),
-	    py::arg("name") = std::string{"<memory>"},
-	    "Read a DataSet from a bytes-like object");
+	        dataset = dicom::read_bytes(std::string{name}, std::move(owned), opts);
+        } else {
+	        if (elem_size != 1) {
+		        throw std::invalid_argument("read_bytes(copy=False) requires a byte-oriented buffer");
+	        }
+	        dataset = dicom::read_bytes(std::string{name},
+	            static_cast<const std::uint8_t*>(info.ptr), total, opts);
+        }
+
+        py::object py_dataset = py::cast(std::move(dataset));
+        if (!copy && total > 0) {
+	        py_dataset.attr("_buffer_owner") = buffer;
+        }
+        return py_dataset;
+    },
+    py::arg("data"),
+    py::arg("name") = std::string{"<memory>"},
+    py::arg("load_until") = py::none(),
+    py::arg("keep_on_error") = py::none(),
+    py::arg("copy") = true,
+    "Read a DataSet from a bytes-like object.\n\n"
+    "Warning: When copy=False, the source buffer must remain alive for as long as the returned "
+    "DataSet; the binding keeps a reference to the Python object internally, but mutating or "
+    "freeing the underlying memory can still corrupt the dataset.");
 
 	py::class_<Tag>(m, "Tag")
 		.def(py::init<>())
@@ -163,6 +241,51 @@ PYBIND11_MODULE(_dicomsdl, m) {
 		.def("__int__", &Tag::value)
 		.def("__bool__", [](const Tag& tag) { return static_cast<bool>(tag); })
 		.def("__repr__", &tag_repr)
+		.def(py::self == py::self);
+
+	auto uid_cls = py::class_<Uid>(m, "Uid")
+		.def(py::init<>())
+		.def(py::init([](const std::string& text) { return Uid(text); }), py::arg("text"),
+		    "Construct a UID from either a dotted value or keyword, raising ValueError if unknown.")
+		.def_static("lookup",
+		    [](const std::string& text) -> py::object {
+			    return uid_or_none(Uid::lookup(text));
+		    },
+		    py::arg("text"),
+		    "Lookup a UID from value or keyword; returns None if missing.")
+		.def_static("from_value",
+		    [](const std::string& value) {
+			    return require_uid(Uid::from_value(value), "Uid.from_value", value);
+		    },
+		    py::arg("value"),
+		    "Resolve a dotted UID value, raising ValueError if unknown.")
+		.def_static("from_keyword",
+		    [](const std::string& keyword) {
+			    return require_uid(Uid::from_keyword(keyword), "Uid.from_keyword", keyword);
+		    },
+		    py::arg("keyword"),
+		    "Resolve a UID keyword, raising ValueError if unknown.")
+		.def_property_readonly("value",
+		    [](const Uid& uid) { return std::string(uid.value()); },
+		    "Return the dotted UID value or empty string if invalid.")
+		.def_property_readonly("keyword",
+		    [](const Uid& uid) -> py::object {
+			    if (uid.keyword().empty()) {
+				    return py::none();
+			    }
+			    return py::str(uid.keyword());
+		    },
+		    "Return the UID keyword or None if missing.")
+		.def_property_readonly("name",
+		    [](const Uid& uid) { return std::string(uid.name()); },
+		    "Return the descriptive UID name or empty string if invalid.")
+		.def_property_readonly("type",
+		    [](const Uid& uid) { return std::string(uid.type()); },
+		    "Return the UID type (Transfer Syntax, SOP Class, ...).")
+		.def_property_readonly("raw_index", &Uid::raw_index, "Return the registry index.")
+		.def_property_readonly("is_valid", &Uid::valid)
+		.def("__bool__", [](const Uid& uid) { return uid.valid(); })
+		.def("__repr__", &uid_repr)
 		.def(py::self == py::self);
 
 	auto vr_cls = py::class_<VR>(m, "VR")
@@ -254,4 +377,38 @@ PYBIND11_MODULE(_dicomsdl, m) {
 	    },
 	    py::arg("tag_value"),
 	    "Return the DICOM keyword for a 32-bit tag value or None if missing.");
+
+	m.def("lookup_uid",
+	    [] (const std::string& text) -> py::object {
+	        return uid_or_none(Uid::lookup(text));
+	    },
+	    py::arg("text"),
+	    "Lookup a UID by either dotted value or keyword; returns None if missing.");
+
+	m.def("uid_from_value",
+	    [] (const std::string& value) {
+	        return require_uid(Uid::from_value(value), "uid_from_value", value);
+	    },
+	    py::arg("value"),
+	    "Resolve a dotted UID value, raising ValueError if unknown.");
+
+	m.def("uid_from_keyword",
+	    [] (const std::string& keyword) {
+	        return require_uid(Uid::from_keyword(keyword), "uid_from_keyword", keyword);
+	    },
+	    py::arg("keyword"),
+	    "Resolve a UID keyword, raising ValueError if unknown.");
+
+	m.attr("__all__") = py::make_tuple(
+	    "DataSet",
+	    "Tag",
+	    "VR",
+	    "Uid",
+	    "read_file",
+	    "read_bytes",
+	    "keyword_to_tag_vr",
+	    "tag_to_keyword",
+	    "lookup_uid",
+	    "uid_from_value",
+	    "uid_from_keyword");
 }

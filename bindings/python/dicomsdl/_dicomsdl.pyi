@@ -2,14 +2,22 @@ from __future__ import annotations
 
 from typing import Optional, overload
 
+DICOM_STANDARD_VERSION: str
+DICOMSDL_VERSION: str
+__version__: str
+
 __all__ = [
     "DataSet",
+    "Tag",
+    "Uid",
+    "VR",
     "read_file",
     "read_bytes",
-    "Tag",
-    "VR",
     "keyword_to_tag_vr",
     "tag_to_keyword",
+    "lookup_uid",
+    "uid_from_value",
+    "uid_from_keyword",
 ]
 
 
@@ -89,6 +97,42 @@ class VR:
 
 def keyword_to_tag_vr(keyword: str, /) -> Optional[tuple[Tag, VR]]: ...
 
+class Uid:
+    @overload
+    def __init__(self) -> None: ...
+
+    @overload
+    def __init__(self, text: str, /) -> None: ...
+
+    @staticmethod
+    def lookup(text: str, /) -> Optional[Uid]: ...
+
+    @staticmethod
+    def from_value(value: str, /) -> Uid: ...
+
+    @staticmethod
+    def from_keyword(keyword: str, /) -> Uid: ...
+
+    @property
+    def value(self) -> str: ...
+
+    @property
+    def keyword(self) -> Optional[str]: ...
+
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def type(self) -> str: ...
+
+    @property
+    def raw_index(self) -> int: ...
+
+    @property
+    def is_valid(self) -> bool: ...
+
+    def __bool__(self) -> bool: ...
+
 
 def read_file(path: str, /) -> DataSet: ...
 
@@ -101,3 +145,9 @@ def tag_to_keyword(tag: Tag, /) -> Optional[str]: ...
 
 @overload
 def tag_to_keyword(tag_value: int, /) -> Optional[str]: ...
+
+def lookup_uid(text: str, /) -> Optional[Uid]: ...
+
+def uid_from_value(value: str, /) -> Uid: ...
+
+def uid_from_keyword(keyword: str, /) -> Uid: ...
