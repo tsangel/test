@@ -8,7 +8,7 @@
 #include <utility>
 
 #include "dataelement_registry.hpp"
-#include "dictionary_lookup_tables.hpp"
+#include "dataelement_lookup_tables.hpp"
 
 namespace dicom::lookup {
 

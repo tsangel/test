@@ -322,7 +322,7 @@ def render(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--registry", type=Path, default=Path("misc/dictionary/_dataelement_registry.tsv"))
-    parser.add_argument("--output", type=Path, default=Path("include/dictionary_lookup_tables.hpp"))
+    parser.add_argument("--output", type=Path, default=Path("include/dataelement_lookup_tables.hpp"))
     args = parser.parse_args()
 
     keyword_entries, tag_entries, wildcard_entries = load_entries(args.registry)

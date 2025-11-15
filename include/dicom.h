@@ -14,7 +14,8 @@
 #include <utility>
 #include <vector>
 
-#include "dictionary_lookup_detail.hpp"
+#include "dataelement_lookup_detail.hpp"
+#include "specific_character_set_registry.hpp"
 #include "version.h"
 #include "uid_lookup_detail.hpp"
 
