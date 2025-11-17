@@ -12,16 +12,17 @@ jobs:
   build_wheels:
     strategy:
       matrix:
-       include:
-         - os: ubuntu-latest
-           archs: x86_64
+        include:
+          - os: ubuntu-latest
+            archs: x86_64
+            test_skip: ""
           - os: macos-15
             archs: "arm64 universal2 x86_64"
             test_skip: "*_universal2:arm64 *_x86_64:arm64"
           - os: macos-15-intel
             archs: x86_64
             test_skip: ""
-         - os: windows-latest
+          - os: windows-latest
             archs: AMD64
             test_skip: ""
     runs-on: ${{ matrix.os }}
