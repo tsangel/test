@@ -52,4 +52,3 @@ jobs:
         with:
           name: wheels-${{ matrix.os }}-${{ matrix.archs }}
           path: wheelhouse/*.whl
-ㅋ
