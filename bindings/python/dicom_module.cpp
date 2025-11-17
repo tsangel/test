@@ -172,11 +172,25 @@ PYBIND11_MODULE(_dicomsdl, m) {
 		    [](const DataElement& element) { return element.vr().is_sequence(); })
 		.def_property_readonly("is_pixel_sequence",
 		    [](const DataElement& element) { return element.vr().is_pixel_sequence(); })
+		.def("to_tag",
+		    [](const DataElement& element, py::object default_value) -> py::object {
+		        if (default_value.is_none()) {
+		            auto v = element.to_tag();
+		            return v ? py::cast(*v) : py::none();
+		        }
+		        return py::cast(element.toTag(default_value.cast<Tag>()));
+		    },
+		    py::arg("default") = py::none())
+		.def("to_tag_vector",
+		    [](const DataElement& element) -> py::object {
+		        auto v = element.to_tag_vector();
+		        return v ? py::cast(*v) : py::none();
+		    })
 		.def("to_long",
 		    [](const DataElement& element, py::object default_value) -> py::object {
-			    if (default_value.is_none()) {
-				    auto v = element.to_long();
-				    return v ? py::cast(*v) : py::none();
+		        if (default_value.is_none()) {
+		            auto v = element.to_long();
+		            return v ? py::cast(*v) : py::none();
 			    }
 			    return py::cast(element.toLong(default_value.cast<long>()));
 		    },
