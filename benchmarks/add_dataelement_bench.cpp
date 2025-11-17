@@ -16,7 +16,7 @@ constexpr int kIterations = 200;
 class DataSetNoPool {
 public:
 	dicom::DataElement* add_dataelement(dicom::Tag tag, dicom::VR vr,
-	    std::size_t length, std::size_t offset) {
+	    std::size_t offset, std::size_t length) {
 		auto element = std::make_unique<dicom::DataElement>(tag, vr, length, offset, nullptr);
 		auto* raw = element.get();
 		elements_.emplace_back(tag, std::move(element));
@@ -43,7 +43,7 @@ void run_benchmark() {
 			dicom::DataSet data_set;
 			for (std::size_t idx = 0; idx < kElementCount; ++idx) {
 				const auto tag = dicom::Tag(static_cast<std::uint16_t>(0x0010 + idx), 0x0001);
-				data_set.add_dataelement(tag, dicom::VR::SQ, 0, idx);
+				data_set.add_dataelement(tag, dicom::VR::SQ, idx, 0);
 			}
 		});
 
@@ -51,7 +51,7 @@ void run_benchmark() {
 			DataSetNoPool data_set;
 			for (std::size_t idx = 0; idx < kElementCount; ++idx) {
 				const auto tag = dicom::Tag(static_cast<std::uint16_t>(0x0010 + idx), 0x0001);
-				data_set.add_dataelement(tag, dicom::VR::SQ, 0, idx);
+				data_set.add_dataelement(tag, dicom::VR::SQ, idx, 0);
 			}
 		});
 	}

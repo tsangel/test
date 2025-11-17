@@ -10,6 +10,7 @@
 #include <fmt/format.h>
 #include <iostream>
 #include <stdexcept>
+#include <string_view>
 #include <vector>
 #include <span>
 
@@ -44,78 +45,6 @@ std::unique_ptr<InStringStream> make_memory_stream(std::vector<std::uint8_t>&& b
 
 }  // namespace
 
-DataElement* NullElement() {
-	static DataElement null(Tag(0x0000, 0x0000), VR::None, 0, 0, nullptr);
-	return &null;
-}
-
-std::span<const std::uint8_t> DataElement::value_span() const {
-	if (storage_.ptr) {
-		return std::span<const std::uint8_t>(
-		    static_cast<const std::uint8_t*>(storage_.ptr), length_);
-	}
-	if (!parent_) {
-		diag::error_and_throw(
-		    "DataElement::value_span offset=0x{:X} tag={} reason=not attached to a DataSet",
-		    offset_, tag_to_string(tag_));
-	}
-	return parent_->stream().get_span(offset_, length_);
-}
-
-void* DataElement::value_ptr() const {
-	if (storage_.ptr) {
-		return storage_.ptr;
-	}
-	if (!parent_) {
-		diag::error_and_throw(
-		    "DataElement::value_ptr offset=0x{:X} tag={} reason=not attached to a DataSet",
-		    offset_, tag_to_string(tag_));
-	}
-	return parent_->stream().get_pointer(offset_, length_);
-}
-
-int DataElement::vm() const {
-	// PS 3.5, 6.4 VALUE MULTIPLICITY (VM) AND DELIMITATION
-	if (length_ == 0) {
-		return 0;
-	}
-
-	const auto vr_value = static_cast<std::uint16_t>(vr_);
-	switch (vr_value) {
-	case VR::FD_val:
-	case VR::SV_val:
-	case VR::UV_val:
-		return static_cast<int>(length_ / 8);
-	case VR::AT_val:
-	case VR::FL_val:
-	case VR::UL_val:
-	case VR::SL_val:
-		return static_cast<int>(length_ / 4);
-	case VR::US_val:
-	case VR::SS_val:
-		return static_cast<int>(length_ / 2);
-	case VR::AE_val: case VR::AS_val: case VR::CS_val: case VR::DA_val:
-	case VR::DS_val: case VR::DT_val: case VR::IS_val: case VR::LO_val:
-	case VR::PN_val: case VR::SH_val: case VR::TM_val: case VR::UC_val:
-	case VR::UI_val: {
-		std::span<const std::uint8_t> data;
-		data = value_span();
-		if (data.empty()) {
-			return 0;
-		}
-		int delims = 0;
-		for (auto byte : data) {
-			if (byte == '\\') {
-				++delims;
-			}
-		}
-		return delims + 1;
-	}
-	// LT, OB, OD, OF, OL, OW, SQ, ST, UN, UR or UT -> always 1
-	default:
-		return 1;
-	}
-}
 
 DataSet::DataSet() = default;
 
@@ -197,7 +126,7 @@ DataSet::const_iterator DataSet::cend() const {
 
 // Keeps elements_ strictly sorted for common sequential inserts, while element_map_
 // stores out-of-order tags so we never duplicate storage for the same tag.
-DataElement* DataSet::add_dataelement(Tag tag, VR vr, std::size_t length, std::size_t offset) {
+DataElement* DataSet::add_dataelement(Tag tag, VR vr, std::size_t offset, std::size_t length) {
 	const auto tag_value = tag.value();
 	if (vr == VR::None) {
 		const auto vr_value = lookup::tag_to_vr(tag_value);

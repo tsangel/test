@@ -10,6 +10,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <optional>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -608,6 +609,42 @@ public:
 		storage_.pixseq = pixseq;
 	}
 
+	// Numeric accessors (PS3.5 6.2 Value Representation)
+	[[nodiscard]] std::optional<long> to_long() const;
+	[[nodiscard]] std::optional<long long> to_longlong() const;
+	[[nodiscard]] std::optional<std::vector<long>> to_long_vector() const;
+	[[nodiscard]] std::optional<std::vector<long long>> to_longlong_vector() const;
+	[[nodiscard]] std::optional<double> to_double() const;
+	[[nodiscard]] std::optional<std::vector<double>> to_double_vector() const;
+	[[nodiscard]] std::optional<Tag> to_tag() const;
+	[[nodiscard]] std::optional<std::vector<Tag>> to_tag_vector() const;
+
+	// Convenience wrappers with default values
+	[[nodiscard]] inline long toLong(long default_value = 0) const {
+		return to_long().value_or(default_value);
+	}
+	[[nodiscard]] inline long long toLongLong(long long default_value = 0) const {
+		return to_longlong().value_or(default_value);
+	}
+	[[nodiscard]] inline std::vector<long> toLongVector(std::vector<long> default_value = {}) const {
+		return to_long_vector().value_or(std::move(default_value));
+	}
+	[[nodiscard]] inline std::vector<long long> toLongLongVector(std::vector<long long> default_value = {}) const {
+		return to_longlong_vector().value_or(std::move(default_value));
+	}
+	[[nodiscard]] inline double toDouble(double default_value = 0.0) const {
+		return to_double().value_or(default_value);
+	}
+	[[nodiscard]] inline std::vector<double> toDoubleVector(std::vector<double> default_value = {}) const {
+		return to_double_vector().value_or(std::move(default_value));
+	}
+	[[nodiscard]] inline Tag toTag(Tag default_value = Tag{}) const {
+		return to_tag().value_or(default_value);
+	}
+	[[nodiscard]] inline std::vector<Tag> toTagVector(std::vector<Tag> default_value = {}) const {
+		return to_tag_vector().value_or(std::move(default_value));
+	}
+
 private:
 	Tag tag_{};
 	VR vr_{};
@@ -769,7 +806,7 @@ public:
 	const std::string& path() const;
 	InStream& stream();
 	const InStream& stream() const;
-	DataElement* add_dataelement(Tag tag, VR vr=VR::None, std::size_t length=0, std::size_t offset=0);
+	DataElement* add_dataelement(Tag tag, VR vr=VR::None, std::size_t offset=0, std::size_t length=0);
 	void remove_dataelement(Tag tag);
 	DataElement* get_dataelement(Tag tag);
 	const DataElement* get_dataelement(Tag tag) const;

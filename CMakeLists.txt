@@ -58,6 +58,7 @@ include(CTest)
 
 add_library(dicomsdl STATIC
 	src/dataset.cpp
+	src/dataelement.cpp
 	src/instream.cpp
 )
 set_target_properties(dicomsdl PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -98,6 +99,11 @@ if(DICOM_BUILD_EXAMPLES)
 		examples/uid_lookup_example.cpp
 	)
 	target_link_libraries(uid_lookup_example PRIVATE dicomsdl)
+
+	add_executable(dump_dataset_example
+		examples/dump_dataset.cpp
+	)
+	target_link_libraries(dump_dataset_example PRIVATE dicomsdl)
 endif()
 
 option(DICOM_BUILD_PYTHON "Build Python bindings with pybind11" ON)
@@ -123,6 +129,12 @@ if(BUILD_TESTING)
 	)
 	target_link_libraries(dicomsdl_basic_smoke PRIVATE dicomsdl)
 	add_test(NAME basic_smoke COMMAND dicomsdl_basic_smoke)
+
+	add_executable(dicomsdl_numeric_values
+		tests/numeric_values.cpp
+	)
+	target_link_libraries(dicomsdl_numeric_values PRIVATE dicomsdl)
+	add_test(NAME numeric_values COMMAND dicomsdl_numeric_values)
 
 	add_executable(dicomsdl_uid_consistency
 		tests/uid_consistency.cpp

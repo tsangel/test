@@ -172,6 +172,61 @@ PYBIND11_MODULE(_dicomsdl, m) {
 		    [](const DataElement& element) { return element.vr().is_sequence(); })
 		.def_property_readonly("is_pixel_sequence",
 		    [](const DataElement& element) { return element.vr().is_pixel_sequence(); })
+		.def("to_long",
+		    [](const DataElement& element, py::object default_value) -> py::object {
+			    if (default_value.is_none()) {
+				    auto v = element.to_long();
+				    return v ? py::cast(*v) : py::none();
+			    }
+			    return py::cast(element.toLong(default_value.cast<long>()));
+		    },
+		    py::arg("default") = py::none(),
+		    "Return int or None; optional default fills on failure")
+		.def("to_longlong",
+		    [](const DataElement& element, py::object default_value) -> py::object {
+			    if (default_value.is_none()) {
+				    auto v = element.to_longlong();
+				    return v ? py::cast(*v) : py::none();
+			    }
+			    return py::cast(element.toLongLong(default_value.cast<long long>()));
+		    },
+		    py::arg("default") = py::none())
+		.def("to_double",
+		    [](const DataElement& element, py::object default_value) -> py::object {
+			    if (default_value.is_none()) {
+				    auto v = element.to_double();
+				    return v ? py::cast(*v) : py::none();
+			    }
+			    return py::cast(element.toDouble(default_value.cast<double>()));
+		    },
+		    py::arg("default") = py::none())
+		.def("to_long_vector",
+		    [](const DataElement& element, py::object default_value) -> py::object {
+			    if (default_value.is_none()) {
+				    auto v = element.to_long_vector();
+				    return v ? py::cast(*v) : py::none();
+			    }
+			    return py::cast(element.toLongVector(default_value.cast<std::vector<long>>()));
+		    },
+		    py::arg("default") = py::none())
+		.def("to_longlong_vector",
+		    [](const DataElement& element, py::object default_value) -> py::object {
+			    if (default_value.is_none()) {
+				    auto v = element.to_longlong_vector();
+				    return v ? py::cast(*v) : py::none();
+			    }
+			    return py::cast(element.toLongLongVector(default_value.cast<std::vector<long long>>()));
+		    },
+		    py::arg("default") = py::none())
+		.def("to_double_vector",
+		    [](const DataElement& element, py::object default_value) -> py::object {
+			    if (default_value.is_none()) {
+				    auto v = element.to_double_vector();
+				    return v ? py::cast(*v) : py::none();
+			    }
+			    return py::cast(element.toDoubleVector(default_value.cast<std::vector<double>>()));
+		    },
+		    py::arg("default") = py::none())
 		.def("__repr__", &dataelement_repr);
 
 	py::class_<PyDataElementIterator>(m, "DataElementIterator")
@@ -185,13 +240,13 @@ PYBIND11_MODULE(_dicomsdl, m) {
 		.def_property_readonly("path", &DataSet::path, "Return the stored file path")
 		.def("add_dataelement",
 		    [](DataSet& self, const Tag& tag, std::optional<VR> vr,
-		        std::size_t length, std::size_t offset) {
+		        std::size_t offset, std::size_t length) {
 		        const VR resolved = vr.value_or(VR::None);
-		        DataElement* element = self.add_dataelement(tag, resolved, length, offset);
+		        DataElement* element = self.add_dataelement(tag, resolved, offset, length);
 		        return element ? element : dicom::NullElement();
 		    },
 		    py::arg("tag"), py::arg("vr") = py::none(),
-		    py::arg("length") = 0, py::arg("offset") = 0,
+		    py::arg("offset") = 0, py::arg("length") = 0,
 		    py::return_value_policy::reference_internal,
 		    "Add or update a DataElement and return a reference to it")
 		.def("remove_dataelement",
