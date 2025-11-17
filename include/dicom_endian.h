@@ -18,7 +18,7 @@ namespace dicom {
 namespace endian {
 namespace detail {
 
-inline constexpr std::uint16_t bswap16(std::uint16_t value) noexcept {
+inline std::uint16_t bswap16(std::uint16_t value) noexcept {
 #if defined(_MSC_VER)
 	return _byteswap_ushort(value);
 #elif defined(__has_builtin)
@@ -34,7 +34,7 @@ inline constexpr std::uint16_t bswap16(std::uint16_t value) noexcept {
 #endif
 }
 
-inline constexpr std::uint32_t bswap32(std::uint32_t value) noexcept {
+inline std::uint32_t bswap32(std::uint32_t value) noexcept {
 #if defined(_MSC_VER)
 	return _byteswap_ulong(value);
 #elif defined(__has_builtin)
@@ -56,7 +56,7 @@ inline constexpr std::uint32_t bswap32(std::uint32_t value) noexcept {
 #endif
 }
 
-inline constexpr std::uint64_t bswap64(std::uint64_t value) noexcept {
+inline std::uint64_t bswap64(std::uint64_t value) noexcept {
 #if defined(_MSC_VER)
 	return _byteswap_uint64(value);
 #elif defined(__has_builtin)

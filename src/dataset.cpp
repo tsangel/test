@@ -156,6 +156,7 @@ void DataSet::attach_to_stream(std::string identifier, std::unique_ptr<InStream>
 }
 
 const std::string& DataSet::path() const {
+	// Returns stream identifier; if no stream is attached, returns an empty string.
 	static const std::string kEmpty;
 	return stream_ ? stream_->identifier() : kEmpty;
 }
