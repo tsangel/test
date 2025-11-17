@@ -7,7 +7,7 @@
 #include <array>
 #include <bit>
 #include <cstring>
-#include <format>
+#include <fmt/format.h>
 #include <iostream>
 #include <stdexcept>
 #include <vector>
@@ -21,7 +21,7 @@ namespace dicom {
 namespace {
 
 inline std::string tag_to_string(Tag tag) {
-	return std::format("({:04X},{:04X})", tag.group(), tag.element());
+	return fmt::format("({:04X},{:04X})", tag.group(), tag.element());
 }
 
 std::unique_ptr<InFileStream> make_file_stream(const std::string& path) {

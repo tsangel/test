@@ -8,7 +8,7 @@
 #include <fstream>
 #include <vector>
 #include <mutex>
-#include <format>
+#include <fmt/format.h>
 
 namespace dicom {
 namespace diag {
@@ -260,10 +260,10 @@ inline void error(std::string_view msg, const std::shared_ptr<Reporter>& r = nul
 
 // fmt-style helpers: diag::info("tag={} vr={}", tag, vr)
 template <typename... Args>
-inline void info(std::format_string<Args...> fmt, Args&&... args) {
+inline void info(fmt::format_string<Args...> fmt, Args&&... args) {
 #if DICOMSDL_ENABLE_INFO_LOGS
 	if (meets_log_level(LogLevel::Info)) {
-		get().info(std::format(fmt, std::forward<Args>(args)...));
+		get().info(fmt::format(fmt, std::forward<Args>(args)...));
 	}
 #else
 	(void)fmt; (void)sizeof...(args);
@@ -271,10 +271,10 @@ inline void info(std::format_string<Args...> fmt, Args&&... args) {
 }
 
 template <typename... Args>
-inline void info(const std::shared_ptr<Reporter>& r, std::format_string<Args...> fmt, Args&&... args) {
+inline void info(const std::shared_ptr<Reporter>& r, fmt::format_string<Args...> fmt, Args&&... args) {
 #if DICOMSDL_ENABLE_INFO_LOGS
 	if (meets_log_level(LogLevel::Info)) {
-		get(r).info(std::format(fmt, std::forward<Args>(args)...));
+		get(r).info(fmt::format(fmt, std::forward<Args>(args)...));
 	}
 #else
 	(void)fmt; (void)r; (void)sizeof...(args);
@@ -282,41 +282,41 @@ inline void info(const std::shared_ptr<Reporter>& r, std::format_string<Args...>
 }
 
 template <typename... Args>
-inline void warn(std::format_string<Args...> fmt, Args&&... args) {
+inline void warn(fmt::format_string<Args...> fmt, Args&&... args) {
 	if (meets_log_level(LogLevel::Warning)) {
-		get().warn(std::format(fmt, std::forward<Args>(args)...));
+		get().warn(fmt::format(fmt, std::forward<Args>(args)...));
 	}
 }
 
 template <typename... Args>
-inline void warn(const std::shared_ptr<Reporter>& r, std::format_string<Args...> fmt, Args&&... args) {
+inline void warn(const std::shared_ptr<Reporter>& r, fmt::format_string<Args...> fmt, Args&&... args) {
 	if (meets_log_level(LogLevel::Warning)) {
-		get(r).warn(std::format(fmt, std::forward<Args>(args)...));
+		get(r).warn(fmt::format(fmt, std::forward<Args>(args)...));
 	}
 }
 
 template <typename... Args>
-inline void error(std::format_string<Args...> fmt, Args&&... args) {
+inline void error(fmt::format_string<Args...> fmt, Args&&... args) {
 	if (meets_log_level(LogLevel::Error)) {
-		get().error(std::format(fmt, std::forward<Args>(args)...));
+		get().error(fmt::format(fmt, std::forward<Args>(args)...));
 	}
 }
 
 template <typename... Args>
-inline void error(const std::shared_ptr<Reporter>& r, std::format_string<Args...> fmt, Args&&... args) {
+inline void error(const std::shared_ptr<Reporter>& r, fmt::format_string<Args...> fmt, Args&&... args) {
 	if (meets_log_level(LogLevel::Error)) {
-		get(r).error(std::format(fmt, std::forward<Args>(args)...));
+		get(r).error(fmt::format(fmt, std::forward<Args>(args)...));
 	}
 }
 
 template <typename... Args>
-[[noreturn]] inline void error_and_throw(std::format_string<Args...> fmt, Args&&... args) {
-	get().error_and_throw(std::format(fmt, std::forward<Args>(args)...));
+[[noreturn]] inline void error_and_throw(fmt::format_string<Args...> fmt, Args&&... args) {
+	get().error_and_throw(fmt::format(fmt, std::forward<Args>(args)...));
 }
 
 template <typename... Args>
-[[noreturn]] inline void error_and_throw(const std::shared_ptr<Reporter>& r, std::format_string<Args...> fmt, Args&&... args) {
-	get(r).error_and_throw(std::format(fmt, std::forward<Args>(args)...));
+[[noreturn]] inline void error_and_throw(const std::shared_ptr<Reporter>& r, fmt::format_string<Args...> fmt, Args&&... args) {
+	get(r).error_and_throw(fmt::format(fmt, std::forward<Args>(args)...));
 }
 
 } // namespace diag

@@ -38,7 +38,7 @@ if(MSVC)
         $<$<CONFIG:RelWithDebInfo>:/LTCG>
     )
 else()
-    set(_dicom_release_flags -O3 -ffast-math -fstrict-aliasing -funroll-loops)
+    set(_dicom_release_flags -O3 -fstrict-aliasing -funroll-loops)
     foreach(flag IN LISTS _dicom_release_flags)
         add_compile_options($<$<CONFIG:Release>:${flag}>)
         add_compile_options($<$<CONFIG:RelWithDebInfo>:${flag}>)
@@ -66,6 +66,8 @@ target_include_directories(dicomsdl
 		${DICOM_INCLUDE_DIR}
 		${GENERATED_INCLUDE_DIR}
 )
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/fmt EXCLUDE_FROM_ALL)
+target_link_libraries(dicomsdl PUBLIC fmt::fmt-header-only)
 option(DICOMSDL_ENABLE_INFO_LOGS "Compile in INFO-level logging (otherwise info logs are compiled out)" OFF)
 if(DICOMSDL_ENABLE_INFO_LOGS)
 	target_compile_definitions(dicomsdl PUBLIC DICOMSDL_ENABLE_INFO_LOGS=1)
@@ -106,7 +108,7 @@ if(DICOM_BUILD_PYTHON)
 	pybind11_add_module(_dicomsdl MODULE
 		bindings/python/dicom_module.cpp
 	)
-	target_link_libraries(_dicomsdl PRIVATE dicomsdl)
+	target_link_libraries(_dicomsdl PRIVATE dicomsdl fmt::fmt-header-only)
 endif()
 
 if(BUILD_TESTING)
