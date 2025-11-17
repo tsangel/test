@@ -51,7 +51,7 @@ struct SpecificCharacterSetInfo {
     std::string_view description;
 };
 
-inline constexpr std::array<SpecificCharacterSetInfo, 34> kSpecificCharacterSetInfo = {
+inline constexpr std::array<SpecificCharacterSetInfo, 34> kSpecificCharacterSetInfo = {{
     {SpecificCharacterSet::NONE, "none", "Default repertoire"},
     {SpecificCharacterSet::ISO_IR_6, "ISO_IR 6", "Default repertoire"},
     {SpecificCharacterSet::ISO_IR_100, "ISO_IR 100", "Latin alphabet No. 1"},
@@ -86,7 +86,7 @@ inline constexpr std::array<SpecificCharacterSetInfo, 34> kSpecificCharacterSetI
     {SpecificCharacterSet::ISO_IR_192, "ISO_IR 192", "Unicode in UTF-8"},
     {SpecificCharacterSet::GB18030, "GB18030", "GB18030"},
     {SpecificCharacterSet::GBK, "GBK", "GBK"},
-};
+}};
 
 namespace detail {
 

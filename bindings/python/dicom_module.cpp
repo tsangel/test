@@ -12,6 +12,7 @@
 #include <pybind11/stl.h>
 
 #include <dicom.h>
+#include <diagnostics.h>
 
 namespace py = pybind11;
 
@@ -20,6 +21,7 @@ using dicom::DataElement;
 using dicom::Tag;
 using dicom::Uid;
 using dicom::VR;
+namespace diag = dicom::diag;
 
 namespace {
 
@@ -109,6 +111,58 @@ PYBIND11_MODULE(_dicomsdl, m) {
 	m.attr("DICOMSDL_VERSION") = py::str(DICOMSDL_VERSION);
 	m.attr("__version__") = py::str(DICOMSDL_VERSION);
 
+	// Logging helpers: forward to diag default reporter
+	m.def("log_info", [] (const std::string& msg) {
+		diag::info(msg);
+	});
+	m.def("log_warn", [] (const std::string& msg) {
+		diag::warn(msg);
+	});
+	m.def("log_error", [] (const std::string& msg) {
+		diag::error(msg);
+	});
+
+	// Diagnostics / reporter bindings
+	auto loglevel = py::enum_<diag::LogLevel>(m, "LogLevel")
+	    .value("Info", diag::LogLevel::Info)
+	    .value("Warning", diag::LogLevel::Warning)
+	    .value("Error", diag::LogLevel::Error)
+	    .export_values();
+
+	py::class_<diag::Reporter, std::shared_ptr<diag::Reporter>>(m, "Reporter");
+
+	py::class_<diag::StderrReporter, diag::Reporter, std::shared_ptr<diag::StderrReporter>>(
+	    m, "StderrReporter")
+			.def(py::init<>(), "Reporter that writes to stderr");
+
+	py::class_<diag::FileReporter, diag::Reporter, std::shared_ptr<diag::FileReporter>>(
+	    m, "FileReporter")
+			.def(py::init<std::string>(), py::arg("path"),
+			    "Append log lines to the given file path");
+
+	py::class_<diag::BufferingReporter, diag::Reporter, std::shared_ptr<diag::BufferingReporter>>(
+	    m, "BufferingReporter")
+			.def(py::init<std::size_t>(), py::arg("max_messages") = 0,
+			    "Buffer messages in memory; 0 means unbounded, otherwise acts as a ring buffer")
+			.def("take_messages", &diag::BufferingReporter::take_messages,
+			    py::arg("include_level") = true,
+			    "Return buffered messages as strings and clear the buffer")
+			.def("for_each",
+			    [] (diag::BufferingReporter& self, py::function fn) {
+				    self.for_each([&fn](diag::LogLevel sev, const std::string& msg) {
+					    fn(sev, msg);
+				    });
+			    },
+			    py::arg("fn"),
+			    "Iterate over buffered messages without clearing; fn(severity, message)");
+
+	m.def("set_default_reporter", &diag::set_default_reporter, py::arg("reporter"),
+	    "Install a process-wide reporter (None resets to stderr)");
+	m.def("set_thread_reporter", &diag::set_thread_reporter, py::arg("reporter"),
+	    "Install a reporter for the current thread (None clears it)");
+	m.def("set_log_level", &diag::set_log_level, py::arg("level"),
+	    "Set process-wide log level; messages below this are dropped");
+
 	py::class_<DataElement>(m, "DataElement")
 		.def_property_readonly("tag", &DataElement::tag)
 		.def_property_readonly("vr", &DataElement::vr)
@@ -132,7 +186,7 @@ PYBIND11_MODULE(_dicomsdl, m) {
 		.def("add_dataelement",
 		    [](DataSet& self, const Tag& tag, std::optional<VR> vr,
 		        std::size_t length, std::size_t offset) {
-		        const VR resolved = vr.value_or(VR::NONE);
+		        const VR resolved = vr.value_or(VR::None);
 		        DataElement* element = self.add_dataelement(tag, resolved, length, offset);
 		        return element ? element : dicom::NullElement();
 		    },
@@ -301,14 +355,14 @@ m.def("read_bytes",
 		.def("is_sequence", &VR::is_sequence)
 		.def("is_pixel_sequence", &VR::is_pixel_sequence)
 		.def("padding_byte", &VR::padding_byte)
-		.def("uses_explicit_32bit_vl", &VR::uses_explicit_32bit_vl)
+		.def("uses_explicit_16bit_vl", &VR::uses_explicit_16bit_vl)
 		.def("fixed_length", &VR::fixed_length)
 		.def("str", [] (const VR& vr) { return std::string(vr_to_string_view(vr)); })
 		.def("__str__", [] (const VR& vr) { return std::string(vr_to_string_view(vr)); })
 		.def("__repr__", &vr_repr)
 		.def(py::self == py::self);
 
-	vr_cls.attr("NONE") = dicom::VR::NONE;
+	vr_cls.attr("None") = dicom::VR::None;
 	vr_cls.attr("AE") = dicom::VR::AE;
 	vr_cls.attr("AS") = dicom::VR::AS;
 	vr_cls.attr("AT") = dicom::VR::AT;
@@ -400,6 +454,17 @@ m.def("read_bytes",
 	    "Resolve a UID keyword, raising ValueError if unknown.");
 
 	m.attr("__all__") = py::make_tuple(
+	    "LogLevel",
+	    "Reporter",
+	    "StderrReporter",
+	    "FileReporter",
+	    "BufferingReporter",
+	    "log_info",
+	    "log_warn",
+	    "log_error",
+	    "set_default_reporter",
+	    "set_thread_reporter",
+	    "set_log_level",
 	    "DataSet",
 	    "Tag",
 	    "VR",

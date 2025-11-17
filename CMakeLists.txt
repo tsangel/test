@@ -66,6 +66,12 @@ target_include_directories(dicomsdl
 		${DICOM_INCLUDE_DIR}
 		${GENERATED_INCLUDE_DIR}
 )
+option(DICOMSDL_ENABLE_INFO_LOGS "Compile in INFO-level logging (otherwise info logs are compiled out)" OFF)
+if(DICOMSDL_ENABLE_INFO_LOGS)
+	target_compile_definitions(dicomsdl PUBLIC DICOMSDL_ENABLE_INFO_LOGS=1)
+else()
+	target_compile_definitions(dicomsdl PUBLIC DICOMSDL_ENABLE_INFO_LOGS=0)
+endif()
 target_compile_features(dicomsdl PUBLIC cxx_std_20)
 
 option(DICOM_BUILD_EXAMPLES "Build example executables for DicomProject" ON)

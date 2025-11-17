@@ -55,24 +55,14 @@ InStream::~InStream() {
 void InStream::release_storage() {}
 
 void InStream::reset_internal_buffer() {
-	if (basestream_ != this && basestream_ != nullptr) {
-		startoffset_ = offset_ = endoffset_ = 0;
-		data_ = nullptr;
-		filesize_ = 0;
-		own_data_ = false;
-		basestream_ = this;
-		rootstream_ = this;
-		return;
-	}
 	if (own_data_) {
 		release_storage();
 	}
+	rootstream_ = this;
+	startoffset_ = offset_ = endoffset_ = 0;
 	data_ = nullptr;
 	filesize_ = 0;
-	startoffset_ = offset_ = endoffset_ = 0;
 	own_data_ = false;
-	basestream_ = this;
-	rootstream_ = this;
 }
 
 std::span<const std::uint8_t> InStream::read(std::size_t size) {
@@ -84,17 +74,19 @@ std::span<const std::uint8_t> InStream::read(std::size_t size) {
 }
 
 std::span<const std::uint8_t> InStream::peek(std::size_t size) const {
-	if (!data_) {
-		throw std::logic_error("InStream has no backing data");
-	}
 	if (size > bytes_remaining()) {
 		return std::span<const std::uint8_t>();
 	}
+#ifndef NDEBUG
+	if (!data_) {
+		throw std::logic_error("InStream has no backing data");
+	}
+#endif
 	return std::span<const std::uint8_t>(data_ + offset_, size);	
 }
 
 std::size_t InStream::skip(std::size_t size) {
-	if (size < bytes_remaining()) {
+	if (size <= bytes_remaining()) {
 		offset_ += size;
 		return size;
 	}
@@ -159,7 +151,6 @@ void InStringStream::attach_memory(std::vector<std::uint8_t>&& buffer) {
 	offset_ = 0;
 	endoffset_ = owned_buffer_.size();
 	filesize_ = owned_buffer_.size();
-	basestream_ = this;
 	rootstream_ = this;
 	own_data_ = true;
 }
@@ -182,7 +173,6 @@ void InStringStream::attach_memory(const std::uint8_t* data, std::size_t datasiz
 	offset_ = 0;
 	endoffset_ = datasize;
 	filesize_ = datasize;
-	basestream_ = this;
 	rootstream_ = this;
 	own_data_ = false;
 }
@@ -262,7 +252,6 @@ void InFileStream::attach_file(const std::string& filename) {
 	startoffset_ = 0;
 	offset_ = 0;
 	endoffset_ = filesize;
-	basestream_ = this;
 	rootstream_ = this;
 	filename_ = filename;
 #else
@@ -291,7 +280,6 @@ void InFileStream::attach_file(const std::string& filename) {
 	startoffset_ = 0;
 	offset_ = 0;
 	endoffset_ = filesize;
-	basestream_ = this;
 	rootstream_ = this;
 	filename_ = filename;
 	own_data_ = filesize > 0;
@@ -310,7 +298,6 @@ InSubStream::InSubStream(InStream* basestream, std::size_t size) {
 	if (size > basestream->bytes_remaining()) {
 		throw std::out_of_range("Requested substream exceeds available bytes");
 	}
-	basestream_ = basestream;
 	rootstream_ = basestream->rootstream();
 	startoffset_ = basestream->tell();
 	endoffset_ = startoffset_ + size;

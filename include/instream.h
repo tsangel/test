@@ -1,7 +1,9 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <span>
 #include <string>
@@ -9,8 +11,13 @@
 
 namespace dicom {
 
+
 class InStream {
 protected:
+	// Absolute offsets into the root stream’s backing buffer/file.
+	// startoffset_ marks the first byte of the attached region, offset_ is the
+	// current cursor within [startoffset_, endoffset_), and endoffset_ is the
+	// one-past-last byte. Substreams keep these absolute positions as well.
 	std::size_t startoffset_{0};
 	std::size_t offset_{0};
 	std::size_t endoffset_{0};
@@ -18,8 +25,8 @@ protected:
 	std::uint8_t* data_{nullptr};
 	bool own_data_{false};
 	std::size_t filesize_{0};
+	std::string identifier_{"<unattached>"};
 
-	InStream* basestream_{this};
 	InStream* rootstream_{this};
 
 	virtual void release_storage();
@@ -41,8 +48,14 @@ public:
 	[[nodiscard]] inline std::size_t bytes_remaining() const { return endoffset_ - offset_; }
 	[[nodiscard]] inline std::size_t begin() const { return startoffset_; }
 	[[nodiscard]] inline std::size_t end() const { return endoffset_; }
+	[[nodiscard]] inline const std::string& identifier() const { return identifier_; }
+	inline void set_identifier(std::string id) { identifier_ = std::move(id); }
 	std::span<const std::uint8_t> read(std::size_t size);
 	std::span<const std::uint8_t> peek(std::size_t size) const;
+	int read_4bytes(std::array<std::uint8_t, 4>& dest);
+	int read_8bytes(std::array<std::uint8_t, 8>& dest);
+	int peek_8bytes(std::array<std::uint8_t, 8>& dest) const;
+	void skip_to_end() { offset_ = endoffset_; }
 	std::size_t skip(std::size_t size);
 	void* get_pointer(std::size_t offset, std::size_t size);
 	std::span<const std::uint8_t> get_span(std::size_t offset, std::size_t size) const;
@@ -50,9 +63,8 @@ public:
 	void unread(std::size_t size);
 	void rewind();
 
-	[[nodiscard]] inline InStream* basestream() const { return basestream_; }
 	[[nodiscard]] inline InStream* rootstream() const { return rootstream_; }
-	[[nodiscard]] inline std::uint8_t* data() const { return rootstream_->data_; }
+	[[nodiscard]] inline std::uint8_t* data() const { return data_; }
 	[[nodiscard]] inline std::size_t datasize() const { return endoffset_ - startoffset_; }
 	[[nodiscard]] inline std::size_t endoffset() const { return endoffset_; }
 
@@ -104,5 +116,49 @@ public:
 protected:
 	void release_storage() override {}
 };
+
+inline int InStream::read_4bytes(std::array<std::uint8_t, 4>& dest) {
+	constexpr std::size_t kSize = 4;
+	if (bytes_remaining() < kSize) {
+		return 0;
+	}
+#ifndef NDEBUG
+	if (!data_) {
+		throw std::logic_error("InStream has no backing data");
+	}
+#endif
+	std::memcpy(dest.data(), data_ + offset_, kSize);
+	offset_ += kSize;
+	return static_cast<int>(kSize);
+}
+
+inline int InStream::read_8bytes(std::array<std::uint8_t, 8>& dest) {
+	constexpr std::size_t kSize = 8;
+	if (bytes_remaining() < kSize) {
+		return 0;
+	}
+#ifndef NDEBUG
+	if (!data_) {
+		throw std::logic_error("InStream has no backing data");
+	}
+#endif
+	std::memcpy(dest.data(), data_ + offset_, kSize);
+	offset_ += kSize;
+	return static_cast<int>(kSize);
+}
+
+inline int InStream::peek_8bytes(std::array<std::uint8_t, 8>& dest) const {
+	constexpr std::size_t kSize = 8;
+	if (bytes_remaining() < kSize) {
+		return 0;
+	}
+#ifndef NDEBUG
+	if (!data_) {
+		throw std::logic_error("InStream has no backing data");
+	}
+#endif
+	std::memcpy(dest.data(), data_ + offset_, kSize);
+	return static_cast<int>(kSize);
+}
 
 }  // namespace dicom

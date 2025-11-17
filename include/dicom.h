@@ -33,8 +33,8 @@ struct Tag {
 	constexpr Tag(std::uint16_t group, std::uint16_t element)
 	    : packed((static_cast<std::uint32_t>(group) << 16) | static_cast<std::uint32_t>(element)) {}
 	constexpr explicit Tag(std::uint32_t value) : packed(value) {}
-	constexpr explicit Tag(std::string_view keyword)
-	    : packed(tag_value_from_keyword(keyword)) {}
+	constexpr explicit Tag(std::string_view text)
+	    : packed(tag_value_from_text(text)) {}
 
 	static constexpr Tag from_value(std::uint32_t value) { return Tag(value); }
 
@@ -59,9 +59,46 @@ struct Tag {
     constexpr bool operator==(const Tag&) const noexcept = default;
 
 private:
-	static constexpr std::uint32_t tag_value_from_keyword(std::string_view keyword) {
-		if (const auto* entry = lookup::keyword_to_entry_chd(keyword)) {
+	static constexpr bool is_hex_digit(char c) noexcept {
+		return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+	}
+
+	static constexpr std::uint8_t hex_digit_value(char c) noexcept {
+		return (c >= '0' && c <= '9')
+		           ? static_cast<std::uint8_t>(c - '0')
+		           : static_cast<std::uint8_t>((c & 0xDF) - 'A' + 10);
+	}
+
+	static constexpr bool try_parse_numeric_tag(std::string_view text, std::uint32_t& value) noexcept {
+		std::uint32_t accum = 0;
+		int digits = 0;
+		for (char c : text) {
+			if (c == '(' || c == ')' || c == ',' || c == ' ' || c == '	') {
+				continue;
+			}
+			if (!is_hex_digit(c)) {
+				return false;
+			}
+			accum = (accum << 4) | hex_digit_value(c);
+			++digits;
+			if (digits > 8) {
+				return false;
+			}
+		}
+		if (digits == 8) {
+			value = accum;
+			return true;
+		}
+		return false;
+	}
+
+	static constexpr std::uint32_t tag_value_from_text(std::string_view text) {
+		if (const auto* entry = lookup::keyword_to_entry_chd(text)) {
 			return entry->tag_value;
+		}
+		std::uint32_t numeric_value = 0;
+		if (try_parse_numeric_tag(text, numeric_value)) {
+			return numeric_value;
 		}
 		throw std::invalid_argument("Unknown DICOM keyword");
 	}
@@ -175,13 +212,13 @@ struct VR {
     // Constructors
     // ------------------------------------------------------------
     constexpr VR() noexcept = default;
-    constexpr explicit VR(uint16_t v) noexcept : value(v ? v : NONE_val) {}
+    constexpr explicit VR(uint16_t v) noexcept : value(v ? v : None_val) {}
 
     /// Construct from two VR characters, e.g. VR('P','N')
     constexpr VR(char a, char b) noexcept {
         const uint16_t raw = pack2(a,b);
         const uint16_t val = raw_to_val(raw);
-        value = val ? val : (raw ? raw : NONE_val);
+        value = val ? val : (raw ? raw : None_val);
     }
 
     /// Construct from string_view (uses first two chars)
@@ -189,9 +226,9 @@ struct VR {
         if (s.size() >= 2) {
             const uint16_t raw = pack2(s[0], s[1]);
             const uint16_t val = raw_to_val(raw);
-            value = val ? val : (raw ? raw : NONE_val);
+            value = val ? val : (raw ? raw : None_val);
         } else {
-            value = NONE_val;
+            value = None_val;
         }
     }
 
@@ -205,13 +242,15 @@ struct VR {
     // ------------------------------------------------------------
     // Basic utilities
     // ------------------------------------------------------------
-    constexpr bool     is_known() const noexcept { return value >= AE_val && value < _UNKNOWN_val; }
-    constexpr uint16_t val()      const noexcept { return is_known() ? value : 0; }
-    constexpr uint16_t raw_code() const noexcept { return is_known() ? val_to_raw[value] : value; }
+    constexpr bool     is_known() const noexcept { return value >= AE_val && value < Unknown_val; }
+	    constexpr uint16_t val()      const noexcept { return is_known() ? value : 0; }
+	    constexpr uint16_t raw_code() const noexcept { return is_known() ? val_to_raw[value] : value; }
+		constexpr char first() const noexcept { return static_cast<char>(raw_code() >> 8); }
+		constexpr char second() const noexcept { return static_cast<char>(raw_code() & 0xFF); }
 
-	/// Returns the two-character VR string or "??" for unknown
-	constexpr std::string_view str() const noexcept {
-		switch (value) {
+		/// Returns the two-character VR string or "??" for unknown
+		constexpr std::string_view str() const noexcept {
+			switch (value) {
 			case AE_val: return "AE"; case AS_val: return "AS";
 			case AT_val: return "AT"; case CS_val: return "CS";
 			case DA_val: return "DA"; case DS_val: return "DS";
@@ -290,15 +329,12 @@ struct VR {
 	}
 
     // ------------------------------------------------------------
-    // Explicit VR encoding: 32-bit VL usage
-    // ------------------------------------------------------------
-    /// Returns true if this VR uses 32-bit VL field in explicit encoding
-    // Table 7.1-1. Data Element with Explicit VR other than as shown in Table 7.1-2
-    //      -> use 32-bit VL field
-    // Table 7.1-2. Data Element with Explicit VR of AE, AS, AT, CS, DA, DS, DT,
-    // FL, FD, IS, LO, LT, PN, SH, SL, SS, ST, TM, UI, UL and US
+    // Explicit VR encoding: 16-bit VL usage
+    // part05. Table 7.1-2. Data Element with Explicit VR of AE, AS, AT, CS,
+	// DA, DS, DT, FL, FD, IS, LO, LT, PN, SH, SL, SS, ST, TM, UI, UL and US
     //      -> use 16-bit VL field
-    constexpr bool uses_explicit_32bit_vl() const noexcept {
+    // ------------------------------------------------------------
+    constexpr bool uses_explicit_16bit_vl() const noexcept {
         if (!is_known()) return false;
         switch (value) {
             case AE_val: case AS_val: case AT_val: case CS_val:
@@ -307,8 +343,9 @@ struct VR {
             case PN_val: case SH_val: case SL_val: case SS_val:
             case ST_val: case TM_val: case UI_val: case UL_val:
             case US_val:
+                return true;
+            default:
                 return false;
-            default: return true;
         }
     }
 
@@ -335,12 +372,12 @@ struct VR {
     // Compact integer IDs (1..32)
     // ------------------------------------------------------------
     enum : uint16_t {
-        NONE_val = 0,
+        None_val = 0, // sentinel for no VR
         AE_val=1, AS_val, AT_val, CS_val, DA_val, DS_val, DT_val, FD_val,
         FL_val, IS_val, LO_val, LT_val, OB_val, OD_val, OF_val, OV_val,
         OL_val, OW_val, PN_val, SH_val, SL_val, SQ_val, SS_val, ST_val,
         SV_val, TM_val, UC_val, UI_val, UL_val, UN_val, UR_val, US_val,
-        UT_val, UV_val, PX_val, _UNKNOWN_val
+        UT_val, UV_val, PX_val, Unknown_val // sentinel upper bound for is_known()
     };
 
     // ------------------------------------------------------------
@@ -381,7 +418,7 @@ struct VR {
 	static const VR UT;
     static const VR UV;
     static const VR PX;
-    static const VR NONE;
+    static const VR None;
 
 private:
     // Mapping table from compact ID -> raw 2-char code
@@ -465,7 +502,7 @@ inline constexpr VR VR::US{uint16_t(VR::US_val)};
 inline constexpr VR VR::UT{uint16_t(VR::UT_val)};
 inline constexpr VR VR::UV{uint16_t(VR::UV_val)};
 inline constexpr VR VR::PX{uint16_t(VR::PX_val)};
-inline constexpr VR VR::NONE{uint16_t(VR::NONE_val)};
+inline constexpr VR VR::None{uint16_t(VR::None_val)};
 
 namespace lookup {
 
@@ -677,7 +714,7 @@ private:
 			}
 
 			if (!vec_done && (map_done || vec_it_->tag().value() <= map_it_->first)) {
-				if (vec_it_->vr() == VR::NONE) {
+				if (vec_it_->vr() == VR::None) {
 					++vec_it_;
 					continue;
 				}
@@ -686,7 +723,7 @@ private:
 			}
 
 			if (!map_done) {
-				if (map_it_->second.vr() == VR::NONE) {
+				if (map_it_->second.vr() == VR::None) {
 					++map_it_;
 					continue;
 				}
@@ -732,13 +769,15 @@ public:
 	const std::string& path() const;
 	InStream& stream();
 	const InStream& stream() const;
-	DataElement* add_dataelement(Tag tag, VR vr=VR::NONE, std::size_t length=0, std::size_t offset=0);
+	DataElement* add_dataelement(Tag tag, VR vr=VR::None, std::size_t length=0, std::size_t offset=0);
 	void remove_dataelement(Tag tag);
 	DataElement* get_dataelement(Tag tag);
 	const DataElement* get_dataelement(Tag tag) const;
 	void dump_elements() const;
 	void read_attached_stream(const ReadOptions& options);
 	void read_elements_until(Tag load_until, InStream* stream);
+	[[nodiscard]] inline bool is_little_endian() const { return true; /* TODO: consult transfer syntax */ }
+	[[nodiscard]] inline bool is_explicit_vr() const { return true; /* TODO: consult transfer syntax */ }
 	iterator begin();
 	iterator end();
 	const_iterator begin() const;
@@ -747,11 +786,11 @@ public:
 	const_iterator cend() const;
 
 private:
-	void reset_stream(std::string identifier, std::unique_ptr<InStream> stream);
-	std::string path_;
+	void attach_to_stream(std::string identifier, std::unique_ptr<InStream> stream);
 	std::unique_ptr<InStream> stream_;
 	DataSet* root_dataset_{this};
 	Tag last_tag_loaded_{Tag::from_value(0)};
+	alignas(std::uint64_t) std::uint8_t buf8_[8];  // temporary buffer for tag, vr and length
 	std::vector<DataElement> elements_;
 	std::map<std::uint32_t, DataElement> element_map_;
 };
