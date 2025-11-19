@@ -15,10 +15,17 @@ cmake -S . -B build -DDICOM_BUILD_EXAMPLES=ON -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
-### Run C++ example
+### Run C++ examples
 
 ```
-./build/dicom_example
+# Keyword -> (Tag, VR)
+./build/keyword_lookup_example PatientName
+
+# Tag -> keyword/name metadata
+./build/tag_lookup_example (0010,0010)
+
+# UID keyword/value -> registry entry
+./build/uid_lookup_example ExplicitVRLittleEndian
 ```
 
 ## Python Wheel
@@ -37,10 +44,13 @@ After building, install the wheel:
 pip install dist/dicomsdl-*.whl
 ```
 
-### Run Python example
+### Run Python examples
 
 ```
-python examples/python/dicom_example.py
+python examples/python/keyword_lookup_example.py PatientName Rows
+python examples/python/tag_lookup_example.py 00100010 (0008,0016)
+python examples/python/uid_lookup_example.py ExplicitVRLittleEndian 1.2.840.10008.1.2.1
+python examples/python/dump_dataset_example.py path/to/file.dcm
 ```
 
 Python 코드에서는 일관되게 `import dicomsdl as dicom` 형식의 alias를 사용합니다.

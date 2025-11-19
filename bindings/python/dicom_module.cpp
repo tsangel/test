@@ -19,8 +19,9 @@ namespace py = pybind11;
 using dicom::DataSet;
 using dicom::DataElement;
 using dicom::Tag;
-using dicom::Uid;
 using dicom::VR;
+using dicom::uid::WellKnown;
+using Uid = dicom::uid::WellKnown;
 namespace diag = dicom::diag;
 
 namespace {
@@ -55,7 +56,7 @@ std::string dataelement_repr(const DataElement& element) {
 	return oss.str();
 }
 
-std::string uid_repr(const Uid& uid) {
+std::string uid_repr(const WellKnown& uid) {
 	if (!uid) {
 		return "Uid(<invalid>)";
 	}
@@ -68,20 +69,34 @@ std::string uid_repr(const Uid& uid) {
 	return oss.str();
 }
 
-py::object uid_or_none(Uid uid) {
+py::object uid_or_none(std::optional<WellKnown> uid) {
 	if (!uid) {
 		return py::none();
 	}
-	return py::cast(uid);
+	return py::cast(*uid);
 }
 
-Uid require_uid(Uid uid, const char* origin, const std::string& text) {
+
+WellKnown require_uid(std::optional<WellKnown> uid, const char* origin, const std::string& text) {
 	if (!uid) {
 		std::ostringstream oss;
 		oss << "Unknown DICOM UID from " << origin << ": " << text;
 		throw py::value_error(oss.str());
 	}
-	return uid;
+	return *uid;
+}
+
+py::dict make_tag_entry_dict(const dicom::DataElementEntry& entry) {
+	py::dict info;
+	info["tag"] = py::str(entry.tag.data(), entry.tag.size());
+	info["keyword"] = py::str(entry.keyword.data(), entry.keyword.size());
+	info["name"] = py::str(entry.name.data(), entry.name.size());
+	info["vr"] = py::str(entry.vr.data(), entry.vr.size());
+	info["vm"] = py::str(entry.vm.data(), entry.vm.size());
+	info["retired"] = py::str(entry.retired.data(), entry.retired.size());
+	info["tag_value"] = entry.tag_value;
+	info["vr_value"] = entry.vr_value;
+	return info;
 }
 
 struct PyDataElementIterator {
@@ -168,6 +183,7 @@ PYBIND11_MODULE(_dicomsdl, m) {
 		.def_property_readonly("vr", &DataElement::vr)
 		.def_property_readonly("length", &DataElement::length)
 		.def_property_readonly("offset", &DataElement::offset)
+		.def_property_readonly("vm", &DataElement::vm)
 		.def_property_readonly("is_sequence",
 		    [](const DataElement& element) { return element.vr().is_sequence(); })
 		.def_property_readonly("is_pixel_sequence",
@@ -366,50 +382,53 @@ m.def("read_bytes",
 		.def("__repr__", &tag_repr)
 		.def(py::self == py::self);
 
-	auto uid_cls = py::class_<Uid>(m, "Uid")
-		.def(py::init<>())
-		.def(py::init([](const std::string& text) { return Uid(text); }), py::arg("text"),
-		    "Construct a UID from either a dotted value or keyword, raising ValueError if unknown.")
-		.def_static("lookup",
-		    [](const std::string& text) -> py::object {
-			    return uid_or_none(Uid::lookup(text));
-		    },
-		    py::arg("text"),
-		    "Lookup a UID from value or keyword; returns None if missing.")
-		.def_static("from_value",
-		    [](const std::string& value) {
-			    return require_uid(Uid::from_value(value), "Uid.from_value", value);
-		    },
-		    py::arg("value"),
-		    "Resolve a dotted UID value, raising ValueError if unknown.")
-		.def_static("from_keyword",
-		    [](const std::string& keyword) {
-			    return require_uid(Uid::from_keyword(keyword), "Uid.from_keyword", keyword);
-		    },
-		    py::arg("keyword"),
-		    "Resolve a UID keyword, raising ValueError if unknown.")
-		.def_property_readonly("value",
-		    [](const Uid& uid) { return std::string(uid.value()); },
-		    "Return the dotted UID value or empty string if invalid.")
-		.def_property_readonly("keyword",
-		    [](const Uid& uid) -> py::object {
-			    if (uid.keyword().empty()) {
-				    return py::none();
-			    }
-			    return py::str(uid.keyword());
-		    },
-		    "Return the UID keyword or None if missing.")
-		.def_property_readonly("name",
-		    [](const Uid& uid) { return std::string(uid.name()); },
-		    "Return the descriptive UID name or empty string if invalid.")
-		.def_property_readonly("type",
-		    [](const Uid& uid) { return std::string(uid.type()); },
-		    "Return the UID type (Transfer Syntax, SOP Class, ...).")
-		.def_property_readonly("raw_index", &Uid::raw_index, "Return the registry index.")
-		.def_property_readonly("is_valid", &Uid::valid)
-		.def("__bool__", [](const Uid& uid) { return uid.valid(); })
-		.def("__repr__", &uid_repr)
-		.def(py::self == py::self);
+auto uid_cls = py::class_<Uid>(m, "Uid")
+	.def(py::init<>())
+	.def(py::init([](const std::string& text) {
+		    return require_uid(dicom::uid::lookup(text), "Uid.__init__", text);
+	    }),
+	    py::arg("text"),
+	    "Construct a UID from either a dotted value or keyword, raising ValueError if unknown.")
+	.def_static("lookup",
+	    [](const std::string& text) -> py::object {
+		    return uid_or_none(dicom::uid::lookup(text));
+	    },
+	    py::arg("text"),
+	    "Lookup a UID from value or keyword; returns None if missing.")
+	.def_static("from_value",
+	    [](const std::string& value) {
+		    return require_uid(dicom::uid::from_value(value), "Uid.from_value", value);
+	    },
+	    py::arg("value"),
+	    "Resolve a dotted UID value, raising ValueError if unknown.")
+	.def_static("from_keyword",
+	    [](const std::string& keyword) {
+		    return require_uid(dicom::uid::from_keyword(keyword), "Uid.from_keyword", keyword);
+	    },
+	    py::arg("keyword"),
+	    "Resolve a UID keyword, raising ValueError if unknown.")
+	.def_property_readonly("value",
+	    [](const Uid& uid) { return std::string(uid.value()); },
+	    "Return the dotted UID value or empty string if invalid.")
+	.def_property_readonly("keyword",
+	    [](const Uid& uid) -> py::object {
+		    if (uid.keyword().empty()) {
+			    return py::none();
+		    }
+		    return py::str(uid.keyword());
+	    },
+	    "Return the UID keyword or None if missing.")
+	.def_property_readonly("name",
+	    [](const Uid& uid) { return std::string(uid.name()); },
+	    "Return the descriptive UID name or empty string if invalid.")
+	.def_property_readonly("type",
+	    [](const Uid& uid) { return std::string(uid.type()); },
+	    "Return the UID type (Transfer Syntax, SOP Class, ...).")
+	.def_property_readonly("raw_index", &Uid::raw_index, "Return the registry index.")
+	.def_property_readonly("is_valid", &Uid::valid)
+	.def("__bool__", [](const Uid& uid) { return uid.valid(); })
+	.def("__repr__", &uid_repr)
+	.def(py::self == py::self);
 
 	auto vr_cls = py::class_<VR>(m, "VR")
 		.def(py::init<>())
@@ -501,26 +520,46 @@ m.def("read_bytes",
 	    py::arg("tag_value"),
 	    "Return the DICOM keyword for a 32-bit tag value or None if missing.");
 
-	m.def("lookup_uid",
-	    [] (const std::string& text) -> py::object {
-	        return uid_or_none(Uid::lookup(text));
+	m.def("tag_to_entry",
+	    [] (const Tag& tag) -> py::object {
+	        if (const auto* entry = dicom::lookup::tag_to_entry(tag.value())) {
+	            return make_tag_entry_dict(*entry);
+	        }
+	        return py::none();
 	    },
-	    py::arg("text"),
-	    "Lookup a UID by either dotted value or keyword; returns None if missing.");
+	    py::arg("tag"),
+	    "Return registry details for the given Tag or None if missing.");
 
-	m.def("uid_from_value",
-	    [] (const std::string& value) {
-	        return require_uid(Uid::from_value(value), "uid_from_value", value);
+	m.def("tag_to_entry",
+	    [] (std::uint32_t tag_value) -> py::object {
+	        if (const auto* entry = dicom::lookup::tag_to_entry(tag_value)) {
+	            return make_tag_entry_dict(*entry);
+	        }
+	        return py::none();
 	    },
-	    py::arg("value"),
-	    "Resolve a dotted UID value, raising ValueError if unknown.");
+	    py::arg("tag_value"),
+	    "Return registry details for a tag numeric value or None if missing.");
 
-	m.def("uid_from_keyword",
-	    [] (const std::string& keyword) {
-	        return require_uid(Uid::from_keyword(keyword), "uid_from_keyword", keyword);
-	    },
-	    py::arg("keyword"),
-	    "Resolve a UID keyword, raising ValueError if unknown.");
+m.def("lookup_uid",
+    [] (const std::string& text) -> py::object {
+        return uid_or_none(dicom::uid::lookup(text));
+    },
+    py::arg("text"),
+    "Lookup a UID by either dotted value or keyword; returns None if missing.");
+
+m.def("uid_from_value",
+    [] (const std::string& value) {
+        return require_uid(dicom::uid::from_value(value), "uid_from_value", value);
+    },
+    py::arg("value"),
+    "Resolve a dotted UID value, raising ValueError if unknown.");
+
+m.def("uid_from_keyword",
+    [] (const std::string& keyword) {
+        return require_uid(dicom::uid::from_keyword(keyword), "uid_from_keyword", keyword);
+    },
+    py::arg("keyword"),
+    "Resolve a UID keyword, raising ValueError if unknown.");
 
 	m.attr("__all__") = py::make_tuple(
 	    "LogLevel",
@@ -542,6 +581,7 @@ m.def("read_bytes",
 	    "read_bytes",
 	    "keyword_to_tag_vr",
 	    "tag_to_keyword",
+	    "tag_to_entry",
 	    "lookup_uid",
 	    "uid_from_value",
 	    "uid_from_keyword");

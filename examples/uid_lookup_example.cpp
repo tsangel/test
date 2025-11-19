@@ -9,7 +9,7 @@ namespace {
 void print_usage(const char* argv0) {
     std::cout << "Usage: " << argv0 << " <uid-or-keyword> [<uid-or-keyword> ...]\n";
     using namespace dicom::literals;
-    constexpr dicom::Uid implicit = "ImplicitVRLittleEndian"_uid;
+    constexpr dicom::uid::WellKnown implicit = "ImplicitVRLittleEndian"_uid;
     std::cout << "Example literal: \"ImplicitVRLittleEndian\"_uid -> "
               << implicit.value() << " (" << implicit.keyword() << ")\n";
 }
@@ -24,16 +24,16 @@ int main(int argc, char** argv) {
 
     for (int i = 1; i < argc; ++i) {
         const std::string_view text{argv[i]};
-        const dicom::Uid uid = dicom::Uid::lookup(text);
+        const auto uid = dicom::uid::lookup(text);
         if (!uid) {
             std::cout << text << ": not found\n";
             continue;
         }
-        std::cout << text << " -> value=" << uid.value();
-        if (!uid.keyword().empty()) {
-            std::cout << ", keyword=" << uid.keyword();
+        std::cout << text << " -> value=" << uid->value();
+        if (!uid->keyword().empty()) {
+            std::cout << ", keyword=" << uid->keyword();
         }
-        std::cout << ", name=" << uid.name() << ", type=" << uid.type() << "\n";
+        std::cout << ", name=" << uid->name() << ", type=" << uid->type() << "\n";
     }
     return 0;
 }

@@ -80,11 +80,6 @@ target_compile_features(dicomsdl PUBLIC cxx_std_20)
 option(DICOM_BUILD_EXAMPLES "Build example executables for DicomProject" ON)
 
 if(DICOM_BUILD_EXAMPLES)
-	add_executable(dicom_example
-		examples/dicom_example.cpp
-	)
-	target_link_libraries(dicom_example PRIVATE dicomsdl)
-
 	add_executable(keyword_lookup_example
 		examples/keyword_lookup_example.cpp
 	)
@@ -99,11 +94,6 @@ if(DICOM_BUILD_EXAMPLES)
 		examples/uid_lookup_example.cpp
 	)
 	target_link_libraries(uid_lookup_example PRIVATE dicomsdl)
-
-	add_executable(dump_dataset_example
-		examples/dump_dataset.cpp
-	)
-	target_link_libraries(dump_dataset_example PRIVATE dicomsdl)
 endif()
 
 option(DICOM_BUILD_PYTHON "Build Python bindings with pybind11" ON)

@@ -140,22 +140,18 @@ std::optional<std::string> extract_single_ui_value(const DataElement& elem) {
 	if (leading > 0) {
 		value.erase(0, leading);
 	}
-	if (value.empty() || value.size() > Uid::max_str_length) {
+	if (value.empty() || value.size() > uid::Generated::max_str_length) {
 		return std::nullopt;
 	}
 	return value;
 }
 
-std::optional<Uid> uid_from_element_value(const DataElement& elem) {
+std::optional<uid::WellKnown> well_known_uid_from_element_value(const DataElement& elem) {
 	auto text = extract_single_ui_value(elem);
 	if (!text) {
 		return std::nullopt;
 	}
-	Uid uid = Uid::from_value(*text);
-	if (!uid.has_value()) {
-		return std::nullopt;
-	}
-	return uid;
+	return uid::from_value(*text);
 }
 
 }  // namespace
@@ -662,12 +658,9 @@ std::optional<Tag> DataElement::to_tag() const {
 }
 
 
-std::optional<Uid> DataElement::to_transfer_syntax_uid() const {
-	auto uid = uid_from_element_value(*this);
+std::optional<uid::WellKnown> DataElement::to_transfer_syntax_uid() const {
+	auto uid = well_known_uid_from_element_value(*this);
 	if (!uid) {
-		return std::nullopt;
-	}
-	if (!uid->is_registry()) {
 		return std::nullopt;
 	}
 	if (uid->uid_type() != UidType::TransferSyntax) {
@@ -676,16 +669,14 @@ std::optional<Uid> DataElement::to_transfer_syntax_uid() const {
 	return uid;
 }
 
-std::optional<Uid> DataElement::to_sop_class_uid() const {
-	auto uid = uid_from_element_value(*this);
+std::optional<uid::WellKnown> DataElement::to_sop_class_uid() const {
+	auto uid = well_known_uid_from_element_value(*this);
 	if (!uid) {
 		return std::nullopt;
 	}
-	if (uid->is_registry()) {
-		const auto type = uid->uid_type();
-		if (type != UidType::SopClass && type != UidType::MetaSopClass) {
-			return std::nullopt;
-		}
+	const auto type = uid->uid_type();
+	if (type != UidType::SopClass && type != UidType::MetaSopClass) {
+		return std::nullopt;
 	}
 	return uid;
 }

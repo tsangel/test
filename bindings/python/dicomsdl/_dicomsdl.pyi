@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional, overload
+from typing import Any, Optional, overload
 
 DICOM_STANDARD_VERSION: str
 DICOMSDL_VERSION: str
@@ -15,6 +15,7 @@ __all__ = [
     "read_bytes",
     "keyword_to_tag_vr",
     "tag_to_keyword",
+    "tag_to_entry",
     "lookup_uid",
     "uid_from_value",
     "uid_from_keyword",
@@ -96,6 +97,8 @@ class VR:
 
 
 def keyword_to_tag_vr(keyword: str, /) -> Optional[tuple[Tag, VR]]: ...
+
+def tag_to_entry(tag: Tag | int, /) -> Optional[dict[str, Any]]: ...
 
 class Uid:
     @overload
