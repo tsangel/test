@@ -2,7 +2,10 @@
 
 #include <array>
 #include <cstddef>
+#include <compare>
 #include <cstdint>
+#include <cstring>
+#include <limits>
 #include <iterator>
 #include <map>
 #include <memory>
@@ -112,47 +115,81 @@ static_assert(std::is_trivially_copyable_v<Tag>, "Tag should be trivially copyab
 // static_assert(std::is_trivial_v<Tag>, "Tag should be trivial");
 
 struct Uid {
-	std::uint16_t index{uid_lookup::kInvalidUidIndex};
+	static constexpr std::size_t max_str_length = 64;
+	using size_type = std::uint8_t;
+	static constexpr std::uint16_t kGeneratedIndexValue =
+	    static_cast<std::uint16_t>(uid_lookup::kInvalidUidIndex - 1);
+
+	enum class RegistryIndex : std::uint16_t {
+		Unknown = uid_lookup::kInvalidUidIndex,
+		Generated = kGeneratedIndexValue,
+	};
+
+	RegistryIndex index{RegistryIndex::Unknown};
+	size_type length{0};
+	std::array<char, max_str_length + 1> buffer{};  // null-terminated when Generated
 
 	constexpr Uid() noexcept = default;
 
-	constexpr explicit Uid(std::string_view text) : index(uid_lookup::uid_index_from_text(text)) {
-		if (!valid()) {
+	constexpr explicit Uid(std::string_view text)
+	    : index(make_registry_index(uid_lookup::uid_index_from_text(text))) {
+		if (!is_registry()) {
 			throw std::invalid_argument("Unknown DICOM UID");
 		}
 	}
 
 	static constexpr Uid from_index(std::uint16_t idx) noexcept {
-		return Uid(idx, from_index_tag{});
+		return Uid(make_registry_index(idx));
 	}
 
 	static constexpr Uid lookup(std::string_view text) noexcept {
 		return from_index(uid_lookup::uid_index_from_text(text));
 	}
 
-	static constexpr Uid from_value(std::string_view value) noexcept {
-		return from_index(uid_lookup::uid_index_from_value(value));
+	static Uid from_value(std::string_view value) noexcept {
+		if (!is_valid_uid_text(value)) {
+			return {};
+		}
+		if (const auto idx = uid_lookup::uid_index_from_value(value); idx != uid_lookup::kInvalidUidIndex) {
+			return from_index(idx);
+		}
+		Uid uid;
+		uid.index = RegistryIndex::Generated;
+		uid.length = static_cast<size_type>(value.size());
+		std::memcpy(uid.buffer.data(), value.data(), value.size());
+		uid.buffer[uid.length] = '\0';
+		return uid;
 	}
 
 	static constexpr Uid from_keyword(std::string_view keyword) noexcept {
 		return from_index(uid_lookup::uid_index_from_keyword(keyword));
 	}
 
-	[[nodiscard]] constexpr bool valid() const noexcept {
-		return index != uid_lookup::kInvalidUidIndex;
+	[[nodiscard]] constexpr bool is_registry() const noexcept {
+		return static_cast<std::uint16_t>(index) < static_cast<std::uint16_t>(RegistryIndex::Generated);
 	}
 
+	[[nodiscard]] constexpr bool is_generated() const noexcept { return index == RegistryIndex::Generated; }
+
+	[[nodiscard]] constexpr bool has_value() const noexcept { return is_registry() || is_generated(); }
+
+	[[nodiscard]] constexpr bool valid() const noexcept { return is_registry(); }
 	[[nodiscard]] constexpr explicit operator bool() const noexcept { return valid(); }
 
-	[[nodiscard]] constexpr std::uint16_t raw_index() const noexcept { return index; }
-
-	[[nodiscard]] constexpr const UidEntry* entry() const noexcept {
-		return uid_lookup::entry_from_index(index);
+	[[nodiscard]] constexpr std::uint16_t raw_index() const noexcept {
+		return is_registry() ? static_cast<std::uint16_t>(index) : uid_lookup::kInvalidUidIndex;
 	}
 
-	[[nodiscard]] constexpr std::string_view value() const noexcept {
+	[[nodiscard]] constexpr const UidEntry* entry() const noexcept {
+		return is_registry() ? uid_lookup::entry_from_index(static_cast<std::uint16_t>(index)) : nullptr;
+	}
+
+	[[nodiscard]] std::string_view value() const noexcept {
 		if (const auto* e = entry()) {
 			return e->value;
+		}
+		if (is_generated()) {
+			return std::string_view{buffer.data(), length};
 		}
 		return {};
 	}
@@ -185,15 +222,68 @@ struct Uid {
 		return UidType::Other;
 	}
 
-	constexpr auto operator<=>(const Uid&) const noexcept = default;
-	constexpr bool operator==(const Uid&) const noexcept = default;
+	friend bool operator==(const Uid& lhs, const Uid& rhs) noexcept {
+		if (lhs.index != rhs.index) {
+			return false;
+		}
+		if (!lhs.is_generated()) {
+			return true;
+		}
+		if (lhs.length != rhs.length) {
+			return false;
+		}
+		return std::memcmp(lhs.buffer.data(), rhs.buffer.data(), lhs.length) == 0;
+	}
+
+	friend std::strong_ordering operator<=>(const Uid& lhs, const Uid& rhs) noexcept {
+		const auto lhs_index = static_cast<std::uint16_t>(lhs.index);
+		const auto rhs_index = static_cast<std::uint16_t>(rhs.index);
+		if (auto cmp = lhs_index <=> rhs_index; cmp != 0) {
+			return cmp;
+		}
+		if (!lhs.is_generated()) {
+			return std::strong_ordering::equal;
+		}
+		if (lhs.length != rhs.length) {
+			return lhs.length <=> rhs.length;
+		}
+		const auto diff = std::memcmp(lhs.buffer.data(), rhs.buffer.data(), lhs.length);
+		if (diff < 0) {
+			return std::strong_ordering::less;
+		}
+		if (diff > 0) {
+			return std::strong_ordering::greater;
+		}
+		return std::strong_ordering::equal;
+	}
 
 private:
-	struct from_index_tag {};
-	constexpr Uid(std::uint16_t idx, from_index_tag) noexcept : index(idx) {}
+	constexpr explicit Uid(RegistryIndex idx) noexcept : index(idx) {}
+
+	static constexpr RegistryIndex make_registry_index(std::uint16_t idx) noexcept {
+		return idx == uid_lookup::kInvalidUidIndex ? RegistryIndex::Unknown
+		                                           : static_cast<RegistryIndex>(idx);
+	}
+
+	static constexpr bool is_valid_uid_char(char ch) noexcept {
+		return (ch >= '0' && ch <= '9') || ch == '.';
+	}
+
+	static constexpr bool is_valid_uid_text(std::string_view text) noexcept {
+		if (text.empty() || text.size() > max_str_length) {
+			return false;
+		}
+		for (char ch : text) {
+			if (!is_valid_uid_char(ch)) {
+				return false;
+			}
+		}
+		return true;
+	}
 };
 
-static_assert(sizeof(Uid) == sizeof(std::uint16_t), "Uid must remain a 16-bit wrapper");
+static_assert(Uid::max_str_length <= std::numeric_limits<Uid::size_type>::max(),
+    "Uid::size_type must fit max_str_length");
 static_assert(std::is_trivially_copyable_v<Uid>, "Uid should be trivially copyable");
 
 /// Packs two ASCII characters into a 16-bit value.
@@ -544,10 +634,14 @@ inline constexpr Tag operator"" _tag(const char* text, std::size_t len) {
 }
 
 inline constexpr Uid operator"" _uid(const char* text, std::size_t len) {
-	return Uid(std::string_view{text, len});
+	const auto idx = uid_lookup::uid_index_from_text(std::string_view{text, len});
+	return Uid::from_index(idx);
 }
 
 } // namespace literals
+static_assert(uid_lookup::uid_index_from_text("ImplicitVRLittleEndian") ==
+		uid_lookup::uid_index_from_text("1.2.840.10008.1.2"),
+	"UID keyword and value literals must resolve to the same registry entry");
 
 class Sequence {};
 class PixelSequence {};
@@ -618,6 +712,8 @@ public:
 	[[nodiscard]] std::optional<std::vector<double>> to_double_vector() const;
 	[[nodiscard]] std::optional<Tag> to_tag() const;
 	[[nodiscard]] std::optional<std::vector<Tag>> to_tag_vector() const;
+	[[nodiscard]] std::optional<Uid> to_transfer_syntax_uid() const;
+	[[nodiscard]] std::optional<Uid> to_sop_class_uid() const;
 
 	// Convenience wrappers with default values
 	[[nodiscard]] inline long toLong(long default_value = 0) const {

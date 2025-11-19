@@ -113,6 +113,51 @@ std::optional<std::vector<long>> make_long_vector_from_numbers(const std::vector
 	return out;
 }
 
+constexpr Tag kTransferSyntaxUidTag{0x0002u, 0x0010u};
+constexpr Tag kSopClassUidTag{0x0008u, 0x0016u};
+
+std::optional<std::string> extract_single_ui_value(const DataElement& elem) {
+	if (elem.vr() != dicom::VR::UI) {
+		return std::nullopt;
+	}
+	const auto span = elem.value_span();
+	if (span.empty()) {
+		return std::nullopt;
+	}
+	for (auto byte : span) {
+		if (byte == '\\') {
+			return std::nullopt;
+		}
+	}
+	std::string value(reinterpret_cast<const char*>(span.data()), span.size());
+	while (!value.empty() && (value.back() == '\0' || value.back() == ' ')) {
+		value.pop_back();
+	}
+	size_t leading = 0;
+	while (leading < value.size() && value[leading] == ' ') {
+		++leading;
+	}
+	if (leading > 0) {
+		value.erase(0, leading);
+	}
+	if (value.empty() || value.size() > Uid::max_str_length) {
+		return std::nullopt;
+	}
+	return value;
+}
+
+std::optional<Uid> uid_from_element_value(const DataElement& elem) {
+	auto text = extract_single_ui_value(elem);
+	if (!text) {
+		return std::nullopt;
+	}
+	Uid uid = Uid::from_value(*text);
+	if (!uid.has_value()) {
+		return std::nullopt;
+	}
+	return uid;
+}
+
 }  // namespace
 
 DataElement* NullElement() {
@@ -614,6 +659,35 @@ std::optional<Tag> DataElement::to_tag() const {
 	const std::uint16_t g = endian::load_value<std::uint16_t>(span.data(), little_endian);
 	const std::uint16_t e = endian::load_value<std::uint16_t>(span.data() + 2, little_endian);
 	return Tag(g, e);
+}
+
+
+std::optional<Uid> DataElement::to_transfer_syntax_uid() const {
+	auto uid = uid_from_element_value(*this);
+	if (!uid) {
+		return std::nullopt;
+	}
+	if (!uid->is_registry()) {
+		return std::nullopt;
+	}
+	if (uid->uid_type() != UidType::TransferSyntax) {
+		return std::nullopt;
+	}
+	return uid;
+}
+
+std::optional<Uid> DataElement::to_sop_class_uid() const {
+	auto uid = uid_from_element_value(*this);
+	if (!uid) {
+		return std::nullopt;
+	}
+	if (uid->is_registry()) {
+		const auto type = uid->uid_type();
+		if (type != UidType::SopClass && type != UidType::MetaSopClass) {
+			return std::nullopt;
+		}
+	}
+	return uid;
 }
 
 }  // namespace dicom
