@@ -94,6 +94,11 @@ if(DICOM_BUILD_EXAMPLES)
 		examples/uid_lookup_example.cpp
 	)
 	target_link_libraries(uid_lookup_example PRIVATE dicomsdl)
+
+	add_executable(dump_dataset_example
+		examples/dump_dataset_example.cpp
+	)
+	target_link_libraries(dump_dataset_example PRIVATE dicomsdl)
 endif()
 
 option(DICOM_BUILD_PYTHON "Build Python bindings with pybind11" ON)

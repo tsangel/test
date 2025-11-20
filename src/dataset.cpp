@@ -25,6 +25,11 @@ inline std::string tag_to_string(Tag tag) {
 	return fmt::format("({:04X},{:04X})", tag.group(), tag.element());
 }
 
+constexpr uid::WellKnown kExplicitVrLittleEndian = "ExplicitVRLittleEndian"_uid;
+constexpr uid::WellKnown kImplicitVrLittleEndianUid = "ImplicitVRLittleEndian"_uid;
+constexpr uid::WellKnown kPapyrusImplicitVrLittleEndianUid = "Papyrus3ImplicitVRLittleEndian"_uid;
+constexpr uid::WellKnown kExplicitVrBigEndianUid = "ExplicitVRBigEndian"_uid;
+
 std::unique_ptr<InFileStream> make_file_stream(const std::string& path) {
 	auto stream = std::make_unique<InFileStream>();
 	stream->attach_file(path);
@@ -46,9 +51,18 @@ std::unique_ptr<InStringStream> make_memory_stream(std::vector<std::uint8_t>&& b
 }  // namespace
 
 
-DataSet::DataSet() = default;
+DataSet::DataSet() {
+	set_transfer_syntax(kExplicitVrLittleEndian);
+}
 
-DataSet::DataSet(DataSet* root_dataset) : root_dataset_(root_dataset ? root_dataset : this) {}
+DataSet::DataSet(DataSet* root_dataset) : root_dataset_(root_dataset ? root_dataset : this) {
+	set_transfer_syntax(kExplicitVrLittleEndian);
+	if (root_dataset && root_dataset != this) {
+		little_endian_ = root_dataset->little_endian_;
+		explicit_vr_ = root_dataset->explicit_vr_;
+		transfer_syntax_uid_ = root_dataset->transfer_syntax_uid_;
+	}
+}
 
 DataSet::~DataSet() = default;
 
@@ -238,6 +252,7 @@ void DataSet::read_attached_stream(const ReadOptions& options) {
 	elements_.clear();
 	element_map_.clear();
 	last_tag_loaded_ = Tag::from_value(0);
+	set_transfer_syntax(kExplicitVrLittleEndian);
 
 	// parse DICOM stream, starting with skipping the 128-byte preamble.
 	stream_->rewind();
@@ -248,6 +263,17 @@ void DataSet::read_attached_stream(const ReadOptions& options) {
 	if (stream_->read_4bytes(magic) != 4 || std::memcmp(magic.data(), "DICM", 4) != 0) {
 		// Some files ship without the PART 10 preamble/magic; rewind to treat them as raw streams.
 		stream_->rewind();
+	}
+
+	read_elements_until("(0002,FFFF)"_tag, stream_.get());
+
+	const auto* transfer_syntax = get_dataelement("(0002,0010)"_tag);
+	if (auto well_known = transfer_syntax->to_transfer_syntax_uid()) {
+		set_transfer_syntax(*well_known);
+	} else if (auto uid_value = transfer_syntax->to_uid_string()) {
+		diag::error(
+		    "DataSet::read_attached_stream file={} transfer_syntax_uid={} reason=unknown transfer syntax UID",
+		    path(), *uid_value);
 	}
 
 	read_elements_until(options.load_until, stream_.get());
@@ -315,13 +341,16 @@ void DataSet::read_elements_until(Tag load_until, InStream* stream) {
 			}
 		}
 
-		if (this == root_dataset_ && tag > load_until)
+		if (this == root_dataset_ && tag > load_until) {
+			stream->unread(8);
 			break;
+		}
 
-			if (last_tag_loaded_ > tag && this != root_dataset_) {
-				diag::error(
-				    "DataSet::read_elements_until file={} offset=0x{:X} tag={} last_tag={} reason=tag order decreased (unexpected sequence end?)",
-				    path(), stream->tell() - 8, tag_to_string(tag), tag_to_string(last_tag_loaded_));
+		if (last_tag_loaded_ > tag && this != root_dataset_) {
+			diag::error(
+				"DataSet::read_elements_until file={} offset=0x{:X} tag={} last_tag={} reason=tag order decreased (unexpected sequence end?)",
+				path(), stream->tell() - 8, tag_to_string(tag), tag_to_string(last_tag_loaded_));
+			stream->unread(8);
 			break;
 		}
 
@@ -412,6 +441,24 @@ void DataSet::read_elements_until(Tag load_until, InStream* stream) {
 	last_tag_loaded_ = load_until;
 	if (stream->is_eof())
 		last_tag_loaded_ = "ffff,ffff"_tag;
+}
+
+void DataSet::set_transfer_syntax(uid::WellKnown transfer_syntax) {
+	transfer_syntax_uid_ = transfer_syntax.valid() ? transfer_syntax : uid::WellKnown{};
+	little_endian_ = true;
+	explicit_vr_ = true;
+
+	if (!transfer_syntax_uid_.valid()) {
+		return;
+	}
+	if (transfer_syntax_uid_ == kExplicitVrBigEndianUid) {
+		little_endian_ = false;
+		return;
+	}
+	if (transfer_syntax_uid_ == kImplicitVrLittleEndianUid ||
+	    transfer_syntax_uid_ == kPapyrusImplicitVrLittleEndianUid) {
+		explicit_vr_ = false;
+	}
 }
 
 void DataSet::dump_elements() const {

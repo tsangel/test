@@ -185,9 +185,71 @@ PYBIND11_MODULE(_dicomsdl, m) {
 		.def_property_readonly("offset", &DataElement::offset)
 		.def_property_readonly("vm", &DataElement::vm)
 		.def_property_readonly("is_sequence",
-		    [](const DataElement& element) { return element.vr().is_sequence(); })
+	    [](const DataElement& element) { return element.vr().is_sequence(); })
 		.def_property_readonly("is_pixel_sequence",
-		    [](const DataElement& element) { return element.vr().is_pixel_sequence(); })
+	    [](const DataElement& element) { return element.vr().is_pixel_sequence(); })
+		.def("to_uid_string",
+	    [](const DataElement& element) -> py::object {
+	        auto v = element.to_uid_string();
+	        if (v) {
+	            return py::str(*v);
+	        }
+	        return py::none();
+	    },
+	    "Return the trimmed UI string value or None if unavailable.")
+		.def("to_string_view",
+	    [](const DataElement& element) -> py::object {
+	        auto v = element.to_string_view();
+	        if (v) {
+	            return py::str(v->data(), v->size());
+	        }
+	        return py::none();
+	    },
+	    "Return a trimmed raw string (no charset decoding) or None if VR is not textual.")
+		.def("to_string_views",
+	    [](const DataElement& element) -> py::object {
+	        auto values = element.to_string_views();
+	        if (!values) {
+	            return py::none();
+	        }
+	        py::list out;
+	        for (const auto& item : *values) {
+	            out.append(py::str(item.data(), item.size()));
+	        }
+	        return out;
+	    },
+	    "Return a list of trimmed raw strings for multi-valued VRs, or None if unsupported.")
+		.def("to_utf8_view",
+	    [](const DataElement& element) -> py::object {
+	        auto v = element.to_utf8_view();
+	        if (v) {
+	            return py::str(v->data(), v->size());
+	        }
+	        return py::none();
+	    },
+	    "Return a charset-decoded UTF-8 string when available, else None.")
+		.def("to_utf8_views",
+	    [](const DataElement& element) -> py::object {
+	        auto values = element.to_utf8_views();
+	        if (!values) {
+	            return py::none();
+	        }
+	        py::list out;
+	        for (const auto& item : *values) {
+	            out.append(py::str(item.data(), item.size()));
+	        }
+	        return out;
+	    },
+	    "Return a list of UTF-8 strings for multi-valued VRs, or None if unsupported.")
+		.def("to_transfer_syntax_uid",
+	    [](const DataElement& element) -> py::object {
+	        auto uid = element.to_transfer_syntax_uid();
+	        if (uid) {
+	            return py::cast(*uid);
+	        }
+	        return py::none();
+	    },
+	    "Return a well-known transfer syntax UID if the element matches, else None.")
 		.def("to_tag",
 		    [](const DataElement& element, py::object default_value) -> py::object {
 		        if (default_value.is_none()) {

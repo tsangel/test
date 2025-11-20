@@ -14,6 +14,7 @@ MAX_LINE = 160
 LONG_VRS = {dicom.VR.SS.value, dicom.VR.US.value, dicom.VR.SL.value, dicom.VR.UL.value}
 LONG_LONG_VRS = {dicom.VR.SV.value, dicom.VR.UV.value}
 DOUBLE_VRS = {dicom.VR.FL.value, dicom.VR.FD.value, dicom.VR.DS.value, dicom.VR.IS.value}
+UI_VR = dicom.VR.UI.value
 
 
 def format_vector(values: Iterable[object]) -> str:
@@ -46,6 +47,18 @@ def try_numeric(elem: dicom.DataElement) -> str | None:
             return format_vector(vec) if vec is not None else None
         scalar = elem.to_double()
         return str(scalar) if scalar is not None else None
+    if vr_value == UI_VR:
+        text = elem.to_uid_string()
+        if text is None:
+            return None
+        uid = dicom.lookup_uid(text)
+        if uid is not None:
+            keyword = uid.keyword or "-"
+            return (
+                f"UID(value='{uid.value}', keyword='{keyword}', "
+                f"name='{uid.name}', type='{uid.type}')"
+            )
+        return f"UID(value='{text}')"
     if vr_value == dicom.VR.AT.value:
         if vm > 1:
             vec = elem.to_tag_vector()

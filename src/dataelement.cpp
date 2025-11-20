@@ -116,43 +116,77 @@ std::optional<std::vector<long>> make_long_vector_from_numbers(const std::vector
 constexpr Tag kTransferSyntaxUidTag{0x0002u, 0x0010u};
 constexpr Tag kSopClassUidTag{0x0008u, 0x0016u};
 
-std::optional<std::string> extract_single_ui_value(const DataElement& elem) {
-	if (elem.vr() != dicom::VR::UI) {
-		return std::nullopt;
+namespace {
+
+constexpr bool is_trim_char(char ch) {
+	return ch == ' ' || ch == '\0';
+}
+
+inline void trim_leading_spaces(std::string_view& view) {
+	while (!view.empty() && is_trim_char(view.front())) {
+		view.remove_prefix(1);
 	}
-	const auto span = elem.value_span();
-	if (span.empty()) {
-		return std::nullopt;
+}
+
+inline void trim_trailing_spaces(std::string_view& view) {
+	while (!view.empty() && is_trim_char(view.back())) {
+		view.remove_suffix(1);
 	}
-	for (auto byte : span) {
-		if (byte == '\\') {
-			return std::nullopt;
+}
+
+template <bool TrimLeading>
+inline std::string_view to_string_view_apply_trim(std::string_view component) {
+	if constexpr (TrimLeading) {
+		trim_leading_spaces(component);
+	}
+	trim_trailing_spaces(component);
+	return component;
+}
+
+template <bool TrimLeading, bool UseDelim>
+inline std::optional<std::string_view> to_string_view_normalize(std::string_view raw) {
+	if constexpr (UseDelim) {
+		const auto pos = raw.find('\\');
+		if (pos != std::string_view::npos) {
+			raw = raw.substr(0, pos);
 		}
 	}
-	std::string value(reinterpret_cast<const char*>(span.data()), span.size());
-	while (!value.empty() && (value.back() == '\0' || value.back() == ' ')) {
-		value.pop_back();
+	return to_string_view_apply_trim<TrimLeading>(raw);
+}
+
+template <bool TrimLeading, bool UseDelim>
+inline std::optional<std::vector<std::string_view>> to_string_views_normalize(std::string_view raw) {
+	std::vector<std::string_view> values;
+	if constexpr (!UseDelim) {
+		values.push_back(to_string_view_apply_trim<TrimLeading>(raw));
+		return values;
 	}
-	size_t leading = 0;
-	while (leading < value.size() && value[leading] == ' ') {
-		++leading;
+	size_t start = 0;
+	while (start <= raw.size()) {
+		const auto next = raw.find('\\', start);
+		const auto len = (next == std::string_view::npos) ? (raw.size() - start) : (next - start);
+		auto token = raw.substr(start, len);
+		values.push_back(to_string_view_apply_trim<TrimLeading>(token));
+		if (next == std::string_view::npos) {
+			break;
+		}
+		start = next + 1;
 	}
-	if (leading > 0) {
-		value.erase(0, leading);
-	}
-	if (value.empty() || value.size() > uid::Generated::max_str_length) {
-		return std::nullopt;
-	}
-	return value;
+	return values;
 }
 
 std::optional<uid::WellKnown> well_known_uid_from_element_value(const DataElement& elem) {
-	auto text = extract_single_ui_value(elem);
-	if (!text) {
+	if (elem.vr() != dicom::VR::UI) {
 		return std::nullopt;
 	}
-	return uid::from_value(*text);
+	const auto normalized = elem.to_string_view();
+	if (!normalized) {
+		return std::nullopt;
+	}
+	return uid::from_value(std::string(*normalized));
 }
+
+}  // namespace
 
 }  // namespace
 
@@ -655,6 +689,90 @@ std::optional<Tag> DataElement::to_tag() const {
 	const std::uint16_t g = endian::load_value<std::uint16_t>(span.data(), little_endian);
 	const std::uint16_t e = endian::load_value<std::uint16_t>(span.data() + 2, little_endian);
 	return Tag(g, e);
+}
+
+std::optional<std::string> DataElement::to_uid_string() const {
+	if (vr_ != dicom::VR::UI) {
+		return std::nullopt;
+	}
+	if (auto normalized = to_string_view()) {
+		return std::string(*normalized);
+	}
+	return std::nullopt;
+}
+
+std::optional<std::string_view> DataElement::to_string_view() const {
+	if (!vr_.is_string()) {
+		return std::nullopt;
+	}
+	const auto span = value_span();
+	std::string_view raw(reinterpret_cast<const char*>(span.data()), span.size());
+	switch (static_cast<std::uint16_t>(vr_)) {
+	case VR::AE_val:
+	case VR::AS_val:
+	case VR::CS_val:
+	case VR::DA_val:
+	case VR::DS_val:
+	case VR::DT_val:
+	case VR::IS_val:
+	case VR::LO_val:
+	case VR::PN_val:
+	case VR::SH_val:
+	case VR::TM_val:
+	case VR::UI_val:
+		return to_string_view_normalize<true, true>(raw);
+	case VR::UR_val:
+		return to_string_view_normalize<true, false>(raw);
+	case VR::UC_val:
+		return to_string_view_normalize<false, true>(raw);
+	case VR::LT_val:
+	case VR::ST_val:
+	case VR::UT_val:
+		return to_string_view_normalize<false, false>(raw);
+	default:
+		return std::nullopt;
+	}
+}
+
+std::optional<std::vector<std::string_view>> DataElement::to_string_views() const {
+	if (!vr_.is_string()) {
+		return std::nullopt;
+	}
+	const auto span = value_span();
+	std::string_view raw(reinterpret_cast<const char*>(span.data()), span.size());
+	switch (static_cast<std::uint16_t>(vr_)) {
+	case VR::AE_val:
+	case VR::AS_val:
+	case VR::CS_val:
+	case VR::DA_val:
+	case VR::DS_val:
+	case VR::DT_val:
+	case VR::IS_val:
+	case VR::LO_val:
+	case VR::PN_val:
+	case VR::SH_val:
+	case VR::TM_val:
+	case VR::UI_val:
+		return to_string_views_normalize<true, true>(raw);
+	case VR::UR_val:
+		return to_string_views_normalize<true, false>(raw);
+	case VR::UC_val:
+		return to_string_views_normalize<false, true>(raw);
+	case VR::LT_val:
+	case VR::ST_val:
+	case VR::UT_val:
+		return to_string_views_normalize<false, false>(raw);
+	default:
+		return std::nullopt;
+	}
+}
+
+std::optional<std::string_view> DataElement::to_utf8_view() const {
+	return to_string_view();
+}
+
+std::optional<std::vector<std::string_view>> DataElement::to_utf8_views() const {
+	return to_string_views();
 }
 
 

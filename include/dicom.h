@@ -665,8 +665,36 @@ public:
 	[[nodiscard]] std::optional<std::vector<double>> to_double_vector() const;
 	[[nodiscard]] std::optional<Tag> to_tag() const;
 	[[nodiscard]] std::optional<std::vector<Tag>> to_tag_vector() const;
+	[[nodiscard]] std::optional<std::string> to_uid_string() const;
 	[[nodiscard]] std::optional<uid::WellKnown> to_transfer_syntax_uid() const;
 	[[nodiscard]] std::optional<uid::WellKnown> to_sop_class_uid() const;
+	[[nodiscard]] std::optional<std::string_view> to_string_view() const;
+	[[nodiscard]] std::optional<std::vector<std::string_view>> to_string_views() const;
+	[[nodiscard]] std::optional<std::string_view> to_utf8_view() const;
+	[[nodiscard]] std::optional<std::vector<std::string_view>> to_utf8_views() const;
+
+	/*
+	VR trimming/charset rules (for string helpers like to_string_view):
+	VR   | Leading | Trailing | Charset        | "\\" Delimiter
+	-----+---------+----------+----------------+---------------
+	AE   | trim    | trim     | default        | yes
+	AS   | trim    | trim     | default        | yes
+	CS   | trim    | trim     | default        | yes
+	DA   | trim    | trim     | default        | yes
+	DS   | trim    | trim     | default        | yes
+	DT   | trim    | trim     | default        | yes
+	IS   | trim    | trim     | default        | yes
+	LO   | trim    | trim     | (0008,0005)    | yes
+	LT   | keep    | trim     | (0008,0005)    | no
+	PN   | trim    | trim     | (0008,0005)    | yes
+	SH   | trim    | trim     | (0008,0005)    | yes
+	ST   | keep    | trim     | (0008,0005)    | no
+	TM   | trim    | trim     | default        | yes
+	UC   | keep    | trim     | (0008,0005)    | yes
+	UI   | trim    | trim/null pad | default   | yes
+	UR   | trim    | trim     | default (RFC)  | no
+	UT   | keep    | trim     | (0008,0005)    | no
+	*/
 
 	// Convenience wrappers with default values
 	[[nodiscard]] inline long toLong(long default_value = 0) const {
@@ -733,6 +761,7 @@ private:
 };
 
 DataElement* NullElement();
+
 
 template <typename VecIter, typename MapIter, typename Ref, typename Ptr>
 class DataElementIterator {
@@ -862,8 +891,9 @@ public:
 	void dump_elements() const;
 	void read_attached_stream(const ReadOptions& options);
 	void read_elements_until(Tag load_until, InStream* stream);
-	[[nodiscard]] inline bool is_little_endian() const { return true; /* TODO: consult transfer syntax */ }
-	[[nodiscard]] inline bool is_explicit_vr() const { return true; /* TODO: consult transfer syntax */ }
+	[[nodiscard]] inline bool is_little_endian() const { return little_endian_; }
+	[[nodiscard]] inline bool is_explicit_vr() const { return explicit_vr_; }
+	[[nodiscard]] inline uid::WellKnown transfer_syntax_uid() const { return transfer_syntax_uid_; }
 	iterator begin();
 	iterator end();
 	const_iterator begin() const;
@@ -873,9 +903,13 @@ public:
 
 private:
 	void attach_to_stream(std::string identifier, std::unique_ptr<InStream> stream);
+	void set_transfer_syntax(uid::WellKnown transfer_syntax);
 	std::unique_ptr<InStream> stream_;
 	DataSet* root_dataset_{this};
 	Tag last_tag_loaded_{Tag::from_value(0)};
+	uid::WellKnown transfer_syntax_uid_{};
+	bool little_endian_{true};
+	bool explicit_vr_{true};
 	alignas(std::uint64_t) std::uint8_t buf8_[8];  // temporary buffer for tag, vr and length
 	std::vector<DataElement> elements_;
 	std::map<std::uint32_t, DataElement> element_map_;
