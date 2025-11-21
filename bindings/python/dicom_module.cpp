@@ -18,6 +18,7 @@ namespace py = pybind11;
 
 using dicom::DataSet;
 using dicom::DataElement;
+using dicom::Sequence;
 using dicom::Tag;
 using dicom::VR;
 using dicom::uid::WellKnown;
@@ -117,6 +118,25 @@ struct PyDataElementIterator {
 	DataSet::iterator end_;
 };
 
+struct PySequenceIterator {
+	explicit PySequenceIterator(Sequence& sequence)
+	    : sequence_(&sequence), index_(0) {}
+
+	DataSet& next() {
+		if (!sequence_ || index_ >= static_cast<std::size_t>(sequence_->size())) {
+			throw py::stop_iteration();
+		}
+		DataSet* dataset = sequence_->get_dataset(index_++);
+		if (!dataset) {
+			throw py::stop_iteration();
+		}
+		return *dataset;
+	}
+
+	Sequence* sequence_;
+	std::size_t index_;
+};
+
 }  // namespace
 
 PYBIND11_MODULE(_dicomsdl, m) {
@@ -188,6 +208,12 @@ PYBIND11_MODULE(_dicomsdl, m) {
 	    [](const DataElement& element) { return element.vr().is_sequence(); })
 		.def_property_readonly("is_pixel_sequence",
 	    [](const DataElement& element) { return element.vr().is_pixel_sequence(); })
+		.def_property_readonly("sequence",
+	    [](DataElement& element) -> Sequence* {
+		    return element.sequence();
+	    },
+	    py::return_value_policy::reference_internal,
+	    "Return the nested Sequence if present; otherwise None.")
 		.def("to_uid_string",
 	    [](const DataElement& element) -> py::object {
 	        auto v = element.to_uid_string();
@@ -320,6 +346,47 @@ PYBIND11_MODULE(_dicomsdl, m) {
 		    },
 		    py::arg("default") = py::none())
 		.def("__repr__", &dataelement_repr);
+
+	py::class_<PySequenceIterator>(m, "SequenceIterator")
+		.def("__iter__", [](PySequenceIterator& self) -> PySequenceIterator& { return self; })
+		.def("__next__",
+		    [](PySequenceIterator& self) -> DataSet& { return self.next(); },
+		    py::return_value_policy::reference_internal);
+
+	py::class_<Sequence>(m, "Sequence")
+		.def("__len__", &Sequence::size)
+		.def("__getitem__",
+		    [](Sequence& self, std::size_t index) -> DataSet& {
+			    DataSet* ds = self.get_dataset(index);
+			    if (!ds) {
+				    throw py::index_error("Sequence index out of range");
+			    }
+			    return *ds;
+		    },
+		    py::arg("index"),
+		    py::return_value_policy::reference_internal)
+		.def("__iter__",
+		    [](Sequence& self) {
+			    return PySequenceIterator(self);
+		    },
+		    py::keep_alive<0, 1>(),
+		    "Iterate over child DataSets in insertion order")
+		.def("add_dataset",
+		    [](Sequence& self) -> DataSet& {
+			    DataSet* ds = self.add_dataset();
+			    if (!ds) {
+				    throw std::runtime_error("Failed to append DataSet to sequence");
+			    }
+			    return *ds;
+		    },
+		    py::return_value_policy::reference_internal,
+		    "Append a new DataSet to the sequence and return it")
+		.def("__repr__",
+		    [](Sequence& self) {
+			    std::ostringstream oss;
+			    oss << "Sequence(len=" << self.size() << ")";
+			    return oss.str();
+		    });
 
 	py::class_<PyDataElementIterator>(m, "DataElementIterator")
 		.def("__iter__", [](PyDataElementIterator& self) -> PyDataElementIterator& { return self; })

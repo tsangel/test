@@ -86,6 +86,18 @@ void DataSet::attach_to_memory(std::string name, std::vector<std::uint8_t>&& buf
 	attach_to_stream(std::move(name), std::move(stream));
 }
 
+void DataSet::attach_to_substream(InStream* basestream, std::size_t size) {
+	if (!basestream) {
+		diag::error_and_throw("DataSet::attach_to_stream reason=null basestream");
+	}
+	const auto base_identifier = basestream->identifier();
+	const auto sub_identifier = fmt::format("{}@0x{:X}+{}",
+	    base_identifier.empty() ? "<substream>" : base_identifier,
+	    basestream->tell(), size);
+	auto substream = std::make_unique<InSubStream>(basestream, size);
+	attach_to_stream(sub_identifier, std::move(substream));
+}
+
 void DataSet::attach_to_stream(std::string identifier, std::unique_ptr<InStream> stream) {
 	if (!stream) {
 		diag::error_and_throw("DataSet::attach_to_stream file={} reason=null stream",
@@ -411,13 +423,25 @@ void DataSet::read_elements_until(Tag load_until, InStream* stream) {
 		// Data Element's values position
     	auto offset = stream->tell();
 		
-		// if (vr == VR::SQ) {
-		// }
+		if (vr == VR::SQ) {
+			if (length == 0xffffffff) {
+				length = stream->bytes_remaining();
+			}
+
+			DataElement *elem = add_dataelement(tag, VR::SQ, offset, length);
+			Sequence *seq = elem->as_sequence();
+			InSubStream subs(stream, length);
+
+			size_t offset_end;
+			seq->load(&subs);
+			offset_end= subs.tell();
+			length = offset_end - offset;
+			elem->set_length(length);
+			stream->skip(length);
+		}
 		// else if (tag == "7fe0,0010"_tag) {
 		// }
-		// else
-
-			{
+		else {
 				if (length != 0xffffffff) {
 					add_dataelement(tag, vr, offset, length);
 					auto n = stream->skip(length);

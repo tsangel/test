@@ -8,6 +8,7 @@ __version__: str
 
 __all__ = [
     "DataSet",
+    "Sequence",
     "Tag",
     "Uid",
     "VR",
@@ -27,6 +28,16 @@ class DataSet:
     def path(self) -> str: ...
 
 
+class Sequence:
+    def __len__(self) -> int: ...
+
+    def __getitem__(self, index: int, /) -> DataSet: ...
+
+    def __iter__(self): ...
+
+    def add_dataset(self) -> DataSet: ...
+
+
 class DataElement:
     @property
     def tag(self) -> Tag: ...
@@ -42,6 +53,9 @@ class DataElement:
 
     @property
     def vm(self) -> int: ...
+
+    @property
+    def sequence(self) -> Optional[Sequence]: ...
 
     def to_tag(self, default: Tag | None = ...) -> Optional[Tag]: ...
 

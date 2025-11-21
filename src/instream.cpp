@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <system_error>
 #include <vector>
+#include <diagnostics.h>
 
 #if defined(_WIN32)
 #define NOMINMAX
@@ -293,19 +294,18 @@ void InFileStream::detach_file() {
 
 InSubStream::InSubStream(InStream* basestream, std::size_t size) {
 	if (!basestream) {
-		throw std::invalid_argument("Basestream cannot be null");
-	}
-	if (size > basestream->bytes_remaining()) {
-		throw std::out_of_range("Requested substream exceeds available bytes");
+		diag::error_and_throw("InSubStream::InSubStream reason=null basestream");
 	}
 	rootstream_ = basestream->rootstream();
 	startoffset_ = basestream->tell();
 	endoffset_ = startoffset_ + size;
+	if (endoffset_ > basestream->endoffset())
+		endoffset_ = basestream->endoffset();
 	offset_ = startoffset_;
-	filesize_ = size;
+	filesize_ = endoffset_ - startoffset_;
 	std::uint8_t* root_data = rootstream_ ? rootstream_->data() : nullptr;
 	if (!root_data) {
-		throw std::logic_error("Basestream has no backing data");
+		diag::error_and_throw("InSubStream::InSubStream reason=basestream missing backing data");
 	}
 	data_ = root_data;
 	own_data_ = false;

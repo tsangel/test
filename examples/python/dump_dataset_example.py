@@ -70,18 +70,32 @@ def try_numeric(elem: dicom.DataElement) -> str | None:
     return None
 
 
-def describe_element(elem: dicom.DataElement) -> str:
+def describe_element(elem: dicom.DataElement, indent: int = 0) -> str:
     tag = elem.tag
     vr = elem.vr
     keyword = dicom.tag_to_keyword(tag) or "-"
     vm = elem.vm
+    indent_str = " " * indent
     line = (
         f"{to_tag_string(tag)} VR={vr} len={elem.length} "
         f"off={elem.offset} vm={vm} keyword={keyword}"
     )
     value = try_numeric(elem) or "[TODO]"
-    full = f"{line} value={value}"
+    full = f"{indent_str}{line} value={value}"
     return full if len(full) <= MAX_LINE else full[: MAX_LINE - 3] + "..."
+
+
+def dump_dataset(dataset: dicom.DataSet, indent: int = 0) -> None:
+    for elem in dataset:
+        print(describe_element(elem, indent))
+        if elem.is_sequence:
+            seq = elem.sequence
+            if seq is None:
+                continue
+            for idx, item in enumerate(seq):
+                print(" " * (indent + 2) + f"Item[{idx}] {{")
+                dump_dataset(item, indent + 4)
+                print(" " * (indent + 2) + "}")
 
 
 def main(argv: list[str]) -> int:
@@ -90,8 +104,7 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
 
     dataset = dicom.read_file(args.path)
-    for elem in dataset:
-        print(describe_element(elem))
+    dump_dataset(dataset)
     return 0
 
 

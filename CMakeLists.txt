@@ -58,6 +58,7 @@ include(CTest)
 
 add_library(dicomsdl STATIC
 	src/dataset.cpp
+	src/sequence.cpp
 	src/dataelement.cpp
 	src/instream.cpp
 )

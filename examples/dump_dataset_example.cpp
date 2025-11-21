@@ -155,6 +155,31 @@ std::string describe_element(const dicom::DataElement& element) {
 	return line;
 }
 
+void dump_dataset(const dicom::DataSet& dataset, std::size_t indent = 0);
+
+void dump_sequence(const dicom::Sequence& sequence, std::size_t indent) {
+	const std::string indent_str(indent, ' ');
+	for (int idx = 0; idx < sequence.size(); ++idx) {
+		const dicom::DataSet* item = sequence.get_dataset(static_cast<std::size_t>(idx));
+		if (!item) {
+			continue;
+		}
+		std::cout << indent_str << "Item[" << idx << "] {\n";
+		dump_dataset(*item, indent + 2);
+		std::cout << indent_str << "}\n";
+	}
+}
+
+void dump_dataset(const dicom::DataSet& dataset, std::size_t indent) {
+	const std::string indent_str(indent, ' ');
+	for (const auto& element : dataset) {
+		std::cout << indent_str << describe_element(element) << '\n';
+		if (const dicom::Sequence* seq = element.sequence()) {
+			dump_sequence(*seq, indent + 2);
+		}
+	}
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -165,9 +190,7 @@ int main(int argc, char** argv) {
 
 	try {
 		auto dataset = dicom::read_file(argv[1]);
-		for (const auto& element : *dataset) {
-			std::cout << describe_element(element) << '\n';
-		}
+		dump_dataset(*dataset);
 	} catch (const std::exception& ex) {
 		std::cerr << "Failed to read DICOM file: " << ex.what() << std::endl;
 		return 1;

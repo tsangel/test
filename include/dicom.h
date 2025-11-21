@@ -18,6 +18,7 @@
 #include <utility>
 #include <vector>
 
+#include "instream.h"
 #include "dataelement_lookup_detail.hpp"
 #include "specific_character_set_registry.hpp"
 #include "version.h"
@@ -596,7 +597,7 @@ static_assert(uid_lookup::uid_index_from_text("ImplicitVRLittleEndian") ==
 		uid_lookup::uid_index_from_text("1.2.840.10008.1.2"),
 	"UID keyword and value literals must resolve to the same registry entry");
 
-class Sequence {};
+class Sequence;
 class PixelSequence {};
 
 class DataSet;
@@ -624,9 +625,8 @@ public:
 		return *this;
 	}
 
-	constexpr DataElement(Tag tag, VR vr, std::size_t length, std::size_t offset,
- 	    DataSet* parent = nullptr) noexcept
-	    : tag_(tag), vr_(vr), length_(length), offset_(offset), storage_(), parent_(parent) {}
+	DataElement(Tag tag, VR vr, std::size_t length, std::size_t offset,
+	    DataSet* parent = nullptr) noexcept;
 
 	[[nodiscard]] constexpr Tag tag() const noexcept { return tag_; }
 	[[nodiscard]] constexpr VR vr() const noexcept { return vr_; }
@@ -643,6 +643,8 @@ public:
 	[[nodiscard]] constexpr PixelSequence* pixel_sequence() const noexcept {
 		return vr_.is_pixel_sequence() ? storage_.pixseq : nullptr;
 	}
+	Sequence* as_sequence();
+	const Sequence* as_sequence() const;
 
 	constexpr void set_tag(Tag tag) noexcept { tag_ = tag; }
 	constexpr void set_vr(VR vr) noexcept { vr_ = vr; }
@@ -735,19 +737,7 @@ private:
 	} storage_{};
 	DataSet* parent_{nullptr};
 
-	void release_storage() noexcept {
-		if (!storage_.ptr) {
-			return;
-		}
-		if (vr_.is_sequence()) {
-			delete storage_.seq;
-		} else if (vr_.is_pixel_sequence()) {
-			delete storage_.pixseq;
-		} else {
-			::operator delete(storage_.ptr);
-		}
-		storage_.ptr = nullptr;
-	}
+	void release_storage() noexcept;
 
 	void move_from(DataElement&& other) noexcept {
 		tag_ = other.tag_;
@@ -884,6 +874,9 @@ public:
 	const std::string& path() const;
 	InStream& stream();
 	const InStream& stream() const;
+	void attach_to_substream(InStream* basestream, std::size_t size);
+	void set_offset(std::size_t offset) { offset_ = offset; }
+	[[nodiscard]] std::size_t offset() const { return offset_; }
 	DataElement* add_dataelement(Tag tag, VR vr=VR::None, std::size_t offset=0, std::size_t length=0);
 	void remove_dataelement(Tag tag);
 	DataElement* get_dataelement(Tag tag);
@@ -911,9 +904,72 @@ private:
 	bool little_endian_{true};
 	bool explicit_vr_{true};
 	alignas(std::uint64_t) std::uint8_t buf8_[8];  // temporary buffer for tag, vr and length
+	std::size_t offset_{0};  // absolute offset within the root stream where this dataset starts
 	std::vector<DataElement> elements_;
 	std::map<std::uint32_t, DataElement> element_map_;
 };
+
+class Sequence {
+public:
+	explicit Sequence(DataSet* root_dataset);
+	~Sequence();
+	Sequence(const Sequence&) = delete;
+	Sequence& operator=(const Sequence&) = delete;
+	Sequence(Sequence&&) noexcept = default;
+	Sequence& operator=(Sequence&&) noexcept = default;
+
+	void load(InStream* instream);
+
+	[[nodiscard]] inline int size() const { return static_cast<int>(seq_.size()); }
+
+	DataSet* add_dataset();
+	DataSet* get_dataset(std::size_t index);
+	const DataSet* get_dataset(std::size_t index) const;
+	DataSet* operator[](std::size_t index);
+	const DataSet* operator[](std::size_t index) const;
+
+	std::vector<std::unique_ptr<DataSet>>::iterator begin();
+	std::vector<std::unique_ptr<DataSet>>::iterator end();
+	std::vector<std::unique_ptr<DataSet>>::const_iterator begin() const;
+	std::vector<std::unique_ptr<DataSet>>::const_iterator end() const;
+	std::vector<std::unique_ptr<DataSet>>::const_iterator cbegin() const;
+	std::vector<std::unique_ptr<DataSet>>::const_iterator cend() const;
+
+private:
+	DataSet* root_dataset_{nullptr};
+	[[maybe_unused]] uid::WellKnown transfer_syntax_uid_{};
+	std::vector<std::unique_ptr<DataSet>> seq_;
+};
+
+inline DataElement::DataElement(Tag tag, VR vr, std::size_t length, std::size_t offset,
+    DataSet* parent) noexcept
+    : tag_(tag), vr_(vr), length_(length), offset_(offset), storage_(), parent_(parent) {
+	if (vr_.is_sequence()) {
+		storage_.seq = new Sequence(parent_);
+	}
+}
+
+inline void DataElement::release_storage() noexcept {
+	if (!storage_.ptr) {
+		return;
+	}
+	if (vr_.is_sequence()) {
+		delete storage_.seq;
+	} else if (vr_.is_pixel_sequence()) {
+		delete storage_.pixseq;
+	} else {
+		::operator delete(storage_.ptr);
+	}
+	storage_.ptr = nullptr;
+}
+
+inline Sequence* DataElement::as_sequence() {
+	return vr_.is_sequence() ? storage_.seq : nullptr;
+}
+
+inline const Sequence* DataElement::as_sequence() const {
+	return vr_.is_sequence() ? storage_.seq : nullptr;
+}
 
 std::unique_ptr<DataSet> read_file(const std::string& path, ReadOptions options = {});
 std::unique_ptr<DataSet> read_bytes(const std::uint8_t* data, std::size_t size,
