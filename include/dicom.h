@@ -221,6 +221,7 @@ struct WellKnown {
 	[[nodiscard]] constexpr bool is_mpeg2() const noexcept;
 	[[nodiscard]] constexpr bool is_h264() const noexcept;
 	[[nodiscard]] constexpr bool is_hevc() const noexcept;
+	[[nodiscard]] constexpr bool ends_with_ffd9_marker() const noexcept;
 
 	friend constexpr auto operator<=>(const WellKnown&, const WellKnown&) = default;
 };
@@ -778,6 +779,49 @@ inline constexpr bool WellKnown::is_hevc() const noexcept {
 	switch (raw_index()) {
 	case "HEVCMP51"_uid.raw_index():
 	case "HEVCM10P51"_uid.raw_index():
+		return true;
+	default:
+		return false;
+	}
+}
+
+inline constexpr bool WellKnown::ends_with_ffd9_marker() const noexcept {
+	const auto idx = raw_index();
+	switch (idx) {
+		// JPEG Baseline/Extended/Progressive/Huffman variants
+	case "JPEGBaseline8Bit"_uid.raw_index():
+	case "JPEGExtended12Bit"_uid.raw_index():
+	case "JPEGExtended35"_uid.raw_index():
+	case "JPEGSpectralSelectionNonHierarchical68"_uid.raw_index():
+	case "JPEGSpectralSelectionNonHierarchical79"_uid.raw_index():
+	case "JPEGFullProgressionNonHierarchical1012"_uid.raw_index():
+	case "JPEGFullProgressionNonHierarchical1113"_uid.raw_index():
+	case "JPEGLossless"_uid.raw_index():
+	case "JPEGLosslessNonHierarchical15"_uid.raw_index():
+	case "JPEGExtendedHierarchical1618"_uid.raw_index():
+	case "JPEGExtendedHierarchical1719"_uid.raw_index():
+	case "JPEGSpectralSelectionHierarchical2022"_uid.raw_index():
+	case "JPEGSpectralSelectionHierarchical2123"_uid.raw_index():
+	case "JPEGFullProgressionHierarchical2426"_uid.raw_index():
+	case "JPEGFullProgressionHierarchical2527"_uid.raw_index():
+	case "JPEGLosslessHierarchical28"_uid.raw_index():
+	case "JPEGLosslessHierarchical29"_uid.raw_index():
+	case "JPEGLosslessSV1"_uid.raw_index():
+		// JPEG-LS (also uses 0xFFD9 EOI)
+	case "JPEGLSLossless"_uid.raw_index():
+	case "JPEGLSNearLossless"_uid.raw_index():
+		// JPEG 2000 and HTJ2K use EOC (FFD9) as codestream terminator.
+	case "JPEG2000Lossless"_uid.raw_index():
+	case "JPEG2000"_uid.raw_index():
+	case "JPEG2000MCLossless"_uid.raw_index():
+	case "JPEG2000MC"_uid.raw_index():
+	case "JPIPReferenced"_uid.raw_index():
+	case "JPIPReferencedDeflate"_uid.raw_index():
+	case "HTJ2KLossless"_uid.raw_index():
+	case "HTJ2KLosslessRPCL"_uid.raw_index():
+	case "HTJ2K"_uid.raw_index():
+	case "JPIPHTJ2KReferenced"_uid.raw_index():
+	case "JPIPHTJ2KReferencedDeflate"_uid.raw_index():
 		return true;
 	default:
 		return false;

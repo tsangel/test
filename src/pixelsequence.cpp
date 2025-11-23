@@ -16,10 +16,10 @@ inline bool ends_with_ffd9(std::span<const std::uint8_t> s) {
 	return tail >= 2 && s[tail - 2] == 0xFF && s[tail - 1] == 0xD9;
 }
 
-// Detects whether the given fragment likely starts a new frame, using
-// lightweight marker checks per transfer syntax. This is a heuristic and
-// intentionally keeps the scan shallow for speed.
-inline bool start_new_frame(std::span<const std::uint8_t> s, uid::WellKnown ts) {
+// Detects whether the given fragment likely starts a new frame for transfer
+// syntaxes that do NOT rely on an FFD9/EOC trailer (e.g., H.264/HEVC/MPEG-2,
+// JPEG XL). FFD9-terminated codecs are handled separately.
+inline bool fragment_starts_new_frame_nonffd9(std::span<const std::uint8_t> s, uid::WellKnown ts) {
 	if (s.empty()) {
 		return false;
 	}
@@ -44,20 +44,6 @@ inline bool start_new_frame(std::span<const std::uint8_t> s, uid::WellKnown ts) 
 		}
 		return false;
 	};
-
-	// JPEG/JLS: SOI or SOS at fragment start signals a new frame/scan.
-	if (ts.is_jpeg_family()) {
-		if (s.size() >= 2 && s[0] == 0xFF && (s[1] == 0xD8 || s[1] == 0xDA)) {
-			return true;
-		}
-	}
-
-	// JPEG 2000 codestream start marker (SOC = FF4F).
-	if (ts.is_jpeg2000()) {
-		if (s.size() >= 2 && s[0] == 0xFF && s[1] == 0x4F) {
-			return true;
-		}
-	}
 
 	// H.264 Annex B: start code 00 00 01 or 00 00 00 01 followed by slice/AUD.
 	if (ts.is_h264()) {
@@ -85,6 +71,11 @@ inline bool start_new_frame(std::span<const std::uint8_t> s, uid::WellKnown ts) 
 				}
 			}
 		}
+	}
+
+	// JPEG XL codestream starts with FF 0A signature.
+	if (ts.is_jpegxl()) {
+		return s.size() >= 2 && s[0] == 0xFF && s[1] == 0x0A;
 	}
 
 	// MPEG-1/2 Video ES: picture start or sequence/GOP headers.
@@ -117,7 +108,7 @@ std::span<const std::uint8_t> PixelFrame::encoded_data_view() const noexcept {
 Tag PixelFrame::read_from_stream(InStream* stream, std::size_t frame_length, uid::WellKnown ts, bool length_from_bot) {
 	std::array<std::uint8_t, 8> buf8{};
 
-	long remaining_bytes = static_cast<long>(frame_length);
+	const std::size_t frame_end = stream->tell() + frame_length;
 
 	if (encoded_data_size() != 0) {
 		diag::error_and_throw("PixelFrame::read_from_stream reason=encoded_data already populated");
@@ -135,8 +126,6 @@ Tag PixelFrame::read_from_stream(InStream* stream, std::size_t frame_length, uid
 		tag = endian::load_tag_le(buf8.data());
 		frag_length = endian::load_le<std::uint32_t>(buf8.data() + 4);
 
-		remaining_bytes -= 8;
-
 		if (tag == "fffe,e0dd"_tag) {
 			// This Sequence of Items is terminated by a Sequence Delimiter Item
 			// with the Tag (FFFE,E0DD).
@@ -151,26 +140,35 @@ Tag PixelFrame::read_from_stream(InStream* stream, std::size_t frame_length, uid
 		}
 
 		size_t frag_offset = stream->tell();
+
+		if (!fragments_.empty() && !length_from_bot) {
+			if (ts.ends_with_ffd9_marker()) {
+				const auto& last = fragments_.back();
+				auto frag_span = stream->get_span(last.offset, last.length);
+				if (ends_with_ffd9(frag_span)) {
+					stream->unread(8);
+					break;
+				}
+			} else {
+				auto frag_span = stream->get_span(frag_offset, frag_length);
+				if (fragment_starts_new_frame_nonffd9(frag_span, ts)) {
+					stream->unread(8);
+					break;
+				}
+			}
+		}
+
 		if (stream->skip(frag_length) != frag_length) {
 			diag::error_and_throw(
 			    "PixelFrame::read_from_stream stream={} offset=0x{:X} length={} reason=failed to skip fragment bytes",
 			    stream->identifier(), stream->tell(), frag_length);
 		}
 
-		if (!fragments_.empty() && !length_from_bot) {
-			auto frag_span = stream->get_span(frag_offset, frag_length);
-			if (start_new_frame(frag_span, ts)) {
-				stream->unread(8);
-				break;
-			}
-		}
-
-		remaining_bytes -= frag_length;
-
 		fragments_.push_back(PixelFragment{frag_offset, frag_length});
 
 		// I have no more bytes to read.
-		if (remaining_bytes <= 0) break;
+		if (stream->tell() >= frame_end)
+			break;
 	}
 
 	return tag; // (FFFE,E000) or (FFFE,E0DD)
