@@ -258,13 +258,12 @@ std::span<const std::uint8_t> PixelSequence::frame_encoded_span(std::size_t inde
 	// 2) Single fragment can be returned as a view without copy.
 	if (frags.size() == 1) {
 		const auto frag = frags.front();
-		const auto abs_offset = base_offset_ + frag.offset;
-		if (abs_offset + frag.length > stream->endoffset()) {
+		if (frag.offset + frag.length > stream->endoffset()) {
 			diag::error_and_throw(
 			    "PixelSequence::frame_encoded_span stream={} offset=0x{:X} length={} reason=fragment exceeds stream bounds",
-			    stream->identifier(), abs_offset, frag.length);
+			    stream->identifier(), frag.offset, frag.length);
 		}
-		return stream->get_span(abs_offset, frag.length);
+		return stream->get_span(frag.offset, frag.length);
 	}
 
 	// 3) Multiple fragments: coalesce once, then reuse.
@@ -278,13 +277,12 @@ std::span<const std::uint8_t> PixelSequence::frame_encoded_span(std::size_t inde
 	std::vector<std::uint8_t> buffer;
 	buffer.reserve(total);
 	for (const auto& frag : frags) {
-		const auto abs_offset = base_offset_ + frag.offset;
-		if (abs_offset + frag.length > stream->endoffset()) {
+		if (frag.offset + frag.length > stream->endoffset()) {
 			diag::error_and_throw(
 			    "PixelSequence::frame_encoded_span stream={} offset=0x{:X} length={} reason=fragment exceeds stream bounds",
-			    stream->identifier(), abs_offset, frag.length);
+			    stream->identifier(), frag.offset, frag.length);
 		}
-		auto span = stream->get_span(abs_offset, frag.length);
+		auto span = stream->get_span(frag.offset, frag.length);
 		buffer.insert(buffer.end(), span.begin(), span.end());
 	}
 	f->set_encoded_data(std::move(buffer));
