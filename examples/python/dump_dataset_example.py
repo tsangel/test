@@ -80,7 +80,10 @@ def describe_element(elem: dicom.DataElement, indent: int = 0) -> str:
         f"{to_tag_string(tag)} VR={vr} len={elem.length} "
         f"off={elem.offset} vm={vm} keyword={keyword}"
     )
-    value = try_numeric(elem) or "[TODO]"
+    if elem.is_pixel_sequence:
+        value = "PixelSequence (encapsulated pixel data)"
+    else:
+        value = try_numeric(elem) or "[TODO]"
     full = f"{indent_str}{line} value={value}"
     return full if len(full) <= MAX_LINE else full[: MAX_LINE - 3] + "..."
 
@@ -96,6 +99,22 @@ def dump_dataset(dataset: dicom.DataSet, indent: int = 0) -> None:
                 print(" " * (indent + 2) + f"Item[{idx}] {{")
                 dump_dataset(item, indent + 4)
                 print(" " * (indent + 2) + "}")
+        elif elem.is_pixel_sequence:
+            pixseq = elem.pixel_sequence
+            if pixseq is None:
+                continue
+            indent2 = " " * (indent + 2)
+            bot = pixseq.basic_offset_table_count
+            if bot == 0:
+                print(indent2 + "BasicOffsetTable: none")
+            else:
+                print(indent2 + f"BasicOffsetTable: offset=0x{pixseq.basic_offset_table_offset:x} count={bot}")
+            for fi in range(pixseq.number_of_frames):
+                frame = pixseq.frame(fi)
+                frags = frame.fragments
+                print(indent2 + f"Frame[{fi}] fragments={len(frags)} encoded_size={frame.encoded_size}")
+                for fj, frag in enumerate(frags):
+                    print(indent2 + f"  frag[{fj}] offset=0x{frag.offset:x} length={frag.length}")
 
 
 def main(argv: list[str]) -> int:

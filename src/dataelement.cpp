@@ -19,10 +19,6 @@ namespace dicom {
 
 namespace {
 
-inline std::string tag_to_string(Tag tag) {
-	return fmt::format("({:04X},{:04X})", tag.group(), tag.element());
-}
-
 inline std::string_view trim(std::string_view s) {
 	while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) s.remove_prefix(1);
 	while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) s.remove_suffix(1);
@@ -203,7 +199,7 @@ std::span<const std::uint8_t> DataElement::value_span() const {
 	if (!parent_) {
 		diag::error_and_throw(
 		    "DataElement::value_span offset=0x{:X} tag={} reason=not attached to a DataSet",
-		    offset_, tag_to_string(tag_));
+		    offset_, tag_.to_string());
 	}
 	return parent_->stream().get_span(offset_, length_);
 }
@@ -215,7 +211,7 @@ void* DataElement::value_ptr() const {
 	if (!parent_) {
 		diag::error_and_throw(
 		    "DataElement::value_ptr offset=0x{:X} tag={} reason=not attached to a DataSet",
-		    offset_, tag_to_string(tag_));
+		    offset_, tag_.to_string());
 	}
 	return parent_->stream().get_pointer(offset_, length_);
 }
@@ -527,7 +523,7 @@ std::optional<long> DataElement::to_long() const {
 		if (!v) return std::nullopt;
 		if constexpr (sizeof(long) < sizeof(std::int64_t)) {
 			if (*v < std::numeric_limits<long>::min() || *v > std::numeric_limits<long>::max()) {
-				diag::warn("DataElement::to_long tag={} vr=SV value too wide for long; use to_longlong()", tag_to_string(tag_));
+				diag::warn("DataElement::to_long tag={} vr=SV value too wide for long; use to_longlong()", tag_.to_string());
 				return std::nullopt;
 			}
 		}
@@ -538,7 +534,7 @@ std::optional<long> DataElement::to_long() const {
 		if (!v) return std::nullopt;
 		if constexpr (sizeof(long) < sizeof(std::uint64_t)) {
 			if (*v > static_cast<std::uint64_t>(std::numeric_limits<long>::max())) {
-				diag::warn("DataElement::to_long tag={} vr=UV value too wide for long; use to_longlong()", tag_to_string(tag_));
+				diag::warn("DataElement::to_long tag={} vr=UV value too wide for long; use to_longlong()", tag_.to_string());
 				return std::nullopt;
 			}
 		}

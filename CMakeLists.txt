@@ -61,6 +61,7 @@ add_library(dicomsdl STATIC
 	src/sequence.cpp
 	src/dataelement.cpp
 	src/instream.cpp
+	src/pixelsequence.cpp
 )
 set_target_properties(dicomsdl PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(dicomsdl
@@ -100,6 +101,11 @@ if(DICOM_BUILD_EXAMPLES)
 		examples/dump_dataset_example.cpp
 	)
 	target_link_libraries(dump_dataset_example PRIVATE dicomsdl)
+
+	add_executable(simple_read
+		examples/simple_read.cpp
+	)
+	target_link_libraries(simple_read PRIVATE dicomsdl)
 endif()
 
 option(DICOM_BUILD_PYTHON "Build Python bindings with pybind11" ON)

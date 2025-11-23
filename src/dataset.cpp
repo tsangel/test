@@ -20,11 +20,6 @@ namespace diag = dicom::diag;
 namespace dicom {
 
 namespace {
-
-inline std::string tag_to_string(Tag tag) {
-	return fmt::format("({:04X},{:04X})", tag.group(), tag.element());
-}
-
 constexpr uid::WellKnown kExplicitVrLittleEndian = "ExplicitVRLittleEndian"_uid;
 constexpr uid::WellKnown kImplicitVrLittleEndianUid = "ImplicitVRLittleEndian"_uid;
 constexpr uid::WellKnown kPapyrusImplicitVrLittleEndianUid = "Papyrus3ImplicitVRLittleEndian"_uid;
@@ -47,7 +42,6 @@ std::unique_ptr<InStringStream> make_memory_stream(std::vector<std::uint8_t>&& b
 	stream->attach_memory(std::move(buffer));
 	return stream;
 }
-
 }  // namespace
 
 
@@ -159,7 +153,7 @@ DataElement* DataSet::add_dataelement(Tag tag, VR vr, std::size_t offset, std::s
 		if (vr_value == 0) {
 			diag::error_and_throw(
 			    "DataSet::add_dataelement file={} tag={} reason=VR required for unknown tag",
-			    root_dataset_->path(), tag_to_string(tag));
+			    root_dataset_->path(), tag.to_string());
 		}
 		vr = VR(vr_value);
 	}
@@ -297,7 +291,7 @@ void DataSet::read_elements_until(Tag load_until, InStream* stream) {
 
 	if (!stream) {
 		// stream is nullptr when second call from read_attached_stream() or calls
-		// Sequence::load()
+		// Sequence::read_from_stream()
 		stream = stream_.get();
 		if (!stream) {
 			// a DataSet is created from scratch without attaching stream.
@@ -338,13 +332,13 @@ void DataSet::read_elements_until(Tag load_until, InStream* stream) {
 				} else {
 					diag::error(
 					    "DataSet::read_elements_until file={} offset=0x{:X} tag={} reason=item delim encountered out of sequence",
-					    path(), item_offset, tag_to_string(tag));
+					    path(), item_offset, tag.to_string());
 					continue;
 				}
 			} else if (tag == "fffe,e0dd"_tag) {
 				diag::error(
 				    "DataSet::read_elements_until file={} offset=0x{:X} tag={} reason=sequence delim encountered while parsing root dataset",
-				    path(), item_offset, tag_to_string(tag));
+				    path(), item_offset, tag.to_string());
 
 				if (this != root_dataset_)
 					break;
@@ -361,7 +355,7 @@ void DataSet::read_elements_until(Tag load_until, InStream* stream) {
 		if (last_tag_loaded_ > tag && this != root_dataset_) {
 			diag::error(
 				"DataSet::read_elements_until file={} offset=0x{:X} tag={} last_tag={} reason=tag order decreased (unexpected sequence end?)",
-				path(), stream->tell() - 8, tag_to_string(tag), tag_to_string(last_tag_loaded_));
+				path(), stream->tell() - 8, tag.to_string(), last_tag_loaded_.to_string());
 			stream->unread(8);
 			break;
 		}
@@ -384,19 +378,14 @@ void DataSet::read_elements_until(Tag load_until, InStream* stream) {
 					if (stream->read_4bytes(buf4) != 4) {
 						diag::error_and_throw(
 					    "DataSet::read_elements_until file={} offset=0x{:X} tag={} vr={} reason=failed to read 4-byte length",
-						    path(), stream->tell(), tag_to_string(tag), vr.str());
+						    path(), stream->tell(), tag.to_string(), vr.str());
 					}
 					length = endian::load_value<std::uint32_t>(buf4.data(), little_endian);
 					
-				// In a strange implementation, VR 'UT' takes 2 bytes for 'len'
-				if (length > stream->bytes_remaining()) {
+					// Some non‑conforming writers store VR UT with a 2‑byte length; salvage it.
+					if (length != 0xffffffff && length > stream->bytes_remaining()) {
 						stream->unread(4);
 						length = endian::load_value<std::uint16_t>(buf8.data() + 6, little_endian);
-					}
-					if (length == 0 || length > stream->bytes_remaining()) {
-						diag::error_and_throw(
-						    "DataSet::read_elements_until file={} offset=0x{:X} tag={} vr={} length={} remaining={} reason=value length exceeds remaining bytes",
-						    path(), stream->tell(), tag_to_string(tag), vr.str(), length, stream->bytes_remaining());
 					}
 			}
 		} else {
@@ -422,7 +411,7 @@ void DataSet::read_elements_until(Tag load_until, InStream* stream) {
 
 		// Data Element's values position
     	auto offset = stream->tell();
-		
+
 		if (vr == VR::SQ) {
 			if (length == 0xffffffff) {
 				length = stream->bytes_remaining();
@@ -433,14 +422,37 @@ void DataSet::read_elements_until(Tag load_until, InStream* stream) {
 			InSubStream subs(stream, length);
 
 			size_t offset_end;
-			seq->load(&subs);
+			seq->read_from_stream(&subs);
 			offset_end= subs.tell();
 			length = offset_end - offset;
 			elem->set_length(length);
 			stream->skip(length);
 		}
-		// else if (tag == "7fe0,0010"_tag) {
-		// }
+		else if (tag == "7fe0,0010"_tag) {
+			if (length != 0xffffffff) {
+				if ((get_dataelement("BitsAllocated"_tag)->to_long().value_or(0) > 8) && (vr == VR::OB))
+					vr = VR::OW;
+				add_dataelement(tag, vr, offset, length);
+				if (stream->skip(length) != length) {
+					diag::error_and_throw(
+					    "DataSet::read_elements_until file={} offset=0x{:X} tag={} vr={} length={} reason=failed to skip pixel data bytes",
+					    path(), offset, tag.to_string(), vr.str(), length);
+				}
+			} else {
+				vr = VR::PX;
+
+				DataElement *elem = add_dataelement(tag, VR::PX, offset, length);
+				PixelSequence *pixseq = elem->as_pixel_sequence();
+
+				// process basic offset table of the pixel sequence
+				pixseq->attach_to_stream(stream, stream->bytes_remaining());
+				pixseq->read_attached_stream();
+				size_t offset_end = pixseq->stream()->tell();
+				length = offset_end - offset;
+				elem->set_length(length);
+				stream->skip(length);
+			}
+		}
 		else {
 				if (length != 0xffffffff) {
 					add_dataelement(tag, vr, offset, length);
@@ -448,7 +460,7 @@ void DataSet::read_elements_until(Tag load_until, InStream* stream) {
 					if (n != length) {
 						diag::error_and_throw(
 						    "DataSet::read_elements_until file={} offset=0x{:X} tag={} vr={} length={} reason=value length exceeds remaining bytes",
-						    path(), offset, tag_to_string(tag), vr.str(), length);
+						    path(), offset, tag.to_string(), vr.str(), length);
 					}
 
 				} else {

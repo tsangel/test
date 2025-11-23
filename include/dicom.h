@@ -9,6 +9,7 @@
 #include <iterator>
 #include <map>
 #include <memory>
+#include <cstdio>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -19,6 +20,7 @@
 #include <vector>
 
 #include "instream.h"
+#include "dicom_endian.h"
 #include "dataelement_lookup_detail.hpp"
 #include "specific_character_set_registry.hpp"
 #include "version.h"
@@ -52,6 +54,11 @@ struct Tag {
 	}
 
 	[[nodiscard]] constexpr std::uint32_t value() const { return packed; }
+	[[nodiscard]] inline std::string to_string() const {
+		char buf[12]; // "(FFFF,FFFF)" + null
+		std::snprintf(buf, sizeof(buf), "(%04X,%04X)", group(), element());
+		return std::string{buf};
+	}
 
 	[[nodiscard]] constexpr bool is_private() const { return (group() & 0x0001u) != 0; }
 	[[nodiscard]] constexpr explicit operator bool() const { return packed != 0; }
@@ -114,6 +121,26 @@ static_assert(alignof(Tag) == alignof(std::uint32_t), "Tag alignment must match 
 static_assert(std::is_standard_layout_v<Tag>, "Tag should be standard-layout");
 static_assert(std::is_trivially_copyable_v<Tag>, "Tag should be trivially copyable");
 // static_assert(std::is_trivial_v<Tag>, "Tag should be trivial");
+
+namespace endian {
+
+// Load a Tag from two consecutive uint16 fields, honoring the source endianness.
+inline Tag load_tag(const void* ptr, bool little_endian_source) noexcept {
+	const auto* byte_ptr = static_cast<const std::uint8_t*>(ptr);
+	const auto group = load_value<std::uint16_t>(byte_ptr, little_endian_source);
+	const auto element = load_value<std::uint16_t>(byte_ptr + 2, little_endian_source);
+	return Tag(group, element);
+}
+
+// Load a Tag assuming little-endian source bytes.
+inline Tag load_tag_le(const void* ptr) noexcept {
+	const auto* byte_ptr = static_cast<const std::uint8_t*>(ptr);
+	const auto group = load_le<std::uint16_t>(byte_ptr);
+	const auto element = load_le<std::uint16_t>(byte_ptr + 2);
+	return Tag(group, element);
+}
+
+}  // namespace endian
 
 namespace uid {
 
@@ -183,6 +210,17 @@ struct WellKnown {
 		}
 		return UidType::Other;
 	}
+
+	// Transfer Syntax classification helpers (UID index-based; no string compares).
+	[[nodiscard]] constexpr bool is_jpeg_baseline() const noexcept;
+	[[nodiscard]] constexpr bool is_jpeg_lossless() const noexcept;
+	[[nodiscard]] constexpr bool is_jpegls() const noexcept;
+	[[nodiscard]] constexpr bool is_jpeg_family() const noexcept;
+	[[nodiscard]] constexpr bool is_jpeg2000() const noexcept;
+	[[nodiscard]] constexpr bool is_jpegxl() const noexcept;
+	[[nodiscard]] constexpr bool is_mpeg2() const noexcept;
+	[[nodiscard]] constexpr bool is_h264() const noexcept;
+	[[nodiscard]] constexpr bool is_hevc() const noexcept;
 
 	friend constexpr auto operator<=>(const WellKnown&, const WellKnown&) = default;
 };
@@ -594,11 +632,162 @@ inline constexpr uid::WellKnown operator"" _uid(const char* text, std::size_t le
 
 } // namespace literals
 static_assert(uid_lookup::uid_index_from_text("ImplicitVRLittleEndian") ==
-		uid_lookup::uid_index_from_text("1.2.840.10008.1.2"),
+			uid_lookup::uid_index_from_text("1.2.840.10008.1.2"),
 	"UID keyword and value literals must resolve to the same registry entry");
 
+// -- WellKnown transfer syntax helpers (definitions placed after _uid literal).
+namespace uid {
+using namespace dicom::literals;
+
+inline constexpr bool WellKnown::is_jpeg_baseline() const noexcept {
+	switch (raw_index()) {
+	case "JPEGBaseline8Bit"_uid.raw_index():
+	case "JPEGExtended12Bit"_uid.raw_index():
+	case "JPEGExtended35"_uid.raw_index():
+	case "JPEGSpectralSelectionNonHierarchical68"_uid.raw_index():
+	case "JPEGSpectralSelectionNonHierarchical79"_uid.raw_index():
+	case "JPEGFullProgressionNonHierarchical1012"_uid.raw_index():
+	case "JPEGFullProgressionNonHierarchical1113"_uid.raw_index():
+	case "JPEGExtendedHierarchical1618"_uid.raw_index():
+	case "JPEGExtendedHierarchical1719"_uid.raw_index():
+	case "JPEGSpectralSelectionHierarchical2022"_uid.raw_index():
+	case "JPEGSpectralSelectionHierarchical2123"_uid.raw_index():
+	case "JPEGFullProgressionHierarchical2426"_uid.raw_index():
+	case "JPEGFullProgressionHierarchical2527"_uid.raw_index():
+		return true;
+	default:
+		return false;
+	}
+}
+
+inline constexpr bool WellKnown::is_jpeg_lossless() const noexcept {
+	switch (raw_index()) {
+	case "JPEGLossless"_uid.raw_index():
+	case "JPEGLosslessNonHierarchical15"_uid.raw_index():
+	case "JPEGLosslessHierarchical28"_uid.raw_index():
+	case "JPEGLosslessHierarchical29"_uid.raw_index():
+	case "JPEGLosslessSV1"_uid.raw_index():
+		return true;
+	default:
+		return false;
+	}
+}
+
+inline constexpr bool WellKnown::is_jpegls() const noexcept {
+	switch (raw_index()) {
+	case "JPEGLSLossless"_uid.raw_index():
+	case "JPEGLSNearLossless"_uid.raw_index():
+		return true;
+	default:
+		return false;
+	}
+}
+
+inline constexpr bool WellKnown::is_jpeg_family() const noexcept {
+	switch (raw_index()) {
+	case "JPEGBaseline8Bit"_uid.raw_index():
+	case "JPEGExtended12Bit"_uid.raw_index():
+	case "JPEGExtended35"_uid.raw_index():
+	case "JPEGSpectralSelectionNonHierarchical68"_uid.raw_index():
+	case "JPEGSpectralSelectionNonHierarchical79"_uid.raw_index():
+	case "JPEGFullProgressionNonHierarchical1012"_uid.raw_index():
+	case "JPEGFullProgressionNonHierarchical1113"_uid.raw_index():
+	case "JPEGLossless"_uid.raw_index():
+	case "JPEGLosslessNonHierarchical15"_uid.raw_index():
+	case "JPEGExtendedHierarchical1618"_uid.raw_index():
+	case "JPEGExtendedHierarchical1719"_uid.raw_index():
+	case "JPEGSpectralSelectionHierarchical2022"_uid.raw_index():
+	case "JPEGSpectralSelectionHierarchical2123"_uid.raw_index():
+	case "JPEGFullProgressionHierarchical2426"_uid.raw_index():
+	case "JPEGFullProgressionHierarchical2527"_uid.raw_index():
+	case "JPEGLosslessHierarchical28"_uid.raw_index():
+	case "JPEGLosslessHierarchical29"_uid.raw_index():
+	case "JPEGLosslessSV1"_uid.raw_index():
+	case "JPEGLSLossless"_uid.raw_index():
+	case "JPEGLSNearLossless"_uid.raw_index():
+	case "JPEGXLLossless"_uid.raw_index():
+	case "JPEGXLJPEGRecompression"_uid.raw_index():
+	case "JPEGXL"_uid.raw_index():
+		return true;
+	default:
+		return false;
+	}
+}
+
+inline constexpr bool WellKnown::is_jpeg2000() const noexcept {
+	switch (raw_index()) {
+	case "JPEG2000Lossless"_uid.raw_index():
+	case "JPEG2000"_uid.raw_index():
+	case "JPEG2000MCLossless"_uid.raw_index():
+	case "JPEG2000MC"_uid.raw_index():
+	case "JPIPReferenced"_uid.raw_index():
+	case "JPIPReferencedDeflate"_uid.raw_index():
+	case "HTJ2KLossless"_uid.raw_index():
+	case "HTJ2KLosslessRPCL"_uid.raw_index():
+	case "HTJ2K"_uid.raw_index():
+	case "JPIPHTJ2KReferenced"_uid.raw_index():
+	case "JPIPHTJ2KReferencedDeflate"_uid.raw_index():
+		return true;
+	default:
+		return false;
+	}
+}
+
+inline constexpr bool WellKnown::is_jpegxl() const noexcept {
+	switch (raw_index()) {
+	case "JPEGXLLossless"_uid.raw_index():
+	case "JPEGXLJPEGRecompression"_uid.raw_index():
+	case "JPEGXL"_uid.raw_index():
+		return true;
+	default:
+		return false;
+	}
+}
+
+inline constexpr bool WellKnown::is_mpeg2() const noexcept {
+	switch (raw_index()) {
+	case "MPEG2MPML"_uid.raw_index():
+	case "MPEG2MPMLF"_uid.raw_index():
+	case "MPEG2MPHL"_uid.raw_index():
+	case "MPEG2MPHLF"_uid.raw_index():
+		return true;
+	default:
+		return false;
+	}
+}
+
+inline constexpr bool WellKnown::is_h264() const noexcept {
+	switch (raw_index()) {
+	case "MPEG4HP41"_uid.raw_index():
+	case "MPEG4HP41F"_uid.raw_index():
+	case "MPEG4HP41BD"_uid.raw_index():
+	case "MPEG4HP41BDF"_uid.raw_index():
+	case "MPEG4HP422D"_uid.raw_index():
+	case "MPEG4HP422DF"_uid.raw_index():
+	case "MPEG4HP423D"_uid.raw_index():
+	case "MPEG4HP423DF"_uid.raw_index():
+	case "MPEG4HP42STEREO"_uid.raw_index():
+	case "MPEG4HP42STEREOF"_uid.raw_index():
+		return true;
+	default:
+		return false;
+	}
+}
+
+inline constexpr bool WellKnown::is_hevc() const noexcept {
+	switch (raw_index()) {
+	case "HEVCMP51"_uid.raw_index():
+	case "HEVCM10P51"_uid.raw_index():
+		return true;
+	default:
+		return false;
+	}
+}
+
+} // namespace uid
+
 class Sequence;
-class PixelSequence {};
+class PixelSequence;
 
 class DataSet;
 struct ReadOptions {
@@ -645,6 +834,8 @@ public:
 	}
 	Sequence* as_sequence();
 	const Sequence* as_sequence() const;
+	PixelSequence* as_pixel_sequence();
+	const PixelSequence* as_pixel_sequence() const;
 
 	constexpr void set_tag(Tag tag) noexcept { tag_ = tag; }
 	constexpr void set_vr(VR vr) noexcept { vr_ = vr; }
@@ -918,7 +1109,7 @@ public:
 	Sequence(Sequence&&) noexcept = default;
 	Sequence& operator=(Sequence&&) noexcept = default;
 
-	void load(InStream* instream);
+	void read_from_stream(InStream* instream);
 
 	[[nodiscard]] inline int size() const { return static_cast<int>(seq_.size()); }
 
@@ -941,11 +1132,82 @@ private:
 	std::vector<std::unique_ptr<DataSet>> seq_;
 };
 
+struct PixelFragment {
+	std::size_t offset{0};  // byte offset of fragment value (relative to pixel sequence base)
+	std::size_t length{0};  // byte length of fragment value
+};
+
+class PixelFrame {
+public:
+	PixelFrame();
+	~PixelFrame();
+	PixelFrame(const PixelFrame&) = delete;
+	PixelFrame& operator=(const PixelFrame&) = delete;
+	PixelFrame(PixelFrame&&) noexcept = default;
+	PixelFrame& operator=(PixelFrame&&) noexcept = default;
+
+	void set_encoded_data(std::vector<std::uint8_t> data);
+	[[nodiscard]] std::span<const std::uint8_t> encoded_data_view() const noexcept;
+	[[nodiscard]] std::size_t encoded_data_size() const noexcept { return encoded_data_.size(); }
+	Tag read_from_stream(InStream* stream, std::size_t frame_length, uid::WellKnown ts, bool length_from_bot = false);
+	// Clears the encoded buffer and releases its capacity.
+	void discard_encoded_data();
+	[[nodiscard]] const std::vector<PixelFragment>& fragments() const noexcept { return fragments_; }
+	void set_fragments(std::vector<PixelFragment> fragments) { fragments_ = std::move(fragments); }
+	// Returns spans for each fragment without copying (requires valid sequence stream).
+	std::vector<std::span<const std::uint8_t>> fragment_views(const InStream& seq_stream) const;
+	// Coalesces all fragments into a single contiguous buffer.
+	std::vector<std::uint8_t> coalesce_encoded_data(const InStream& seq_stream) const;
+
+private:
+	std::vector<std::uint8_t> encoded_data_;
+	std::vector<PixelFragment> fragments_;
+};
+
+class PixelSequence {
+public:
+	PixelSequence(DataSet* root_dataset, uid::WellKnown transfer_syntax);
+	~PixelSequence();
+	PixelSequence(const PixelSequence&) = delete;
+	PixelSequence& operator=(const PixelSequence&) = delete;
+	PixelSequence(PixelSequence&&) noexcept;
+	PixelSequence& operator=(PixelSequence&&) noexcept;
+
+	PixelFrame* add_frame();
+	PixelFrame* frame(std::size_t index);
+	const PixelFrame* frame(std::size_t index) const;
+	[[nodiscard]] std::size_t number_of_frames() const noexcept { return frames_.size(); }
+	[[nodiscard]] DataSet* root_dataset() const noexcept { return root_dataset_; }
+	[[nodiscard]] uid::WellKnown transfer_syntax_uid() const noexcept { return transfer_syntax_; }
+	[[nodiscard]] std::size_t base_offset() const noexcept { return base_offset_; }
+	[[nodiscard]] std::size_t basic_offset_table_offset() const noexcept { return basic_offset_table_offset_; }
+	[[nodiscard]] std::size_t basic_offset_table_count() const noexcept { return basic_offset_table_count_; }
+	std::span<const std::uint8_t> frame_encoded_span(std::size_t index);
+	void clear_frame_encoded_data(std::size_t index);
+
+	void attach_to_stream(InStream* basestream, std::size_t size);
+	void read_attached_stream();
+	[[nodiscard]] InStream* stream() noexcept { return stream_.get(); }
+	[[nodiscard]] const InStream* stream() const noexcept { return stream_.get(); }
+
+private:
+	DataSet* root_dataset_{nullptr};
+	uid::WellKnown transfer_syntax_{};
+	std::unique_ptr<InStream> stream_;
+	std::size_t base_offset_{0};
+	std::size_t basic_offset_table_offset_{0};
+	std::size_t basic_offset_table_count_{0};
+	std::vector<std::unique_ptr<PixelFrame>> frames_;
+};
+
 inline DataElement::DataElement(Tag tag, VR vr, std::size_t length, std::size_t offset,
     DataSet* parent) noexcept
     : tag_(tag), vr_(vr), length_(length), offset_(offset), storage_(), parent_(parent) {
 	if (vr_.is_sequence()) {
 		storage_.seq = new Sequence(parent_);
+	} else if (vr_.is_pixel_sequence()) {
+		const auto ts = parent_ ? parent_->transfer_syntax_uid() : uid::WellKnown{};
+		storage_.pixseq = new PixelSequence(parent_, ts);
 	}
 }
 
@@ -969,6 +1231,14 @@ inline Sequence* DataElement::as_sequence() {
 
 inline const Sequence* DataElement::as_sequence() const {
 	return vr_.is_sequence() ? storage_.seq : nullptr;
+}
+
+inline PixelSequence* DataElement::as_pixel_sequence() {
+	return vr_.is_pixel_sequence() ? storage_.pixseq : nullptr;
+}
+
+inline const PixelSequence* DataElement::as_pixel_sequence() const {
+	return vr_.is_pixel_sequence() ? storage_.pixseq : nullptr;
 }
 
 std::unique_ptr<DataSet> read_file(const std::string& path, ReadOptions options = {});

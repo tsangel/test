@@ -214,6 +214,12 @@ PYBIND11_MODULE(_dicomsdl, m) {
 	    },
 	    py::return_value_policy::reference_internal,
 	    "Return the nested Sequence if present; otherwise None.")
+		.def_property_readonly("pixel_sequence",
+	    [](DataElement& element) -> dicom::PixelSequence* {
+		    return element.pixel_sequence();
+	    },
+	    py::return_value_policy::reference_internal,
+	    "Return the nested PixelSequence if present; otherwise None.")
 		.def("to_uid_string",
 	    [](const DataElement& element) -> py::object {
 	        auto v = element.to_uid_string();
@@ -508,6 +514,7 @@ m.def("read_bytes",
 		.def("is_private", &Tag::is_private)
 		.def("__int__", &Tag::value)
 		.def("__bool__", [](const Tag& tag) { return static_cast<bool>(tag); })
+		.def("__str__", &Tag::to_string)
 		.def("__repr__", &tag_repr)
 		.def(py::self == py::self);
 
@@ -615,6 +622,73 @@ auto uid_cls = py::class_<Uid>(m, "Uid")
 	vr_cls.attr("UT") = dicom::VR::UT;
 	vr_cls.attr("UV") = dicom::VR::UV;
 	vr_cls.attr("PX") = dicom::VR::PX;
+
+	py::class_<dicom::PixelFragment>(m, "PixelFragment")
+		.def_readonly("offset", &dicom::PixelFragment::offset, "Fragment offset relative to pixel sequence base")
+		.def_readonly("length", &dicom::PixelFragment::length, "Fragment length in bytes")
+		.def("__repr__",
+		    [](const dicom::PixelFragment& frag) {
+			    std::ostringstream oss;
+			    oss << "PixelFragment(offset=0x" << std::hex << frag.offset
+			        << ", length=" << std::dec << frag.length << ")";
+			    return oss.str();
+		    });
+
+	py::class_<dicom::PixelFrame>(m, "PixelFrame")
+		.def_property_readonly("encoded_size", &dicom::PixelFrame::encoded_data_size,
+		    "Size in bytes of materialized encoded data; 0 if not loaded")
+		.def_property_readonly("fragments",
+		    [](const dicom::PixelFrame& f) { return f.fragments(); },
+		    "Fragments belonging to this frame")
+		.def("encoded_bytes",
+		    [](dicom::PixelFrame& f) {
+			    auto span = f.encoded_data_view();
+			    return py::bytes(reinterpret_cast<const char*>(span.data()), span.size());
+		    },
+		    "Return encoded pixel data as bytes (coalesced if needed)")
+		.def("encoded_memoryview",
+		    [](dicom::PixelFrame& f) {
+			    auto span = f.encoded_data_view();
+			    return py::memoryview::from_memory(
+			        reinterpret_cast<const char*>(span.data()), span.size());
+		    },
+		    "Return a read-only memoryview over encoded pixel data (no copy); "
+		    "invalidated if the frame's encoded data is cleared");
+
+	py::class_<dicom::PixelSequence>(m, "PixelSequence")
+		.def_property_readonly("number_of_frames", &dicom::PixelSequence::number_of_frames)
+		.def_property_readonly("basic_offset_table_offset", &dicom::PixelSequence::basic_offset_table_offset)
+		.def_property_readonly("basic_offset_table_count", &dicom::PixelSequence::basic_offset_table_count)
+		.def("__len__", &dicom::PixelSequence::number_of_frames)
+		.def("frame",
+		    [](dicom::PixelSequence& self, std::size_t index) -> dicom::PixelFrame& {
+			    dicom::PixelFrame* f = self.frame(index);
+			    if (!f) throw py::index_error("PixelSequence index out of range");
+			    return *f;
+		    },
+		    py::arg("index"),
+		    py::return_value_policy::reference_internal)
+		.def("frame_encoded_bytes",
+		    [](dicom::PixelSequence& self, std::size_t index) {
+			    auto span = self.frame_encoded_span(index);
+			    return py::bytes(reinterpret_cast<const char*>(span.data()), span.size());
+		    },
+		    py::arg("index"),
+		    "Return encoded pixel data for a frame (coalesces fragments if needed)")
+		.def("frame_encoded_memoryview",
+		    [](dicom::PixelSequence& self, std::size_t index) {
+			    auto span = self.frame_encoded_span(index);
+			    return py::memoryview::from_memory(
+			        reinterpret_cast<const char*>(span.data()), span.size());
+		    },
+		    py::arg("index"),
+		    "Return a read-only memoryview over encoded pixel data for a frame (no copy)")
+		.def("__repr__",
+		    [](dicom::PixelSequence& self) {
+			    std::ostringstream oss;
+			    oss << "PixelSequence(frames=" << self.number_of_frames() << ")";
+			    return oss.str();
+		    });
 
 	m.def("keyword_to_tag_vr",
 	    [] (const std::string& keyword) -> py::object {

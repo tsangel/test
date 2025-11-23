@@ -13,13 +13,6 @@ namespace {
 
 constexpr std::size_t kMaxLineLength = 160;
 
-std::string tag_to_string(const dicom::Tag& tag) {
-	std::ostringstream oss;
-	oss << '(' << std::uppercase << std::hex << std::setw(4) << std::setfill('0') << tag.group()
-	    << ',' << std::setw(4) << tag.element() << ')';
-	return oss.str();
-}
-
 template <typename T>
 std::string format_vector(const std::vector<T>& values) {
 	if (values.empty()) {
@@ -47,7 +40,7 @@ std::string format_tag_vector(const std::vector<dicom::Tag>& values) {
 		if (i) {
 			oss << ',';
 		}
-		oss << tag_to_string(values[i]);
+		oss << values[i].to_string();
 	}
 	oss << ']';
 	return oss.str();
@@ -113,7 +106,7 @@ std::optional<std::string> describe_numeric(const dicom::DataElement& element) {
 			return format_tag_vector(*vec);
 		}
 		auto tag = element.to_tag();
-		return tag ? std::optional<std::string>(tag_to_string(*tag)) : std::nullopt;
+		return tag ? std::optional<std::string>(tag->to_string()) : std::nullopt;
 	}
 	default:
 		return std::nullopt;
@@ -124,7 +117,7 @@ std::string describe_element(const dicom::DataElement& element) {
 	const auto tag = element.tag();
 	const auto keyword = dicom::lookup::tag_to_keyword(tag.value());
 	std::ostringstream oss;
-	oss << tag_to_string(tag)
+	oss << tag.to_string()
 	    << " VR=" << element.vr().str()
 	    << " len=" << element.length()
 	    << " off=" << element.offset()
@@ -156,6 +149,7 @@ std::string describe_element(const dicom::DataElement& element) {
 }
 
 void dump_dataset(const dicom::DataSet& dataset, std::size_t indent = 0);
+void dump_pixel_sequence(const dicom::PixelSequence& pixseq, std::size_t indent);
 
 void dump_sequence(const dicom::Sequence& sequence, std::size_t indent) {
 	const std::string indent_str(indent, ' ');
@@ -170,12 +164,42 @@ void dump_sequence(const dicom::Sequence& sequence, std::size_t indent) {
 	}
 }
 
+void dump_pixel_sequence(const dicom::PixelSequence& pixseq, std::size_t indent) {
+	const std::string indent_str(indent, ' ');
+	const auto bot_offset = pixseq.basic_offset_table_offset();
+	const auto bot_count = pixseq.basic_offset_table_count();
+
+	if (bot_count == 0) {
+		std::cout << indent_str << "BasicOffsetTable: none\n";
+	} else {
+		std::cout << indent_str << "BasicOffsetTable: offset=0x"
+		          << std::hex << bot_offset << std::dec
+		          << " count=" << bot_count << '\n';
+	}
+
+	const auto frame_count = pixseq.number_of_frames();
+	for (std::size_t i = 0; i < frame_count; ++i) {
+		const auto* frame = pixseq.frame(i);
+		if (!frame) continue;
+		const auto& frags = frame->fragments();
+		std::cout << indent_str << "Frame[" << i << "] fragments=" << frags.size() << '\n';
+		for (std::size_t j = 0; j < frags.size(); ++j) {
+			const auto& frag = frags[j];
+			std::cout << indent_str << "  frag[" << j << "] offset=0x"
+			          << std::hex << frag.offset << std::dec
+			          << " length=" << frag.length << '\n';
+		}
+	}
+}
+
 void dump_dataset(const dicom::DataSet& dataset, std::size_t indent) {
 	const std::string indent_str(indent, ' ');
 	for (const auto& element : dataset) {
 		std::cout << indent_str << describe_element(element) << '\n';
 		if (const dicom::Sequence* seq = element.sequence()) {
 			dump_sequence(*seq, indent + 2);
+		} else if (const dicom::PixelSequence* pixseq = element.pixel_sequence()) {
+			dump_pixel_sequence(*pixseq, indent + 2);
 		}
 	}
 }

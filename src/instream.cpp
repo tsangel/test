@@ -86,6 +86,20 @@ std::span<const std::uint8_t> InStream::peek(std::size_t size) const {
 	return std::span<const std::uint8_t>(data_ + offset_, size);	
 }
 
+std::size_t InStream::read_into(void* dest, std::size_t size) {
+	if (size > bytes_remaining()) {
+		return 0;
+	}
+#ifndef NDEBUG
+	if (!data_) {
+		throw std::logic_error("InStream has no backing data");
+	}
+#endif
+	std::memcpy(dest, data_ + offset_, size);
+	offset_ += size;
+	return size;
+}
+
 std::size_t InStream::skip(std::size_t size) {
 	if (size <= bytes_remaining()) {
 		offset_ += size;

@@ -16,7 +16,7 @@ Sequence::Sequence(DataSet* root_dataset)
 
 Sequence::~Sequence() = default;
 
-void Sequence::load(InStream* stream) {
+void Sequence::read_from_stream(InStream* stream) {
 	std::array<std::uint8_t, 8> buf8{};
 
 	bool little_endian = root_dataset_->is_little_endian();
@@ -24,7 +24,7 @@ void Sequence::load(InStream* stream) {
 	while (!stream->is_eof()) {
 		if (stream->read_8bytes(buf8) != 8) {
 			diag::error_and_throw(
-			    "Sequence::load stream={} offset=0x{:X} reason=failed to read 8-byte item header",
+			    "Sequence::read_from_stream stream={} offset=0x{:X} reason=failed to read 8-byte item header",
 			    stream->identifier(), stream->tell());
 		}
 
@@ -38,7 +38,7 @@ void Sequence::load(InStream* stream) {
 			
 		if (tag != "(fffe,e000)"_tag) { // Item Tag (FFFE, E000)
 			stream->unread(8);
-			diag::error("Sequence::load stream={} offset=0x{:X} reason=expected (FFFE,E000) item tag but found ({:04X},{:04X}); aborting sequence parse",
+			diag::error("Sequence::read_from_stream stream={} offset=0x{:X} reason=expected (FFFE,E000) item tag but found ({:04X},{:04X}); aborting sequence parse",
 			    stream->identifier(), stream->tell(), gggg, eeee);
 			break;
 		}

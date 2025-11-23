@@ -52,6 +52,7 @@ public:
 	inline void set_identifier(std::string id) { identifier_ = std::move(id); }
 	std::span<const std::uint8_t> read(std::size_t size);
 	std::span<const std::uint8_t> peek(std::size_t size) const;
+	std::size_t read_into(void* dest, std::size_t size);
 	int read_4bytes(std::array<std::uint8_t, 4>& dest);
 	int read_8bytes(std::array<std::uint8_t, 8>& dest);
 	int peek_8bytes(std::array<std::uint8_t, 8>& dest) const;
