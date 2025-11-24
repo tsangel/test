@@ -707,18 +707,30 @@ void DataSet::read_elements_until(Tag load_until, InStream* stream) {
 			}
 		}
 		else {
-				if (length != 0xffffffff) {
-					add_dataelement(tag, vr, offset, length);
-					auto n = stream->skip(length);
-					if (n != length) {
-						diag::error_and_throw(
-						    "DataSet::read_elements_until file={} offset=0x{:X} tag={} vr={} length={} reason=value length exceeds remaining bytes",
-						    path(), offset, tag.to_string(), vr.str(), length);
-					}
+			if (length != 0xffffffff) {
+				add_dataelement(tag, vr, offset, length);
+				auto n = stream->skip(length);
+				if (n != length) {
+					diag::error_and_throw(
+						"DataSet::read_elements_until file={} offset=0x{:X} tag={} vr={} length={} reason=value length exceeds remaining bytes",
+						path(), offset, tag.to_string(), vr.str(), length);
+				}
 
-				} else {
+			} else {
 				// PROBABLY SEQUENCE ELEMENT WITH IMPLICIT VR WITH ...
+				length = stream->bytes_remaining();
+				vr = VR::SQ;
+				
+				DataElement *elem = add_dataelement(tag, VR::SQ, offset, length);
+				Sequence *seq = elem->as_sequence();
+				InSubStream subs(stream, length);
 
+				size_t offset_end;
+				seq->read_from_stream(&subs);
+				offset_end= subs.tell();
+				length = offset_end - offset;
+				elem->set_length(length);
+				stream->skip(length);
 			}
 		}
 
