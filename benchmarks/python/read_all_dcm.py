@@ -100,14 +100,23 @@ def main(argv: list[str]) -> int:
                     return _read_mem
 
                 def _read_tmp(data: bytes, name: str):
-                    with tempfile.NamedTemporaryFile(suffix=".dcm") as tmp:
+                    # Windows locks NamedTemporaryFile while open; use delete=False then unlink.
+                    tmp = tempfile.NamedTemporaryFile(suffix=".dcm", delete=False)
+                    try:
                         tmp.write(data)
                         tmp.flush()
+                        tmp.close()
                         reader = gdcm.Reader()
                         reader.SetFileName(tmp.name)
                         if not reader.Read():
                             raise RuntimeError(f"gdcm failed to read {name} via temp file")
                         return reader
+                    finally:
+                        try:
+                            import os
+                            os.unlink(tmp.name)
+                        except OSError:
+                            pass
 
                 return _read_tmp
 
