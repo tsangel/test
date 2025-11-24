@@ -26,11 +26,7 @@ set OUT_BIN=%OUT_DIR%\read_all_dcm.exe
 echo Using lib: %LIB_PATH%
 echo Building %OUT_BIN%
 
-cl /std:c++20 /O2 /Zi /MT /EHsc ^
-    /I"%ROOT_DIR%include" /I"%BUILD_DIR%" /I"%BUILD_DIR%generated\include" ^
-    "%ROOT_DIR%benchmarks\read_all_dcm.cpp" ^
-    "%LIB_PATH%" ^
-    /Fe:"%OUT_BIN%"
+cl /std:c++20 /O2 /Zi /MT /EHsc /I"%ROOT_DIR%include" /I"%BUILD_DIR%" /I"%BUILD_DIR%generated\include" "%ROOT_DIR%benchmarks\read_all_dcm.cpp" "%LIB_PATH%" /Fe:"%OUT_BIN%"
 
 echo Done -> %OUT_BIN%
 
