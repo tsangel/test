@@ -3,15 +3,16 @@ rem Build C++ benchmark (read_all_dcm) in RelWithDebInfo with debug info.
 setlocal enabledelayedexpansion
 
 set ROOT_DIR=%~dp0
-set BUILD_DIR=%ROOT_DIR%build
-if not "%BUILD_DIR:~-1%"=="\" set BUILD_DIR=%BUILD_DIR%\
+rem strip trailing backslash if present
+if "%ROOT_DIR:~-1%"=="\" set ROOT_DIR=%ROOT_DIR:~0,-1%
+set BUILD_DIR=%ROOT_DIR%\build
 set CONFIG=RelWithDebInfo
 
 cmake -S "%ROOT_DIR%" -B "%BUILD_DIR%" -DCMAKE_BUILD_TYPE=%CONFIG% -DBUILD_SHARED_LIBS=OFF -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
 cmake --build "%BUILD_DIR%" --config %CONFIG%
 
 set LIB_PATH=
-for %%L in ("%BUILD_DIR%%CONFIG%\dicomsdl.lib" "%BUILD_DIR%dicomsdl.lib") do (
+for %%L in ("%BUILD_DIR%\%CONFIG%\dicomsdl.lib" "%BUILD_DIR%\dicomsdl.lib") do (
     if exist %%L set LIB_PATH=%%L
 )
 
@@ -20,7 +21,7 @@ if "%LIB_PATH%"=="" (
     exit /b 1
 )
 
-set OUT_DIR=%ROOT_DIR%build.bench
+set OUT_DIR=%ROOT_DIR%\build.bench
 if not exist "%OUT_DIR%" mkdir "%OUT_DIR%"
 set OUT_BIN=%OUT_DIR%\read_all_dcm.exe
 echo Using lib: %LIB_PATH%
