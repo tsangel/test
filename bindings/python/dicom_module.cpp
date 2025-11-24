@@ -351,6 +351,14 @@ PYBIND11_MODULE(_dicomsdl, m) {
 			    return py::cast(element.toDoubleVector(default_value.cast<std::vector<double>>()));
 		    },
 		    py::arg("default") = py::none())
+		.def("value_span",
+		    [](const DataElement& element) {
+			    auto span = element.value_span();
+			    return py::memoryview::from_memory(
+			        static_cast<const void*>(span.data()),
+			        static_cast<ssize_t>(span.size()));
+		    },
+		    "Return the raw value bytes as a read-only memoryview")
 		.def("__repr__", &dataelement_repr);
 
 	py::class_<PySequenceIterator>(m, "SequenceIterator")
@@ -424,13 +432,33 @@ PYBIND11_MODULE(_dicomsdl, m) {
 		    "Print internal element storage for debugging")
 		.def("get_dataelement",
 		    [](DataSet& self, const Tag& tag) -> DataElement& {
-		        DataElement* element = self.get_dataelement(tag);
-		        if (element == dicom::NullElement()) {
-			        throw py::key_error("Tag not found in DataSet");
-		        }
-		        return *element;
+		        return *self.get_dataelement(tag);
 		    },
-		    py::arg("tag"), py::return_value_policy::reference_internal)
+		    py::arg("tag"), py::return_value_policy::reference_internal,
+		    "Return the DataElement for a tag or a VR::None NullElement sentinel if missing")
+		.def("get_dataelement",
+		    [](DataSet& self, std::uint32_t packed) -> DataElement& {
+			    const Tag tag(packed);
+			    return *self.get_dataelement(tag);
+		    },
+		    py::arg("packed_tag"),
+		    py::return_value_policy::reference_internal,
+		    "Overload: pass packed 0xGGGEEEE integer; returns NullElement if missing")
+		.def("get_dataelement",
+		    [](DataSet& self, const std::string& tag_str) -> DataElement& {
+			    return *self.get_dataelement(tag_str);
+		    },
+		    py::arg("tag_str"),
+		    py::return_value_policy::reference_internal,
+		    "Overload: parse tag path string.\n"
+		    "Supported examples:\n"
+		    "  - Hex tag with/without parens: '00100010', '(0010,0010)'\n"
+		    "  - Keyword: 'PatientName'\n"
+		    "  - Private creator: 'gggg,xxee,CREATOR' (odd group, xx block placeholder ok)\n"
+		    "    e.g., '0009,xx1e,GEMS_GENIE_1'\n"
+		    "  - Nested sequences: '00082112.0.00081190' or\n"
+		    "    'RadiopharmaceuticalInformationSequence.0.RadionuclideTotalDose'\n"
+		    "Returns a DataElement or NullElement (VR::None) if not found; malformed paths raise.")
 		.def("__iter__",
 		    [](DataSet& self) {
 			    return PyDataElementIterator(self);

@@ -9,10 +9,13 @@
 #include <cstring>
 #include <fmt/format.h>
 #include <iostream>
+#include <optional>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <vector>
 #include <span>
+#include <cctype>
 
 using namespace dicom::literals;
 namespace diag = dicom::diag;
@@ -41,6 +44,120 @@ std::unique_ptr<InStringStream> make_memory_stream(std::vector<std::uint8_t>&& b
 	auto stream = std::make_unique<InStringStream>();
 	stream->attach_memory(std::move(buffer));
 	return stream;
+}
+
+// Trim leading/trailing ASCII whitespace.
+inline std::string_view trim(std::string_view sv) {
+	while (!sv.empty() && std::isspace(static_cast<unsigned char>(sv.front()))) {
+		sv.remove_prefix(1);
+	}
+	while (!sv.empty() && std::isspace(static_cast<unsigned char>(sv.back()))) {
+		sv.remove_suffix(1);
+	}
+	return sv;
+}
+
+// Remove outer parentheses if both present.
+inline std::string_view strip_parens(std::string_view sv) {
+	if (sv.size() >= 2 && sv.front() == '(' && sv.back() == ')') {
+		return sv.substr(1, sv.size() - 2);
+	}
+	return sv;
+}
+
+inline std::uint8_t hex_digit_value_local(char c) {
+	if (c >= '0' && c <= '9') {
+		return static_cast<std::uint8_t>(c - '0');
+	}
+	return static_cast<std::uint8_t>((c & 0xDF) - 'A' + 10);
+}
+
+inline std::optional<std::uint32_t> parse_hex_prefix(std::string_view sv) {
+	std::uint32_t value = 0;
+	int digits = 0;
+	for (char c : sv) {
+		if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			value = (value << 4) | hex_digit_value_local(c);
+			++digits;
+			continue;
+		}
+		break;  // stop at first non-hex
+	}
+	if (digits == 0) {
+		return std::nullopt;
+	}
+	return value;
+}
+
+template <typename DataSetPtr>
+std::optional<Tag> parse_private_creator_tag(DataSetPtr* dataset, std::string_view token) {
+	token = strip_parens(trim(token));
+
+	const auto comma = token.find(',');
+	if (comma == std::string_view::npos) {
+		return std::nullopt;  // not a private-creator pattern
+	}
+
+	const auto second_comma = token.find(',', comma + 1);
+	if (second_comma != std::string_view::npos) {
+		// Recommended style: gggg,xxee,CREATOR  (quotes optional, xx literal allowed)
+		auto group_sv = trim(token.substr(0, comma));
+		auto element_sv = trim(token.substr(comma + 1, second_comma - comma - 1));
+		auto creator_sv = trim(token.substr(second_comma + 1));
+
+		if (group_sv.empty() || element_sv.empty() || creator_sv.empty()) {
+			diag::error_and_throw("Malformed private creator tag string");
+		}
+
+		// Strip optional quotes
+		if (creator_sv.size() >= 2 &&
+		    ((creator_sv.front() == '"' && creator_sv.back() == '"') ||
+		     (creator_sv.front() == '\'' && creator_sv.back() == '\''))) {
+			creator_sv = creator_sv.substr(1, creator_sv.size() - 2);
+		}
+
+		auto group_parsed = parse_hex_prefix(group_sv);
+		if (!group_parsed) {
+			diag::error_and_throw("Malformed private creator tag string");
+		}
+		const auto group = *group_parsed;
+		if ((group & 0x1u) == 0) {
+			diag::error_and_throw("Private creator tag requires an odd group");
+		}
+
+		// Remove literal "xx" placeholder if present.
+		if (element_sv.size() >= 2 &&
+		    (element_sv[0] == 'x' || element_sv[0] == 'X') &&
+		    (element_sv[1] == 'x' || element_sv[1] == 'X')) {
+			element_sv.remove_prefix(2);
+		}
+
+		if (element_sv.empty()) {
+			diag::error_and_throw("Malformed private creator tag string");
+		}
+
+		auto element_parsed = parse_hex_prefix(element_sv);
+		if (!element_parsed) {
+			diag::error_and_throw("Malformed private creator tag string");
+		}
+		const auto element_low = *element_parsed & 0xFFu;
+
+		const auto desired_creator = std::string(creator_sv);
+		for (std::uint32_t block = 0x10; block <= 0xFF; ++block) {
+			Tag creator_tag(static_cast<std::uint16_t>(group), static_cast<std::uint16_t>(block));
+			auto* creator_el = dataset->get_dataelement(creator_tag);
+			if (creator_el == NullElement()) {
+				continue;
+			}
+			auto value = creator_el->to_string_view();
+			if (value && *value == desired_creator) {
+				const auto element = static_cast<std::uint16_t>((block << 8) | element_low);
+				return Tag(static_cast<std::uint16_t>(group), element);
+			}
+		}
+		return std::nullopt;  // creator not found
+	}
+	return std::nullopt;
 }
 }  // namespace
 
@@ -228,6 +345,142 @@ const DataElement* DataSet::get_dataelement(Tag tag) const {
 		return &map_it->second;
 	}
 	return NullElement();
+}
+
+// Parse a tag path expressed as text and resolve it to a DataElement.
+// Supported forms:
+//   - Hex tag with or without parens/comma: "00100010", "(0010,0010)"
+//   - Keyword: "PatientName"
+//   - Private creator (recommended style): "gggg,xxee,CREATOR" where gggg is odd,
+//     xx is the reserved block (literal "xx" placeholder allowed), and CREATOR is the
+//     Private Creator string present in (gggg,00xx); e.g., "0009,xx1e,GEMS_GENIE_1"
+//   - Nested sequences: "00082112.0.00081190" (sequence tag . index . child tag ...),
+//     keyword-friendly paths like "RadiopharmaceuticalInformationSequence.0.RadionuclideTotalDose" work too
+// Behavior:
+//   - Returns NullElement() when the tag (or nested dataset) is missing
+//   - Uses diag::error_and_throw for malformed strings, non-sequence traversal, bad indices, etc.
+DataElement* DataSet::get_dataelement(std::string_view tag_path) {
+	DataSet* current = this;
+	std::string_view remaining = trim(tag_path);
+
+	while (!remaining.empty()) {
+		const auto dot_pos = remaining.find('.');
+		auto tag_token = strip_parens(trim(remaining.substr(0, dot_pos)));
+		remaining = (dot_pos == std::string_view::npos) ? std::string_view{} : remaining.substr(dot_pos + 1);
+
+		Tag tag{};
+		try {
+			tag = Tag(tag_token);
+		} catch (const std::invalid_argument&) {
+			auto private_tag = parse_private_creator_tag(current, tag_token);
+			if (!private_tag) {
+				return NullElement();
+			}
+			tag = *private_tag;
+		}
+
+		DataElement* element = current->get_dataelement(tag);
+		if (element == NullElement()) {
+			return element;
+		}
+		if (dot_pos == std::string_view::npos) {
+			return element;
+		}
+
+		const auto next_dot = remaining.find('.');
+		auto index_token = trim(remaining.substr(0, next_dot));
+		remaining = (next_dot == std::string_view::npos) ? std::string_view{} : remaining.substr(next_dot + 1);
+
+		if (!element->vr().is_sequence()) {
+			diag::error_and_throw("Element {} is not a sequence; cannot index into it",
+			    element->tag().to_string());
+		}
+
+		auto* seq = element->as_sequence();
+		if (!seq) {
+			return NullElement();
+		}
+
+		std::size_t idx = 0;
+		try {
+			idx = static_cast<std::size_t>(std::stoul(std::string(index_token), nullptr, 10));
+		} catch (const std::exception&) {
+			diag::error_and_throw("Malformed sequence index in tag path");
+		}
+
+		current = seq->get_dataset(idx);
+		if (!current) {
+			return NullElement();
+		}
+	}
+
+	return NullElement();
+}
+
+const DataElement* DataSet::get_dataelement(std::string_view tag_path) const {
+	const DataSet* current = this;
+	std::string_view remaining = trim(tag_path);
+
+	while (!remaining.empty()) {
+		const auto dot_pos = remaining.find('.');
+		auto tag_token = strip_parens(trim(remaining.substr(0, dot_pos)));
+		remaining = (dot_pos == std::string_view::npos) ? std::string_view{} : remaining.substr(dot_pos + 1);
+
+		Tag tag{};
+		try {
+			tag = Tag(tag_token);
+		} catch (const std::invalid_argument&) {
+			auto private_tag = parse_private_creator_tag(current, tag_token);
+			if (!private_tag) {
+				return NullElement();
+			}
+			tag = *private_tag;
+		}
+
+		const DataElement* element = current->get_dataelement(tag);
+		if (element == NullElement()) {
+			return element;
+		}
+		if (dot_pos == std::string_view::npos) {
+			return element;
+		}
+
+		const auto next_dot = remaining.find('.');
+		auto index_token = trim(remaining.substr(0, next_dot));
+		remaining = (next_dot == std::string_view::npos) ? std::string_view{} : remaining.substr(next_dot + 1);
+
+		if (!element->vr().is_sequence()) {
+			diag::error_and_throw("Element {} is not a sequence; cannot index into it",
+			    element->tag().to_string());
+		}
+
+		auto* seq = element->as_sequence();
+		if (!seq) {
+			return NullElement();
+		}
+
+		std::size_t idx = 0;
+		try {
+			idx = static_cast<std::size_t>(std::stoul(std::string(index_token), nullptr, 10));
+		} catch (const std::exception&) {
+			diag::error_and_throw("Malformed sequence index in tag path");
+		}
+
+		current = seq->get_dataset(idx);
+		if (!current) {
+			return NullElement();
+		}
+	}
+
+	return NullElement();
+}
+
+DataElement& DataSet::operator[](Tag tag) {
+	return *get_dataelement(tag);
+}
+
+const DataElement& DataSet::operator[](Tag tag) const {
+	return *get_dataelement(tag);
 }
 
 void DataSet::remove_dataelement(Tag tag) {

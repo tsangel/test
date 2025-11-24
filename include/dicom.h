@@ -606,16 +606,45 @@ constexpr std::string_view keyword_to_tag(std::string_view keyword) {
 }
 
 constexpr std::string_view tag_to_keyword(std::uint32_t tag_value) {
+	const auto group = static_cast<std::uint16_t>(tag_value >> 16);
+	const auto element = static_cast<std::uint16_t>(tag_value & 0xFFFFu);
+
 	if (const auto* entry = tag_to_entry(tag_value)) {
 		return entry->keyword;
 	}
+	
+	if (element == 0) {
+		return "(Group Length)";
+	}
+
+	if (group & 0x1u) {
+		if (element >= 0x10 && element <= 0xFF) {
+			return "(Private Creator Data Element)";
+		}
+		return "(Private Data Elements)";
+	}
+
 	return {};
 }
 
 constexpr std::uint16_t tag_to_vr(std::uint32_t tag_value) {
+	const auto group = static_cast<std::uint16_t>(tag_value >> 16);
+	const auto element = static_cast<std::uint16_t>(tag_value & 0xFFFFu);
+
 	if (const auto* entry = tag_to_entry(tag_value)) {
 		return entry->vr_value;
 	}
+
+	if (element == 0) {
+		return VR::UL_val;
+	}
+
+	if (group & 0x1u) {
+		if (element >= 0x10 && element <= 0xFF) {
+			return VR::LO_val;
+		}
+	}
+
 	return 0;
 }
 
@@ -1116,6 +1145,10 @@ public:
 	void remove_dataelement(Tag tag);
 	DataElement* get_dataelement(Tag tag);
 	const DataElement* get_dataelement(Tag tag) const;
+	DataElement* get_dataelement(std::string_view tag_path);
+	const DataElement* get_dataelement(std::string_view tag_path) const;
+	DataElement& operator[](Tag tag);
+	const DataElement& operator[](Tag tag) const;
 	void dump_elements() const;
 	void read_attached_stream(const ReadOptions& options);
 	void read_elements_until(Tag load_until, InStream* stream);
