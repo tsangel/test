@@ -1226,6 +1226,8 @@ public:
 	[[nodiscard]] std::size_t base_offset() const noexcept { return base_offset_; }
 	[[nodiscard]] std::size_t basic_offset_table_offset() const noexcept { return basic_offset_table_offset_; }
 	[[nodiscard]] std::size_t basic_offset_table_count() const noexcept { return basic_offset_table_count_; }
+	[[nodiscard]] std::size_t extended_offset_table_offset() const noexcept { return extended_offset_table_offset_; }
+	[[nodiscard]] std::size_t extended_offset_table_count() const noexcept { return extended_offset_table_count_; }
 	std::span<const std::uint8_t> frame_encoded_span(std::size_t index);
 	void clear_frame_encoded_data(std::size_t index);
 
@@ -1241,6 +1243,8 @@ private:
 	std::size_t base_offset_{0};
 	std::size_t basic_offset_table_offset_{0};
 	std::size_t basic_offset_table_count_{0};
+	std::size_t extended_offset_table_offset_{0};
+	std::size_t extended_offset_table_count_{0};
 	std::vector<std::unique_ptr<PixelFrame>> frames_;
 };
 
