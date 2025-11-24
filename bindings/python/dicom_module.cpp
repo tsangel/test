@@ -71,7 +71,7 @@ py::object dataelement_get_value_py(DataElement& element) {
 	auto span = element.value_span();
 	return py::memoryview::from_memory(
 	    static_cast<const void*>(span.data()),
-	    static_cast<ssize_t>(span.size()));
+	    static_cast<py::ssize_t>(span.size()));
 }
 
 std::string tag_repr(const Tag& tag) {
@@ -408,7 +408,7 @@ PYBIND11_MODULE(_dicomsdl, m) {
 			    auto span = element.value_span();
 			    return py::memoryview::from_memory(
 			        static_cast<const void*>(span.data()),
-			        static_cast<ssize_t>(span.size()));
+			        static_cast<py::ssize_t>(span.size()));
 		    },
 		    "Return the raw value bytes as a read-only memoryview")
 		.def("__repr__", &dataelement_repr);
