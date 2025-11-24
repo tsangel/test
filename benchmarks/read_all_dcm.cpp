@@ -71,6 +71,7 @@ int main(int argc, char** argv) {
 			std::unique_ptr<dicom::DataSet> dataset;
 			if (source == "memory") {
 				dicom::ReadOptions opts;
+				opts.copy = false;  // reuse preloaded buffer without extra copy
 				dataset = dicom::read_bytes(f.path.string(), f.buffer.data(), f.buffer.size(), opts);
 			} else {
 				dataset = dicom::read_file(f.path.string());
