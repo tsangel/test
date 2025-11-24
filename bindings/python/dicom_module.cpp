@@ -30,15 +30,21 @@ namespace {
 
 std::string_view vr_to_string_view(const VR& vr);
 
-py::object dataelement_get_value_py(DataElement& element) {
+py::object dataelement_get_value_py(DataElement& element, py::handle parent = py::handle()) {
 	if (&element == dicom::NullElement()) {
 		return py::none();
 	}
 	if (element.vr().is_sequence()) {
-		return py::cast(element.as_sequence(), py::return_value_policy::reference_internal);
+		auto* seq = element.as_sequence();
+		if (!seq) return py::none();
+		py::handle keep = parent.is_none() ? py::cast(element.parent(), py::return_value_policy::reference) : parent;
+		return py::cast(seq, py::return_value_policy::reference_internal, keep);
 	}
 	if (element.vr().is_pixel_sequence()) {
-		return py::cast(element.as_pixel_sequence(), py::return_value_policy::reference_internal);
+		auto* pix = element.as_pixel_sequence();
+		if (!pix) return py::none();
+		py::handle keep = parent.is_none() ? py::cast(element.parent(), py::return_value_policy::reference) : parent;
+		return py::cast(pix, py::return_value_policy::reference_internal, keep);
 	}
 
 	const int vm = element.vm();
@@ -513,26 +519,23 @@ PYBIND11_MODULE(_dicomsdl, m) {
 		    "Returns a DataElement or NullElement (VR::None) if not found; malformed paths raise.")
 		.def("__getitem__",
 		    [](DataSet& self, py::object key) -> py::object {
-			    Tag tag;
+			    DataElement* el = nullptr;
+
 			    if (py::isinstance<Tag>(key)) {
-				    tag = key.cast<Tag>();
+				    el = self.get_dataelement(key.cast<Tag>());
 			    } else if (py::isinstance<py::int_>(key)) {
-				    tag = Tag(key.cast<std::uint32_t>());
+				    el = self.get_dataelement(Tag(key.cast<std::uint32_t>()));
 			    } else if (py::isinstance<py::str>(key)) {
-				    try {
-					    tag = Tag(key.cast<std::string>());
-				    } catch (const std::exception&) {
-					    throw py::key_error("Invalid tag string");
-				    }
+				    // Allow full tag-path strings (including sequences)
+				    el = self.get_dataelement(key.cast<std::string>());
 			    } else {
 				    throw py::type_error("DataSet indices must be Tag, int (0xGGGEEEE), or str");
 			    }
 
-			    DataElement* el = self.get_dataelement(tag);
 			    if (!el || el == dicom::NullElement()) {
 				    return py::none();
 			    }
-			    return dataelement_get_value_py(*el);
+			    return dataelement_get_value_py(*el, py::cast(&self, py::return_value_policy::reference));
 		    },
 		    py::arg("key"),
 		    "Index syntax: ds[tag|packed_int|tag_str] -> element.get_value(); returns None if missing")
@@ -544,7 +547,7 @@ PYBIND11_MODULE(_dicomsdl, m) {
 					    Tag tag(name);
 					    DataElement* el = self.get_dataelement(tag);
 					    if (el && el != dicom::NullElement()) {
-						    return dataelement_get_value_py(*el);
+						    return dataelement_get_value_py(*el, py::cast(&self, py::return_value_policy::reference));
 					    }
 				    } catch (const std::exception&) {
 					    // fall through to AttributeError
