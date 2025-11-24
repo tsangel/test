@@ -5,6 +5,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <vector>
 
 #include <pybind11/operators.h>
@@ -28,6 +29,50 @@ namespace diag = dicom::diag;
 namespace {
 
 std::string_view vr_to_string_view(const VR& vr);
+
+py::object dataelement_get_value_py(DataElement& element) {
+	if (&element == dicom::NullElement()) {
+		return py::none();
+	}
+	if (element.vr().is_sequence()) {
+		return py::cast(element.as_sequence(), py::return_value_policy::reference_internal);
+	}
+	if (element.vr().is_pixel_sequence()) {
+		return py::cast(element.as_pixel_sequence(), py::return_value_policy::reference_internal);
+	}
+
+	const int vm = element.vm();
+	if (vm <= 1) {
+		if (auto v = element.to_longlong()) {
+			return py::cast(*v);
+		}
+		if (auto v = element.to_double()) {
+			return py::cast(*v);
+		}
+		if (auto v = element.to_string_view()) {
+			return py::str(v->data(), v->size());
+		}
+	} else {
+		if (auto v = element.to_longlong_vector()) {
+			return py::cast(*v);
+		}
+		if (auto v = element.to_double_vector()) {
+			return py::cast(*v);
+		}
+		if (auto v = element.to_string_views()) {
+			py::list out;
+			for (const auto& sv : *v) {
+				out.append(py::str(sv.data(), sv.size()));
+			}
+			return out;
+		}
+	}
+
+	auto span = element.value_span();
+	return py::memoryview::from_memory(
+	    static_cast<const void*>(span.data()),
+	    static_cast<ssize_t>(span.size()));
+}
 
 std::string tag_repr(const Tag& tag) {
 	std::ostringstream oss;
@@ -351,6 +396,13 @@ PYBIND11_MODULE(_dicomsdl, m) {
 			    return py::cast(element.toDoubleVector(default_value.cast<std::vector<double>>()));
 		    },
 		    py::arg("default") = py::none())
+		.def("get_value",
+		    [](DataElement& element) -> py::object {
+			    return dataelement_get_value_py(element);
+		    },
+		    "Best-effort typed access: returns int/float/str or list based on VR/VM; "
+		    "falls back to raw bytes (memoryview) for binary VRs; "
+		    "returns None for NullElement or sequences/pixel sequences.")
 		.def("value_span",
 		    [](const DataElement& element) {
 			    auto span = element.value_span();
@@ -459,6 +511,81 @@ PYBIND11_MODULE(_dicomsdl, m) {
 		    "  - Nested sequences: '00082112.0.00081190' or\n"
 		    "    'RadiopharmaceuticalInformationSequence.0.RadionuclideTotalDose'\n"
 		    "Returns a DataElement or NullElement (VR::None) if not found; malformed paths raise.")
+		.def("__getitem__",
+		    [](DataSet& self, py::object key) -> py::object {
+			    Tag tag;
+			    if (py::isinstance<Tag>(key)) {
+				    tag = key.cast<Tag>();
+			    } else if (py::isinstance<py::int_>(key)) {
+				    tag = Tag(key.cast<std::uint32_t>());
+			    } else if (py::isinstance<py::str>(key)) {
+				    try {
+					    tag = Tag(key.cast<std::string>());
+				    } catch (const std::exception&) {
+					    throw py::key_error("Invalid tag string");
+				    }
+			    } else {
+				    throw py::type_error("DataSet indices must be Tag, int (0xGGGEEEE), or str");
+			    }
+
+			    DataElement* el = self.get_dataelement(tag);
+			    if (!el || el == dicom::NullElement()) {
+				    return py::none();
+			    }
+			    return dataelement_get_value_py(*el);
+		    },
+		    py::arg("key"),
+		    "Index syntax: ds[tag|packed_int|tag_str] -> element.get_value(); returns None if missing")
+		.def("__getattr__",
+		    [](DataSet& self, const std::string& name) -> py::object {
+			    // Allow keyword-style attribute access: ds.PatientName -> get_value("PatientName")
+			    if (!name.empty() && name.size() >= 2 && name[0] != '_') {
+				    try {
+					    Tag tag(name);
+					    DataElement* el = self.get_dataelement(tag);
+					    if (el && el != dicom::NullElement()) {
+						    return dataelement_get_value_py(*el);
+					    }
+				    } catch (const std::exception&) {
+					    // fall through to AttributeError
+				    }
+			    }
+			    throw py::attribute_error(("DataSet has no attribute '" + name + "'").c_str());
+		    },
+		    py::arg("name"),
+		    "Attribute sugar: ds.PatientName -> ds.get_dataelement('PatientName').get_value(); "
+		    "raises AttributeError if no such keyword/tag or element is missing.")
+		.def("__dir__",
+		    [](DataSet& self) {
+			    py::object self_obj = py::cast(&self, py::return_value_policy::reference);
+			    py::type t = py::type::of(self_obj);
+			    py::list result = py::reinterpret_steal<py::list>(PyObject_Dir(t.ptr()));  // class attrs
+
+			    std::unordered_set<std::string> seen;
+			    for (auto& item : result) {
+				    seen.insert(py::cast<std::string>(item));
+			    }
+
+			    for (auto& elem : self) {
+				    const auto tag = elem.tag();
+				    if (tag.element() == 0) {
+					    continue;  // group length
+				    }
+				    if (tag.group() & 0x1u) {
+					    continue;  // skip private tags
+				    }
+				    auto kw = dicom::lookup::tag_to_keyword(tag.value());
+				    if (kw.empty()) {
+					    continue;
+				    }
+				    std::string kw_str(kw.data(), kw.size());
+				    if (seen.insert(kw_str).second) {
+					    result.append(py::str(kw_str));
+				    }
+			    }
+			    return result;
+		    },
+		    "dir() includes standard attributes plus public data element keywords (excludes group length/private).")
 		.def("__iter__",
 		    [](DataSet& self) {
 			    return PyDataElementIterator(self);
