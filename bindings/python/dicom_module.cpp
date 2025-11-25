@@ -249,7 +249,9 @@ PYBIND11_MODULE(_dicomsdl, m) {
 	m.def("set_log_level", &diag::set_log_level, py::arg("level"),
 	    "Set process-wide log level; messages below this are dropped");
 
-	py::class_<DataElement>(m, "DataElement")
+	py::class_<DataElement>(m, "DataElement",
+	    "Single DICOM element. Provides tag/VR/length/offset and typed value helpers.\n"
+	    "For sequences and pixel data, holds nested Sequence or PixelSequence objects.")
 		.def_property_readonly("tag", &DataElement::tag)
 		.def_property_readonly("vr", &DataElement::vr)
 		.def_property_readonly("length", &DataElement::length)
@@ -466,9 +468,17 @@ PYBIND11_MODULE(_dicomsdl, m) {
 		    [](PyDataElementIterator& self) -> DataElement& { return self.next(); },
 		    py::return_value_policy::reference_internal);
 
-	py::class_<DataSet, std::unique_ptr<DataSet>>(m, "DataSet")
+	py::class_<DataSet, std::unique_ptr<DataSet>>(m, "DataSet",
+	    "In-memory DICOM dataset. Created via read_file/read_bytes or directly.\n"
+	    "\n"
+	    "Features\n"
+	    "--------\n"
+	    "- Iterable over DataElements in tag order\n"
+	    "- Indexing by Tag, packed int, or tag-path string\n"
+	    "- Attribute access by keyword (e.g., ds.PatientName)\n"
+	    "- Missing lookups return a NullElement sentinel (VR::None)")
 		.def(py::init<>())
-		.def_property_readonly("path", &DataSet::path, "Return the stored file path")
+	.def_property_readonly("path", &DataSet::path, "Identifier of the attached stream (file path, provided name, or '<memory>')")
 		.def("add_dataelement",
 		    [](DataSet& self, const Tag& tag, std::optional<VR> vr,
 		        std::size_t offset, std::size_t length) {
@@ -609,7 +619,16 @@ m.def("read_file",
     py::arg("path"),
     py::arg("load_until") = py::none(),
     py::arg("keep_on_error") = py::none(),
-    "Read a DICOM file from disk and return a DataSet");
+    "Read a DICOM file from disk and return a DataSet.\n"
+    "\n"
+    "Parameters\n"
+    "----------\n"
+    "path : str\n"
+    "    Filesystem path to the DICOM Part 10 file.\n"
+    "load_until : Tag | None, optional\n"
+    "    Stop after this tag is read (inclusive). Defaults to reading entire file.\n"
+    "keep_on_error : bool | None, optional\n"
+    "    When True, keep partially read data instead of raising on parse errors.\n");
 
 m.def("read_bytes",
     [] (py::buffer buffer, const std::string& name, std::optional<Tag> load_until,
@@ -656,10 +675,27 @@ m.def("read_bytes",
     py::arg("load_until") = py::none(),
     py::arg("keep_on_error") = py::none(),
     py::arg("copy") = true,
-    "Read a DataSet from a bytes-like object.\n\n"
-    "Warning: When copy=False, the source buffer must remain alive for as long as the returned "
-    "DataSet; the binding keeps a reference to the Python object internally, but mutating or "
-    "freeing the underlying memory can still corrupt the dataset.");
+    "Read a DataSet from a bytes-like object. Parsing is eager up to `load_until`.\n"
+    "\n"
+    "Parameters\n"
+    "----------\n"
+    "data : buffer\n"
+    "    1-D bytes-like object containing the Part 10 stream (or raw stream).\n"
+    "name : str, optional\n"
+    "    Identifier reported by DataSet.path() and diagnostics. Default '<memory>'.\n"
+    "load_until : Tag | None, optional\n"
+    "    Stop after this tag is read (inclusive). Defaults to reading entire buffer.\n"
+    "keep_on_error : bool | None, optional\n"
+    "    When True, keep partially read data instead of raising on parse errors.\n"
+    "copy : bool, optional\n"
+    "    When False, avoid copying and reference the caller's buffer; caller must keep\n"
+    "    the buffer alive while the DataSet exists.\n"
+    "\n"
+    "Warning\n"
+    "-------\n"
+    "When copy=False, the source buffer must remain alive for as long as the returned DataSet;\n"
+    "the binding keeps a Python reference, but mutating or freeing the underlying memory can\n"
+    "still corrupt the dataset.");
 
 	py::class_<Tag>(m, "Tag")
 		.def(py::init<>())

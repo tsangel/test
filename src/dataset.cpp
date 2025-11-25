@@ -311,7 +311,7 @@ DataElement* DataSet::get_dataelement(Tag tag) {
 	const auto tag_value = tag.value();
 
 	auto it = std::lower_bound(elements_.begin(), elements_.end(), tag_value,
- 	    [](const DataElement& element, std::uint32_t value) {
+  	    [](const DataElement& element, std::uint32_t value) {
 		return element.tag().value() < value;
 	});
 	if (it != elements_.end() && it->tag().value() == tag_value) {
@@ -742,6 +742,16 @@ void DataSet::read_elements_until(Tag load_until, InStream* stream) {
 	last_tag_loaded_ = load_until;
 	if (stream->is_eof())
 		last_tag_loaded_ = "ffff,ffff"_tag;
+}
+
+void DataSet::ensure_loaded(Tag tag) {
+	if (tag > last_tag_loaded_) {
+		read_elements_until(tag, nullptr);
+	}
+}
+
+void DataSet::ensure_loaded(Tag tag) const {
+	const_cast<DataSet*>(this)->ensure_loaded(tag);
 }
 
 void DataSet::set_transfer_syntax(uid::WellKnown transfer_syntax) {

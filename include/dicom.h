@@ -33,6 +33,7 @@ using std::uint16_t;
 
 class InStream;
 
+/// DICOM tag wrapper (16-bit group + 16-bit element packed into 32 bits).
 struct Tag {
 	std::uint32_t packed{0};
 
@@ -863,12 +864,15 @@ class Sequence;
 class PixelSequence;
 
 class DataSet;
+/// Options controlling how a DataSet is read from a stream.
 struct ReadOptions {
 	Tag load_until{Tag(0xFFFFu, 0xFFFFu)};
 	bool keep_on_error{false};
 	bool copy{true};
 };
 
+/// Represents a collection of DICOM data elements backed by a file or memory stream.
+/// The root DataSet owns the input stream; elements are parsed lazily on demand.
 class DataElement {
 public:
 	constexpr DataElement() noexcept = default;
@@ -890,18 +894,29 @@ public:
 	DataElement(Tag tag, VR vr, std::size_t length, std::size_t offset,
 	    DataSet* parent = nullptr) noexcept;
 
+	/// Tag of this element.
 	[[nodiscard]] constexpr Tag tag() const noexcept { return tag_; }
+	/// VR of this element.
 	[[nodiscard]] constexpr VR vr() const noexcept { return vr_; }
+	/// Value length in bytes (may be undefined for sequences).
 	[[nodiscard]] constexpr std::size_t length() const noexcept { return length_; }
+	/// Absolute offset of the value within the root stream.
 	[[nodiscard]] constexpr std::size_t offset() const noexcept { return offset_; }
+	/// Parent dataset (if any).
 	[[nodiscard]] constexpr DataSet* parent() const noexcept { return parent_; }
+	/// Raw value as a byte span; for SQ/PixelData this is the encoded payload.
 	[[nodiscard]] std::span<const std::uint8_t> value_span() const;
+	/// Pointer to stored value or nested sequence/pixel sequence.
 	void* value_ptr() const;
+	/// Value multiplicity; returns -1 when not applicable or parse fails.
 	[[nodiscard]] int vm() const;
+	/// Raw storage pointer for non-sequence VRs.
 	[[nodiscard]] constexpr void* data() const noexcept { return storage_.ptr; }
+	/// Returns the nested Sequence value if VR indicates a sequence, otherwise nullptr.
 	[[nodiscard]] constexpr Sequence* sequence() const noexcept {
 		return vr_.is_sequence() ? storage_.seq : nullptr;
 	}
+	/// Returns the nested PixelSequence value if VR indicates encapsulated pixel data, otherwise nullptr.
 	[[nodiscard]] constexpr PixelSequence* pixel_sequence() const noexcept {
 		return vr_.is_pixel_sequence() ? storage_.pixseq : nullptr;
 	}
@@ -916,27 +931,45 @@ public:
 	constexpr void set_offset(std::size_t offset) noexcept { offset_ = offset; }
 	constexpr void set_parent(DataSet* parent) noexcept { parent_ = parent; }
 
+	/// Set raw storage pointer (binary/string VRs).
 	constexpr void set_data(void* ptr) noexcept { storage_.ptr = ptr; }
+	/// Set nested sequence pointer (SQ VR only).
 	constexpr void set_sequence(Sequence* seq) noexcept { storage_.seq = seq; }
+	/// Set nested pixel sequence pointer (encapsulated pixel data).
 	constexpr void set_pixel_sequence(PixelSequence* pixseq) noexcept {
 		storage_.pixseq = pixseq;
 	}
 
 	// Numeric accessors (PS3.5 6.2 Value Representation)
+	/// Parse value as signed long; empty on failure.
 	[[nodiscard]] std::optional<long> to_long() const;
+	/// Parse value as signed long long; empty on failure.
 	[[nodiscard]] std::optional<long long> to_longlong() const;
+	/// Parse value as vector of signed long; empty on failure.
 	[[nodiscard]] std::optional<std::vector<long>> to_long_vector() const;
+	/// Parse value as vector of signed long long; empty on failure.
 	[[nodiscard]] std::optional<std::vector<long long>> to_longlong_vector() const;
+	/// Parse value as double; empty on failure.
 	[[nodiscard]] std::optional<double> to_double() const;
+	/// Parse value as vector of double; empty on failure.
 	[[nodiscard]] std::optional<std::vector<double>> to_double_vector() const;
+	/// Parse value as Tag.
 	[[nodiscard]] std::optional<Tag> to_tag() const;
+	/// Parse value as vector of Tag.
 	[[nodiscard]] std::optional<std::vector<Tag>> to_tag_vector() const;
+	/// Parse value as UID string (no validation beyond VR rules).
 	[[nodiscard]] std::optional<std::string> to_uid_string() const;
+	/// Parse value as transfer syntax UID (well-known lookup).
 	[[nodiscard]] std::optional<uid::WellKnown> to_transfer_syntax_uid() const;
+	/// Parse value as SOP class UID (well-known lookup).
 	[[nodiscard]] std::optional<uid::WellKnown> to_sop_class_uid() const;
+	/// Parse value as string_view after VR trimming/charset handling.
 	[[nodiscard]] std::optional<std::string_view> to_string_view() const;
+	/// Parse value as multiple string_views (backed by internal storage).
 	[[nodiscard]] std::optional<std::vector<std::string_view>> to_string_views() const;
+	/// Parse value as UTF-8 string_view (using Specific Character Set when applicable).
 	[[nodiscard]] std::optional<std::string_view> to_utf8_view() const;
+	/// Parse value as multiple UTF-8 string_views.
 	[[nodiscard]] std::optional<std::vector<std::string_view>> to_utf8_views() const;
 
 	/*
@@ -1018,6 +1051,7 @@ DataElement* NullElement();
 
 
 template <typename VecIter, typename MapIter, typename Ref, typename Ptr>
+/// Forward iterator that merges vector- and map-backed element storage.
 class DataElementIterator {
 public:
 	using iterator_category = std::forward_iterator_tag;
@@ -1110,56 +1144,135 @@ private:
 };
 
 
-class DataSet {
-public:
-	using iterator = DataElementIterator<std::vector<DataElement>::iterator,
-	    std::map<std::uint32_t, DataElement>::iterator, DataElement&, DataElement*>;
-	using const_iterator = DataElementIterator<std::vector<DataElement>::const_iterator,
-	    std::map<std::uint32_t, DataElement>::const_iterator, const DataElement&, const DataElement*>;
+	/// Root or nested DICOM dataset. Holds elements and the underlying stream identifier,
+	/// and supports lazy reading/iteration of elements.
+	class DataSet {
+	public:
+		using iterator = DataElementIterator<std::vector<DataElement>::iterator,
+		    std::map<std::uint32_t, DataElement>::iterator, DataElement&, DataElement*>;
+		using const_iterator = DataElementIterator<std::vector<DataElement>::const_iterator,
+		    std::map<std::uint32_t, DataElement>::const_iterator, const DataElement&, const DataElement*>;
 
-	DataSet();
-	explicit DataSet(DataSet* root_dataset);
-	~DataSet();
-	DataSet(const DataSet&) = delete;
-	DataSet& operator=(const DataSet&) = delete;
-	DataSet(DataSet&&) noexcept = default;
+		/// Construct an empty root dataset.
+		DataSet();
+		/// Construct a child dataset sharing the same root stream.
+		explicit DataSet(DataSet* root_dataset);
+		~DataSet();
+		DataSet(const DataSet&) = delete;
+		DataSet& operator=(const DataSet&) = delete;
+		DataSet(DataSet&&) noexcept = default;
 	DataSet& operator=(DataSet&&) noexcept = default;
 
+	/// Attach the dataset to a DICOM file on disk. Lazy: parsing happens on first access.
+	/// @param path Filesystem path to the DICOM file.
 	void attach_to_file(const std::string& path);
+
+	/// Attach to an in-memory buffer.
+	/// @param data Pointer to the buffer.
+	/// @param size Length of the buffer in bytes.
+	/// @param copy When true (default) the buffer is copied; when false it is referenced and must outlive the DataSet.
 	void attach_to_memory(const std::uint8_t* data, std::size_t size, bool copy = true);
+
+	/// Attach to an in-memory buffer with a custom identifier (used in diagnostics/path()).
+	/// @param name Identifier reported by path() and logs.
+	/// @param data Pointer to the buffer.
+	/// @param size Length of the buffer in bytes.
+	/// @param copy When true (default) the buffer is copied; when false it is referenced and must outlive the DataSet.
 	void attach_to_memory(const std::string& name, const std::uint8_t* data,
 	    std::size_t size, bool copy = true);
-	void attach_to_memory(std::string name, std::vector<std::uint8_t>&& buffer);
-	// NOTE: DataSet keeps file/memory mappings alive for as long as the instance exists.
-	// Make sure all DataSet objects that reference a path go out of scope (or are reset)
-	// before you delete or overwrite the underlying file, otherwise Windows will refuse
-	// to remove it while the mapping handle is still open.
 
-	const std::string& path() const;
+		/// Attach by taking ownership of a movable buffer.
+		/// @param name Identifier reported by path() and logs.
+		/// @param buffer Buffer that will be moved into the DataSet.
+		/// @note DataSet keeps file/memory mappings alive for as long as the instance exists.
+		/// Destroy or reset all DataSet instances that reference a path before deleting or
+		/// overwriting the underlying file; some OSes (especially Windows) may refuse removal
+		/// while a mapping handle is open.
+		void attach_to_memory(std::string name, std::vector<std::uint8_t>&& buffer);
+
+		/// Returns the current stream identifier (file path, provided name, or "<memory>").
+		const std::string& path() const;
+
+	/// Access the underlying input stream (root dataset only).
 	InStream& stream();
+
+	/// Access the underlying input stream (const).
 	const InStream& stream() const;
+
+	/// Attach a sub-range of another stream (used internally for sequences/pixel data).
 	void attach_to_substream(InStream* basestream, std::size_t size);
+
+	/// Set the absolute offset of this dataset within the root stream.
 	void set_offset(std::size_t offset) { offset_ = offset; }
+
+	/// Absolute offset of this dataset within the root stream.
 	[[nodiscard]] std::size_t offset() const { return offset_; }
+
+	/// Add or replace a data element (vector-backed, preserves insertion order).
+	/// @return Pointer to the inserted element.
 	DataElement* add_dataelement(Tag tag, VR vr=VR::None, std::size_t offset=0, std::size_t length=0);
+
+	/// Remove a data element by tag (no-op if missing).
 	void remove_dataelement(Tag tag);
+
+	/// Lookup a data element by tag. Does not load implicitly; call ensure_loaded(tag) or read_attached_stream() first.
 	DataElement* get_dataelement(Tag tag);
+
+	/// Const lookup by tag. Does not load implicitly; call ensure_loaded(tag) or read_attached_stream() first.
 	const DataElement* get_dataelement(Tag tag) const;
+
+	/// Resolve a dotted tag path (e.g., "00540016.0.00181075"). Caller must ensure_loaded() the needed prefixes.
 	DataElement* get_dataelement(std::string_view tag_path);
+
+	/// Const resolve of a dotted tag path. Caller must ensure_loaded() the needed prefixes.
 	const DataElement* get_dataelement(std::string_view tag_path) const;
+
+	/// Map-style access; throws if missing.
 	DataElement& operator[](Tag tag);
+
+	/// Const map-style access; throws if missing.
 	const DataElement& operator[](Tag tag) const;
+
+	/// Print elements to stdout (debug).
 	void dump_elements() const;
-	void read_attached_stream(const ReadOptions& options);
-	void read_elements_until(Tag load_until, InStream* stream);
+
+	/// Read all elements from the attached stream with options.
+		void read_attached_stream(const ReadOptions& options);
+
+		/// Read elements until the given tag boundary.
+		void read_elements_until(Tag load_until, InStream* stream);
+
+		/// Ensure the given tag (and preceding tags) are loaded.
+		void ensure_loaded(Tag tag);
+
+	/// Const version of ensure_loaded.
+	void ensure_loaded(Tag tag) const;
+
+	/// Transfer syntax endianness flag.
 	[[nodiscard]] inline bool is_little_endian() const { return little_endian_; }
+
+	/// Transfer syntax explicit VR flag.
 	[[nodiscard]] inline bool is_explicit_vr() const { return explicit_vr_; }
+
+	/// Well-known transfer syntax UID for this dataset.
 	[[nodiscard]] inline uid::WellKnown transfer_syntax_uid() const { return transfer_syntax_uid_; }
+
+	/// Begin iterator over active elements (vector + map merge).
 	iterator begin();
+
+	/// End iterator over active elements.
 	iterator end();
+
+	/// Const begin iterator.
 	const_iterator begin() const;
+
+	/// Const end iterator.
 	const_iterator end() const;
+
+	/// Const begin iterator (alias).
 	const_iterator cbegin() const;
+
+	/// Const end iterator (alias).
 	const_iterator cend() const;
 
 private:
@@ -1177,30 +1290,45 @@ private:
 	std::map<std::uint32_t, DataElement> element_map_;
 };
 
-class Sequence {
-public:
-	explicit Sequence(DataSet* root_dataset);
-	~Sequence();
-	Sequence(const Sequence&) = delete;
-	Sequence& operator=(const Sequence&) = delete;
-	Sequence(Sequence&&) noexcept = default;
+/// Represents a DICOM SQ element value: an ordered list of nested DataSets.
+	class Sequence {
+	public:
+		/// Construct a sequence tied to the given root dataset.
+		explicit Sequence(DataSet* root_dataset);
+		~Sequence();
+		Sequence(const Sequence&) = delete;
+		Sequence& operator=(const Sequence&) = delete;
+		Sequence(Sequence&&) noexcept = default;
 	Sequence& operator=(Sequence&&) noexcept = default;
 
+	/// Read sequence items from the current stream position.
 	void read_from_stream(InStream* instream);
 
+	/// Number of item datasets.
 	[[nodiscard]] inline int size() const { return static_cast<int>(seq_.size()); }
 
+	/// Create and append a new item dataset; returns the created dataset.
 	DataSet* add_dataset();
+	/// Get item dataset by index.
 	DataSet* get_dataset(std::size_t index);
+	/// Const item access by index.
 	const DataSet* get_dataset(std::size_t index) const;
+	/// Indexing operator (mutable).
 	DataSet* operator[](std::size_t index);
+	/// Indexing operator (const).
 	const DataSet* operator[](std::size_t index) const;
 
+	/// Begin iterator over item datasets.
 	std::vector<std::unique_ptr<DataSet>>::iterator begin();
+	/// End iterator over item datasets.
 	std::vector<std::unique_ptr<DataSet>>::iterator end();
+	/// Const begin iterator.
 	std::vector<std::unique_ptr<DataSet>>::const_iterator begin() const;
+	/// Const end iterator.
 	std::vector<std::unique_ptr<DataSet>>::const_iterator end() const;
+	/// Const begin iterator (alias).
 	std::vector<std::unique_ptr<DataSet>>::const_iterator cbegin() const;
+	/// Const end iterator (alias).
 	std::vector<std::unique_ptr<DataSet>>::const_iterator cend() const;
 
 private:
@@ -1241,32 +1369,51 @@ private:
 	std::vector<PixelFragment> fragments_;
 };
 
-class PixelSequence {
-public:
-	PixelSequence(DataSet* root_dataset, uid::WellKnown transfer_syntax);
-	~PixelSequence();
-	PixelSequence(const PixelSequence&) = delete;
-	PixelSequence& operator=(const PixelSequence&) = delete;
-	PixelSequence(PixelSequence&&) noexcept;
+/// Encapsulated pixel data as defined by PS3.5: owns fragments, offset tables, and frames.
+	class PixelSequence {
+	public:
+		/// Construct an encapsulated pixel sequence tied to the root dataset and transfer syntax.
+		PixelSequence(DataSet* root_dataset, uid::WellKnown transfer_syntax);
+		~PixelSequence();
+		PixelSequence(const PixelSequence&) = delete;
+		PixelSequence& operator=(const PixelSequence&) = delete;
+		PixelSequence(PixelSequence&&) noexcept;
 	PixelSequence& operator=(PixelSequence&&) noexcept;
 
+	/// Append a new pixel frame and return it.
 	PixelFrame* add_frame();
+	/// Mutable frame access.
 	PixelFrame* frame(std::size_t index);
+	/// Const frame access.
 	const PixelFrame* frame(std::size_t index) const;
+	/// Number of frames contained.
 	[[nodiscard]] std::size_t number_of_frames() const noexcept { return frames_.size(); }
+	/// Root dataset owning this pixel sequence.
 	[[nodiscard]] DataSet* root_dataset() const noexcept { return root_dataset_; }
+	/// Transfer syntax associated with this pixel sequence.
 	[[nodiscard]] uid::WellKnown transfer_syntax_uid() const noexcept { return transfer_syntax_; }
+	/// Base offset of the pixel sequence within the root stream.
 	[[nodiscard]] std::size_t base_offset() const noexcept { return base_offset_; }
+	/// Offset of the basic offset table within the stream.
 	[[nodiscard]] std::size_t basic_offset_table_offset() const noexcept { return basic_offset_table_offset_; }
+	/// Number of entries in the basic offset table.
 	[[nodiscard]] std::size_t basic_offset_table_count() const noexcept { return basic_offset_table_count_; }
+	/// Offset of the extended offset table within the stream.
 	[[nodiscard]] std::size_t extended_offset_table_offset() const noexcept { return extended_offset_table_offset_; }
+	/// Number of entries in the extended offset table.
 	[[nodiscard]] std::size_t extended_offset_table_count() const noexcept { return extended_offset_table_count_; }
+	/// Encoded frame bytes as a span (requires attached stream).
 	std::span<const std::uint8_t> frame_encoded_span(std::size_t index);
+	/// Drop encoded data buffer for a given frame to free memory.
 	void clear_frame_encoded_data(std::size_t index);
 
-	void attach_to_stream(InStream* basestream, std::size_t size);
-	void read_attached_stream();
+		/// Attach to a substream containing the pixel sequence payload.
+		void attach_to_stream(InStream* basestream, std::size_t size);
+		/// Read the attached pixel sequence stream (fragments, offset tables).
+		void read_attached_stream();
+	/// Access the underlying pixel sequence stream.
 	[[nodiscard]] InStream* stream() noexcept { return stream_.get(); }
+	/// Const access to the underlying pixel sequence stream.
 	[[nodiscard]] const InStream* stream() const noexcept { return stream_.get(); }
 
 private:
@@ -1322,11 +1469,15 @@ inline const PixelSequence* DataElement::as_pixel_sequence() const {
 	return vr_.is_pixel_sequence() ? storage_.pixseq : nullptr;
 }
 
+/// Read a DICOM dataset from disk (eager up to options.load_until).
 std::unique_ptr<DataSet> read_file(const std::string& path, ReadOptions options = {});
+/// Read from a raw memory buffer (identifier set to "<memory>"); copies unless options.copy is false.
 std::unique_ptr<DataSet> read_bytes(const std::uint8_t* data, std::size_t size,
     ReadOptions options = {});
+/// Read from a named raw memory buffer.
 std::unique_ptr<DataSet> read_bytes(const std::string& name, const std::uint8_t* data,
     std::size_t size, ReadOptions options = {});
+/// Read from an owning buffer moved into the dataset.
 std::unique_ptr<DataSet> read_bytes(std::string name, std::vector<std::uint8_t>&& buffer,
     ReadOptions options = {});
 
