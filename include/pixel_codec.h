@@ -7,6 +7,7 @@
 #include <string_view>
 #include <vector>
 #include <array>
+#include <cmath>
 
 namespace dicom {
 
@@ -42,7 +43,6 @@ struct StrideInfo {
 struct DecodeOptions {
 	bool convert_to_rgb{true};
 	bool apply_rescale{true};
-	bool apply_voi{false};
 	OutputLayout output_layout{OutputLayout::interleaved};
 	PixelFormat output_format{PixelFormat::auto_format};
 	std::size_t output_stride{0};      // optional caller-provided row stride
@@ -57,6 +57,10 @@ struct FrameInfo {
 	bool signed_samples{false};
 	int planar_config{0};  // 0: interleaved, 1: planar
 	bool lossless{true};
+	// Rescale / VOI hints for output format selection
+	double rescale_slope{1.0};
+	double rescale_intercept{0.0};
+	bool has_modality_lut{false};
 
 	[[nodiscard]] StrideInfo compute_strides(const DecodeOptions* opts = nullptr) const;
 };
@@ -75,10 +79,27 @@ inline PixelFormat resolve_output_format(const FrameInfo& info, const DecodeOpti
 	if (opts.output_format != PixelFormat::auto_format) {
 		return opts.output_format;
 	}
-	if (info.bits_allocated <= 8) {
-		return PixelFormat::uint8;
+
+	if (opts.apply_rescale) {
+		const bool requires_rescale = info.has_modality_lut ||
+		    info.rescale_slope != 1.0 || info.rescale_intercept != 0.0;
+		if (requires_rescale) {
+			const auto int_part = static_cast<long long>(info.rescale_intercept);
+			const bool intercept_is_int = info.rescale_intercept == static_cast<double>(int_part);
+			const bool intercept_in_range = int_part >= -10000 && int_part <= 10000;
+			if (info.rescale_slope == 1.0 && intercept_is_int && intercept_in_range) {
+				// Integer-preserving shift; only keep uint8 when no offset; otherwise stay 16-bit.
+				if (info.bits_allocated <= 8) {
+					return int_part == 0 ? PixelFormat::uint8 : PixelFormat::int16;
+				}
+				return PixelFormat::int16;
+			}
+			return PixelFormat::float32;
+		}
 	}
-	return PixelFormat::int16;
+
+	// Default auto selection by stored bit depth.
+	return info.bits_allocated <= 8 ? PixelFormat::uint8 : PixelFormat::int16;
 }
 
 class PixelDecoder {

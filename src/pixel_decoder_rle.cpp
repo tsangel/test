@@ -1,6 +1,7 @@
 #include "pixel_codec.h"
 #include "dicom.h"
 #include "diagnostics.h"
+#include "pixel_rescale.h"
 
 #include <array>
 #include <cstring>
@@ -48,7 +49,8 @@ class RlePixelDecoder final : public PixelDecoder {
 public:
 	FrameInfo frame_info(const DataSet& ds, std::size_t /*frame*/) const override {
 		FrameInfo info{};
-		constexpr Tag kLoadUntil = "PixelRepresentation"_tag; // (0028,0103)
+		// Load all pixel-metadata we consume in one pass (tags are sorted; last one is enough).
+		constexpr Tag kLoadUntil = "RescaleSlope"_tag; // (0028,1053)
 		ds.ensure_loaded(kLoadUntil);
 
 		info.rows = static_cast<int>(ds["Rows"_tag].toLong(0));                         // (0028,0010)
@@ -58,6 +60,9 @@ public:
 		info.signed_samples = ds["PixelRepresentation"_tag].toLong(0) == 1;              // (0028,0103)
 		info.planar_config = 1;  // RLE is color-by-plane
 		info.lossless = true;
+		info.rescale_slope = ds["RescaleSlope"_tag].toDouble(1.0);                       // (0028,1053)
+		info.rescale_intercept = ds["RescaleIntercept"_tag].toDouble(0.0);               // (0028,1052)
+		info.has_modality_lut = ds["ModalityLUTSequence"_tag].sequence() != nullptr;     // (0028,3000)
 		return info;
 	}
 
@@ -65,39 +70,33 @@ public:
 	    std::size_t frame, const DecodeOptions& opts) const override {
 		ds.ensure_loaded("7fe0,0010"_tag); // PixelData
 
-		if (opts.apply_rescale) {
-			const double slope = ds["RescaleSlope"_tag].toDouble(1.0);
-			const double intercept = ds["RescaleIntercept"_tag].toDouble(0.0);
-			const bool has_modality_lut = ds["ModalityLUTSequence"_tag].sequence() != nullptr;
-			const bool requires_rescale = has_modality_lut || slope != 1.0 || intercept != 0.0;
-			if (requires_rescale) {
-				return DecodeStatus::unsupported_ts;  // rescale not implemented yet
-			}
-		}
-		if (opts.apply_voi) {
-			const bool has_voi_lut = ds["VOILUTSequence"_tag].sequence() != nullptr;
-			const bool has_window_center = !ds["WindowCenter"_tag].toDoubleVector().empty();
-			const bool has_window_width = !ds["WindowWidth"_tag].toDoubleVector().empty();
-			const bool requires_voi = has_voi_lut || has_window_center || has_window_width;
-			if (requires_voi) {
-				return DecodeStatus::unsupported_ts;  // VOI LUT/window not implemented yet
-			}
-		}
-
 		const auto info = frame_info(ds, frame);
 		const auto fmt = resolve_output_format(info, opts);
 		const auto stored_bytes = static_cast<std::size_t>((info.bits_allocated + 7) / 8);
 		const auto out_bytes = bytes_per_sample(fmt);
-		if (stored_bytes == 0 || out_bytes == 0 || out_bytes != stored_bytes) {
+		if (stored_bytes == 0 || out_bytes == 0 || (stored_bytes != 1 && stored_bytes != 2)) {
 			return DecodeStatus::unsupported_ts;
 		}
+
+		const bool requires_rescale = opts.apply_rescale &&
+		    (info.has_modality_lut || info.rescale_slope != 1.0 || info.rescale_intercept != 0.0);
+		const bool use_modality_lut = requires_rescale && info.has_modality_lut;
+		ModalityLut modality_lut;
+		if (use_modality_lut) {
+			if (!load_modality_lut(ds, modality_lut)) {
+				return DecodeStatus::invalid_frame;
+			}
+		}
+		const RescalePlan rescale_plan = make_rescale_plan(
+		    requires_rescale, info.has_modality_lut, info.signed_samples,
+		    info.rescale_slope, info.rescale_intercept, fmt == PixelFormat::float32);
 
 		const std::size_t src_row_bytes = static_cast<std::size_t>(info.cols) *
 		    static_cast<std::size_t>(info.samples_per_pixel) * stored_bytes;
 		const bool request_planar_out = opts.output_layout == OutputLayout::planar;
 		const std::size_t base_dst_row = request_planar_out
-		    ? static_cast<std::size_t>(info.cols) * stored_bytes
-		    : src_row_bytes;
+		    ? static_cast<std::size_t>(info.cols) * out_bytes
+		    : static_cast<std::size_t>(info.cols) * static_cast<std::size_t>(info.samples_per_pixel) * out_bytes;
 		const std::size_t dst_row_bytes = opts.output_stride
 		    ? opts.output_stride
 		    : align_up(base_dst_row, opts.output_alignment);
@@ -156,31 +155,83 @@ public:
 			}
 		}
 
-		// Assemble output according to requested layout.
+		// Assemble output according to requested layout with optional rescale.
 		std::byte* out = dst.data();
 		const bool want_interleaved = opts.output_layout != OutputLayout::planar;
 		const std::size_t dst_plane_size = dst_row_bytes * static_cast<std::size_t>(info.rows);
 
-		for (std::size_t idx = 0; idx < plane_size; ++idx) {
-			const std::size_t row = idx / static_cast<std::size_t>(info.cols);
-			const std::size_t col = idx % static_cast<std::size_t>(info.cols);
-			for (int s = 0; s < info.samples_per_pixel; ++s) {
-				for (std::size_t b = 0; b < stored_bytes; ++b) {
-					const std::size_t plane_index = static_cast<std::size_t>(s) * stored_bytes + b;
-					const std::uint8_t value = planes[plane_index][idx];
-					if (want_interleaved) {
-						auto* pix_dst = reinterpret_cast<std::uint8_t*>(
-						    out + dst_row_bytes * row +
-						    (col * static_cast<std::size_t>(info.samples_per_pixel) +
-						     static_cast<std::size_t>(s)) * stored_bytes +
-						    b);
-						*pix_dst = value;
-					} else {
-						auto* pix_dst = reinterpret_cast<std::uint8_t*>(
-						    out + static_cast<std::size_t>(s) * dst_plane_size +
-						    dst_row_bytes * row +
-						    col * stored_bytes + b);
-						*pix_dst = value;
+		if (stored_bytes == 1) {
+			auto map_sample = [&](std::uint8_t stored, std::byte* dst_ptr) {
+				const int stored_value = info.signed_samples
+				    ? static_cast<int>(static_cast<int8_t>(stored))
+				    : static_cast<int>(stored);
+				const uint16_t mapped = info.signed_samples
+				    ? modality_lookup<true>(stored_value, modality_lut)
+				    : modality_lookup<false>(stored_value, modality_lut);
+				store_mapped_sample(mapped, fmt, dst_ptr);
+			};
+			for (std::size_t row = 0; row < static_cast<std::size_t>(info.rows); ++row) {
+				for (std::size_t col = 0; col < static_cast<std::size_t>(info.cols); ++col) {
+					const std::size_t idx = row * static_cast<std::size_t>(info.cols) + col;
+					for (int s = 0; s < info.samples_per_pixel; ++s) {
+						const std::uint8_t v = planes[static_cast<std::size_t>(s)][idx];
+						std::byte* pix_dst;
+						if (want_interleaved) {
+							pix_dst = out + dst_row_bytes * row +
+							    (col * static_cast<std::size_t>(info.samples_per_pixel) +
+							     static_cast<std::size_t>(s)) * out_bytes;
+						} else {
+							pix_dst = out + static_cast<std::size_t>(s) * dst_plane_size +
+							    dst_row_bytes * row +
+							    col * out_bytes;
+						}
+						if (use_modality_lut) {
+							map_sample(v, pix_dst);
+						} else if (!rescale_plan.enabled && out_bytes == 1) {
+							*reinterpret_cast<std::uint8_t*>(pix_dst) = v;
+						} else {
+							rescale_line_u8(&v, 1, pix_dst, out_bytes, rescale_plan);
+						}
+					}
+				}
+			}
+		} else { // stored_bytes == 2
+			auto map_sample = [&](const std::byte packed[2], std::byte* dst_ptr) {
+				int stored_value = 0;
+				if (info.signed_samples) {
+					stored_value = load16<true, false>(packed);
+				} else {
+					stored_value = load16<false, false>(packed);
+				}
+				const uint16_t mapped = info.signed_samples
+				    ? modality_lookup<true>(stored_value, modality_lut)
+				    : modality_lookup<false>(stored_value, modality_lut);
+				store_mapped_sample(mapped, fmt, dst_ptr);
+			};
+			for (std::size_t row = 0; row < static_cast<std::size_t>(info.rows); ++row) {
+				for (std::size_t col = 0; col < static_cast<std::size_t>(info.cols); ++col) {
+					const std::size_t idx = row * static_cast<std::size_t>(info.cols) + col;
+					for (int s = 0; s < info.samples_per_pixel; ++s) {
+						const std::uint8_t lo = planes[static_cast<std::size_t>(s) * 2 + 0][idx];
+						const std::uint8_t hi = planes[static_cast<std::size_t>(s) * 2 + 1][idx];
+						const std::byte packed[2] = {static_cast<std::byte>(lo), static_cast<std::byte>(hi)};
+						std::byte* pix_dst;
+						if (want_interleaved) {
+							pix_dst = out + dst_row_bytes * row +
+							    (col * static_cast<std::size_t>(info.samples_per_pixel) +
+							     static_cast<std::size_t>(s)) * out_bytes;
+						} else {
+							pix_dst = out + static_cast<std::size_t>(s) * dst_plane_size +
+							    dst_row_bytes * row +
+							    col * out_bytes;
+						}
+						if (use_modality_lut) {
+							map_sample(packed, pix_dst);
+						} else if (info.signed_samples) {
+							rescale_line_16<true>(packed, 1, pix_dst, /*need_swap=*/false, rescale_plan);
+						} else {
+							rescale_line_16<false>(packed, 1, pix_dst, /*need_swap=*/false, rescale_plan);
+						}
 					}
 				}
 			}

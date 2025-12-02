@@ -573,13 +573,16 @@ PYBIND11_MODULE(_dicomsdl, m) {
 		        std::size_t frame,
 		        const std::string& layout,
 		        py::object dtype,
-		        py::object out) -> py::object {
+		        py::object out,
+		        bool apply_rescale) -> py::object {
 			    dicom::DecodeOptions opts{};
 			    opts.output_layout = layout_from_str(layout);
+			    opts.apply_rescale = apply_rescale;
 			    if (!dtype.is_none()) {
 				    opts.output_format = pixel_format_from_str(dtype.cast<std::string>());
 			    }
 			    const auto info = self.frame_info(frame);
+			    const auto final_fmt = dicom::resolve_output_format(info, opts);
 			    const auto stride = info.compute_strides(&opts);
 			    const std::size_t required = stride.frame_bytes;
 
@@ -622,13 +625,18 @@ PYBIND11_MODULE(_dicomsdl, m) {
 					    shape[1] = info.cols;
 					    shape[2] = info.samples_per_pixel;
 				    }
-				    std::string dtype_str = "uint8";
+				    auto fmt_to_dtype = [](dicom::PixelFormat fmt) -> std::string {
+					    switch (fmt) {
+					    case dicom::PixelFormat::uint8: return "uint8";
+					    case dicom::PixelFormat::int16: return "int16";
+					    case dicom::PixelFormat::int32: return "int32";
+					    case dicom::PixelFormat::float32: return "float32";
+					    default: return "uint8";
+					    }
+				    };
+				    std::string dtype_str = fmt_to_dtype(final_fmt);
 				    if (!dtype.is_none()) {
 					    dtype_str = dtype.cast<std::string>();
-				    } else {
-					    if (info.bits_allocated > 8) {
-						    dtype_str = "uint16";
-					    }
 				    }
 				    auto capsule = py::capsule(new std::shared_ptr<std::vector<std::byte>>(buffer),
 				        [](void* p) {
@@ -659,10 +667,12 @@ PYBIND11_MODULE(_dicomsdl, m) {
 		    py::arg("layout") = "interleaved",
 		    py::arg("dtype") = py::none(),
 		    py::arg("out") = py::none(),
+		    py::arg("apply_rescale") = true,
 		    "Decode pixel data for a frame.\n"
 		    "- layout: 'interleaved' (default), 'planar', or 'keep'\n"
 		    "- dtype: None for auto, or one of 'uint8','int16','int32','float32'\n"
-		    "- out: optional writable buffer/memoryview/numpy array; if provided, filled in-place and returned")
+		    "- out: optional writable buffer/memoryview/numpy array; if provided, filled in-place and returned\n"
+		    "- apply_rescale: when True (default), apply Modality LUT or Rescale Slope/Intercept; when False, return stored values")
 		.def("__getattr__",
 		    [](DataSet& self, const std::string& name) -> py::object {
 			    // Allow keyword-style attribute access: ds.PatientName -> get_value("PatientName")
