@@ -1,3 +1,4 @@
+#include <array>
 #include <cstring>
 #include <memory>
 #include <optional>
@@ -10,6 +11,7 @@
 
 #include <pybind11/operators.h>
 #include <pybind11/pybind11.h>
+#include <pybind11/numpy.h>
 #include <pybind11/stl.h>
 
 #include <dicom.h>
@@ -96,6 +98,23 @@ std::string vr_repr(const VR& vr) {
 
 std::string_view vr_to_string_view(const VR& vr) {
 	return vr.str();
+}
+
+dicom::OutputLayout layout_from_str(const std::string& s) {
+	using dicom::OutputLayout;
+	if (s == "interleaved") return OutputLayout::interleaved;
+	if (s == "planar") return OutputLayout::planar;
+	if (s == "keep" || s == "keep_config") return OutputLayout::keep_config;
+	throw std::invalid_argument("layout must be 'interleaved', 'planar', or 'keep'");
+}
+
+dicom::PixelFormat pixel_format_from_str(const std::string& s) {
+	using dicom::PixelFormat;
+	if (s == "uint8") return PixelFormat::uint8;
+	if (s == "int16") return PixelFormat::int16;
+	if (s == "int32") return PixelFormat::int32;
+	if (s == "float32") return PixelFormat::float32;
+	throw std::invalid_argument("dtype must be one of uint8, int16, int32, float32");
 }
 
 std::string dataelement_repr(const DataElement& element) {
@@ -549,6 +568,101 @@ PYBIND11_MODULE(_dicomsdl, m) {
 		    },
 		    py::arg("key"),
 		    "Index syntax: ds[tag|packed_int|tag_str] -> element.get_value(); returns None if missing")
+		.def("pixel_array",
+		    [](DataSet& self,
+		        std::size_t frame,
+		        const std::string& layout,
+		        py::object dtype,
+		        py::object out) -> py::object {
+			    dicom::DecodeOptions opts{};
+			    opts.output_layout = layout_from_str(layout);
+			    if (!dtype.is_none()) {
+				    opts.output_format = pixel_format_from_str(dtype.cast<std::string>());
+			    }
+			    const auto info = self.frame_info(frame);
+			    const auto stride = info.compute_strides(&opts);
+			    const std::size_t required = stride.frame_bytes;
+
+			    // If out provided, write into it.
+			    if (!out.is_none()) {
+				    py::buffer buf(out);
+				    py::buffer_info bi = buf.request();
+				    if (bi.readonly) {
+					    throw py::value_error("out buffer is read-only");
+				    }
+				    const std::size_t bytes = static_cast<std::size_t>(bi.size) *
+				        static_cast<std::size_t>(bi.itemsize);
+				    if (bytes < required) {
+					    throw py::value_error("out buffer too small for decoded pixel data");
+				    }
+				    auto* ptr = static_cast<std::byte*>(bi.ptr);
+				    const auto status = self.decode_into(std::span<std::byte>(ptr, bytes), frame, opts);
+				    if (status != dicom::DecodeStatus::ok) {
+					    throw std::runtime_error("decode_into failed");
+				    }
+				    return out;
+			    }
+
+			    // No out: allocate vector then wrap.
+			    auto buffer = std::make_shared<std::vector<std::byte>>(self.decode_pixels(frame, opts));
+			    if (buffer->empty()) {
+				    throw std::runtime_error("decode_pixels failed");
+			    }
+
+			    // Try numpy
+			    try {
+				    py::module np = py::module::import("numpy");
+				    std::array<py::ssize_t, 3> shape{};
+				    if (opts.output_layout == dicom::OutputLayout::planar) {
+					    shape[0] = info.samples_per_pixel;
+					    shape[1] = info.rows;
+					    shape[2] = info.cols;
+				    } else {
+					    shape[0] = info.rows;
+					    shape[1] = info.cols;
+					    shape[2] = info.samples_per_pixel;
+				    }
+				    std::string dtype_str = "uint8";
+				    if (!dtype.is_none()) {
+					    dtype_str = dtype.cast<std::string>();
+				    } else {
+					    if (info.bits_allocated > 8) {
+						    dtype_str = "uint16";
+					    }
+				    }
+				    auto capsule = py::capsule(new std::shared_ptr<std::vector<std::byte>>(buffer),
+				        [](void* p) {
+					        delete static_cast<std::shared_ptr<std::vector<std::byte>>*>(p);
+				        });
+				    py::object arr = py::array(py::dtype(dtype_str),
+				        shape,
+				        buffer->data(),
+				        capsule);
+				    // hand off ownership to Python; shared_ptr keeps data alive
+				    return arr;
+			    } catch (const py::error_already_set&) {
+				    PyErr_Clear();
+			    }
+
+			    auto capsule = py::capsule(new std::shared_ptr<std::vector<std::byte>>(buffer),
+			        [](void* p) {
+				        delete static_cast<std::shared_ptr<std::vector<std::byte>>*>(p);
+			        });
+			    std::array<py::ssize_t, 1> shape{static_cast<py::ssize_t>(buffer->size())};
+			    py::array arr(py::dtype("uint8"),
+			        shape,
+			        buffer->data(),
+			        capsule);
+			    return arr;
+		    },
+		    py::arg("frame") = 0,
+		    py::arg("layout") = "interleaved",
+		    py::arg("dtype") = py::none(),
+		    py::arg("out") = py::none(),
+		    "Decode pixel data for a frame.\n"
+		    "- layout: 'interleaved' (default), 'planar', or 'keep'\n"
+		    "- dtype: None for auto, or one of 'uint8','int16','int32','float32'\n"
+		    "- out: optional writable buffer/memoryview/numpy array; if provided, filled in-place and returned")
 		.def("__getattr__",
 		    [](DataSet& self, const std::string& name) -> py::object {
 			    // Allow keyword-style attribute access: ds.PatientName -> get_value("PatientName")
@@ -877,12 +991,12 @@ auto uid_cls = py::class_<Uid>(m, "Uid")
 		    },
 		    py::arg("index"),
 		    "Return a read-only memoryview over encoded pixel data for a frame (no copy)")
-		.def("__repr__",
-		    [](dicom::PixelSequence& self) {
-			    std::ostringstream oss;
-			    oss << "PixelSequence(frames=" << self.number_of_frames() << ")";
-			    return oss.str();
-		    });
+	.def("__repr__",
+	    [](dicom::PixelSequence& self) {
+		    std::ostringstream oss;
+		    oss << "PixelSequence(frames=" << self.number_of_frames() << ")";
+		    return oss.str();
+	    });
 
 	m.def("keyword_to_tag_vr",
 	    [] (const std::string& keyword) -> py::object {

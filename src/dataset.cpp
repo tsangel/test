@@ -22,11 +22,14 @@ namespace diag = dicom::diag;
 
 namespace dicom {
 
-namespace {
-constexpr uid::WellKnown kExplicitVrLittleEndian = "ExplicitVRLittleEndian"_uid;
-constexpr uid::WellKnown kImplicitVrLittleEndianUid = "ImplicitVRLittleEndian"_uid;
-constexpr uid::WellKnown kPapyrusImplicitVrLittleEndianUid = "Papyrus3ImplicitVRLittleEndian"_uid;
-constexpr uid::WellKnown kExplicitVrBigEndianUid = "ExplicitVRBigEndian"_uid;
+inline const uid::WellKnown kExplicitVrLittleEndian =
+    uid::lookup("ExplicitVRLittleEndian").value_or(uid::WellKnown{});
+inline const uid::WellKnown kImplicitVrLittleEndianUid =
+    uid::lookup("ImplicitVRLittleEndian").value_or(uid::WellKnown{});
+inline const uid::WellKnown kPapyrusImplicitVrLittleEndianUid =
+	uid::lookup("Papyrus3ImplicitVRLittleEndian").value_or(uid::WellKnown{});
+inline const uid::WellKnown kExplicitVrBigEndianUid =
+	uid::lookup("ExplicitVRBigEndian").value_or(uid::WellKnown{});
 
 std::unique_ptr<InFileStream> make_file_stream(const std::string& path) {
 	auto stream = std::make_unique<InFileStream>();
@@ -159,9 +162,6 @@ std::optional<Tag> parse_private_creator_tag(DataSetPtr* dataset, std::string_vi
 	}
 	return std::nullopt;
 }
-}  // namespace
-
-
 DataSet::DataSet() {
 	set_transfer_syntax(kExplicitVrLittleEndian);
 }

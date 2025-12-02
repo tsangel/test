@@ -197,9 +197,7 @@ std::span<const std::uint8_t> DataElement::value_span() const {
 		    static_cast<const std::uint8_t*>(storage_.ptr), length_);
 	}
 	if (!parent_) {
-		diag::error_and_throw(
-		    "DataElement::value_span offset=0x{:X} tag={} reason=not attached to a DataSet",
-		    offset_, tag_.to_string());
+		return {};
 	}
 	return parent_->stream().get_span(offset_, length_);
 }
@@ -209,9 +207,7 @@ void* DataElement::value_ptr() const {
 		return storage_.ptr;
 	}
 	if (!parent_) {
-		diag::error_and_throw(
-		    "DataElement::value_ptr offset=0x{:X} tag={} reason=not attached to a DataSet",
-		    offset_, tag_.to_string());
+		return nullptr;
 	}
 	return parent_->stream().get_pointer(offset_, length_);
 }

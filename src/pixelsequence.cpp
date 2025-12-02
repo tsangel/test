@@ -24,6 +24,8 @@ inline bool fragment_starts_new_frame_nonffd9(std::span<const std::uint8_t> s, u
 		return false;
 	}
 
+	const auto ts_mask = uid::detail::ts_mask(ts.raw_index());
+
 	// Limit how far we scan into a fragment for start codes to avoid O(n) walks
 	// on very large fragments. Most codecs place a start code near the front.
 	constexpr std::size_t kMaxStartCodeProbe = 16 * 1024;  // bytes
@@ -46,7 +48,7 @@ inline bool fragment_starts_new_frame_nonffd9(std::span<const std::uint8_t> s, u
 	};
 
 	// H.264 Annex B: start code 00 00 01 or 00 00 00 01 followed by slice/AUD.
-	if (ts.is_h264()) {
+	if (ts_mask & uid::detail::kTSH264) {
 		std::size_t off = 0;
 		std::size_t code_len = 0;
 		if (find_start_code(off, code_len)) {
@@ -60,7 +62,7 @@ inline bool fragment_starts_new_frame_nonffd9(std::span<const std::uint8_t> s, u
 	}
 
 	// HEVC Annex B: start code followed by slice/AUD. nal_type is 6-bit (bits 1-6).
-	if (ts.is_hevc()) {
+	if (ts_mask & uid::detail::kTSHevc) {
 		std::size_t off = 0;
 		std::size_t code_len = 0;
 		if (find_start_code(off, code_len)) {
@@ -74,12 +76,12 @@ inline bool fragment_starts_new_frame_nonffd9(std::span<const std::uint8_t> s, u
 	}
 
 	// JPEG XL codestream starts with FF 0A signature.
-	if (ts.is_jpegxl()) {
+	if (ts_mask & uid::detail::kTSJpegXL) {
 		return s.size() >= 2 && s[0] == 0xFF && s[1] == 0x0A;
 	}
 
 	// MPEG-1/2 Video ES: picture start or sequence/GOP headers.
-	if (ts.is_mpeg2()) {
+	if (ts_mask & uid::detail::kTSMpeg2) {
 		std::size_t off = 0;
 		std::size_t code_len = 0;
 		if (find_start_code(off, code_len) && off <= s.size()) {

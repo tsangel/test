@@ -33,65 +33,48 @@ enum class UidType : std::uint8_t {{
     Other,
 }};
 
-constexpr UidType DecodeUidType(std::string_view type) {{
-    if (type == "Transfer Syntax") {{
-        return UidType::TransferSyntax;
-    }}
-    if (type == "SOP Class") {{
-        return UidType::SopClass;
-    }}
-    if (type == "Well-known SOP Instance") {{
-        return UidType::WellKnownSopInstance;
-    }}
-    if (type == "Meta SOP Class") {{
-        return UidType::MetaSopClass;
-    }}
-    if (type == "Application Context Name") {{
-        return UidType::ApplicationContextName;
-    }}
-    if (type == "Application Hosting Model") {{
-        return UidType::ApplicationHostingModel;
-    }}
-    if (type == "Coding Scheme") {{
-        return UidType::CodingScheme;
-    }}
-    if (type == "DICOM UIDs as a Coding Scheme") {{
-        return UidType::DicomUidsAsCodingScheme;
-    }}
-    if (type == "Mapping Resource") {{
-        return UidType::MappingResource;
-    }}
-    if (type == "Service Class") {{
-        return UidType::ServiceClass;
-    }}
-    if (type == "Synchronization Frame of Reference") {{
-        return UidType::SynchronizationFrameOfReference;
-    }}
-    if (type == "LDAP OID") {{
-        return UidType::LdapOid;
-    }}
-    return UidType::Other;
-}}
-
 struct UidEntry {{
     std::string_view value;
     std::string_view name;
     std::string_view keyword;
     std::string_view type;
-    UidType uid_type = DecodeUidType(type);
+    UidType uid_type;
 }};
 
 constexpr std::array<UidEntry, {count}> kUidRegistry = {{{{
 """
 
-FOOTER = """}};
+FOOTER_TEMPLATE = """}}}};
 
-} // namespace dicom
+// Highest registry index whose UidType is TransferSyntax (auto-generated hint for fast tables).
+constexpr std::size_t kMaxTransferSyntaxIndex = {max_transfer_index};
+
+}} // namespace dicom
 """
 
 
 def escape(value: str) -> str:
     return value.replace("\\", r"\\").replace('"', r"\"")
+
+
+UID_TYPE_MAP = {
+    "Transfer Syntax": "UidType::TransferSyntax",
+    "SOP Class": "UidType::SopClass",
+    "Well-known SOP Instance": "UidType::WellKnownSopInstance",
+    "Meta SOP Class": "UidType::MetaSopClass",
+    "Application Context Name": "UidType::ApplicationContextName",
+    "Application Hosting Model": "UidType::ApplicationHostingModel",
+    "Coding Scheme": "UidType::CodingScheme",
+    "DICOM UIDs as a Coding Scheme": "UidType::DicomUidsAsCodingScheme",
+    "Mapping Resource": "UidType::MappingResource",
+    "Service Class": "UidType::ServiceClass",
+    "Synchronization Frame of Reference": "UidType::SynchronizationFrameOfReference",
+    "LDAP OID": "UidType::LdapOid",
+}
+
+
+def encode_uid_type(uid_type: str) -> str:
+    return UID_TYPE_MAP.get(uid_type, "UidType::Other")
 
 
 def load_rows(path: Path) -> list[list[str]]:
@@ -107,15 +90,20 @@ def load_rows(path: Path) -> list[list[str]]:
     return rows
 
 
-def write_header(rows: list[list[str]], dest: Path, source: Path) -> None:
+def write_header(
+    rows: list[list[str]],
+    dest: Path,
+    source: Path,
+    max_transfer_index: int,
+) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     with dest.open("w", encoding="utf-8") as fh:
         fh.write(HEADER_TEMPLATE.format(source=source.as_posix(), count=len(rows)))
         for idx, (value, name, keyword, uid_type) in enumerate(rows):
             fh.write(
-                f'    UidEntry{{"{escape(value)}", "{escape(name)}", "{escape(keyword)}", "{escape(uid_type)}"}},\n'
+                f'    UidEntry{{"{escape(value)}", "{escape(name)}", "{escape(keyword)}", "{escape(uid_type)}", {encode_uid_type(uid_type)}}},\n'
             )
-        fh.write(FOOTER)
+        fh.write(FOOTER_TEMPLATE.format(max_transfer_index=max_transfer_index))
 
 
 def main() -> None:
@@ -125,7 +113,16 @@ def main() -> None:
     args = parser.parse_args()
 
     rows = load_rows(args.source)
-    write_header(rows, args.output, args.source)
+
+    max_transfer_index = -1
+    for idx, (_value, _name, _keyword, uid_type) in enumerate(rows):
+        if uid_type == "Transfer Syntax":
+            max_transfer_index = idx
+
+    if max_transfer_index < 0:
+        raise ValueError("Transfer Syntax entries not found; cannot compute kMaxTransferSyntaxIndex")
+
+    write_header(rows, args.output, args.source, max_transfer_index)
 
 
 if __name__ == "__main__":

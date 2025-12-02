@@ -62,6 +62,9 @@ add_library(dicomsdl STATIC
 	src/dataelement.cpp
 	src/instream.cpp
 	src/pixelsequence.cpp
+	src/pixel_codec.cpp
+	src/pixel_decoder_raw.cpp
+	src/pixel_decoder_rle.cpp
 )
 set_target_properties(dicomsdl PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(dicomsdl

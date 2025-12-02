@@ -25,6 +25,7 @@
 #include "specific_character_set_registry.hpp"
 #include "version.h"
 #include "uid_lookup_detail.hpp"
+#include "pixel_codec.h"
 
 namespace dicom {
 
@@ -670,8 +671,22 @@ static_assert(uid_lookup::uid_index_from_text("ImplicitVRLittleEndian") ==
 namespace uid {
 using namespace dicom::literals;
 
-inline constexpr bool WellKnown::is_jpeg_baseline() const noexcept {
-	switch (raw_index()) {
+// Transfer Syntax classification compressed into a single switch.
+namespace detail {
+constexpr std::uint32_t kTSJpegBaseline = 1u << 0;
+constexpr std::uint32_t kTSJpegLossless = 1u << 1;
+constexpr std::uint32_t kTSJpegLS = 1u << 2;
+constexpr std::uint32_t kTSJpeg2000 = 1u << 3;
+constexpr std::uint32_t kTSJpegXL = 1u << 4;
+constexpr std::uint32_t kTSMpeg2 = 1u << 5;
+constexpr std::uint32_t kTSH264 = 1u << 6;
+constexpr std::uint32_t kTSHevc = 1u << 7;
+constexpr std::uint32_t kTSFfd9 = 1u << 8;      // Codestream ends with FFD9 marker
+constexpr std::uint32_t kTSJpegFamily = 1u << 9;
+
+inline constexpr std::uint32_t ts_mask(std::uint16_t idx) {
+	switch (idx) {
+		// JPEG Baseline / Extended / Progressive
 	case "JPEGBaseline8Bit"_uid.raw_index():
 	case "JPEGExtended12Bit"_uid.raw_index():
 	case "JPEGExtended35"_uid.raw_index():
@@ -685,68 +700,22 @@ inline constexpr bool WellKnown::is_jpeg_baseline() const noexcept {
 	case "JPEGSpectralSelectionHierarchical2123"_uid.raw_index():
 	case "JPEGFullProgressionHierarchical2426"_uid.raw_index():
 	case "JPEGFullProgressionHierarchical2527"_uid.raw_index():
-		return true;
-	default:
-		return false;
-	}
-}
+		return kTSJpegBaseline | kTSJpegFamily | kTSFfd9;
 
-inline constexpr bool WellKnown::is_jpeg_lossless() const noexcept {
-	switch (raw_index()) {
+		// JPEG Lossless
 	case "JPEGLossless"_uid.raw_index():
 	case "JPEGLosslessNonHierarchical15"_uid.raw_index():
 	case "JPEGLosslessHierarchical28"_uid.raw_index():
 	case "JPEGLosslessHierarchical29"_uid.raw_index():
 	case "JPEGLosslessSV1"_uid.raw_index():
-		return true;
-	default:
-		return false;
-	}
-}
+		return kTSJpegLossless | kTSJpegFamily | kTSFfd9;
 
-inline constexpr bool WellKnown::is_jpegls() const noexcept {
-	switch (raw_index()) {
+		// JPEG-LS
 	case "JPEGLSLossless"_uid.raw_index():
 	case "JPEGLSNearLossless"_uid.raw_index():
-		return true;
-	default:
-		return false;
-	}
-}
+		return kTSJpegLS | kTSJpegFamily | kTSFfd9;
 
-inline constexpr bool WellKnown::is_jpeg_family() const noexcept {
-	switch (raw_index()) {
-	case "JPEGBaseline8Bit"_uid.raw_index():
-	case "JPEGExtended12Bit"_uid.raw_index():
-	case "JPEGExtended35"_uid.raw_index():
-	case "JPEGSpectralSelectionNonHierarchical68"_uid.raw_index():
-	case "JPEGSpectralSelectionNonHierarchical79"_uid.raw_index():
-	case "JPEGFullProgressionNonHierarchical1012"_uid.raw_index():
-	case "JPEGFullProgressionNonHierarchical1113"_uid.raw_index():
-	case "JPEGLossless"_uid.raw_index():
-	case "JPEGLosslessNonHierarchical15"_uid.raw_index():
-	case "JPEGExtendedHierarchical1618"_uid.raw_index():
-	case "JPEGExtendedHierarchical1719"_uid.raw_index():
-	case "JPEGSpectralSelectionHierarchical2022"_uid.raw_index():
-	case "JPEGSpectralSelectionHierarchical2123"_uid.raw_index():
-	case "JPEGFullProgressionHierarchical2426"_uid.raw_index():
-	case "JPEGFullProgressionHierarchical2527"_uid.raw_index():
-	case "JPEGLosslessHierarchical28"_uid.raw_index():
-	case "JPEGLosslessHierarchical29"_uid.raw_index():
-	case "JPEGLosslessSV1"_uid.raw_index():
-	case "JPEGLSLossless"_uid.raw_index():
-	case "JPEGLSNearLossless"_uid.raw_index():
-	case "JPEGXLLossless"_uid.raw_index():
-	case "JPEGXLJPEGRecompression"_uid.raw_index():
-	case "JPEGXL"_uid.raw_index():
-		return true;
-	default:
-		return false;
-	}
-}
-
-inline constexpr bool WellKnown::is_jpeg2000() const noexcept {
-	switch (raw_index()) {
+		// JPEG 2000 / HTJ2K
 	case "JPEG2000Lossless"_uid.raw_index():
 	case "JPEG2000"_uid.raw_index():
 	case "JPEG2000MCLossless"_uid.raw_index():
@@ -758,37 +727,22 @@ inline constexpr bool WellKnown::is_jpeg2000() const noexcept {
 	case "HTJ2K"_uid.raw_index():
 	case "JPIPHTJ2KReferenced"_uid.raw_index():
 	case "JPIPHTJ2KReferencedDeflate"_uid.raw_index():
-		return true;
-	default:
-		return false;
-	}
-}
+		return kTSJpeg2000 | kTSJpegFamily;
 
-inline constexpr bool WellKnown::is_jpegxl() const noexcept {
-	switch (raw_index()) {
+		// JPEG XL
 	case "JPEGXLLossless"_uid.raw_index():
 	case "JPEGXLJPEGRecompression"_uid.raw_index():
 	case "JPEGXL"_uid.raw_index():
-		return true;
-	default:
-		return false;
-	}
-}
+		return kTSJpegXL | kTSJpegFamily | kTSFfd9;
 
-inline constexpr bool WellKnown::is_mpeg2() const noexcept {
-	switch (raw_index()) {
+		// MPEG-2
 	case "MPEG2MPML"_uid.raw_index():
 	case "MPEG2MPMLF"_uid.raw_index():
 	case "MPEG2MPHL"_uid.raw_index():
 	case "MPEG2MPHLF"_uid.raw_index():
-		return true;
-	default:
-		return false;
-	}
-}
+		return kTSMpeg2;
 
-inline constexpr bool WellKnown::is_h264() const noexcept {
-	switch (raw_index()) {
+		// H.264 / MPEG-4 AVC
 	case "MPEG4HP41"_uid.raw_index():
 	case "MPEG4HP41F"_uid.raw_index():
 	case "MPEG4HP41BD"_uid.raw_index():
@@ -799,63 +753,58 @@ inline constexpr bool WellKnown::is_h264() const noexcept {
 	case "MPEG4HP423DF"_uid.raw_index():
 	case "MPEG4HP42STEREO"_uid.raw_index():
 	case "MPEG4HP42STEREOF"_uid.raw_index():
-		return true;
+		return kTSH264;
+
+		// HEVC
+	case "HEVCMP51"_uid.raw_index():
+	case "HEVCM10P51"_uid.raw_index():
+		return kTSHevc;
+
 	default:
-		return false;
+		return 0;
 	}
+}
+
+}  // namespace detail
+
+inline constexpr bool WellKnown::is_jpeg_baseline() const noexcept {
+	return detail::ts_mask(raw_index()) & detail::kTSJpegBaseline;
+}
+
+inline constexpr bool WellKnown::is_jpeg_lossless() const noexcept {
+	return detail::ts_mask(raw_index()) & detail::kTSJpegLossless;
+}
+
+inline constexpr bool WellKnown::is_jpegls() const noexcept {
+	return detail::ts_mask(raw_index()) & detail::kTSJpegLS;
+}
+
+inline constexpr bool WellKnown::is_jpeg_family() const noexcept {
+	return detail::ts_mask(raw_index()) & detail::kTSJpegFamily;
+}
+
+inline constexpr bool WellKnown::is_jpeg2000() const noexcept {
+	return detail::ts_mask(raw_index()) & detail::kTSJpeg2000;
+}
+
+inline constexpr bool WellKnown::is_jpegxl() const noexcept {
+	return detail::ts_mask(raw_index()) & detail::kTSJpegXL;
+}
+
+inline constexpr bool WellKnown::is_mpeg2() const noexcept {
+	return detail::ts_mask(raw_index()) & detail::kTSMpeg2;
+}
+
+inline constexpr bool WellKnown::is_h264() const noexcept {
+	return detail::ts_mask(raw_index()) & detail::kTSH264;
 }
 
 inline constexpr bool WellKnown::is_hevc() const noexcept {
-	switch (raw_index()) {
-	case "HEVCMP51"_uid.raw_index():
-	case "HEVCM10P51"_uid.raw_index():
-		return true;
-	default:
-		return false;
-	}
+	return detail::ts_mask(raw_index()) & detail::kTSHevc;
 }
 
 inline constexpr bool WellKnown::ends_with_ffd9_marker() const noexcept {
-	const auto idx = raw_index();
-	switch (idx) {
-		// JPEG Baseline/Extended/Progressive/Huffman variants
-	case "JPEGBaseline8Bit"_uid.raw_index():
-	case "JPEGExtended12Bit"_uid.raw_index():
-	case "JPEGExtended35"_uid.raw_index():
-	case "JPEGSpectralSelectionNonHierarchical68"_uid.raw_index():
-	case "JPEGSpectralSelectionNonHierarchical79"_uid.raw_index():
-	case "JPEGFullProgressionNonHierarchical1012"_uid.raw_index():
-	case "JPEGFullProgressionNonHierarchical1113"_uid.raw_index():
-	case "JPEGLossless"_uid.raw_index():
-	case "JPEGLosslessNonHierarchical15"_uid.raw_index():
-	case "JPEGExtendedHierarchical1618"_uid.raw_index():
-	case "JPEGExtendedHierarchical1719"_uid.raw_index():
-	case "JPEGSpectralSelectionHierarchical2022"_uid.raw_index():
-	case "JPEGSpectralSelectionHierarchical2123"_uid.raw_index():
-	case "JPEGFullProgressionHierarchical2426"_uid.raw_index():
-	case "JPEGFullProgressionHierarchical2527"_uid.raw_index():
-	case "JPEGLosslessHierarchical28"_uid.raw_index():
-	case "JPEGLosslessHierarchical29"_uid.raw_index():
-	case "JPEGLosslessSV1"_uid.raw_index():
-		// JPEG-LS (also uses 0xFFD9 EOI)
-	case "JPEGLSLossless"_uid.raw_index():
-	case "JPEGLSNearLossless"_uid.raw_index():
-		// JPEG 2000 and HTJ2K use EOC (FFD9) as codestream terminator.
-	case "JPEG2000Lossless"_uid.raw_index():
-	case "JPEG2000"_uid.raw_index():
-	case "JPEG2000MCLossless"_uid.raw_index():
-	case "JPEG2000MC"_uid.raw_index():
-	case "JPIPReferenced"_uid.raw_index():
-	case "JPIPReferencedDeflate"_uid.raw_index():
-	case "HTJ2KLossless"_uid.raw_index():
-	case "HTJ2KLosslessRPCL"_uid.raw_index():
-	case "HTJ2K"_uid.raw_index():
-	case "JPIPHTJ2KReferenced"_uid.raw_index():
-	case "JPIPHTJ2KReferencedDeflate"_uid.raw_index():
-		return true;
-	default:
-		return false;
-	}
+	return detail::ts_mask(raw_index()) & detail::kTSFfd9;
 }
 
 } // namespace uid
@@ -904,6 +853,8 @@ public:
 	[[nodiscard]] constexpr std::size_t offset() const noexcept { return offset_; }
 	/// Parent dataset (if any).
 	[[nodiscard]] constexpr DataSet* parent() const noexcept { return parent_; }
+	/// Truthy when this element is present (VR not None).
+	[[nodiscard]] constexpr explicit operator bool() const noexcept { return vr_ != VR::None; }
 	/// Raw value as a byte span; for SQ/PixelData this is the encoded payload.
 	[[nodiscard]] std::span<const std::uint8_t> value_span() const;
 	/// Pointer to stored value or nested sequence/pixel sequence.
@@ -1275,6 +1226,12 @@ private:
 	/// Const end iterator (alias).
 	const_iterator cend() const;
 
+	// Pixel decoding helpers (PIXEL_DECODER_DESIGN.md)
+	FrameInfo frame_info(std::size_t frame = 0) const;
+	DecodeStatus decode_into(std::span<std::byte> dst, std::size_t frame = 0,
+	    DecodeOptions opts = {}) const;
+	std::vector<std::byte> decode_pixels(std::size_t frame = 0, DecodeOptions opts = {}) const;
+
 private:
 	void attach_to_stream(std::string identifier, std::unique_ptr<InStream> stream);
 	void set_transfer_syntax(uid::WellKnown transfer_syntax);
@@ -1427,6 +1384,7 @@ private:
 	std::size_t extended_offset_table_count_{0};
 	std::vector<std::unique_ptr<PixelFrame>> frames_;
 };
+
 
 inline DataElement::DataElement(Tag tag, VR vr, std::size_t length, std::size_t offset,
     DataSet* parent) noexcept
