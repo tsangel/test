@@ -5,3 +5,12 @@
 [submodule "extern/fmt"]
 	path = extern/fmt
 	url = https://github.com/fmtlib/fmt.git
+[submodule "extern/libjpeg-turbo"]
+	path = extern/libjpeg-turbo
+	url = https://github.com/libjpeg-turbo/libjpeg-turbo.git
+[submodule "extern/charls"]
+	path = extern/charls
+	url = https://github.com/team-charls/charls.git
+[submodule "extern/openjpeg"]
+	path = extern/openjpeg
+	url = https://github.com/uclouvain/openjpeg.git
