@@ -888,10 +888,22 @@ pixel::strides DataSet::calc_strides(const pixel::decode_opts& opt) const {
 	const auto rows_value = info.rows;
 	const auto cols_value = info.cols;
 	const auto spp_value = info.samples_per_pixel;
+	constexpr int kMaxRowsOrColumns = 65535;
+	constexpr int kMaxSamplesPerPixel = 4;
 
 	if (rows_value <= 0 || cols_value <= 0 || spp_value <= 0) {
 		diag::error_and_throw(
 		    "DataSet::calc_strides file={} reason=invalid Rows/Columns/SamplesPerPixel",
+		    path());
+	}
+	if (rows_value > kMaxRowsOrColumns || cols_value > kMaxRowsOrColumns) {
+		diag::error_and_throw(
+		    "DataSet::calc_strides file={} reason=Rows/Columns must be <= 65535",
+		    path());
+	}
+	if (spp_value > kMaxSamplesPerPixel) {
+		diag::error_and_throw(
+		    "DataSet::calc_strides file={} reason=SamplesPerPixel must be <= 4",
 		    path());
 	}
 

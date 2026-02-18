@@ -112,6 +112,7 @@ if(DICOM_BUILD_EXAMPLES)
 endif()
 
 option(DICOM_BUILD_PYTHON "Build Python bindings with nanobind" ON)
+option(DICOM_PYTHON_STABLE_ABI "Build Python bindings with nanobind STABLE_ABI (abi3, CPython>=3.12)" OFF)
 
 if(DICOM_BUILD_PYTHON)
 	set(NANOBIND_DIR ${CMAKE_CURRENT_SOURCE_DIR}/extern/nanobind)
@@ -120,11 +121,17 @@ if(DICOM_BUILD_PYTHON)
 			"nanobind not found at ${NANOBIND_DIR}. "
 			"Initialize submodules (git submodule update --init --recursive).")
 	endif()
-	find_package(Python REQUIRED COMPONENTS Interpreter Development)
+	find_package(Python REQUIRED COMPONENTS Interpreter Development OPTIONAL_COMPONENTS Development.SABIModule)
 	add_subdirectory(${NANOBIND_DIR} EXCLUDE_FROM_ALL)
-	nanobind_add_module(_dicomsdl NOMINSIZE
-		bindings/python/dicom_module.cpp
-	)
+	if(DICOM_PYTHON_STABLE_ABI)
+		nanobind_add_module(_dicomsdl STABLE_ABI NOMINSIZE
+			bindings/python/dicom_module.cpp
+		)
+	else()
+		nanobind_add_module(_dicomsdl NOMINSIZE
+			bindings/python/dicom_module.cpp
+		)
+	endif()
 	target_link_libraries(_dicomsdl PRIVATE dicomsdl fmt::fmt-header-only)
 endif()
 

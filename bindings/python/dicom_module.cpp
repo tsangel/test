@@ -1,4 +1,6 @@
+#include <array>
 #include <cstring>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <sstream>
@@ -10,6 +12,7 @@
 
 #include <nanobind/operators.h>
 #include <nanobind/nanobind.h>
+#include <nanobind/ndarray.h>
 #include <nanobind/stl/optional.h>
 #include <nanobind/stl/shared_ptr.h>
 #include <nanobind/stl/string.h>
@@ -42,6 +45,162 @@ nb::object readonly_memoryview_from_span(const void* data, std::size_t size) {
 	                : const_cast<char*>(reinterpret_cast<const char*>(data));
 	return nb::steal<nb::object>(
 	    PyMemoryView_FromMemory(ptr, static_cast<Py_ssize_t>(size), PyBUF_READ));
+}
+
+struct DecodedArraySpec {
+	nb::dlpack::dtype dtype{};
+	std::size_t bytes_per_sample{0};
+};
+
+DecodedArraySpec decoded_array_spec(const DataSet::pixel_info_t& info, bool scaled) {
+	if (scaled) {
+		return DecodedArraySpec{nb::dtype<float>(), sizeof(float)};
+	}
+
+	switch (info.sv_dtype) {
+	case dicom::pixel::dtype::u8:
+		return DecodedArraySpec{nb::dtype<std::uint8_t>(), sizeof(std::uint8_t)};
+	case dicom::pixel::dtype::s8:
+		return DecodedArraySpec{nb::dtype<std::int8_t>(), sizeof(std::int8_t)};
+	case dicom::pixel::dtype::u16:
+		return DecodedArraySpec{nb::dtype<std::uint16_t>(), sizeof(std::uint16_t)};
+	case dicom::pixel::dtype::s16:
+		return DecodedArraySpec{nb::dtype<std::int16_t>(), sizeof(std::int16_t)};
+	case dicom::pixel::dtype::u32:
+		return DecodedArraySpec{nb::dtype<std::uint32_t>(), sizeof(std::uint32_t)};
+	case dicom::pixel::dtype::s32:
+		return DecodedArraySpec{nb::dtype<std::int32_t>(), sizeof(std::int32_t)};
+	case dicom::pixel::dtype::f32:
+		return DecodedArraySpec{nb::dtype<float>(), sizeof(float)};
+	case dicom::pixel::dtype::f64:
+		return DecodedArraySpec{nb::dtype<double>(), sizeof(double)};
+	default:
+		break;
+	}
+
+	throw nb::value_error("pixel_array requires a known pixel sample dtype");
+}
+
+nb::object make_numpy_array_from_decoded(std::vector<std::uint8_t>&& decoded,
+    std::size_t ndim, const std::array<std::size_t, 4>& shape,
+    const std::array<std::int64_t, 4>& strides, const nb::dlpack::dtype& dtype) {
+	auto* storage = new std::vector<std::uint8_t>(std::move(decoded));
+	void* data_ptr = storage->empty() ? nullptr : static_cast<void*>(storage->data());
+	nb::capsule owner(storage, [](void* ptr) noexcept {
+		delete static_cast<std::vector<std::uint8_t>*>(ptr);
+	});
+	return nb::cast(nb::ndarray<nb::numpy>(
+	    data_ptr, ndim, shape.data(), owner, strides.data(), dtype,
+	    nb::device::cpu::value, 0, 'C'));
+}
+
+nb::object dataset_pixel_array(const DataSet& self, long frame, bool scaled) {
+	if (frame < -1) {
+		throw nb::value_error("frame must be >= -1");
+	}
+
+	const auto& info = self.pixel_info();
+	if (!info.has_pixel_data) {
+		throw nb::value_error(
+		    "pixel_array requires PixelData, FloatPixelData, or DoubleFloatPixelData");
+	}
+	if (info.rows <= 0 || info.cols <= 0 || info.samples_per_pixel <= 0) {
+		throw nb::value_error("pixel_array requires positive Rows/Columns/SamplesPerPixel");
+	}
+	if (info.frames <= 0) {
+		throw nb::value_error("pixel_array requires NumberOfFrames >= 1");
+	}
+
+	const auto rows = static_cast<std::size_t>(info.rows);
+	const auto cols = static_cast<std::size_t>(info.cols);
+	const auto samples_per_pixel = static_cast<std::size_t>(info.samples_per_pixel);
+	const auto frames = static_cast<std::size_t>(info.frames);
+
+	dicom::pixel::decode_opts opt{};
+	opt.planar_out = dicom::pixel::planar::interleaved;
+	opt.alignment = 1;
+	opt.scaled = scaled;
+
+	const auto dst_strides = self.calc_strides(opt);
+	const auto spec = decoded_array_spec(info, scaled);
+	const auto row_stride = dst_strides.row;
+	const auto frame_stride = dst_strides.frame;
+	const auto bytes_per_sample = spec.bytes_per_sample;
+	if (bytes_per_sample == 0) {
+		throw nb::value_error("pixel_array could not determine output sample size");
+	}
+	if ((row_stride % bytes_per_sample) != 0 || (frame_stride % bytes_per_sample) != 0) {
+		throw std::runtime_error("pixel_array stride is not aligned to output sample size");
+	}
+	const auto row_stride_elems = row_stride / bytes_per_sample;
+	const auto frame_stride_elems = frame_stride / bytes_per_sample;
+	const auto col_stride_elems = samples_per_pixel;
+
+	const bool decode_all_frames = (frame == -1) && (frames > 1);
+	if (!decode_all_frames) {
+		const auto frame_index = (frame < 0) ? std::size_t{0} : static_cast<std::size_t>(frame);
+		if (frame_index >= frames) {
+			throw nb::index_error("pixel_array frame index out of range");
+		}
+
+		std::vector<std::uint8_t> decoded(frame_stride);
+		self.decode_into(frame_index, std::span<std::uint8_t>(decoded), dst_strides, opt);
+
+		std::array<std::size_t, 4> shape{};
+		std::array<std::int64_t, 4> strides{};
+		std::size_t ndim = 0;
+		if (samples_per_pixel == 1) {
+			ndim = 2;
+			shape[0] = rows;
+			shape[1] = cols;
+			strides[0] = static_cast<std::int64_t>(row_stride_elems);
+			strides[1] = 1;
+		} else {
+			ndim = 3;
+			shape[0] = rows;
+			shape[1] = cols;
+			shape[2] = samples_per_pixel;
+			strides[0] = static_cast<std::int64_t>(row_stride_elems);
+			strides[1] = static_cast<std::int64_t>(col_stride_elems);
+			strides[2] = 1;
+		}
+
+		return make_numpy_array_from_decoded(
+		    std::move(decoded), ndim, shape, strides, spec.dtype);
+	}
+
+	std::vector<std::uint8_t> decoded(frame_stride * frames);
+	for (std::size_t frame_index = 0; frame_index < frames; ++frame_index) {
+		auto frame_span = std::span<std::uint8_t>(
+		    decoded.data() + frame_index * frame_stride, frame_stride);
+		self.decode_into(frame_index, frame_span, dst_strides, opt);
+	}
+
+	std::array<std::size_t, 4> shape{};
+	std::array<std::int64_t, 4> strides{};
+	std::size_t ndim = 0;
+	if (samples_per_pixel == 1) {
+		ndim = 3;
+		shape[0] = frames;
+		shape[1] = rows;
+		shape[2] = cols;
+		strides[0] = static_cast<std::int64_t>(frame_stride_elems);
+		strides[1] = static_cast<std::int64_t>(row_stride_elems);
+		strides[2] = 1;
+	} else {
+		ndim = 4;
+		shape[0] = frames;
+		shape[1] = rows;
+		shape[2] = cols;
+		shape[3] = samples_per_pixel;
+		strides[0] = static_cast<std::int64_t>(frame_stride_elems);
+		strides[1] = static_cast<std::int64_t>(row_stride_elems);
+		strides[2] = static_cast<std::int64_t>(col_stride_elems);
+		strides[3] = 1;
+	}
+
+	return make_numpy_array_from_decoded(
+	    std::move(decoded), ndim, shape, strides, spec.dtype);
 }
 
 class PyBufferView {
@@ -576,6 +735,24 @@ NB_MODULE(_dicomsdl, m) {
 		    },
 		    nb::arg("frame_index") = 0,
 		    "Decode one frame with default options and return decoded bytes.")
+		.def("pixel_array",
+		    &dataset_pixel_array,
+		    nb::arg("frame") = -1,
+		    nb::arg("scaled") = false,
+		    "Decode pixel samples and return a NumPy array.\n"
+		    "\n"
+		    "Parameters\n"
+		    "----------\n"
+		    "frame : int, optional\n"
+		    "    -1 decodes all frames (multi-frame only), otherwise decode the selected frame index.\n"
+		    "scaled : bool, optional\n"
+		    "    If True, apply Modality LUT/Rescale and return float32 output.\n"
+		    "\n"
+		    "Returns\n"
+		    "-------\n"
+		    "numpy.ndarray\n"
+		    "    Shape is (rows, cols) or (rows, cols, samples) for a single frame,\n"
+		    "    and (frames, rows, cols) or (frames, rows, cols, samples) when decoding all frames.")
 		.def("get_dataelement",
 		    [](DataSet& self, const Tag& tag) -> DataElement& {
 		        return *self.get_dataelement(tag);
