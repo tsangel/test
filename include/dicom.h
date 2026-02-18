@@ -219,6 +219,8 @@ struct WellKnown {
 	[[nodiscard]] constexpr bool is_jpeg_family() const noexcept;
 	[[nodiscard]] constexpr bool is_jpeg2000() const noexcept;
 	[[nodiscard]] constexpr bool is_jpegxl() const noexcept;
+	[[nodiscard]] constexpr bool is_rle() const noexcept;
+	[[nodiscard]] constexpr bool is_uncompressed() const noexcept;
 	[[nodiscard]] constexpr bool is_mpeg2() const noexcept;
 	[[nodiscard]] constexpr bool is_h264() const noexcept;
 	[[nodiscard]] constexpr bool is_hevc() const noexcept;
@@ -671,20 +673,32 @@ namespace uid {
 using namespace dicom::literals;
 
 // Transfer Syntax classification compressed into a single switch.
+// Order follows uid_registry transfer syntax listing (with uncompressed first).
 namespace detail {
-constexpr std::uint32_t kTSJpegBaseline = 1u << 0;
-constexpr std::uint32_t kTSJpegLossless = 1u << 1;
-constexpr std::uint32_t kTSJpegLS = 1u << 2;
-constexpr std::uint32_t kTSJpeg2000 = 1u << 3;
-constexpr std::uint32_t kTSJpegXL = 1u << 4;
+constexpr std::uint32_t kTSUncompressed = 1u << 0;
+constexpr std::uint32_t kTSJpegBaseline = 1u << 1;
+constexpr std::uint32_t kTSJpegLossless = 1u << 2;
+constexpr std::uint32_t kTSJpegLS = 1u << 3;
+constexpr std::uint32_t kTSJpeg2000 = 1u << 4;
 constexpr std::uint32_t kTSMpeg2 = 1u << 5;
 constexpr std::uint32_t kTSH264 = 1u << 6;
 constexpr std::uint32_t kTSHevc = 1u << 7;
-constexpr std::uint32_t kTSFfd9 = 1u << 8;      // Codestream ends with FFD9 marker
-constexpr std::uint32_t kTSJpegFamily = 1u << 9;
+constexpr std::uint32_t kTSJpegXL = 1u << 8;
+constexpr std::uint32_t kTSRle = 1u << 9;
+constexpr std::uint32_t kTSFfd9 = 1u << 10;      // Codestream ends with FFD9 marker
+constexpr std::uint32_t kTSJpegFamily = 1u << 11;
 
 inline constexpr std::uint32_t ts_mask(std::uint16_t idx) {
 	switch (idx) {
+		// Uncompressed image transfer syntaxes
+	case "ImplicitVRLittleEndian"_uid.raw_index():
+	case "ExplicitVRLittleEndian"_uid.raw_index():
+	case "EncapsulatedUncompressedExplicitVRLittleEndian"_uid.raw_index():
+	case "DeflatedExplicitVRLittleEndian"_uid.raw_index():
+	case "ExplicitVRBigEndian"_uid.raw_index():
+	case "Papyrus3ImplicitVRLittleEndian"_uid.raw_index():
+		return kTSUncompressed;
+
 		// JPEG Baseline / Extended / Progressive
 	case "JPEGBaseline8Bit"_uid.raw_index():
 	case "JPEGExtended12Bit"_uid.raw_index():
@@ -714,25 +728,14 @@ inline constexpr std::uint32_t ts_mask(std::uint16_t idx) {
 	case "JPEGLSNearLossless"_uid.raw_index():
 		return kTSJpegLS | kTSJpegFamily | kTSFfd9;
 
-		// JPEG 2000 / HTJ2K
+		// JPEG 2000 / JPIP Referenced
 	case "JPEG2000Lossless"_uid.raw_index():
 	case "JPEG2000"_uid.raw_index():
 	case "JPEG2000MCLossless"_uid.raw_index():
 	case "JPEG2000MC"_uid.raw_index():
 	case "JPIPReferenced"_uid.raw_index():
 	case "JPIPReferencedDeflate"_uid.raw_index():
-	case "HTJ2KLossless"_uid.raw_index():
-	case "HTJ2KLosslessRPCL"_uid.raw_index():
-	case "HTJ2K"_uid.raw_index():
-	case "JPIPHTJ2KReferenced"_uid.raw_index():
-	case "JPIPHTJ2KReferencedDeflate"_uid.raw_index():
 		return kTSJpeg2000 | kTSJpegFamily;
-
-		// JPEG XL
-	case "JPEGXLLossless"_uid.raw_index():
-	case "JPEGXLJPEGRecompression"_uid.raw_index():
-	case "JPEGXL"_uid.raw_index():
-		return kTSJpegXL | kTSJpegFamily | kTSFfd9;
 
 		// MPEG-2
 	case "MPEG2MPML"_uid.raw_index():
@@ -758,6 +761,24 @@ inline constexpr std::uint32_t ts_mask(std::uint16_t idx) {
 	case "HEVCMP51"_uid.raw_index():
 	case "HEVCM10P51"_uid.raw_index():
 		return kTSHevc;
+
+		// JPEG XL
+	case "JPEGXLLossless"_uid.raw_index():
+	case "JPEGXLJPEGRecompression"_uid.raw_index():
+	case "JPEGXL"_uid.raw_index():
+		return kTSJpegXL | kTSJpegFamily | kTSFfd9;
+
+		// HTJ2K / JPIP HTJ2K Referenced
+	case "HTJ2KLossless"_uid.raw_index():
+	case "HTJ2KLosslessRPCL"_uid.raw_index():
+	case "HTJ2K"_uid.raw_index():
+	case "JPIPHTJ2KReferenced"_uid.raw_index():
+	case "JPIPHTJ2KReferencedDeflate"_uid.raw_index():
+		return kTSJpeg2000 | kTSJpegFamily;
+
+		// RLE
+	case "RLELossless"_uid.raw_index():
+		return kTSRle;
 
 	default:
 		return 0;
@@ -788,6 +809,14 @@ inline constexpr bool WellKnown::is_jpeg2000() const noexcept {
 
 inline constexpr bool WellKnown::is_jpegxl() const noexcept {
 	return detail::ts_mask(raw_index()) & detail::kTSJpegXL;
+}
+
+inline constexpr bool WellKnown::is_rle() const noexcept {
+	return detail::ts_mask(raw_index()) & detail::kTSRle;
+}
+
+inline constexpr bool WellKnown::is_uncompressed() const noexcept {
+	return detail::ts_mask(raw_index()) & detail::kTSUncompressed;
 }
 
 inline constexpr bool WellKnown::is_mpeg2() const noexcept {
