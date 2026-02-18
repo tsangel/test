@@ -46,7 +46,6 @@ class CMakeBuild(build_ext):
             f"-DPython_EXECUTABLE={python_executable}",
             f"-DPython3_EXECUTABLE={python_executable}",
             "-DDICOM_BUILD_PYTHON=ON",
-            "-DPYBIND11_FINDPYTHON=ON",
         ]
 
         build_args = ["--target", "_dicomsdl"]

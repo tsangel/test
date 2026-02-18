@@ -111,12 +111,18 @@ if(DICOM_BUILD_EXAMPLES)
 	target_link_libraries(simple_read PRIVATE dicomsdl)
 endif()
 
-option(DICOM_BUILD_PYTHON "Build Python bindings with pybind11" ON)
+option(DICOM_BUILD_PYTHON "Build Python bindings with nanobind" ON)
 
 if(DICOM_BUILD_PYTHON)
-	set(PYBIND11_DIR ${CMAKE_CURRENT_SOURCE_DIR}/extern/pybind11)
-	add_subdirectory(${PYBIND11_DIR} EXCLUDE_FROM_ALL)
-	pybind11_add_module(_dicomsdl MODULE
+	set(NANOBIND_DIR ${CMAKE_CURRENT_SOURCE_DIR}/extern/nanobind)
+	if(NOT EXISTS "${NANOBIND_DIR}/CMakeLists.txt")
+		message(FATAL_ERROR
+			"nanobind not found at ${NANOBIND_DIR}. "
+			"Initialize submodules (git submodule update --init --recursive).")
+	endif()
+	find_package(Python REQUIRED COMPONENTS Interpreter Development)
+	add_subdirectory(${NANOBIND_DIR} EXCLUDE_FROM_ALL)
+	nanobind_add_module(_dicomsdl NOMINSIZE
 		bindings/python/dicom_module.cpp
 	)
 	target_link_libraries(_dicomsdl PRIVATE dicomsdl fmt::fmt-header-only)

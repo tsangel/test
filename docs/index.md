@@ -1,6 +1,6 @@
 # dicomsdl Documentation
 
-Lightweight DICOM parser/wrapper with a C++ core and a pybind11-based Python module. The docs are written with Python users first, while still covering the C++ API.
+Lightweight DICOM parser/wrapper with a C++ core and a nanobind-based Python module. The docs are written with Python users first, while still covering the C++ API.
 
 ## What you'll find here
 - Installation and build (Python wheel, CMake-based C++)

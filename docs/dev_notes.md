@@ -3,7 +3,7 @@
 ## Build & test
 - C++: `cmake -S . -B build -DDICOM_BUILD_EXAMPLES=ON -DCMAKE_BUILD_TYPE=Release && cmake --build build && ctest --test-dir build`
 - Python: `pip install -e .` then `pytest -q tests/python`
-- Submodules: `git submodule update --init --recursive` (includes pybind11)
+- Submodules: `git submodule update --init --recursive` (includes nanobind)
 
 ## Dictionary/registry generation
 - Sources: `misc/dictionary/part06.xml`, `part03.xml`, `_dicom_version.txt`, `VERSION`, etc.

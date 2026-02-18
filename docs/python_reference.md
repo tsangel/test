@@ -1,6 +1,6 @@
 # Python API Reference
 
-This page collects the primary Python entry points exposed by `dicomsdl`'s pybind11 module. Docstrings are defined in `bindings/python/dicom_module.cpp` and rendered here for convenience.
+This page collects the primary Python entry points exposed by `dicomsdl`'s nanobind module. Docstrings are defined in `bindings/python/dicom_module.cpp` and rendered here for convenience.
 
 ## Module-level functions
 

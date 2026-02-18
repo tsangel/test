@@ -8,14 +8,20 @@
 #include <unordered_set>
 #include <vector>
 
-#include <pybind11/operators.h>
-#include <pybind11/pybind11.h>
-#include <pybind11/stl.h>
+#include <nanobind/operators.h>
+#include <nanobind/nanobind.h>
+#include <nanobind/stl/optional.h>
+#include <nanobind/stl/shared_ptr.h>
+#include <nanobind/stl/string.h>
+#include <nanobind/stl/string_view.h>
+#include <nanobind/stl/tuple.h>
+#include <nanobind/stl/unique_ptr.h>
+#include <nanobind/stl/vector.h>
 
 #include <dicom.h>
 #include <diagnostics.h>
 
-namespace py = pybind11;
+namespace nb = nanobind;
 
 using dicom::DataSet;
 using dicom::DataElement;
@@ -30,54 +36,79 @@ namespace {
 
 std::string_view vr_to_string_view(const VR& vr);
 
-py::object dataelement_get_value_py(DataElement& element, py::handle parent = py::handle()) {
+nb::object readonly_memoryview_from_span(const void* data, std::size_t size) {
+	char* ptr = size == 0
+	                ? const_cast<char*>("")
+	                : const_cast<char*>(reinterpret_cast<const char*>(data));
+	return nb::steal<nb::object>(
+	    PyMemoryView_FromMemory(ptr, static_cast<Py_ssize_t>(size), PyBUF_READ));
+}
+
+class PyBufferView {
+public:
+	explicit PyBufferView(nb::handle obj) {
+		if (PyObject_GetBuffer(obj.ptr(), &view_, PyBUF_FULL_RO) != 0) {
+			throw nb::type_error("read_bytes expects a bytes-like object");
+		}
+	}
+
+	~PyBufferView() { PyBuffer_Release(&view_); }
+
+	PyBufferView(const PyBufferView&) = delete;
+	PyBufferView& operator=(const PyBufferView&) = delete;
+
+	const Py_buffer& view() const { return view_; }
+
+private:
+	Py_buffer view_{};
+};
+
+nb::object dataelement_get_value_py(DataElement& element, nb::handle parent = nb::handle()) {
 	if (&element == dicom::NullElement()) {
-		return py::none();
+		return nb::none();
 	}
 	if (element.vr().is_sequence()) {
 		auto* seq = element.as_sequence();
-		if (!seq) return py::none();
-		py::handle keep = parent.is_none() ? py::cast(element.parent(), py::return_value_policy::reference) : parent;
-		return py::cast(seq, py::return_value_policy::reference_internal, keep);
+		if (!seq) return nb::none();
+		nb::handle keep = parent.is_none() ? nb::cast(element.parent(), nb::rv_policy::reference) : parent;
+		return nb::cast(seq, nb::rv_policy::reference_internal, keep);
 	}
 	if (element.vr().is_pixel_sequence()) {
 		auto* pix = element.as_pixel_sequence();
-		if (!pix) return py::none();
-		py::handle keep = parent.is_none() ? py::cast(element.parent(), py::return_value_policy::reference) : parent;
-		return py::cast(pix, py::return_value_policy::reference_internal, keep);
+		if (!pix) return nb::none();
+		nb::handle keep = parent.is_none() ? nb::cast(element.parent(), nb::rv_policy::reference) : parent;
+		return nb::cast(pix, nb::rv_policy::reference_internal, keep);
 	}
 
 	const int vm = element.vm();
 	if (vm <= 1) {
 		if (auto v = element.to_longlong()) {
-			return py::cast(*v);
+			return nb::cast(*v);
 		}
 		if (auto v = element.to_double()) {
-			return py::cast(*v);
+			return nb::cast(*v);
 		}
 		if (auto v = element.to_string_view()) {
-			return py::str(v->data(), v->size());
+			return nb::str(v->data(), v->size());
 		}
 	} else {
 		if (auto v = element.to_longlong_vector()) {
-			return py::cast(*v);
+			return nb::cast(*v);
 		}
 		if (auto v = element.to_double_vector()) {
-			return py::cast(*v);
+			return nb::cast(*v);
 		}
 		if (auto v = element.to_string_views()) {
-			py::list out;
+			nb::list out;
 			for (const auto& sv : *v) {
-				out.append(py::str(sv.data(), sv.size()));
+				out.append(nb::str(sv.data(), sv.size()));
 			}
 			return out;
 		}
 	}
 
 	auto span = element.value_span();
-	return py::memoryview::from_memory(
-	    static_cast<const void*>(span.data()),
-	    static_cast<py::ssize_t>(span.size()));
+	return readonly_memoryview_from_span(span.data(), span.size());
 }
 
 std::string tag_repr(const Tag& tag) {
@@ -121,11 +152,11 @@ std::string uid_repr(const WellKnown& uid) {
 	return oss.str();
 }
 
-py::object uid_or_none(std::optional<WellKnown> uid) {
+nb::object uid_or_none(std::optional<WellKnown> uid) {
 	if (!uid) {
-		return py::none();
+		return nb::none();
 	}
-	return py::cast(*uid);
+	return nb::cast(*uid);
 }
 
 
@@ -133,19 +164,20 @@ WellKnown require_uid(std::optional<WellKnown> uid, const char* origin, const st
 	if (!uid) {
 		std::ostringstream oss;
 		oss << "Unknown DICOM UID from " << origin << ": " << text;
-		throw py::value_error(oss.str());
+		const std::string message = oss.str();
+		throw nb::value_error(message.c_str());
 	}
 	return *uid;
 }
 
-py::dict make_tag_entry_dict(const dicom::DataElementEntry& entry) {
-	py::dict info;
-	info["tag"] = py::str(entry.tag.data(), entry.tag.size());
-	info["keyword"] = py::str(entry.keyword.data(), entry.keyword.size());
-	info["name"] = py::str(entry.name.data(), entry.name.size());
-	info["vr"] = py::str(entry.vr.data(), entry.vr.size());
-	info["vm"] = py::str(entry.vm.data(), entry.vm.size());
-	info["retired"] = py::str(entry.retired.data(), entry.retired.size());
+nb::dict make_tag_entry_dict(const dicom::DataElementEntry& entry) {
+	nb::dict info;
+	info["tag"] = nb::str(entry.tag.data(), entry.tag.size());
+	info["keyword"] = nb::str(entry.keyword.data(), entry.keyword.size());
+	info["name"] = nb::str(entry.name.data(), entry.name.size());
+	info["vr"] = nb::str(entry.vr.data(), entry.vr.size());
+	info["vm"] = nb::str(entry.vm.data(), entry.vm.size());
+	info["retired"] = nb::str(entry.retired.data(), entry.retired.size());
 	info["tag_value"] = entry.tag_value;
 	info["vr_value"] = entry.vr_value;
 	return info;
@@ -157,7 +189,7 @@ struct PyDataElementIterator {
 
 	DataElement& next() {
 		if (current_ == end_) {
-			throw py::stop_iteration();
+			throw nb::stop_iteration();
 		}
 		DataElement& element = *current_;
 		++current_;
@@ -175,11 +207,11 @@ struct PySequenceIterator {
 
 	DataSet& next() {
 		if (!sequence_ || index_ >= static_cast<std::size_t>(sequence_->size())) {
-			throw py::stop_iteration();
+			throw nb::stop_iteration();
 		}
 		DataSet* dataset = sequence_->get_dataset(index_++);
 		if (!dataset) {
-			throw py::stop_iteration();
+			throw nb::stop_iteration();
 		}
 		return *dataset;
 	}
@@ -190,12 +222,12 @@ struct PySequenceIterator {
 
 }  // namespace
 
-PYBIND11_MODULE(_dicomsdl, m) {
-	m.doc() = "pybind11 bindings for DataSet";
+NB_MODULE(_dicomsdl, m) {
+	m.doc() = "nanobind bindings for DataSet";
 
-	m.attr("DICOM_STANDARD_VERSION") = py::str(DICOM_STANDARD_VERSION);
-	m.attr("DICOMSDL_VERSION") = py::str(DICOMSDL_VERSION);
-	m.attr("__version__") = py::str(DICOMSDL_VERSION);
+	m.attr("DICOM_STANDARD_VERSION") = nb::str(DICOM_STANDARD_VERSION);
+	m.attr("DICOMSDL_VERSION") = nb::str(DICOMSDL_VERSION);
+	m.attr("__version__") = nb::str(DICOMSDL_VERSION);
 
 	// Logging helpers: forward to diag default reporter
 	m.def("log_info", [] (const std::string& msg) {
@@ -209,242 +241,241 @@ PYBIND11_MODULE(_dicomsdl, m) {
 	});
 
 	// Diagnostics / reporter bindings
-	auto loglevel = py::enum_<diag::LogLevel>(m, "LogLevel")
+	nb::enum_<diag::LogLevel>(m, "LogLevel")
 	    .value("Info", diag::LogLevel::Info)
 	    .value("Warning", diag::LogLevel::Warning)
-	    .value("Error", diag::LogLevel::Error)
-	    .export_values();
+	    .value("Error", diag::LogLevel::Error);
 
-	py::class_<diag::Reporter, std::shared_ptr<diag::Reporter>>(m, "Reporter");
+	nb::class_<diag::Reporter>(m, "Reporter");
 
-	py::class_<diag::StderrReporter, diag::Reporter, std::shared_ptr<diag::StderrReporter>>(
+	nb::class_<diag::StderrReporter, diag::Reporter>(
 	    m, "StderrReporter")
-			.def(py::init<>(), "Reporter that writes to stderr");
+			.def(nb::init<>(), "Reporter that writes to stderr");
 
-	py::class_<diag::FileReporter, diag::Reporter, std::shared_ptr<diag::FileReporter>>(
+	nb::class_<diag::FileReporter, diag::Reporter>(
 	    m, "FileReporter")
-			.def(py::init<std::string>(), py::arg("path"),
+			.def(nb::init<std::string>(), nb::arg("path"),
 			    "Append log lines to the given file path");
 
-	py::class_<diag::BufferingReporter, diag::Reporter, std::shared_ptr<diag::BufferingReporter>>(
+	nb::class_<diag::BufferingReporter, diag::Reporter>(
 	    m, "BufferingReporter")
-			.def(py::init<std::size_t>(), py::arg("max_messages") = 0,
+			.def(nb::init<std::size_t>(), nb::arg("max_messages") = 0,
 			    "Buffer messages in memory; 0 means unbounded, otherwise acts as a ring buffer")
 			.def("take_messages", &diag::BufferingReporter::take_messages,
-			    py::arg("include_level") = true,
+			    nb::arg("include_level") = true,
 			    "Return buffered messages as strings and clear the buffer")
 			.def("for_each",
-			    [] (diag::BufferingReporter& self, py::function fn) {
+			    [] (diag::BufferingReporter& self, nb::callable fn) {
 				    self.for_each([&fn](diag::LogLevel sev, const std::string& msg) {
 					    fn(sev, msg);
 				    });
 			    },
-			    py::arg("fn"),
+			    nb::arg("fn"),
 			    "Iterate over buffered messages without clearing; fn(severity, message)");
 
-	m.def("set_default_reporter", &diag::set_default_reporter, py::arg("reporter"),
+	m.def("set_default_reporter", &diag::set_default_reporter, nb::arg("reporter").none(),
 	    "Install a process-wide reporter (None resets to stderr)");
-	m.def("set_thread_reporter", &diag::set_thread_reporter, py::arg("reporter"),
+	m.def("set_thread_reporter", &diag::set_thread_reporter, nb::arg("reporter").none(),
 	    "Install a reporter for the current thread (None clears it)");
-	m.def("set_log_level", &diag::set_log_level, py::arg("level"),
+	m.def("set_log_level", &diag::set_log_level, nb::arg("level"),
 	    "Set process-wide log level; messages below this are dropped");
 
-	py::class_<DataElement>(m, "DataElement",
+	nb::class_<DataElement>(m, "DataElement",
 	    "Single DICOM element. Provides tag/VR/length/offset and typed value helpers.\n"
 	    "For sequences and pixel data, holds nested Sequence or PixelSequence objects.")
-		.def_property_readonly("tag", &DataElement::tag)
-		.def_property_readonly("vr", &DataElement::vr)
-		.def_property_readonly("length", &DataElement::length)
-		.def_property_readonly("offset", &DataElement::offset)
-		.def_property_readonly("vm", &DataElement::vm)
-		.def_property_readonly("is_sequence",
+		.def_prop_ro("tag", &DataElement::tag)
+		.def_prop_ro("vr", &DataElement::vr)
+		.def_prop_ro("length", &DataElement::length)
+		.def_prop_ro("offset", &DataElement::offset)
+		.def_prop_ro("vm", &DataElement::vm)
+		.def_prop_ro("is_sequence",
 	    [](const DataElement& element) { return element.vr().is_sequence(); })
-		.def_property_readonly("is_pixel_sequence",
+		.def_prop_ro("is_pixel_sequence",
 	    [](const DataElement& element) { return element.vr().is_pixel_sequence(); })
-		.def_property_readonly("sequence",
+		.def_prop_ro("sequence",
 	    [](DataElement& element) -> Sequence* {
 		    return element.sequence();
 	    },
-	    py::return_value_policy::reference_internal,
+	    nb::rv_policy::reference_internal,
 	    "Return the nested Sequence if present; otherwise None.")
-		.def_property_readonly("pixel_sequence",
+		.def_prop_ro("pixel_sequence",
 	    [](DataElement& element) -> dicom::PixelSequence* {
 		    return element.pixel_sequence();
 	    },
-	    py::return_value_policy::reference_internal,
+	    nb::rv_policy::reference_internal,
 	    "Return the nested PixelSequence if present; otherwise None.")
-		.def("to_uid_string",
-	    [](const DataElement& element) -> py::object {
+	.def("to_uid_string",
+	    [](const DataElement& element) -> nb::object {
 	        auto v = element.to_uid_string();
 	        if (v) {
-	            return py::str(*v);
+	            return nb::cast(*v);
 	        }
-	        return py::none();
+	        return nb::none();
 	    },
 	    "Return the trimmed UI string value or None if unavailable.")
 		.def("to_string_view",
-	    [](const DataElement& element) -> py::object {
+	    [](const DataElement& element) -> nb::object {
 	        auto v = element.to_string_view();
 	        if (v) {
-	            return py::str(v->data(), v->size());
+	            return nb::str(v->data(), v->size());
 	        }
-	        return py::none();
+	        return nb::none();
 	    },
 	    "Return a trimmed raw string (no charset decoding) or None if VR is not textual.")
 		.def("to_string_views",
-	    [](const DataElement& element) -> py::object {
+	    [](const DataElement& element) -> nb::object {
 	        auto values = element.to_string_views();
 	        if (!values) {
-	            return py::none();
+	            return nb::none();
 	        }
-	        py::list out;
+	        nb::list out;
 	        for (const auto& item : *values) {
-	            out.append(py::str(item.data(), item.size()));
+	            out.append(nb::str(item.data(), item.size()));
 	        }
 	        return out;
 	    },
 	    "Return a list of trimmed raw strings for multi-valued VRs, or None if unsupported.")
 		.def("to_utf8_view",
-	    [](const DataElement& element) -> py::object {
+	    [](const DataElement& element) -> nb::object {
 	        auto v = element.to_utf8_view();
 	        if (v) {
-	            return py::str(v->data(), v->size());
+	            return nb::str(v->data(), v->size());
 	        }
-	        return py::none();
+	        return nb::none();
 	    },
 	    "Return a charset-decoded UTF-8 string when available, else None.")
 		.def("to_utf8_views",
-	    [](const DataElement& element) -> py::object {
+	    [](const DataElement& element) -> nb::object {
 	        auto values = element.to_utf8_views();
 	        if (!values) {
-	            return py::none();
+	            return nb::none();
 	        }
-	        py::list out;
+	        nb::list out;
 	        for (const auto& item : *values) {
-	            out.append(py::str(item.data(), item.size()));
+	            out.append(nb::str(item.data(), item.size()));
 	        }
 		return out;
 	    },
 	    "Return a list of UTF-8 strings for multi-valued VRs, or None if unsupported.")
 	.def("to_transfer_syntax_uid",
-	    [](const DataElement& element) -> py::object {
+	    [](const DataElement& element) -> nb::object {
 	        auto uid = element.to_transfer_syntax_uid();
 	        if (uid) {
-	            return py::cast(*uid);
+	            return nb::cast(*uid);
 	        }
-	        return py::none();
+	        return nb::none();
 	    },
 	    "Return a well-known transfer syntax UID if the element matches, else None.")
 		.def("to_tag",
-		    [](const DataElement& element, py::object default_value) -> py::object {
+		    [](const DataElement& element, nb::object default_value) -> nb::object {
 		        if (default_value.is_none()) {
 		            auto v = element.to_tag();
-		            return v ? py::cast(*v) : py::none();
+		            return v ? nb::cast(*v) : nb::none();
 		        }
-		        return py::cast(element.toTag(default_value.cast<Tag>()));
+		        return nb::cast(element.toTag(nb::cast<Tag>(default_value)));
 		    },
-		    py::arg("default") = py::none())
+		    nb::arg("default") = nb::none())
 		.def("to_tag_vector",
-		    [](const DataElement& element) -> py::object {
+		    [](const DataElement& element) -> nb::object {
 		        auto v = element.to_tag_vector();
-	        return v ? py::cast(*v) : py::none();
+	        return v ? nb::cast(*v) : nb::none();
 	    })
 	.def("to_int",
-	    [](const DataElement& element, py::object default_value) -> py::object {
+	    [](const DataElement& element, nb::object default_value) -> nb::object {
 	        if (default_value.is_none()) {
 	            auto v = element.to_int();
-	            return v ? py::cast(*v) : py::none();
+	            return v ? nb::cast(*v) : nb::none();
 	        }
-	        return py::cast(element.toInt(default_value.cast<int>()));
+	        return nb::cast(element.toInt(nb::cast<int>(default_value)));
 	    },
-	    py::arg("default") = py::none(),
+	    nb::arg("default") = nb::none(),
 	    "Return int or None; optional default fills on failure")
 	.def("to_long",
-	    [](const DataElement& element, py::object default_value) -> py::object {
+	    [](const DataElement& element, nb::object default_value) -> nb::object {
 	        if (default_value.is_none()) {
 	            auto v = element.to_long();
-	            return v ? py::cast(*v) : py::none();
+	            return v ? nb::cast(*v) : nb::none();
 			    }
-			    return py::cast(element.toLong(default_value.cast<long>()));
+			    return nb::cast(element.toLong(nb::cast<long>(default_value)));
 		    },
-		    py::arg("default") = py::none(),
+		    nb::arg("default") = nb::none(),
 		    "Return int or None; optional default fills on failure")
 		.def("to_longlong",
-		    [](const DataElement& element, py::object default_value) -> py::object {
+		    [](const DataElement& element, nb::object default_value) -> nb::object {
 			    if (default_value.is_none()) {
 				    auto v = element.to_longlong();
-				    return v ? py::cast(*v) : py::none();
+				    return v ? nb::cast(*v) : nb::none();
 			    }
-			    return py::cast(element.toLongLong(default_value.cast<long long>()));
+			    return nb::cast(element.toLongLong(nb::cast<long long>(default_value)));
 		    },
-		    py::arg("default") = py::none())
+		    nb::arg("default") = nb::none())
 		.def("to_double",
-		    [](const DataElement& element, py::object default_value) -> py::object {
+		    [](const DataElement& element, nb::object default_value) -> nb::object {
 			    if (default_value.is_none()) {
 				    auto v = element.to_double();
-				    return v ? py::cast(*v) : py::none();
+				    return v ? nb::cast(*v) : nb::none();
 	        }
-	        return py::cast(element.toDouble(default_value.cast<double>()));
+	        return nb::cast(element.toDouble(nb::cast<double>(default_value)));
 	    },
-	    py::arg("default") = py::none())
+	    nb::arg("default") = nb::none())
 	.def("to_int_vector",
-	    [](const DataElement& element, py::object default_value) -> py::object {
+	    [](const DataElement& element, nb::object default_value) -> nb::object {
 	        if (default_value.is_none()) {
 	            auto v = element.to_int_vector();
-	            return v ? py::cast(*v) : py::none();
+	            return v ? nb::cast(*v) : nb::none();
 	        }
-	        return py::cast(element.toIntVector(default_value.cast<std::vector<int>>()));
+	        return nb::cast(element.toIntVector(nb::cast<std::vector<int>>(default_value)));
 	    },
-	    py::arg("default") = py::none())
+	    nb::arg("default") = nb::none())
 	.def("as_uint16_vector",
-	    [](const DataElement& element, py::object default_value) -> py::object {
+	    [](const DataElement& element, nb::object default_value) -> nb::object {
 	        if (default_value.is_none()) {
 	            auto v = element.as_uint16_vector();
-	            return v ? py::cast(*v) : py::none();
+	            return v ? nb::cast(*v) : nb::none();
 	        }
-	        return py::cast(element.asUint16Vector(default_value.cast<std::vector<std::uint16_t>>()));
+	        return nb::cast(element.asUint16Vector(nb::cast<std::vector<std::uint16_t>>(default_value)));
 	    },
-	    py::arg("default") = py::none(),
+	    nb::arg("default") = nb::none(),
 	    "Interpret raw value bytes as uint16 list (honors dataset endianness)")
 	.def("as_uint8_vector",
-	    [](const DataElement& element, py::object default_value) -> py::object {
+	    [](const DataElement& element, nb::object default_value) -> nb::object {
 	        if (default_value.is_none()) {
 	            auto v = element.as_uint8_vector();
-	            return v ? py::cast(*v) : py::none();
+	            return v ? nb::cast(*v) : nb::none();
 	        }
-	        return py::cast(element.asUint8Vector(default_value.cast<std::vector<std::uint8_t>>()));
+	        return nb::cast(element.asUint8Vector(nb::cast<std::vector<std::uint8_t>>(default_value)));
 	    },
-	    py::arg("default") = py::none(),
+	    nb::arg("default") = nb::none(),
 	    "Interpret raw value bytes as uint8 list")
 	.def("to_long_vector",
-	    [](const DataElement& element, py::object default_value) -> py::object {
+	    [](const DataElement& element, nb::object default_value) -> nb::object {
 	        if (default_value.is_none()) {
 	            auto v = element.to_long_vector();
-	            return v ? py::cast(*v) : py::none();
+	            return v ? nb::cast(*v) : nb::none();
 			    }
-			    return py::cast(element.toLongVector(default_value.cast<std::vector<long>>()));
+			    return nb::cast(element.toLongVector(nb::cast<std::vector<long>>(default_value)));
 		    },
-		    py::arg("default") = py::none())
+		    nb::arg("default") = nb::none())
 		.def("to_longlong_vector",
-		    [](const DataElement& element, py::object default_value) -> py::object {
+		    [](const DataElement& element, nb::object default_value) -> nb::object {
 			    if (default_value.is_none()) {
 				    auto v = element.to_longlong_vector();
-				    return v ? py::cast(*v) : py::none();
+				    return v ? nb::cast(*v) : nb::none();
 			    }
-			    return py::cast(element.toLongLongVector(default_value.cast<std::vector<long long>>()));
+			    return nb::cast(element.toLongLongVector(nb::cast<std::vector<long long>>(default_value)));
 		    },
-		    py::arg("default") = py::none())
+		    nb::arg("default") = nb::none())
 		.def("to_double_vector",
-		    [](const DataElement& element, py::object default_value) -> py::object {
+		    [](const DataElement& element, nb::object default_value) -> nb::object {
 			    if (default_value.is_none()) {
 				    auto v = element.to_double_vector();
-				    return v ? py::cast(*v) : py::none();
+				    return v ? nb::cast(*v) : nb::none();
 			    }
-			    return py::cast(element.toDoubleVector(default_value.cast<std::vector<double>>()));
+			    return nb::cast(element.toDoubleVector(nb::cast<std::vector<double>>(default_value)));
 		    },
-		    py::arg("default") = py::none())
+		    nb::arg("default") = nb::none())
 		.def("get_value",
-		    [](DataElement& element) -> py::object {
+		    [](DataElement& element) -> nb::object {
 			    return dataelement_get_value_py(element);
 		    },
 		    "Best-effort typed access: returns int/float/str or list based on VR/VM; "
@@ -453,36 +484,34 @@ PYBIND11_MODULE(_dicomsdl, m) {
 		.def("value_span",
 		    [](const DataElement& element) {
 			    auto span = element.value_span();
-			    return py::memoryview::from_memory(
-			        static_cast<const void*>(span.data()),
-			        static_cast<py::ssize_t>(span.size()));
+			    return readonly_memoryview_from_span(span.data(), span.size());
 		    },
 		    "Return the raw value bytes as a read-only memoryview")
 		.def("__repr__", &dataelement_repr);
 
-	py::class_<PySequenceIterator>(m, "SequenceIterator")
+	nb::class_<PySequenceIterator>(m, "SequenceIterator")
 		.def("__iter__", [](PySequenceIterator& self) -> PySequenceIterator& { return self; })
 		.def("__next__",
 		    [](PySequenceIterator& self) -> DataSet& { return self.next(); },
-		    py::return_value_policy::reference_internal);
+		    nb::rv_policy::reference_internal);
 
-	py::class_<Sequence>(m, "Sequence")
+	nb::class_<Sequence>(m, "Sequence")
 		.def("__len__", &Sequence::size)
 		.def("__getitem__",
 		    [](Sequence& self, std::size_t index) -> DataSet& {
 			    DataSet* ds = self.get_dataset(index);
 			    if (!ds) {
-				    throw py::index_error("Sequence index out of range");
+				    throw nb::index_error("Sequence index out of range");
 			    }
 			    return *ds;
 		    },
-		    py::arg("index"),
-		    py::return_value_policy::reference_internal)
+		    nb::arg("index"),
+		    nb::rv_policy::reference_internal)
 		.def("__iter__",
 		    [](Sequence& self) {
 			    return PySequenceIterator(self);
 		    },
-		    py::keep_alive<0, 1>(),
+		    nb::keep_alive<0, 1>(),
 		    "Iterate over child DataSets in insertion order")
 		.def("add_dataset",
 		    [](Sequence& self) -> DataSet& {
@@ -492,7 +521,7 @@ PYBIND11_MODULE(_dicomsdl, m) {
 			    }
 			    return *ds;
 		    },
-		    py::return_value_policy::reference_internal,
+		    nb::rv_policy::reference_internal,
 		    "Append a new DataSet to the sequence and return it")
 		.def("__repr__",
 		    [](Sequence& self) {
@@ -501,13 +530,13 @@ PYBIND11_MODULE(_dicomsdl, m) {
 			    return oss.str();
 		    });
 
-	py::class_<PyDataElementIterator>(m, "DataElementIterator")
+	nb::class_<PyDataElementIterator>(m, "DataElementIterator")
 		.def("__iter__", [](PyDataElementIterator& self) -> PyDataElementIterator& { return self; })
 		.def("__next__",
 		    [](PyDataElementIterator& self) -> DataElement& { return self.next(); },
-		    py::return_value_policy::reference_internal);
+		    nb::rv_policy::reference_internal);
 
-	py::class_<DataSet, std::unique_ptr<DataSet>>(m, "DataSet",
+	nb::class_<DataSet>(m, "DataSet",
 	    "In-memory DICOM dataset. Created via read_file/read_bytes or directly.\n"
 	    "\n"
 	    "Features\n"
@@ -516,8 +545,8 @@ PYBIND11_MODULE(_dicomsdl, m) {
 	    "- Indexing by Tag, packed int, or tag-path string\n"
 	    "- Attribute access by keyword (e.g., ds.PatientName)\n"
 	    "- Missing lookups return a NullElement sentinel (VR::None)")
-		.def(py::init<>())
-	.def_property_readonly("path", &DataSet::path, "Identifier of the attached stream (file path, provided name, or '<memory>')")
+		.def(nb::init<>())
+	.def_prop_ro("path", &DataSet::path, "Identifier of the attached stream (file path, provided name, or '<memory>')")
 		.def("add_dataelement",
 		    [](DataSet& self, const Tag& tag, std::optional<VR> vr,
 		        std::size_t offset, std::size_t length) {
@@ -525,15 +554,15 @@ PYBIND11_MODULE(_dicomsdl, m) {
 		        DataElement* element = self.add_dataelement(tag, resolved, offset, length);
 		        return element ? element : dicom::NullElement();
 		    },
-		    py::arg("tag"), py::arg("vr") = py::none(),
-		    py::arg("offset") = 0, py::arg("length") = 0,
-		    py::return_value_policy::reference_internal,
+		    nb::arg("tag"), nb::arg("vr") = nb::none(),
+		    nb::arg("offset") = 0, nb::arg("length") = 0,
+		    nb::rv_policy::reference_internal,
 		    "Add or update a DataElement and return a reference to it")
 		.def("remove_dataelement",
 		    [](DataSet& self, const Tag& tag) {
 		        self.remove_dataelement(tag);
 		    },
-		    py::arg("tag"),
+		    nb::arg("tag"),
 		    "Remove a DataElement by tag if it exists")
 		.def("dump_elements", &DataSet::dump_elements,
 		    "Print internal element storage for debugging")
@@ -541,32 +570,32 @@ PYBIND11_MODULE(_dicomsdl, m) {
 		    [](const DataSet& self, std::size_t frame_index) {
 			    const auto decoded = self.pixel_data(frame_index);
 			    if (decoded.empty()) {
-				    return py::bytes();
+				    return nb::bytes("", 0);
 			    }
-			    return py::bytes(reinterpret_cast<const char*>(decoded.data()), decoded.size());
+			    return nb::bytes(reinterpret_cast<const char*>(decoded.data()), decoded.size());
 		    },
-		    py::arg("frame_index") = 0,
+		    nb::arg("frame_index") = 0,
 		    "Decode one frame with default options and return decoded bytes.")
 		.def("get_dataelement",
 		    [](DataSet& self, const Tag& tag) -> DataElement& {
 		        return *self.get_dataelement(tag);
 		    },
-		    py::arg("tag"), py::return_value_policy::reference_internal,
+		    nb::arg("tag"), nb::rv_policy::reference_internal,
 		    "Return the DataElement for a tag or a VR::None NullElement sentinel if missing")
 		.def("get_dataelement",
 		    [](DataSet& self, std::uint32_t packed) -> DataElement& {
 			    const Tag tag(packed);
 			    return *self.get_dataelement(tag);
 		    },
-		    py::arg("packed_tag"),
-		    py::return_value_policy::reference_internal,
+		    nb::arg("packed_tag"),
+		    nb::rv_policy::reference_internal,
 		    "Overload: pass packed 0xGGGEEEE integer; returns NullElement if missing")
 		.def("get_dataelement",
 		    [](DataSet& self, const std::string& tag_str) -> DataElement& {
 			    return *self.get_dataelement(tag_str);
 		    },
-		    py::arg("tag_str"),
-		    py::return_value_policy::reference_internal,
+		    nb::arg("tag_str"),
+		    nb::rv_policy::reference_internal,
 		    "Overload: parse tag path string.\n"
 		    "Supported examples:\n"
 		    "  - Hex tag with/without parens: '00100010', '(0010,0010)'\n"
@@ -577,55 +606,55 @@ PYBIND11_MODULE(_dicomsdl, m) {
 		    "    'RadiopharmaceuticalInformationSequence.0.RadionuclideTotalDose'\n"
 		    "Returns a DataElement or NullElement (VR::None) if not found; malformed paths raise.")
 		.def("__getitem__",
-		    [](DataSet& self, py::object key) -> py::object {
+		    [](DataSet& self, nb::object key) -> nb::object {
 			    DataElement* el = nullptr;
 
-			    if (py::isinstance<Tag>(key)) {
-				    el = self.get_dataelement(key.cast<Tag>());
-			    } else if (py::isinstance<py::int_>(key)) {
-				    el = self.get_dataelement(Tag(key.cast<std::uint32_t>()));
-			    } else if (py::isinstance<py::str>(key)) {
+			    if (nb::isinstance<Tag>(key)) {
+				    el = self.get_dataelement(nb::cast<Tag>(key));
+			    } else if (nb::isinstance<nb::int_>(key)) {
+				    el = self.get_dataelement(Tag(nb::cast<std::uint32_t>(key)));
+			    } else if (nb::isinstance<nb::str>(key)) {
 				    // Allow full tag-path strings (including sequences)
-				    el = self.get_dataelement(key.cast<std::string>());
+				    el = self.get_dataelement(nb::cast<std::string>(key));
 			    } else {
-				    throw py::type_error("DataSet indices must be Tag, int (0xGGGEEEE), or str");
+				    throw nb::type_error("DataSet indices must be Tag, int (0xGGGEEEE), or str");
 			    }
 
 			    if (!el || el == dicom::NullElement()) {
-				    return py::none();
+				    return nb::none();
 			    }
-			    return dataelement_get_value_py(*el, py::cast(&self, py::return_value_policy::reference));
+			    return dataelement_get_value_py(*el, nb::cast(&self, nb::rv_policy::reference));
 		    },
-		    py::arg("key"),
+		    nb::arg("key"),
 		    "Index syntax: ds[tag|packed_int|tag_str] -> element.get_value(); returns None if missing")
 		.def("__getattr__",
-		    [](DataSet& self, const std::string& name) -> py::object {
+		    [](DataSet& self, const std::string& name) -> nb::object {
 			    // Allow keyword-style attribute access: ds.PatientName -> get_value("PatientName")
 			    if (!name.empty() && name.size() >= 2 && name[0] != '_') {
 				    try {
 					    Tag tag(name);
 					    DataElement* el = self.get_dataelement(tag);
 					    if (el && el != dicom::NullElement()) {
-						    return dataelement_get_value_py(*el, py::cast(&self, py::return_value_policy::reference));
+						    return dataelement_get_value_py(*el, nb::cast(&self, nb::rv_policy::reference));
 					    }
 				    } catch (const std::exception&) {
 					    // fall through to AttributeError
 				    }
 			    }
-			    throw py::attribute_error(("DataSet has no attribute '" + name + "'").c_str());
+			    throw nb::attribute_error(("DataSet has no attribute '" + name + "'").c_str());
 		    },
-		    py::arg("name"),
+		    nb::arg("name"),
 		    "Attribute sugar: ds.PatientName -> ds.get_dataelement('PatientName').get_value(); "
 		    "raises AttributeError if no such keyword/tag or element is missing.")
 		.def("__dir__",
 		    [](DataSet& self) {
-			    py::object self_obj = py::cast(&self, py::return_value_policy::reference);
-			    py::type t = py::type::of(self_obj);
-			    py::list result = py::reinterpret_steal<py::list>(PyObject_Dir(t.ptr()));  // class attrs
+			    nb::object self_obj = nb::cast(&self, nb::rv_policy::reference);
+			    PyObject* type_obj = reinterpret_cast<PyObject*>(Py_TYPE(self_obj.ptr()));
+			    nb::list result = nb::steal<nb::list>(PyObject_Dir(type_obj));  // class attrs
 
 			    std::unordered_set<std::string> seen;
-			    for (auto& item : result) {
-				    seen.insert(py::cast<std::string>(item));
+			    for (nb::handle item : result) {
+				    seen.insert(nb::cast<std::string>(item));
 			    }
 
 			    for (auto& elem : self) {
@@ -642,7 +671,7 @@ PYBIND11_MODULE(_dicomsdl, m) {
 				    }
 				    std::string kw_str(kw.data(), kw.size());
 				    if (seen.insert(kw_str).second) {
-					    result.append(py::str(kw_str));
+					    result.append(nb::str(kw_str.c_str(), kw_str.size()));
 				    }
 			    }
 			    return result;
@@ -652,7 +681,7 @@ PYBIND11_MODULE(_dicomsdl, m) {
 		    [](DataSet& self) {
 			    return PyDataElementIterator(self);
 		    },
-		    py::keep_alive<0, 1>(), "Iterate over DataElements in tag order");
+		    nb::keep_alive<0, 1>(), "Iterate over DataElements in tag order");
 
 m.def("read_file",
     [](const std::string& path, std::optional<Tag> load_until, std::optional<bool> keep_on_error) {
@@ -665,9 +694,9 @@ m.def("read_file",
 	    }
 	    return dicom::read_file(path, opts);
     },
-    py::arg("path"),
-    py::arg("load_until") = py::none(),
-    py::arg("keep_on_error") = py::none(),
+    nb::arg("path"),
+    nb::arg("load_until") = nb::none(),
+    nb::arg("keep_on_error") = nb::none(),
     "Read a DICOM file from disk and return a DataSet.\n"
     "\n"
     "Parameters\n"
@@ -680,15 +709,20 @@ m.def("read_file",
     "    When True, keep partially read data instead of raising on parse errors.\n");
 
 m.def("read_bytes",
-    [] (py::buffer buffer, const std::string& name, std::optional<Tag> load_until,
+    [] (nb::object buffer, const std::string& name, std::optional<Tag> load_until,
         std::optional<bool> keep_on_error, bool copy) {
-        py::buffer_info info = buffer.request();
+        PyBufferView view(buffer);
+        const Py_buffer& info = view.view();
         if (info.ndim != 1) {
             throw std::invalid_argument("read_bytes expects a 1-D bytes-like object");
         }
-        const std::size_t elem_size = static_cast<std::size_t>(info.itemsize);
-        const std::size_t count = static_cast<std::size_t>(info.size);
-        const std::size_t total = elem_size * count;
+        if (!PyBuffer_IsContiguous(&info, 'C')) {
+            throw std::invalid_argument("read_bytes expects a contiguous bytes-like object");
+        }
+
+        const std::size_t elem_size = static_cast<std::size_t>(info.itemsize <= 0 ? 1 : info.itemsize);
+        const std::size_t total = static_cast<std::size_t>(info.len);
+
         dicom::ReadOptions opts;
         if (load_until) {
 	        opts.load_until = *load_until;
@@ -702,7 +736,7 @@ m.def("read_bytes",
         if (copy || total == 0) {
 	        std::vector<std::uint8_t> owned(total);
 	        if (total > 0) {
-		        std::memcpy(owned.data(), info.ptr, total);
+		        std::memcpy(owned.data(), info.buf, total);
 	        }
 	        dataset = dicom::read_bytes(std::string{name}, std::move(owned), opts);
         } else {
@@ -710,20 +744,20 @@ m.def("read_bytes",
 		        throw std::invalid_argument("read_bytes(copy=False) requires a byte-oriented buffer");
 	        }
 	        dataset = dicom::read_bytes(std::string{name},
-	            static_cast<const std::uint8_t*>(info.ptr), total, opts);
+	            static_cast<const std::uint8_t*>(info.buf), total, opts);
         }
 
-        py::object py_dataset = py::cast(std::move(dataset));
+        nb::object py_dataset = nb::cast(std::move(dataset));
         if (!copy && total > 0) {
 	        py_dataset.attr("_buffer_owner") = buffer;
         }
         return py_dataset;
     },
-    py::arg("data"),
-    py::arg("name") = std::string{"<memory>"},
-    py::arg("load_until") = py::none(),
-    py::arg("keep_on_error") = py::none(),
-    py::arg("copy") = true,
+    nb::arg("data"),
+    nb::arg("name") = std::string{"<memory>"},
+    nb::arg("load_until") = nb::none(),
+    nb::arg("keep_on_error") = nb::none(),
+    nb::arg("copy") = true,
     "Read a DataSet from a bytes-like object. Parsing is eager up to `load_until`.\n"
     "\n"
     "Parameters\n"
@@ -746,77 +780,78 @@ m.def("read_bytes",
     "the binding keeps a Python reference, but mutating or freeing the underlying memory can\n"
     "still corrupt the dataset.");
 
-	py::class_<Tag>(m, "Tag")
-		.def(py::init<>())
-		.def(py::init<std::uint16_t, std::uint16_t>(), py::arg("group"), py::arg("element"))
-		.def(py::init([](const std::string& keyword) { return Tag(keyword); }), py::arg("keyword"))
-		.def_static("from_value", &Tag::from_value, py::arg("value"))
-		.def_property_readonly("group", &Tag::group)
-		.def_property_readonly("element", &Tag::element)
-		.def_property_readonly("value", &Tag::value)
+	nb::class_<Tag>(m, "Tag")
+		.def(nb::init<>())
+		.def(nb::init<std::uint16_t, std::uint16_t>(), nb::arg("group"), nb::arg("element"))
+		.def(nb::init<const std::string&>(), nb::arg("keyword"))
+		.def_static("from_value", &Tag::from_value, nb::arg("value"))
+		.def_prop_ro("group", &Tag::group)
+		.def_prop_ro("element", &Tag::element)
+		.def_prop_ro("value", &Tag::value)
 		.def("is_private", &Tag::is_private)
 		.def("__int__", &Tag::value)
 		.def("__bool__", [](const Tag& tag) { return static_cast<bool>(tag); })
 		.def("__str__", &Tag::to_string)
 		.def("__repr__", &tag_repr)
-		.def(py::self == py::self);
+		.def(nb::self == nb::self);
 
-auto uid_cls = py::class_<Uid>(m, "Uid")
-	.def(py::init<>())
-	.def(py::init([](const std::string& text) {
-		    return require_uid(dicom::uid::lookup(text), "Uid.__init__", text);
-	    }),
-	    py::arg("text"),
+auto uid_cls = nb::class_<Uid>(m, "Uid")
+	.def(nb::init<>())
+	.def("__init__",
+	    [](Uid* self, const std::string& text) {
+		    new (self) Uid(require_uid(dicom::uid::lookup(text), "Uid.__init__", text));
+	    },
+	    nb::arg("text"),
 	    "Construct a UID from either a dotted value or keyword, raising ValueError if unknown.")
 	.def_static("lookup",
-	    [](const std::string& text) -> py::object {
+	    [](const std::string& text) -> nb::object {
 		    return uid_or_none(dicom::uid::lookup(text));
 	    },
-	    py::arg("text"),
+	    nb::arg("text"),
 	    "Lookup a UID from value or keyword; returns None if missing.")
 	.def_static("from_value",
 	    [](const std::string& value) {
 		    return require_uid(dicom::uid::from_value(value), "Uid.from_value", value);
 	    },
-	    py::arg("value"),
+	    nb::arg("value"),
 	    "Resolve a dotted UID value, raising ValueError if unknown.")
 	.def_static("from_keyword",
 	    [](const std::string& keyword) {
 		    return require_uid(dicom::uid::from_keyword(keyword), "Uid.from_keyword", keyword);
 	    },
-	    py::arg("keyword"),
+	    nb::arg("keyword"),
 	    "Resolve a UID keyword, raising ValueError if unknown.")
-	.def_property_readonly("value",
+	.def_prop_ro("value",
 	    [](const Uid& uid) { return std::string(uid.value()); },
 	    "Return the dotted UID value or empty string if invalid.")
-	.def_property_readonly("keyword",
-	    [](const Uid& uid) -> py::object {
+	.def_prop_ro("keyword",
+	    [](const Uid& uid) -> nb::object {
 		    if (uid.keyword().empty()) {
-			    return py::none();
+			    return nb::none();
 		    }
-		    return py::str(uid.keyword());
+		    return nb::str(uid.keyword().data(), uid.keyword().size());
 	    },
 	    "Return the UID keyword or None if missing.")
-	.def_property_readonly("name",
+	.def_prop_ro("name",
 	    [](const Uid& uid) { return std::string(uid.name()); },
 	    "Return the descriptive UID name or empty string if invalid.")
-	.def_property_readonly("type",
+	.def_prop_ro("type",
 	    [](const Uid& uid) { return std::string(uid.type()); },
 	    "Return the UID type (Transfer Syntax, SOP Class, ...).")
-	.def_property_readonly("raw_index", &Uid::raw_index, "Return the registry index.")
-	.def_property_readonly("is_valid", &Uid::valid)
+	.def_prop_ro("raw_index", &Uid::raw_index, "Return the registry index.")
+	.def_prop_ro("is_valid", &Uid::valid)
 	.def("__bool__", [](const Uid& uid) { return uid.valid(); })
 	.def("__repr__", &uid_repr)
-	.def(py::self == py::self);
+	.def(nb::self == nb::self);
 
-	auto vr_cls = py::class_<VR>(m, "VR")
-		.def(py::init<>())
-		.def(py::init<std::uint16_t>(), py::arg("value"))
-		.def_static("from_string", &VR::from_string, py::arg("value"))
+	auto vr_cls = nb::class_<VR>(m, "VR")
+		.def(nb::init<>())
+		.def(nb::init<std::uint16_t>(), nb::arg("value"))
+		.def_static("from_string", &VR::from_string, nb::arg("value"))
 		.def_static("from_chars", [](char a, char b) { return VR::from_chars(a, b); },
-		         py::arg("first"), py::arg("second"))
-		.def_property_readonly("value", [] (const VR& vr) { return static_cast<std::uint16_t>(vr); })
-		.def_property_readonly("is_known", &VR::is_known)
+		         nb::arg("first"), nb::arg("second"))
+		.def_prop_ro("value", [] (const VR& vr) { return static_cast<std::uint16_t>(vr); })
+		.def_prop_ro("is_known", &VR::is_known)
 		.def("is_string", &VR::is_string)
 		.def("is_binary", &VR::is_binary)
 		.def("is_sequence", &VR::is_sequence)
@@ -827,48 +862,47 @@ auto uid_cls = py::class_<Uid>(m, "Uid")
 		.def("str", [] (const VR& vr) { return std::string(vr_to_string_view(vr)); })
 		.def("__str__", [] (const VR& vr) { return std::string(vr_to_string_view(vr)); })
 		.def("__repr__", &vr_repr)
-		.def(py::self == py::self);
+		.def(nb::self == nb::self)
+		.def_prop_ro_static("None", [](nb::handle) { return dicom::VR::None; })
+		.def_prop_ro_static("AE", [](nb::handle) { return dicom::VR::AE; })
+		.def_prop_ro_static("AS", [](nb::handle) { return dicom::VR::AS; })
+		.def_prop_ro_static("AT", [](nb::handle) { return dicom::VR::AT; })
+		.def_prop_ro_static("CS", [](nb::handle) { return dicom::VR::CS; })
+		.def_prop_ro_static("DA", [](nb::handle) { return dicom::VR::DA; })
+		.def_prop_ro_static("DS", [](nb::handle) { return dicom::VR::DS; })
+		.def_prop_ro_static("DT", [](nb::handle) { return dicom::VR::DT; })
+		.def_prop_ro_static("FD", [](nb::handle) { return dicom::VR::FD; })
+		.def_prop_ro_static("FL", [](nb::handle) { return dicom::VR::FL; })
+		.def_prop_ro_static("IS", [](nb::handle) { return dicom::VR::IS; })
+		.def_prop_ro_static("LO", [](nb::handle) { return dicom::VR::LO; })
+		.def_prop_ro_static("LT", [](nb::handle) { return dicom::VR::LT; })
+		.def_prop_ro_static("OB", [](nb::handle) { return dicom::VR::OB; })
+		.def_prop_ro_static("OD", [](nb::handle) { return dicom::VR::OD; })
+		.def_prop_ro_static("OF", [](nb::handle) { return dicom::VR::OF; })
+		.def_prop_ro_static("OV", [](nb::handle) { return dicom::VR::OV; })
+		.def_prop_ro_static("OL", [](nb::handle) { return dicom::VR::OL; })
+		.def_prop_ro_static("OW", [](nb::handle) { return dicom::VR::OW; })
+		.def_prop_ro_static("PN", [](nb::handle) { return dicom::VR::PN; })
+		.def_prop_ro_static("SH", [](nb::handle) { return dicom::VR::SH; })
+		.def_prop_ro_static("SL", [](nb::handle) { return dicom::VR::SL; })
+		.def_prop_ro_static("SQ", [](nb::handle) { return dicom::VR::SQ; })
+		.def_prop_ro_static("SS", [](nb::handle) { return dicom::VR::SS; })
+		.def_prop_ro_static("ST", [](nb::handle) { return dicom::VR::ST; })
+		.def_prop_ro_static("SV", [](nb::handle) { return dicom::VR::SV; })
+		.def_prop_ro_static("TM", [](nb::handle) { return dicom::VR::TM; })
+		.def_prop_ro_static("UC", [](nb::handle) { return dicom::VR::UC; })
+		.def_prop_ro_static("UI", [](nb::handle) { return dicom::VR::UI; })
+		.def_prop_ro_static("UL", [](nb::handle) { return dicom::VR::UL; })
+		.def_prop_ro_static("UN", [](nb::handle) { return dicom::VR::UN; })
+		.def_prop_ro_static("UR", [](nb::handle) { return dicom::VR::UR; })
+		.def_prop_ro_static("US", [](nb::handle) { return dicom::VR::US; })
+		.def_prop_ro_static("UT", [](nb::handle) { return dicom::VR::UT; })
+		.def_prop_ro_static("UV", [](nb::handle) { return dicom::VR::UV; })
+		.def_prop_ro_static("PX", [](nb::handle) { return dicom::VR::PX; });
 
-	vr_cls.attr("None") = dicom::VR::None;
-	vr_cls.attr("AE") = dicom::VR::AE;
-	vr_cls.attr("AS") = dicom::VR::AS;
-	vr_cls.attr("AT") = dicom::VR::AT;
-	vr_cls.attr("CS") = dicom::VR::CS;
-	vr_cls.attr("DA") = dicom::VR::DA;
-	vr_cls.attr("DS") = dicom::VR::DS;
-	vr_cls.attr("DT") = dicom::VR::DT;
-	vr_cls.attr("FD") = dicom::VR::FD;
-	vr_cls.attr("FL") = dicom::VR::FL;
-	vr_cls.attr("IS") = dicom::VR::IS;
-	vr_cls.attr("LO") = dicom::VR::LO;
-	vr_cls.attr("LT") = dicom::VR::LT;
-	vr_cls.attr("OB") = dicom::VR::OB;
-	vr_cls.attr("OD") = dicom::VR::OD;
-	vr_cls.attr("OF") = dicom::VR::OF;
-	vr_cls.attr("OV") = dicom::VR::OV;
-	vr_cls.attr("OL") = dicom::VR::OL;
-	vr_cls.attr("OW") = dicom::VR::OW;
-	vr_cls.attr("PN") = dicom::VR::PN;
-	vr_cls.attr("SH") = dicom::VR::SH;
-	vr_cls.attr("SL") = dicom::VR::SL;
-	vr_cls.attr("SQ") = dicom::VR::SQ;
-	vr_cls.attr("SS") = dicom::VR::SS;
-	vr_cls.attr("ST") = dicom::VR::ST;
-	vr_cls.attr("SV") = dicom::VR::SV;
-	vr_cls.attr("TM") = dicom::VR::TM;
-	vr_cls.attr("UC") = dicom::VR::UC;
-	vr_cls.attr("UI") = dicom::VR::UI;
-	vr_cls.attr("UL") = dicom::VR::UL;
-	vr_cls.attr("UN") = dicom::VR::UN;
-	vr_cls.attr("UR") = dicom::VR::UR;
-	vr_cls.attr("US") = dicom::VR::US;
-	vr_cls.attr("UT") = dicom::VR::UT;
-	vr_cls.attr("UV") = dicom::VR::UV;
-	vr_cls.attr("PX") = dicom::VR::PX;
-
-	py::class_<dicom::PixelFragment>(m, "PixelFragment")
-		.def_readonly("offset", &dicom::PixelFragment::offset, "Fragment offset relative to pixel sequence base")
-		.def_readonly("length", &dicom::PixelFragment::length, "Fragment length in bytes")
+	nb::class_<dicom::PixelFragment>(m, "PixelFragment")
+		.def_ro("offset", &dicom::PixelFragment::offset, "Fragment offset relative to pixel sequence base")
+		.def_ro("length", &dicom::PixelFragment::length, "Fragment length in bytes")
 		.def("__repr__",
 		    [](const dicom::PixelFragment& frag) {
 			    std::ostringstream oss;
@@ -877,54 +911,52 @@ auto uid_cls = py::class_<Uid>(m, "Uid")
 			    return oss.str();
 		    });
 
-	py::class_<dicom::PixelFrame>(m, "PixelFrame")
-		.def_property_readonly("encoded_size", &dicom::PixelFrame::encoded_data_size,
+	nb::class_<dicom::PixelFrame>(m, "PixelFrame")
+		.def_prop_ro("encoded_size", &dicom::PixelFrame::encoded_data_size,
 		    "Size in bytes of materialized encoded data; 0 if not loaded")
-		.def_property_readonly("fragments",
+		.def_prop_ro("fragments",
 		    [](const dicom::PixelFrame& f) { return f.fragments(); },
 		    "Fragments belonging to this frame")
 		.def("encoded_bytes",
 		    [](dicom::PixelFrame& f) {
 			    auto span = f.encoded_data_view();
-			    return py::bytes(reinterpret_cast<const char*>(span.data()), span.size());
+			    return nb::bytes(reinterpret_cast<const char*>(span.data()), span.size());
 		    },
 		    "Return encoded pixel data as bytes (coalesced if needed)")
 		.def("encoded_memoryview",
 		    [](dicom::PixelFrame& f) {
 			    auto span = f.encoded_data_view();
-			    return py::memoryview::from_memory(
-			        reinterpret_cast<const char*>(span.data()), span.size());
+			    return readonly_memoryview_from_span(span.data(), span.size());
 		    },
 		    "Return a read-only memoryview over encoded pixel data (no copy); "
 		    "invalidated if the frame's encoded data is cleared");
 
-	py::class_<dicom::PixelSequence>(m, "PixelSequence")
-		.def_property_readonly("number_of_frames", &dicom::PixelSequence::number_of_frames)
-		.def_property_readonly("basic_offset_table_offset", &dicom::PixelSequence::basic_offset_table_offset)
-		.def_property_readonly("basic_offset_table_count", &dicom::PixelSequence::basic_offset_table_count)
+	nb::class_<dicom::PixelSequence>(m, "PixelSequence")
+		.def_prop_ro("number_of_frames", &dicom::PixelSequence::number_of_frames)
+		.def_prop_ro("basic_offset_table_offset", &dicom::PixelSequence::basic_offset_table_offset)
+		.def_prop_ro("basic_offset_table_count", &dicom::PixelSequence::basic_offset_table_count)
 		.def("__len__", &dicom::PixelSequence::number_of_frames)
 		.def("frame",
 		    [](dicom::PixelSequence& self, std::size_t index) -> dicom::PixelFrame& {
 			    dicom::PixelFrame* f = self.frame(index);
-			    if (!f) throw py::index_error("PixelSequence index out of range");
+			    if (!f) throw nb::index_error("PixelSequence index out of range");
 			    return *f;
 		    },
-		    py::arg("index"),
-		    py::return_value_policy::reference_internal)
+		    nb::arg("index"),
+		    nb::rv_policy::reference_internal)
 		.def("frame_encoded_bytes",
 		    [](dicom::PixelSequence& self, std::size_t index) {
 			    auto span = self.frame_encoded_span(index);
-			    return py::bytes(reinterpret_cast<const char*>(span.data()), span.size());
+			    return nb::bytes(reinterpret_cast<const char*>(span.data()), span.size());
 		    },
-		    py::arg("index"),
+		    nb::arg("index"),
 		    "Return encoded pixel data for a frame (coalesces fragments if needed)")
 		.def("frame_encoded_memoryview",
 		    [](dicom::PixelSequence& self, std::size_t index) {
 			    auto span = self.frame_encoded_span(index);
-			    return py::memoryview::from_memory(
-			        reinterpret_cast<const char*>(span.data()), span.size());
+			    return readonly_memoryview_from_span(span.data(), span.size());
 		    },
-		    py::arg("index"),
+		    nb::arg("index"),
 		    "Return a read-only memoryview over encoded pixel data for a frame (no copy)")
 	.def("__repr__",
 	    [](dicom::PixelSequence& self) {
@@ -934,80 +966,80 @@ auto uid_cls = py::class_<Uid>(m, "Uid")
 	    });
 
 	m.def("keyword_to_tag_vr",
-	    [] (const std::string& keyword) -> py::object {
+	    [] (const std::string& keyword) -> nb::object {
 	        auto [tag, vr] = dicom::lookup::keyword_to_tag_vr(keyword);
 	        if (!static_cast<bool>(tag)) {
-	            return py::none();
+	            return nb::none();
 	        }
-	        return py::make_tuple(tag, vr);
+	        return nb::make_tuple(tag, vr);
 	    },
-	    py::arg("keyword"),
+	    nb::arg("keyword"),
 	    "Return (Tag, VR) for the provided DICOM keyword or None if missing.");
 
 	m.def("tag_to_keyword",
-	    [] (const Tag& tag) -> py::object {
+	    [] (const Tag& tag) -> nb::object {
 	        const auto keyword = dicom::lookup::tag_to_keyword(tag.value());
 	        if (keyword.empty()) {
-	            return py::none();
+	            return nb::none();
 	        }
-	        return py::str(keyword);
+	        return nb::str(keyword.data(), keyword.size());
 	    },
-	    py::arg("tag"),
+	    nb::arg("tag"),
 	    "Return the DICOM keyword for this Tag or None if missing.");
 
 	m.def("tag_to_keyword",
-	    [] (std::uint32_t tag_value) -> py::object {
+	    [] (std::uint32_t tag_value) -> nb::object {
 	        const auto keyword = dicom::lookup::tag_to_keyword(tag_value);
 	        if (keyword.empty()) {
-	            return py::none();
+	            return nb::none();
 	        }
-	        return py::str(keyword);
+	        return nb::str(keyword.data(), keyword.size());
 	    },
-	    py::arg("tag_value"),
+	    nb::arg("tag_value"),
 	    "Return the DICOM keyword for a 32-bit tag value or None if missing.");
 
 	m.def("tag_to_entry",
-	    [] (const Tag& tag) -> py::object {
+	    [] (const Tag& tag) -> nb::object {
 	        if (const auto* entry = dicom::lookup::tag_to_entry(tag.value())) {
 	            return make_tag_entry_dict(*entry);
 	        }
-	        return py::none();
+	        return nb::none();
 	    },
-	    py::arg("tag"),
+	    nb::arg("tag"),
 	    "Return registry details for the given Tag or None if missing.");
 
 	m.def("tag_to_entry",
-	    [] (std::uint32_t tag_value) -> py::object {
+	    [] (std::uint32_t tag_value) -> nb::object {
 	        if (const auto* entry = dicom::lookup::tag_to_entry(tag_value)) {
 	            return make_tag_entry_dict(*entry);
 	        }
-	        return py::none();
+	        return nb::none();
 	    },
-	    py::arg("tag_value"),
+	    nb::arg("tag_value"),
 	    "Return registry details for a tag numeric value or None if missing.");
 
 m.def("lookup_uid",
-    [] (const std::string& text) -> py::object {
+    [] (const std::string& text) -> nb::object {
         return uid_or_none(dicom::uid::lookup(text));
     },
-    py::arg("text"),
+    nb::arg("text"),
     "Lookup a UID by either dotted value or keyword; returns None if missing.");
 
 m.def("uid_from_value",
     [] (const std::string& value) {
         return require_uid(dicom::uid::from_value(value), "uid_from_value", value);
     },
-    py::arg("value"),
+    nb::arg("value"),
     "Resolve a dotted UID value, raising ValueError if unknown.");
 
 m.def("uid_from_keyword",
     [] (const std::string& keyword) {
         return require_uid(dicom::uid::from_keyword(keyword), "uid_from_keyword", keyword);
     },
-    py::arg("keyword"),
+    nb::arg("keyword"),
     "Resolve a UID keyword, raising ValueError if unknown.");
 
-	m.attr("__all__") = py::make_tuple(
+	m.attr("__all__") = nb::make_tuple(
 	    "LogLevel",
 	    "Reporter",
 	    "StderrReporter",

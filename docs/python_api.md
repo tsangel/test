@@ -1,6 +1,6 @@
 # Python API Overview
 
-`dicomsdl` is a thin pybind11 wrapper. It loads a native extension at runtime, so docs build with a mock import; install the wheel to run the examples.
+`dicomsdl` is a thin nanobind wrapper. It loads a native extension at runtime, so docs build with a mock import; install the wheel to run the examples.
 
 ## Import
 ```python
