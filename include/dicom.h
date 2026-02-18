@@ -848,6 +848,54 @@ struct ReadOptions {
 	bool copy{true};
 };
 
+namespace pixel {
+
+enum class planar : std::uint8_t {
+	interleaved = 0,
+	planar = 1,
+};
+
+enum class dtype : std::uint8_t {
+	unknown = 0,
+	u8,
+	s8,
+	u16,
+	s16,
+	u32,
+	s32,
+	f32,
+	f64,
+};
+
+struct decode_opts {
+	planar planar_out{planar::interleaved};
+	std::uint16_t alignment{1};  // 0/1: packed, power-of-two aligned (<= 4096)
+	// true: output float32 after Modality LUT (if present) or Rescale
+	// currently limited to SamplesPerPixel=1.
+	bool scaled{false};
+};
+
+struct strides {
+	std::size_t row{0};
+	std::size_t frame{0};
+};
+
+struct modality_lut {
+	std::int64_t first_mapped{0};
+	std::vector<float> values;
+};
+
+/// Decode a single frame into caller-provided buffer.
+/// Current implementation supports raw(uncompressed) and RLE backends, interleaved/planar layout conversion,
+/// spp=1/3/4, sv_dtype=u8/s8/u16/s16/u32/s32/f32/f64.
+/// When scaled=true, output is float32 and currently supports SamplesPerPixel=1 only.
+void decode_into(const DataSet& ds, std::size_t frame_index,
+    std::span<std::uint8_t> dst, const decode_opts& opt = {});
+void decode_into(const DataSet& ds, std::size_t frame_index,
+    std::span<std::uint8_t> dst, const strides& dst_strides, const decode_opts& opt = {});
+
+} // namespace pixel
+
 /// Represents a collection of DICOM data elements backed by a file or memory stream.
 /// The root DataSet owns the input stream; elements are parsed lazily on demand.
 class DataElement {
@@ -1256,6 +1304,58 @@ private:
 	/// Well-known transfer syntax UID for this dataset.
 	[[nodiscard]] inline uid::WellKnown transfer_syntax_uid() const { return transfer_syntax_uid_; }
 
+	struct pixel_info_t {
+		uid::WellKnown ts{};
+		int rows{0};
+		int cols{0};
+		int samples_per_pixel{1};
+		int bits_allocated{0};
+		pixel::dtype sv_dtype{pixel::dtype::unknown};
+		int frames{1};
+		pixel::planar planar_configuration{pixel::planar::interleaved};
+		bool has_pixel_data{false};
+	};
+
+	/// Read pixel-related metadata from the dataset tags.
+	/// Results are cached inside DataSet. Set recalc=true to force refresh.
+	[[nodiscard]] const pixel_info_t& pixel_info(bool recalc = false) const;
+
+	/// Calculate output strides for one decoded frame with the given options.
+	[[nodiscard]] pixel::strides calc_strides(const pixel::decode_opts& opt = {}) const;
+
+	/// Read Modality LUT Sequence (0028,3000) item #0 as a lookup table.
+	/// Returns std::nullopt when Modality LUT Sequence is absent.
+	/// Throws when the sequence exists but descriptor/data are invalid.
+	[[nodiscard]] std::optional<pixel::modality_lut> modality_lut() const;
+
+	/// Decode selected frame into caller-provided buffer.
+	void decode_into(std::size_t frame_index, std::span<std::uint8_t> dst,
+	    const pixel::decode_opts& opt = {}) const {
+		pixel::decode_into(*this, frame_index, dst, opt);
+	}
+	void decode_into(std::size_t frame_index, std::span<std::uint8_t> dst,
+	    const pixel::strides& dst_strides, const pixel::decode_opts& opt = {}) const {
+		pixel::decode_into(*this, frame_index, dst, dst_strides, opt);
+	}
+
+	/// Decode frame 0 into caller-provided buffer.
+	void decode_into(std::span<std::uint8_t> dst, const pixel::decode_opts& opt = {}) const {
+		pixel::decode_into(*this, 0, dst, opt);
+	}
+	void decode_into(std::span<std::uint8_t> dst, const pixel::strides& dst_strides,
+	    const pixel::decode_opts& opt = {}) const {
+		pixel::decode_into(*this, 0, dst, dst_strides, opt);
+	}
+
+	/// Decode selected frame and return decoded bytes as an owning vector.
+	[[nodiscard]] std::vector<std::uint8_t> pixel_data(std::size_t frame_index = 0,
+	    const pixel::decode_opts& opt = {}) const {
+		const auto dst_strides = calc_strides(opt);
+		std::vector<std::uint8_t> out(dst_strides.frame);
+		pixel::decode_into(*this, frame_index, std::span<std::uint8_t>(out), dst_strides, opt);
+		return out;
+	}
+
 	/// Begin iterator over active elements (vector + map merge).
 	iterator begin();
 
@@ -1275,6 +1375,7 @@ private:
 	const_iterator cend() const;
 
 private:
+	void invalidate_pixel_info_cache() const { pixel_info_cache_.reset(); }
 	void attach_to_stream(std::string identifier, std::unique_ptr<InStream> stream);
 	void set_transfer_syntax(uid::WellKnown transfer_syntax);
 	std::unique_ptr<InStream> stream_;
@@ -1287,6 +1388,7 @@ private:
 	std::size_t offset_{0};  // absolute offset within the root stream where this dataset starts
 	std::vector<DataElement> elements_;
 	std::map<std::uint32_t, DataElement> element_map_;
+	mutable std::optional<pixel_info_t> pixel_info_cache_{};
 };
 
 /// Represents a DICOM SQ element value: an ordered list of nested DataSets.

@@ -537,6 +537,16 @@ PYBIND11_MODULE(_dicomsdl, m) {
 		    "Remove a DataElement by tag if it exists")
 		.def("dump_elements", &DataSet::dump_elements,
 		    "Print internal element storage for debugging")
+		.def("pixel_data",
+		    [](const DataSet& self, std::size_t frame_index) {
+			    const auto decoded = self.pixel_data(frame_index);
+			    if (decoded.empty()) {
+				    return py::bytes();
+			    }
+			    return py::bytes(reinterpret_cast<const char*>(decoded.data()), decoded.size());
+		    },
+		    py::arg("frame_index") = 0,
+		    "Decode one frame with default options and return decoded bytes.")
 		.def("get_dataelement",
 		    [](DataSet& self, const Tag& tag) -> DataElement& {
 		        return *self.get_dataelement(tag);
