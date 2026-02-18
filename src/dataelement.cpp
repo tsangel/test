@@ -104,7 +104,19 @@ std::optional<std::vector<long>> make_long_vector_from_numbers(const std::vector
 		if (v < std::numeric_limits<long>::min() || v > std::numeric_limits<long>::max()) {
 			return std::nullopt;
 		}
-		out.push_back(static_cast<long>(v));
+	out.push_back(static_cast<long>(v));
+	}
+	return out;
+}
+
+std::optional<std::vector<int>> make_int_vector_from_numbers(const std::vector<long long>& src) {
+	std::vector<int> out;
+	out.reserve(src.size());
+	for (auto v : src) {
+		if (v < std::numeric_limits<int>::min() || v > std::numeric_limits<int>::max()) {
+			return std::nullopt;
+		}
+		out.push_back(static_cast<int>(v));
 	}
 	return out;
 }
@@ -327,6 +339,120 @@ std::optional<std::vector<long long>> DataElement::to_longlong_vector() const {
 	}
 }
 
+std::optional<std::vector<std::uint16_t>> DataElement::as_uint16_vector() const {
+	if (vr_ == VR::None) return std::nullopt;
+	const auto vec = load_numeric_vector<std::uint16_t>(*this);
+	return vec;
+}
+
+std::optional<std::vector<std::uint8_t>> DataElement::as_uint8_vector() const {
+	if (vr_ == VR::None) return std::nullopt;
+	const auto span = value_span();
+	std::vector<std::uint8_t> out;
+	out.reserve(span.size());
+	for (auto b : span) out.push_back(static_cast<std::uint8_t>(b));
+	return out;
+}
+
+std::optional<std::vector<int>> DataElement::to_int_vector() const {
+	switch (static_cast<std::uint16_t>(vr_)) {
+	case VR::SS_val: {
+		auto vec = load_numeric_vector<std::int16_t>(*this);
+		if (!vec) return std::nullopt;
+		std::vector<int> out;
+		out.reserve(vec->size());
+		for (auto v : *vec) {
+			if constexpr (sizeof(int) < sizeof(std::int16_t)) {
+				if (v < std::numeric_limits<int>::min() || v > std::numeric_limits<int>::max()) return std::nullopt;
+			}
+			out.push_back(static_cast<int>(v));
+		}
+		return out;
+	}
+	case VR::US_val: {
+		auto vec = load_numeric_vector<std::uint16_t>(*this);
+		if (!vec) return std::nullopt;
+		std::vector<int> out;
+		out.reserve(vec->size());
+		for (auto v : *vec) {
+			if (v > static_cast<std::uint16_t>(std::numeric_limits<int>::max())) return std::nullopt;
+			out.push_back(static_cast<int>(v));
+		}
+		return out;
+	}
+	case VR::UL_val: {
+		auto vec = load_numeric_vector<std::uint32_t>(*this);
+		if (!vec) return std::nullopt;
+		std::vector<int> out;
+		out.reserve(vec->size());
+		for (auto v : *vec) {
+			if (v > static_cast<std::uint32_t>(std::numeric_limits<int>::max())) return std::nullopt;
+			out.push_back(static_cast<int>(v));
+		}
+		return out;
+	}
+	case VR::SL_val: {
+		auto vec = load_numeric_vector<std::int32_t>(*this);
+		if (!vec) return std::nullopt;
+		std::vector<int> out;
+		out.reserve(vec->size());
+		for (auto v : *vec) {
+			if (v < std::numeric_limits<int>::min() || v > std::numeric_limits<int>::max()) return std::nullopt;
+			out.push_back(static_cast<int>(v));
+		}
+		return out;
+	}
+	case VR::SV_val: {
+		auto vec = load_numeric_vector<std::int64_t>(*this);
+		if (!vec) return std::nullopt;
+		std::vector<int> out;
+		out.reserve(vec->size());
+		for (auto v : *vec) {
+			if (v < std::numeric_limits<int>::min() || v > std::numeric_limits<int>::max()) {
+				diag::warn("DataElement::to_int tag={} vr=SV value too wide for int; use to_long() or to_longlong()", tag_.to_string());
+				return std::nullopt;
+			}
+			out.push_back(static_cast<int>(v));
+		}
+		return out;
+	}
+	case VR::UV_val: {
+		auto vec = load_numeric_vector<std::uint64_t>(*this);
+		if (!vec) return std::nullopt;
+		std::vector<int> out;
+		out.reserve(vec->size());
+		for (auto v : *vec) {
+			if (v > static_cast<std::uint64_t>(std::numeric_limits<int>::max())) {
+				diag::warn("DataElement::to_int tag={} vr=UV value too wide for int; use to_long() or to_longlong()", tag_.to_string());
+				return std::nullopt;
+			}
+			out.push_back(static_cast<int>(v));
+		}
+		return out;
+	}
+	case VR::IS_val: {
+		auto vec = parse_string_numbers(*this, IntParser{});
+		if (!vec) return std::nullopt;
+		return make_int_vector_from_numbers(*vec);
+	}
+	case VR::DS_val: {
+		auto vec = parse_string_numbers(*this, DoubleParser{});
+		if (!vec) return std::nullopt;
+		std::vector<int> out;
+		out.reserve(vec->size());
+		for (auto v : *vec) {
+			auto rounded = std::llround(v);
+			if (std::fabs(v - rounded) > 1e-9) return std::nullopt;
+			if (rounded < std::numeric_limits<int>::min() || rounded > std::numeric_limits<int>::max()) return std::nullopt;
+			out.push_back(static_cast<int>(rounded));
+		}
+		return out;
+	}
+	default:
+		return std::nullopt;
+	}
+}
+
 std::optional<std::vector<long>> DataElement::to_long_vector() const {
 	switch (static_cast<std::uint16_t>(vr_)) {
 	case VR::SS_val: {
@@ -482,6 +608,75 @@ std::optional<long long> DataElement::to_longlong() const {
 		return std::nullopt;
 	}
 }
+
+std::optional<int> DataElement::to_int() const {
+	switch (static_cast<std::uint16_t>(vr_)) {
+	case VR::SS_val: {
+		auto v = load_numeric_scalar<std::int16_t>(*this);
+		if (!v) return std::nullopt;
+		if constexpr (sizeof(int) < sizeof(std::int16_t)) {
+			if (*v < std::numeric_limits<int>::min() || *v > std::numeric_limits<int>::max()) return std::nullopt;
+		}
+		return static_cast<int>(*v);
+	}
+	case VR::US_val: {
+		auto v = load_numeric_scalar<std::uint16_t>(*this);
+		if (!v) return std::nullopt;
+		if (*v > static_cast<std::uint16_t>(std::numeric_limits<int>::max())) return std::nullopt;
+		return static_cast<int>(*v);
+	}
+	case VR::SL_val: {
+		auto v = load_numeric_scalar<std::int32_t>(*this);
+		if (!v) return std::nullopt;
+		if (*v < std::numeric_limits<int>::min() || *v > std::numeric_limits<int>::max()) return std::nullopt;
+		return static_cast<int>(*v);
+	}
+	case VR::UL_val: {
+		auto v = load_numeric_scalar<std::uint32_t>(*this);
+		if (!v) return std::nullopt;
+		if (*v > static_cast<std::uint32_t>(std::numeric_limits<int>::max())) return std::nullopt;
+		return static_cast<int>(*v);
+	}
+	case VR::SV_val: {
+		auto v = load_numeric_scalar<std::int64_t>(*this);
+		if (!v) return std::nullopt;
+		if (*v < std::numeric_limits<int>::min() || *v > std::numeric_limits<int>::max()) {
+			diag::warn("DataElement::to_int tag={} vr=SV value too wide for int; use to_long() or to_longlong()", tag_.to_string());
+			return std::nullopt;
+		}
+		return static_cast<int>(*v);
+	}
+	case VR::UV_val: {
+		auto v = load_numeric_scalar<std::uint64_t>(*this);
+		if (!v) return std::nullopt;
+		if (*v > static_cast<std::uint64_t>(std::numeric_limits<int>::max())) {
+			diag::warn("DataElement::to_int tag={} vr=UV value too wide for int; use to_long() or to_longlong()", tag_.to_string());
+			return std::nullopt;
+		}
+		return static_cast<int>(*v);
+	}
+	case VR::IS_val: {
+		auto nums = parse_string_numbers(*this, IntParser{});
+		if (!nums || nums->empty()) return std::nullopt;
+		auto v = nums->front();
+		if (v < std::numeric_limits<int>::min() || v > std::numeric_limits<int>::max()) return std::nullopt;
+		return static_cast<int>(v);
+	}
+	case VR::DS_val: {
+		auto nums = parse_string_numbers(*this, DoubleParser{});
+		if (!nums || nums->empty()) return std::nullopt;
+		auto v = nums->front();
+		auto rounded = std::llround(v);
+		if (std::fabs(v - rounded) > 1e-9) return std::nullopt;
+		if (rounded < std::numeric_limits<int>::min() || rounded > std::numeric_limits<int>::max()) return std::nullopt;
+		return static_cast<int>(rounded);
+	}
+	default:
+		return std::nullopt;
+	}
+}
+
+
 
 std::optional<long> DataElement::to_long() const {
 	switch (static_cast<std::uint16_t>(vr_)) {

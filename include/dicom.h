@@ -25,7 +25,6 @@
 #include "specific_character_set_registry.hpp"
 #include "version.h"
 #include "uid_lookup_detail.hpp"
-#include "pixel_codec.h"
 
 namespace dicom {
 
@@ -892,10 +891,18 @@ public:
 	}
 
 	// Numeric accessors (PS3.5 6.2 Value Representation)
+	/// Parse value as signed int; empty on failure.
+	[[nodiscard]] std::optional<int> to_int() const;
 	/// Parse value as signed long; empty on failure.
 	[[nodiscard]] std::optional<long> to_long() const;
 	/// Parse value as signed long long; empty on failure.
 	[[nodiscard]] std::optional<long long> to_longlong() const;
+	/// Parse value as vector of signed int; empty on failure.
+	[[nodiscard]] std::optional<std::vector<int>> to_int_vector() const;
+	/// Treat underlying value bytes as little/endian-aware uint16 vector; empty on failure.
+	[[nodiscard]] std::optional<std::vector<std::uint16_t>> as_uint16_vector() const;
+	/// Treat underlying value bytes as uint8 vector; empty on failure.
+	[[nodiscard]] std::optional<std::vector<std::uint8_t>> as_uint8_vector() const;
 	/// Parse value as vector of signed long; empty on failure.
 	[[nodiscard]] std::optional<std::vector<long>> to_long_vector() const;
 	/// Parse value as vector of signed long long; empty on failure.
@@ -947,11 +954,23 @@ public:
 	*/
 
 	// Convenience wrappers with default values
+	[[nodiscard]] inline int toInt(int default_value = 0) const {
+		return to_int().value_or(default_value);
+	}
 	[[nodiscard]] inline long toLong(long default_value = 0) const {
 		return to_long().value_or(default_value);
 	}
 	[[nodiscard]] inline long long toLongLong(long long default_value = 0) const {
 		return to_longlong().value_or(default_value);
+	}
+	[[nodiscard]] inline std::vector<int> toIntVector(std::vector<int> default_value = {}) const {
+		return to_int_vector().value_or(std::move(default_value));
+	}
+	[[nodiscard]] inline std::vector<std::uint16_t> asUint16Vector(std::vector<std::uint16_t> default_value = {}) const {
+		return as_uint16_vector().value_or(std::move(default_value));
+	}
+	[[nodiscard]] inline std::vector<std::uint8_t> asUint8Vector(std::vector<std::uint8_t> default_value = {}) const {
+		return as_uint8_vector().value_or(std::move(default_value));
 	}
 	[[nodiscard]] inline std::vector<long> toLongVector(std::vector<long> default_value = {}) const {
 		return to_long_vector().value_or(std::move(default_value));
@@ -1225,12 +1244,6 @@ private:
 
 	/// Const end iterator (alias).
 	const_iterator cend() const;
-
-	// Pixel decoding helpers (PIXEL_DECODER_DESIGN.md)
-	FrameInfo frame_info(std::size_t frame = 0) const;
-	DecodeStatus decode_into(std::span<std::byte> dst, std::size_t frame = 0,
-	    DecodeOptions opts = {}) const;
-	std::vector<std::byte> decode_pixels(std::size_t frame = 0, DecodeOptions opts = {}) const;
 
 private:
 	void attach_to_stream(std::string identifier, std::unique_ptr<InStream> stream);
