@@ -121,7 +121,7 @@ if(DICOM_BUILD_PYTHON)
 			"nanobind not found at ${NANOBIND_DIR}. "
 			"Initialize submodules (git submodule update --init --recursive).")
 	endif()
-	find_package(Python REQUIRED COMPONENTS Interpreter Development OPTIONAL_COMPONENTS Development.SABIModule)
+	find_package(Python REQUIRED COMPONENTS Interpreter Development.Module OPTIONAL_COMPONENTS Development.SABIModule)
 	add_subdirectory(${NANOBIND_DIR} EXCLUDE_FROM_ALL)
 	if(DICOM_PYTHON_STABLE_ABI)
 		nanobind_add_module(_dicomsdl STABLE_ABI NOMINSIZE

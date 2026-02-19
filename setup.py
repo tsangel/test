@@ -35,6 +35,10 @@ class CMakeBuild(build_ext):
         cfg = "Debug" if self.debug else "Release"
 
         python_executable = sys.executable
+        base_executable = getattr(sys, "_base_executable", python_executable)
+        if sys.prefix != sys.base_prefix and base_executable:
+            python_executable = base_executable
+        python_root_dir = pathlib.Path(python_executable).resolve().parent.parent
         python_tag = sysconfig.get_python_version().replace(".", "")
         plat_name_raw = getattr(self, "plat_name", sysconfig.get_platform())
         plat_name = plat_name_raw.replace("-", "_")
@@ -45,6 +49,8 @@ class CMakeBuild(build_ext):
             f"-DPYTHON_EXECUTABLE={python_executable}",
             f"-DPython_EXECUTABLE={python_executable}",
             f"-DPython3_EXECUTABLE={python_executable}",
+            f"-DPython_ROOT_DIR={python_root_dir}",
+            f"-DPython3_ROOT_DIR={python_root_dir}",
             "-DDICOM_BUILD_PYTHON=ON",
         ]
 
