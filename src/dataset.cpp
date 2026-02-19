@@ -910,8 +910,9 @@ pixel::strides DataSet::calc_strides(const pixel::decode_opts& opt) const {
 	const auto rows = static_cast<std::size_t>(rows_value);
 	const auto cols = static_cast<std::size_t>(cols_value);
 	const auto samples_per_pixel = static_cast<std::size_t>(spp_value);
+	const auto scaled_output = pixel::should_use_scaled_output(*this, opt);
 
-	const auto bytes_per_sample = opt.scaled
+	const auto bytes_per_sample = scaled_output
 	                                  ? sizeof(float)
 	                                  : bytes_per_sample_of(info.sv_dtype);
 	if (bytes_per_sample == 0) {

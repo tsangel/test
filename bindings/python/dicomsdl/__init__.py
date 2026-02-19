@@ -2,6 +2,7 @@
 
 from . import _dicomsdl as _dicomsdl  # noqa: F401
 from ._dicomsdl import *  # noqa: F401,F403
+from . import _image as _image  # noqa: F401
 
 DICOM_STANDARD_VERSION = getattr(_dicomsdl, "DICOM_STANDARD_VERSION", "")
 DICOMSDL_VERSION = getattr(_dicomsdl, "DICOMSDL_VERSION", "")

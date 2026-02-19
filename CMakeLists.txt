@@ -26,7 +26,7 @@ endif()
 set(DICOM_VERSION_SOURCE "${_dicom_version_file}")
 set(DICOMSDL_VERSION_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/VERSION")
 
-project(DicomProject VERSION ${DICOMPROJECT_VERSION} LANGUAGES CXX)
+project(DicomProject VERSION ${DICOMPROJECT_VERSION} LANGUAGES C CXX)
 
 set(GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/include")
 configure_file(
@@ -75,8 +75,12 @@ add_library(dicomsdl STATIC
 	src/pixel_decoder.cpp
 	src/pixel_decoder_raw.cpp
 	src/pixel_decoder_rle.cpp
+	src/pixel_decoder_jpeg2k.cpp
 )
 set_target_properties(dicomsdl PROPERTIES POSITION_INDEPENDENT_CODE ON)
+set_target_properties(dicomsdl PROPERTIES
+	ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+)
 target_include_directories(dicomsdl
 	PUBLIC
 		${DICOM_INCLUDE_DIR}
@@ -84,6 +88,29 @@ target_include_directories(dicomsdl
 )
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/fmt EXCLUDE_FROM_ALL)
 target_link_libraries(dicomsdl PUBLIC fmt::fmt-header-only)
+
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/openjpeg/CMakeLists.txt")
+	message(FATAL_ERROR
+		"openjpeg not found at ${CMAKE_CURRENT_SOURCE_DIR}/extern/openjpeg. "
+		"Initialize submodules (git submodule update --init --recursive).")
+endif()
+
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/openjpeg EXCLUDE_FROM_ALL)
+
+unset(EXECUTABLE_OUTPUT_PATH)
+unset(EXECUTABLE_OUTPUT_PATH CACHE)
+unset(LIBRARY_OUTPUT_PATH)
+unset(LIBRARY_OUTPUT_PATH CACHE)
+
+target_include_directories(dicomsdl PRIVATE
+	${CMAKE_CURRENT_SOURCE_DIR}/extern/openjpeg/src/lib/openjp2
+	${CMAKE_CURRENT_BINARY_DIR}/extern/openjpeg/src/lib/openjp2
+)
+if(TARGET openjp2_static)
+	target_link_libraries(dicomsdl PRIVATE openjp2_static)
+else()
+	target_link_libraries(dicomsdl PRIVATE openjp2)
+endif()
 option(DICOMSDL_ENABLE_INFO_LOGS "Compile in INFO-level logging (otherwise info logs are compiled out)" OFF)
 if(DICOMSDL_ENABLE_INFO_LOGS)
 	target_compile_definitions(dicomsdl PUBLIC DICOMSDL_ENABLE_INFO_LOGS=1)

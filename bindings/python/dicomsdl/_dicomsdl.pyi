@@ -29,7 +29,17 @@ class DataSet:
 
     def pixel_data(self, frame_index: int = ...) -> bytes: ...
 
+    def to_array(self, frame: int = ..., scaled: bool = ...) -> Any: ...
+
     def pixel_array(self, frame: int = ..., scaled: bool = ...) -> Any: ...
+
+    def to_image(
+        self,
+        frame: int = ...,
+        *,
+        window: tuple[float, float] | None = ...,
+        auto_window: bool = ...,
+    ) -> Any: ...
 
 
 class Sequence:

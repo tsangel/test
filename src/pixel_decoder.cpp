@@ -713,27 +713,74 @@ void run_planar_transform_copy(planar_transform transform, std::size_t bytes_per
 
 namespace pixel {
 
+namespace {
+
+bool has_rescale_transform_metadata(const DataSet& ds) {
+	return static_cast<bool>(ds["RescaleSlope"_tag]) ||
+	    static_cast<bool>(ds["RescaleIntercept"_tag]);
+}
+
+bool should_use_scaled_output_impl(
+    const DataSet& ds, const DataSet::pixel_info_t& info, const decode_opts& opt) {
+	if (!opt.scaled) {
+		return false;
+	}
+	if (!info.has_pixel_data) {
+		return false;
+	}
+	if (info.samples_per_pixel != 1) {
+		return false;
+	}
+
+	const bool has_modality_lut = static_cast<bool>(ds["ModalityLUTSequence"_tag]);
+	if (has_modality_lut) {
+		// Validate and load LUT eagerly so malformed metadata still fails loudly.
+		(void)ds.modality_lut();
+		return true;
+	}
+
+	return has_rescale_transform_metadata(ds);
+}
+
+} // namespace
+
+bool should_use_scaled_output(const DataSet& ds, const decode_opts& opt) {
+	const auto& info = ds.pixel_info();
+	return should_use_scaled_output_impl(ds, info, opt);
+}
+
 void decode_into(const DataSet& ds, std::size_t frame_index,
     std::span<std::uint8_t> dst, const decode_opts& opt) {
-	const auto dst_strides = ds.calc_strides(opt);
-	decode_into(ds, frame_index, dst, dst_strides, opt);
+	const auto& info = ds.pixel_info();
+	auto effective_opt = opt;
+	effective_opt.scaled = should_use_scaled_output_impl(ds, info, opt);
+
+	const auto dst_strides = ds.calc_strides(effective_opt);
+	decode_into(ds, frame_index, dst, dst_strides, effective_opt);
 }
 
 void decode_into(const DataSet& ds, std::size_t frame_index,
     std::span<std::uint8_t> dst, const strides& dst_strides, const decode_opts& opt) {
 	const auto& info = ds.pixel_info();
+	auto effective_opt = opt;
+	effective_opt.scaled = should_use_scaled_output_impl(ds, info, opt);
+
 	const auto backend = detail::select_decode_backend(info.ts);
 	switch (backend) {
 	case detail::decode_backend::raw:
-		detail::decode_raw_into(ds, info, frame_index, dst, dst_strides, opt);
+		detail::decode_raw_into(ds, info, frame_index, dst, dst_strides, effective_opt);
 		return;
 	case detail::decode_backend::rle:
-		detail::decode_rle_into(ds, info, frame_index, dst, dst_strides, opt);
+		detail::decode_rle_into(ds, info, frame_index, dst, dst_strides, effective_opt);
 		return;
 	case detail::decode_backend::jpeg_family:
+		if (info.ts.is_jpeg2000()) {
+			detail::decode_jpeg2k_into(ds, info, frame_index, dst, dst_strides, effective_opt);
+			return;
+		}
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=JPEG family decode is not implemented yet",
-		    ds.path());
+		    "pixel::decode_into file={} reason=JPEG family transfer syntax is not implemented yet ({})",
+		    ds.path(), ds.transfer_syntax_uid().value());
 		return;
 	default:
 		diag::error_and_throw(

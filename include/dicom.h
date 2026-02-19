@@ -871,7 +871,7 @@ struct decode_opts {
 	planar planar_out{planar::interleaved};
 	std::uint16_t alignment{1};  // 0/1: packed, power-of-two aligned (<= 4096)
 	// true: output float32 after Modality LUT (if present) or Rescale
-	// currently limited to SamplesPerPixel=1.
+	// applies only when SamplesPerPixel=1 and modality transform metadata exists.
 	bool scaled{false};
 };
 
@@ -885,10 +885,15 @@ struct modality_lut {
 	std::vector<float> values;
 };
 
+/// Returns whether scaled float output is effectively applied for this dataset and options.
+/// Scaled output is ignored when SamplesPerPixel != 1, or when both Modality LUT Sequence
+/// and Rescale Slope/Intercept are absent.
+[[nodiscard]] bool should_use_scaled_output(const DataSet& ds, const decode_opts& opt = {});
+
 /// Decode a single frame into caller-provided buffer.
 /// Current implementation supports raw(uncompressed) and RLE backends, interleaved/planar layout conversion,
 /// spp=1/3/4, sv_dtype=u8/s8/u16/s16/u32/s32/f32/f64.
-/// When scaled=true, output is float32 and currently supports SamplesPerPixel=1 only.
+/// When scaled output is effectively enabled, output sample type is float32.
 void decode_into(const DataSet& ds, std::size_t frame_index,
     std::span<std::uint8_t> dst, const decode_opts& opt = {});
 void decode_into(const DataSet& ds, std::size_t frame_index,

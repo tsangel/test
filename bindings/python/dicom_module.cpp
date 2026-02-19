@@ -78,7 +78,7 @@ DecodedArraySpec decoded_array_spec(const DataSet::pixel_info_t& info, bool scal
 		break;
 	}
 
-	throw nb::value_error("pixel_array requires a known pixel sample dtype");
+	throw nb::value_error("to_array requires a known pixel sample dtype");
 }
 
 nb::object make_numpy_array_from_decoded(std::vector<std::uint8_t>&& decoded,
@@ -94,7 +94,7 @@ nb::object make_numpy_array_from_decoded(std::vector<std::uint8_t>&& decoded,
 	    nb::device::cpu::value, 0, 'C'));
 }
 
-nb::object dataset_pixel_array(const DataSet& self, long frame, bool scaled) {
+nb::object dataset_to_array(const DataSet& self, long frame, bool scaled) {
 	if (frame < -1) {
 		throw nb::value_error("frame must be >= -1");
 	}
@@ -102,13 +102,13 @@ nb::object dataset_pixel_array(const DataSet& self, long frame, bool scaled) {
 	const auto& info = self.pixel_info();
 	if (!info.has_pixel_data) {
 		throw nb::value_error(
-		    "pixel_array requires PixelData, FloatPixelData, or DoubleFloatPixelData");
+		    "to_array requires PixelData, FloatPixelData, or DoubleFloatPixelData");
 	}
 	if (info.rows <= 0 || info.cols <= 0 || info.samples_per_pixel <= 0) {
-		throw nb::value_error("pixel_array requires positive Rows/Columns/SamplesPerPixel");
+		throw nb::value_error("to_array requires positive Rows/Columns/SamplesPerPixel");
 	}
 	if (info.frames <= 0) {
-		throw nb::value_error("pixel_array requires NumberOfFrames >= 1");
+		throw nb::value_error("to_array requires NumberOfFrames >= 1");
 	}
 
 	const auto rows = static_cast<std::size_t>(info.rows);
@@ -120,17 +120,19 @@ nb::object dataset_pixel_array(const DataSet& self, long frame, bool scaled) {
 	opt.planar_out = dicom::pixel::planar::interleaved;
 	opt.alignment = 1;
 	opt.scaled = scaled;
+	const bool effective_scaled = dicom::pixel::should_use_scaled_output(self, opt);
+	opt.scaled = effective_scaled;
 
 	const auto dst_strides = self.calc_strides(opt);
-	const auto spec = decoded_array_spec(info, scaled);
+	const auto spec = decoded_array_spec(info, effective_scaled);
 	const auto row_stride = dst_strides.row;
 	const auto frame_stride = dst_strides.frame;
 	const auto bytes_per_sample = spec.bytes_per_sample;
 	if (bytes_per_sample == 0) {
-		throw nb::value_error("pixel_array could not determine output sample size");
+		throw nb::value_error("to_array could not determine output sample size");
 	}
 	if ((row_stride % bytes_per_sample) != 0 || (frame_stride % bytes_per_sample) != 0) {
-		throw std::runtime_error("pixel_array stride is not aligned to output sample size");
+		throw std::runtime_error("to_array stride is not aligned to output sample size");
 	}
 	const auto row_stride_elems = row_stride / bytes_per_sample;
 	const auto frame_stride_elems = frame_stride / bytes_per_sample;
@@ -140,7 +142,7 @@ nb::object dataset_pixel_array(const DataSet& self, long frame, bool scaled) {
 	if (!decode_all_frames) {
 		const auto frame_index = (frame < 0) ? std::size_t{0} : static_cast<std::size_t>(frame);
 		if (frame_index >= frames) {
-			throw nb::index_error("pixel_array frame index out of range");
+			throw nb::index_error("to_array frame index out of range");
 		}
 
 		std::vector<std::uint8_t> decoded(frame_stride);
@@ -735,8 +737,8 @@ NB_MODULE(_dicomsdl, m) {
 		    },
 		    nb::arg("frame_index") = 0,
 		    "Decode one frame with default options and return decoded bytes.")
-		.def("pixel_array",
-		    &dataset_pixel_array,
+		.def("to_array",
+		    &dataset_to_array,
 		    nb::arg("frame") = -1,
 		    nb::arg("scaled") = false,
 		    "Decode pixel samples and return a NumPy array.\n"
@@ -746,13 +748,20 @@ NB_MODULE(_dicomsdl, m) {
 		    "frame : int, optional\n"
 		    "    -1 decodes all frames (multi-frame only), otherwise decode the selected frame index.\n"
 		    "scaled : bool, optional\n"
-		    "    If True, apply Modality LUT/Rescale and return float32 output.\n"
+		    "    If True, apply Modality LUT/Rescale when available.\n"
+		    "    Scaled output is ignored when SamplesPerPixel != 1, or when both\n"
+		    "    Modality LUT Sequence and Rescale Slope/Intercept are absent.\n"
 		    "\n"
 		    "Returns\n"
 		    "-------\n"
 		    "numpy.ndarray\n"
 		    "    Shape is (rows, cols) or (rows, cols, samples) for a single frame,\n"
 		    "    and (frames, rows, cols) or (frames, rows, cols, samples) when decoding all frames.")
+		.def("pixel_array",
+		    &dataset_to_array,
+		    nb::arg("frame") = -1,
+		    nb::arg("scaled") = false,
+		    "Alias of to_array(frame=-1, scaled=False).")
 		.def("get_dataelement",
 		    [](DataSet& self, const Tag& tag) -> DataElement& {
 		        return *self.get_dataelement(tag);
