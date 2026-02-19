@@ -1,5 +1,15 @@
 cmake_minimum_required(VERSION 3.16)
 
+if(APPLE)
+    if(DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
+        if(CMAKE_OSX_DEPLOYMENT_TARGET VERSION_LESS "10.13")
+            set(CMAKE_OSX_DEPLOYMENT_TARGET "10.13" CACHE STRING "Minimum macOS deployment target" FORCE)
+        endif()
+    else()
+        set(CMAKE_OSX_DEPLOYMENT_TARGET "10.13" CACHE STRING "Minimum macOS deployment target")
+    endif()
+endif()
+
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" _dicomsdl_version_raw)
 string(STRIP "${_dicomsdl_version_raw}" DICOMPROJECT_VERSION)
 

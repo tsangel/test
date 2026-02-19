@@ -28,6 +28,7 @@ jobs:
       CIBW_ARCHS: ${{ matrix.archs }}
       CIBW_PRERELEASE_PYTHONS: "1"
       CIBW_BEFORE_BUILD: python -m pip install --upgrade pip cmake ninja
+      CIBW_ENVIRONMENT_MACOS: "MACOSX_DEPLOYMENT_TARGET=10.13"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
