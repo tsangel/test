@@ -30,7 +30,7 @@ cmake --build build
 
 ## Python Wheel
 
-Python ≥ 3.8 is required.
+Python ≥ 3.9 is required.
 
 ```
 python -m pip install --upgrade pip
@@ -103,5 +103,5 @@ python -c "import dicomsdl as dicom; tag, vr = dicom.keyword_to_tag_vr('PatientN
 ## Continuous Integration
 
 GitHub Actions builds Python wheels for Linux, macOS (x86_64 & arm64), and Windows
-across CPython 3.8 through 3.14. Generated wheels are published as workflow
+across CPython 3.9 through 3.14. Generated wheels are published as workflow
 artifacts.

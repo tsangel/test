@@ -91,7 +91,7 @@ setup(
     version=PACKAGE_VERSION,
     author="DicomProject Authors",
     description="Python bindings for dicomsdl",
-    python_requires=">=3.8",
+    python_requires=">=3.9",
     packages=["dicomsdl"],
     package_dir={"dicomsdl": "bindings/python/dicomsdl"},
     package_data={"dicomsdl": ["py.typed", "*.pyi"]},
