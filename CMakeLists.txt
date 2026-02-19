@@ -95,6 +95,20 @@ if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/openjpeg/CMakeLists.txt")
 		"Initialize submodules (git submodule update --init --recursive).")
 endif()
 
+if(DEFINED BUILD_SHARED_LIBS)
+	set(_dicomsdl_build_shared_libs_defined TRUE)
+	set(_dicomsdl_build_shared_libs "${BUILD_SHARED_LIBS}")
+else()
+	set(_dicomsdl_build_shared_libs_defined FALSE)
+endif()
+
+if(WIN32)
+	# Avoid runtime DLL dependency for wheel tests/import on Windows.
+	# OpenJPEG builds a shared openjp2 by default, which is not bundled by
+	# cibuildwheel automatically, causing _dicomsdl import failures.
+	set(BUILD_SHARED_LIBS OFF)
+endif()
+
 set(_dicomsdl_build_testing "${BUILD_TESTING}")
 # Keep OpenJPEG tests disabled in this superbuild. Otherwise CTest registers
 # hundreds of OpenJPEG cases while EXCLUDE_FROM_ALL prevents their binaries
@@ -103,6 +117,14 @@ set(BUILD_TESTING OFF)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/openjpeg EXCLUDE_FROM_ALL)
 set(BUILD_TESTING "${_dicomsdl_build_testing}")
 unset(_dicomsdl_build_testing)
+
+if(_dicomsdl_build_shared_libs_defined)
+	set(BUILD_SHARED_LIBS "${_dicomsdl_build_shared_libs}")
+else()
+	unset(BUILD_SHARED_LIBS)
+endif()
+unset(_dicomsdl_build_shared_libs)
+unset(_dicomsdl_build_shared_libs_defined)
 
 unset(EXECUTABLE_OUTPUT_PATH)
 unset(EXECUTABLE_OUTPUT_PATH CACHE)
