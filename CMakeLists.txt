@@ -95,7 +95,14 @@ if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/openjpeg/CMakeLists.txt")
 		"Initialize submodules (git submodule update --init --recursive).")
 endif()
 
+set(_dicomsdl_build_testing "${BUILD_TESTING}")
+# Keep OpenJPEG tests disabled in this superbuild. Otherwise CTest registers
+# hundreds of OpenJPEG cases while EXCLUDE_FROM_ALL prevents their binaries
+# from being built, which causes mass "Not Run" failures.
+set(BUILD_TESTING OFF)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/openjpeg EXCLUDE_FROM_ALL)
+set(BUILD_TESTING "${_dicomsdl_build_testing}")
+unset(_dicomsdl_build_testing)
 
 unset(EXECUTABLE_OUTPUT_PATH)
 unset(EXECUTABLE_OUTPUT_PATH CACHE)
@@ -178,22 +185,29 @@ if(BUILD_TESTING)
 	)
 	target_link_libraries(dicomsdl_dictionary_consistency PRIVATE dicomsdl)
 	add_test(NAME dictionary_consistency COMMAND dicomsdl_dictionary_consistency)
+	set_tests_properties(dictionary_consistency PROPERTIES LABELS "dicomsdl")
 
 	add_executable(dicomsdl_basic_smoke
 		tests/basic_smoke.cpp
 	)
 	target_link_libraries(dicomsdl_basic_smoke PRIVATE dicomsdl)
 	add_test(NAME basic_smoke COMMAND dicomsdl_basic_smoke)
+	set_tests_properties(basic_smoke PROPERTIES LABELS "dicomsdl")
 
 	add_executable(dicomsdl_numeric_values
 		tests/numeric_values.cpp
 	)
 	target_link_libraries(dicomsdl_numeric_values PRIVATE dicomsdl)
 	add_test(NAME numeric_values COMMAND dicomsdl_numeric_values)
+	set_tests_properties(numeric_values PROPERTIES
+		LABELS "dicomsdl"
+		WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+	)
 
 	add_executable(dicomsdl_uid_consistency
 		tests/uid_consistency.cpp
 	)
 	target_link_libraries(dicomsdl_uid_consistency PRIVATE dicomsdl)
 	add_test(NAME uid_consistency COMMAND dicomsdl_uid_consistency)
+	set_tests_properties(uid_consistency PROPERTIES LABELS "dicomsdl")
 endif()

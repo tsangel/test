@@ -1,7 +1,6 @@
 #include <cassert>
 #include <array>
 #include <string>
-#include <filesystem>
 #include <vector>
 #include <iostream>
 #include <cmath>
@@ -74,8 +73,7 @@ void check_double_vec(DataSet& ds, Tag tag, const std::vector<double>& expected)
 } // namespace
 
 int main() {
-    const auto root = std::filesystem::path(__FILE__).parent_path().parent_path();
-    auto ds = dicom::read_file((root / "tests" / "test_le.dcm").string());
+    auto ds = dicom::read_file("tests/test_le.dcm");
     assert(ds);
 
     // Scalars

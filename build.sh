@@ -4,8 +4,10 @@ set -euo pipefail
 ROOT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="${BUILD_DIR:-${ROOT_DIR}/build}"
 BUILD_TYPE="${BUILD_TYPE:-Release}"
+BUILD_TESTING="${BUILD_TESTING:-ON}"
 DICOM_BUILD_EXAMPLES="${DICOM_BUILD_EXAMPLES:-ON}"
 BUILD_WHEEL="${BUILD_WHEEL:-1}"
+CTEST_LABEL="${CTEST_LABEL:-dicomsdl}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 WHEEL_DIR="${WHEEL_DIR:-${ROOT_DIR}/dist}"
 
@@ -47,6 +49,7 @@ if [[ -f "$CMAKE_CACHE_FILE" ]]; then
 fi
 
 cmake_args=(-S "$ROOT_DIR" -B "$BUILD_DIR" \
+	-DBUILD_TESTING="${BUILD_TESTING}" \
 	-DDICOM_BUILD_EXAMPLES="${DICOM_BUILD_EXAMPLES}" \
 	-DCMAKE_BUILD_TYPE="${BUILD_TYPE}")
 
@@ -85,7 +88,11 @@ echo "Building dicomsdl (${BUILD_TYPE})"
 if [[ "${RUN_TESTS:-1}" != "0" ]]; then
 	echo "Running CTest suite (${BUILD_TYPE})"
 	pushd "$BUILD_DIR" >/dev/null
-	ctest --output-on-failure --build-config "$BUILD_TYPE"
+	if [[ -n "${CTEST_LABEL}" ]]; then
+		ctest --output-on-failure --build-config "$BUILD_TYPE" -L "$CTEST_LABEL"
+	else
+		ctest --output-on-failure --build-config "$BUILD_TYPE"
+	fi
 	popd >/dev/null
 fi
 

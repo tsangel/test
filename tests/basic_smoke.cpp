@@ -1,10 +1,10 @@
 #include <cstdint>
-#include <filesystem>
 #include <fstream>
 #include <string>
 #include <vector>
 #include <iostream>
 #include <cstdlib>
+#include <cstdio>
 
 #include <dicom.h>
 #include <instream.h>
@@ -41,21 +41,31 @@ int main() {
 	const dicom::Tag literal_tag = "Rows"_tag;
 	if (literal_tag.value() != 0x00280010u) fail("literal tag mismatch");
 
-	const auto tmp_dir = std::filesystem::temp_directory_path();
-	const auto file_path = tmp_dir / "dicomsdl_basic_smoke.dcm";
+	std::string tmp_dir = ".";
+	if (const char* env = std::getenv("TMPDIR"); env && *env) {
+		tmp_dir = env;
+	} else if (const char* env = std::getenv("TEMP"); env && *env) {
+		tmp_dir = env;
+	} else if (const char* env = std::getenv("TMP"); env && *env) {
+		tmp_dir = env;
+	}
+	if (!tmp_dir.empty() && tmp_dir.back() != '/' && tmp_dir.back() != '\\') {
+		tmp_dir.push_back('/');
+	}
+	const std::string file_path = tmp_dir + "dicomsdl_basic_smoke.dcm";
 	{
 		std::ofstream os(file_path, std::ios::binary);
 		os << "DICM";
 	}
 	{
-		const auto file = read_file(file_path.string());
+		const auto file = read_file(file_path);
 		if (!file) fail("read_file returned null");
-		if (file->path() != file_path.string()) fail("file path mismatch");
+		if (file->path() != file_path) fail("file path mismatch");
 		if (file->stream().datasize() != 4) fail("file datasize mismatch");
 
 		DataSet manual;
-		manual.attach_to_file(file_path.string());
-		if (manual.path() != file_path.string()) fail("manual path mismatch");
+		manual.attach_to_file(file_path);
+		if (manual.path() != file_path) fail("manual path mismatch");
 		if (manual.stream().datasize() != 4) fail("manual datasize mismatch");
 	}
 
@@ -71,7 +81,7 @@ int main() {
 	manual_mem.attach_to_memory("manual-buffer", buffer.data(), buffer.size());
 	if (manual_mem.stream().datasize() != buffer.size()) fail("manual_mem datasize mismatch");
 
-	std::filesystem::remove(file_path);
+	std::remove(file_path.c_str());
 
 	return 0;
 }
