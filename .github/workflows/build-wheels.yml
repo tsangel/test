@@ -32,7 +32,29 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: false
+
+      - name: Init submodules (with retry)
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git config --global --add url."https://github.com/".insteadOf "https://Github.com/"
+          git submodule set-url extern/charls https://github.com/team-charls/charls.git
+          git submodule set-url extern/fmt https://github.com/fmtlib/fmt.git
+          git submodule set-url extern/libjpeg-turbo https://github.com/libjpeg-turbo/libjpeg-turbo.git
+          git submodule set-url extern/nanobind https://github.com/wjakob/nanobind.git
+          git submodule set-url extern/openjpeg https://github.com/uclouvain/openjpeg.git
+          git submodule sync --recursive
+          for attempt in 1 2 3; do
+            if git -c protocol.version=2 submodule update --init --force --depth=1 --recursive \
+              extern/charls extern/fmt extern/libjpeg-turbo extern/nanobind extern/openjpeg; then
+              exit 0
+            fi
+            echo "Submodule init failed (attempt ${attempt}), retrying..."
+            sleep $((attempt * 5))
+          done
+          echo "Submodule init failed after retries" >&2
+          exit 1
 
       - name: Set up Python
         uses: actions/setup-python@v5
