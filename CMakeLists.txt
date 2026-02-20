@@ -76,6 +76,7 @@ add_library(dicomsdl STATIC
 	src/pixel_decoder_raw.cpp
 	src/pixel_decoder_rle.cpp
 	src/pixel_decoder_jpeg2k.cpp
+	src/pixel_decoder_jpegls.cpp
 )
 set_target_properties(dicomsdl PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(dicomsdl PROPERTIES
@@ -93,6 +94,40 @@ if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/openjpeg/CMakeLists.txt")
 	message(FATAL_ERROR
 		"openjpeg not found at ${CMAKE_CURRENT_SOURCE_DIR}/extern/openjpeg. "
 		"Initialize submodules (git submodule update --init --recursive).")
+endif()
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/charls/CMakeLists.txt")
+	message(FATAL_ERROR
+		"charls not found at ${CMAKE_CURRENT_SOURCE_DIR}/extern/charls. "
+		"Initialize submodules (git submodule update --init --recursive).")
+endif()
+
+# Keep CharLS pinned while upstream regression remains unresolved.
+# The known-good submodule revision corresponds to tag 2.2.1.
+option(DICOMSDL_ALLOW_UNPINNED_CHARLS
+	"Allow building with a CharLS revision other than the pinned known-good commit." OFF)
+set(DICOMSDL_CHARLS_PINNED_SHA "0ae38a5e106a788d6895b0d2db1cfcc845c5759c")
+if(NOT DICOMSDL_ALLOW_UNPINNED_CHARLS)
+	find_package(Git QUIET)
+	if(Git_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/charls/.git")
+		execute_process(
+			COMMAND "${GIT_EXECUTABLE}" -C "${CMAKE_CURRENT_SOURCE_DIR}/extern/charls" rev-parse HEAD
+			OUTPUT_VARIABLE _dicomsdl_charls_head
+			OUTPUT_STRIP_TRAILING_WHITESPACE
+			ERROR_QUIET
+		)
+		if(NOT _dicomsdl_charls_head STREQUAL DICOMSDL_CHARLS_PINNED_SHA)
+			message(FATAL_ERROR
+				"extern/charls is not pinned to known-good revision ${DICOMSDL_CHARLS_PINNED_SHA} (tag 2.2.1).\n"
+				"Current revision: ${_dicomsdl_charls_head}\n"
+				"This pin is temporary due to a JPEG-LS regression with WG04 MR1 samples in newer CharLS tags.\n"
+				"If you intentionally want to build with another revision, set -DDICOMSDL_ALLOW_UNPINNED_CHARLS=ON.")
+		endif()
+	else()
+		message(WARNING
+			"Could not verify CharLS pinned revision (git metadata unavailable). "
+			"Expected known-good tag: 2.2.1. "
+			"Set -DDICOMSDL_ALLOW_UNPINNED_CHARLS=ON to silence this warning.")
+	endif()
 endif()
 
 if(DEFINED BUILD_SHARED_LIBS)
@@ -126,6 +161,24 @@ endif()
 unset(_dicomsdl_build_shared_libs)
 unset(_dicomsdl_build_shared_libs_defined)
 
+if(DEFINED BUILD_SHARED_LIBS)
+	set(_dicomsdl_charls_build_shared_libs_defined TRUE)
+	set(_dicomsdl_charls_build_shared_libs "${BUILD_SHARED_LIBS}")
+else()
+	set(_dicomsdl_charls_build_shared_libs_defined FALSE)
+endif()
+
+set(BUILD_SHARED_LIBS OFF)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/charls EXCLUDE_FROM_ALL)
+
+if(_dicomsdl_charls_build_shared_libs_defined)
+	set(BUILD_SHARED_LIBS "${_dicomsdl_charls_build_shared_libs}")
+else()
+	unset(BUILD_SHARED_LIBS)
+endif()
+unset(_dicomsdl_charls_build_shared_libs)
+unset(_dicomsdl_charls_build_shared_libs_defined)
+
 unset(EXECUTABLE_OUTPUT_PATH)
 unset(EXECUTABLE_OUTPUT_PATH CACHE)
 unset(LIBRARY_OUTPUT_PATH)
@@ -140,6 +193,7 @@ if(TARGET openjp2_static)
 else()
 	target_link_libraries(dicomsdl PRIVATE openjp2)
 endif()
+target_link_libraries(dicomsdl PRIVATE charls)
 option(DICOMSDL_ENABLE_INFO_LOGS "Compile in INFO-level logging (otherwise info logs are compiled out)" OFF)
 if(DICOMSDL_ENABLE_INFO_LOGS)
 	target_compile_definitions(dicomsdl PUBLIC DICOMSDL_ENABLE_INFO_LOGS=1)

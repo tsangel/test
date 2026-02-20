@@ -8,6 +8,20 @@ Minimal DICOM file wrapper with optional Python bindings.
 git submodule update --init --recursive
 ```
 
+## JPEG-LS (CharLS) Pin
+
+`extern/charls` is intentionally pinned to `2.2.1` for now.
+Newer CharLS tags (`2.3.0+`) show a regression for WG04 `MR1_JLSL`
+codestream decoding in this project. See:
+`misc/repro/charls_mr1_jpegls_regression/`.
+
+By default, CMake enforces the pinned CharLS submodule revision.
+If you explicitly need to test another CharLS revision, configure with:
+
+```bash
+cmake -S . -B build -DDICOMSDL_ALLOW_UNPINNED_CHARLS=ON
+```
+
 ## C++ Build
 
 ```

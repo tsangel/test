@@ -31,6 +31,8 @@ _REF_DIR = _WG04_IMAGES_ROOT / "REF"
 _RLE_DIR = _WG04_IMAGES_ROOT / "RLE"
 _J2KR_DIR = _WG04_IMAGES_ROOT / "J2KR"
 _J2KI_DIR = _WG04_IMAGES_ROOT / "J2KI"
+_JLSL_DIR = _WG04_IMAGES_ROOT / "JLSL"
+_JLSN_DIR = _WG04_IMAGES_ROOT / "JLSN"
 
 
 def _series_key(path: Path) -> str:
@@ -69,11 +71,16 @@ _REF_FILES = _files(_REF_DIR)
 _RLE_PAIRS = _pairs(_RLE_DIR)
 _J2KR_PAIRS = _pairs(_J2KR_DIR)
 _J2KI_PAIRS = _pairs(_J2KI_DIR)
+_JLSL_PAIRS = _pairs(_JLSL_DIR)
+_JLSN_PAIRS = _pairs(_JLSN_DIR)
 _RLE_IDS = [compressed.name for compressed, _ in _RLE_PAIRS]
 _J2KR_IDS = [compressed.name for compressed, _ in _J2KR_PAIRS]
 _J2KI_IDS = [compressed.name for compressed, _ in _J2KI_PAIRS]
+_JLSL_IDS = [compressed.name for compressed, _ in _JLSL_PAIRS]
+_JLSN_IDS = [compressed.name for compressed, _ in _JLSN_PAIRS]
 
 _J2KI_MAX_MAE = 55.0
+_JLSN_MAX_ABS_ERROR = 10.0
 
 
 def _decode(path: Path):
@@ -93,6 +100,11 @@ def _assert_same_pixels(decoded, reference, source_name: str):
 def _mae(decoded, reference) -> float:
     diff = decoded.astype(np.float64) - reference.astype(np.float64)
     return float(np.mean(np.abs(diff)))
+
+
+def _max_abs_error(decoded, reference) -> float:
+    diff = decoded.astype(np.float64) - reference.astype(np.float64)
+    return float(np.max(np.abs(diff)))
 
 
 @pytest.mark.parametrize("ref_path", _REF_FILES, ids=lambda p: p.name)
@@ -130,4 +142,30 @@ def test_wg04_j2ki_matches_ref_with_mae_tolerance(j2ki_path: Path, ref_path: Pat
     mae = _mae(decoded, reference)
     assert mae <= _J2KI_MAX_MAE, (
         f"{j2ki_path.name}: MAE too high ({mae:.3f} > {_J2KI_MAX_MAE:.3f})"
+    )
+
+
+@pytest.mark.parametrize("jlsl_path,ref_path", _JLSL_PAIRS, ids=_JLSL_IDS)
+def test_wg04_jlsl_matches_ref(jlsl_path: Path, ref_path: Path):
+    decoded = _decode(jlsl_path)
+    reference = _decode(ref_path)
+    _assert_same_pixels(decoded, reference, jlsl_path.name)
+
+
+@pytest.mark.parametrize("jlsn_path,ref_path", _JLSN_PAIRS, ids=_JLSN_IDS)
+def test_wg04_jlsn_matches_ref_with_max_abs_tolerance(jlsn_path: Path, ref_path: Path):
+    decoded = _decode(jlsn_path)
+    reference = _decode(ref_path)
+
+    assert decoded.shape == reference.shape, (
+        f"{jlsn_path.name}: shape mismatch decoded={decoded.shape} reference={reference.shape}"
+    )
+    assert decoded.dtype == reference.dtype, (
+        f"{jlsn_path.name}: dtype mismatch decoded={decoded.dtype} reference={reference.dtype}"
+    )
+
+    max_abs_error = _max_abs_error(decoded, reference)
+    assert max_abs_error <= _JLSN_MAX_ABS_ERROR, (
+        f"{jlsn_path.name}: max abs error too high "
+        f"({max_abs_error:.3f} > {_JLSN_MAX_ABS_ERROR:.3f})"
     )

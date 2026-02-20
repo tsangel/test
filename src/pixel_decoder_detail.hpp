@@ -50,4 +50,8 @@ void decode_jpeg2k_into(const DataSet& ds, const DataSet::pixel_info_t& info,
     std::size_t frame_index, std::span<std::uint8_t> dst,
     const strides& dst_strides, const decode_opts& opt);
 
+void decode_jpegls_into(const DataSet& ds, const DataSet::pixel_info_t& info,
+    std::size_t frame_index, std::span<std::uint8_t> dst,
+    const strides& dst_strides, const decode_opts& opt);
+
 } // namespace dicom::pixel::detail

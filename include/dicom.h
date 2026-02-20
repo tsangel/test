@@ -891,8 +891,12 @@ struct modality_lut {
 [[nodiscard]] bool should_use_scaled_output(const DataSet& ds, const decode_opts& opt = {});
 
 /// Decode a single frame into caller-provided buffer.
-/// Current implementation supports raw(uncompressed) and RLE backends, interleaved/planar layout conversion,
-/// spp=1/3/4, sv_dtype=u8/s8/u16/s16/u32/s32/f32/f64.
+/// Current implementation supports raw(uncompressed), RLE, JPEG-LS, and JPEG 2000 backends,
+/// interleaved/planar layout conversion, spp=1/3/4.
+/// Supported sample dtypes vary by backend:
+/// - raw/RLE: u8/s8/u16/s16/u32/s32/f32/f64
+/// - JPEG-LS: integral up to 16-bit
+/// - JPEG 2000: integral up to 32-bit
 /// When scaled output is effectively enabled, output sample type is float32.
 void decode_into(const DataSet& ds, std::size_t frame_index,
     std::span<std::uint8_t> dst, const decode_opts& opt = {});

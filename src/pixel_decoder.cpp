@@ -778,6 +778,10 @@ void decode_into(const DataSet& ds, std::size_t frame_index,
 			detail::decode_jpeg2k_into(ds, info, frame_index, dst, dst_strides, effective_opt);
 			return;
 		}
+		if (info.ts.is_jpegls()) {
+			detail::decode_jpegls_into(ds, info, frame_index, dst, dst_strides, effective_opt);
+			return;
+		}
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=JPEG family transfer syntax is not implemented yet ({})",
 		    ds.path(), ds.transfer_syntax_uid().value());
