@@ -218,6 +218,7 @@ struct WellKnown {
 	[[nodiscard]] constexpr bool is_jpegls() const noexcept;
 	[[nodiscard]] constexpr bool is_jpeg_family() const noexcept;
 	[[nodiscard]] constexpr bool is_jpeg2000() const noexcept;
+	[[nodiscard]] constexpr bool is_htj2k() const noexcept;
 	[[nodiscard]] constexpr bool is_jpegxl() const noexcept;
 	[[nodiscard]] constexpr bool is_rle() const noexcept;
 	[[nodiscard]] constexpr bool is_uncompressed() const noexcept;
@@ -680,13 +681,14 @@ constexpr std::uint32_t kTSJpegBaseline = 1u << 1;
 constexpr std::uint32_t kTSJpegLossless = 1u << 2;
 constexpr std::uint32_t kTSJpegLS = 1u << 3;
 constexpr std::uint32_t kTSJpeg2000 = 1u << 4;
-constexpr std::uint32_t kTSMpeg2 = 1u << 5;
-constexpr std::uint32_t kTSH264 = 1u << 6;
-constexpr std::uint32_t kTSHevc = 1u << 7;
-constexpr std::uint32_t kTSJpegXL = 1u << 8;
-constexpr std::uint32_t kTSRle = 1u << 9;
-constexpr std::uint32_t kTSFfd9 = 1u << 10;      // Codestream ends with FFD9 marker
-constexpr std::uint32_t kTSJpegFamily = 1u << 11;
+constexpr std::uint32_t kTSHTJ2K = 1u << 5;
+constexpr std::uint32_t kTSMpeg2 = 1u << 6;
+constexpr std::uint32_t kTSH264 = 1u << 7;
+constexpr std::uint32_t kTSHevc = 1u << 8;
+constexpr std::uint32_t kTSJpegXL = 1u << 9;
+constexpr std::uint32_t kTSRle = 1u << 10;
+constexpr std::uint32_t kTSFfd9 = 1u << 11;      // Codestream ends with FFD9 marker
+constexpr std::uint32_t kTSJpegFamily = 1u << 12;
 
 inline constexpr std::uint32_t ts_mask(std::uint16_t idx) {
 	switch (idx) {
@@ -768,13 +770,16 @@ inline constexpr std::uint32_t ts_mask(std::uint16_t idx) {
 	case "JPEGXL"_uid.raw_index():
 		return kTSJpegXL | kTSJpegFamily | kTSFfd9;
 
-		// HTJ2K / JPIP HTJ2K Referenced
+		// HTJ2K codestream transfer syntaxes
 	case "HTJ2KLossless"_uid.raw_index():
 	case "HTJ2KLosslessRPCL"_uid.raw_index():
 	case "HTJ2K"_uid.raw_index():
+		return kTSJpeg2000 | kTSHTJ2K | kTSJpegFamily | kTSFfd9;
+
+		// JPIP HTJ2K referenced transfer syntaxes
 	case "JPIPHTJ2KReferenced"_uid.raw_index():
 	case "JPIPHTJ2KReferencedDeflate"_uid.raw_index():
-		return kTSJpeg2000 | kTSJpegFamily;
+		return kTSJpeg2000 | kTSHTJ2K | kTSJpegFamily;
 
 		// RLE
 	case "RLELossless"_uid.raw_index():
@@ -805,6 +810,10 @@ inline constexpr bool WellKnown::is_jpeg_family() const noexcept {
 
 inline constexpr bool WellKnown::is_jpeg2000() const noexcept {
 	return detail::ts_mask(raw_index()) & detail::kTSJpeg2000;
+}
+
+inline constexpr bool WellKnown::is_htj2k() const noexcept {
+	return detail::ts_mask(raw_index()) & detail::kTSHTJ2K;
 }
 
 inline constexpr bool WellKnown::is_jpegxl() const noexcept {
@@ -867,6 +876,12 @@ enum class dtype : std::uint8_t {
 	f64,
 };
 
+enum class htj2k_decoder : std::uint8_t {
+	auto_select = 0,
+	openjph,
+	openjpeg,
+};
+
 struct decode_opts {
 	planar planar_out{planar::interleaved};
 	std::uint16_t alignment{1};  // 0/1: packed, power-of-two aligned (<= 4096)
@@ -877,6 +892,11 @@ struct decode_opts {
 	//  -1: auto(all CPUs) [default], 0: library default, >0: explicit thread count.
 	// Backends may ignore this option when unsupported.
 	int decoder_threads{-1};
+	// HTJ2K decoder backend selection:
+	//  auto_select: prefer OpenJPH when available, then fallback to OpenJPEG.
+	//  openjph: use OpenJPH only.
+	//  openjpeg: use OpenJPEG only.
+	htj2k_decoder htj2k_decoder_backend{htj2k_decoder::auto_select};
 };
 
 struct strides {

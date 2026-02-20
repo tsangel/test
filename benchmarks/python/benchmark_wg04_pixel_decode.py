@@ -17,13 +17,27 @@ from typing import Any
 _DEFAULT_WG04_IMAGES_ROOT = Path("/Users/tsangel/workspace.dev/sample/nema/WG04/IMAGES")
 _WG04_IMAGES_ENV = "DICOMSDL_WG04_IMAGES_BASE"
 
-_CODEC_ORDER: tuple[str, ...] = ("REF", "RLE", "J2KR", "J2KI", "JLSL", "JLSN", "JPLL", "JPLY")
+_HTJ2K_CODECS: tuple[str, ...] = ("htj2kll", "htj2kly")
+_CODEC_ORDER: tuple[str, ...] = (
+    "REF",
+    "RLE",
+    "J2KR",
+    "J2KI",
+    "htj2kll",
+    "htj2kly",
+    "JLSL",
+    "JLSN",
+    "JPLL",
+    "JPLY",
+)
 
 _CODEC_LABEL: dict[str, str] = {
     "REF": "Raw/Reference",
     "RLE": "RLE Lossless",
     "J2KR": "JPEG2000 Lossless",
     "J2KI": "JPEG2000 Lossy",
+    "htj2kll": "HTJ2K Lossless",
+    "htj2kly": "HTJ2K Lossy",
     "JLSL": "JPEG-LS Lossless",
     "JLSN": "JPEG-LS Near-lossless",
     "JPLL": "JPEG Lossless",
@@ -42,6 +56,11 @@ _RAW_BEST_CODEC = "REF"
 _RAW_BEST_DICOMSDL_MODE = "to_array_view_copyto"
 _RAW_BEST_PYDICOM_MODE = "reuse_output"
 _J2K_CODECS: tuple[str, ...] = ("J2KR", "J2KI")
+
+
+def _is_htj2k_codec(codec: str) -> bool:
+    normalized = codec.removesuffix("_MT")
+    return normalized.lower().startswith("htj2k")
 
 
 @dataclass
@@ -173,7 +192,13 @@ def _decode_pydicom_pixel_array(ds: Any) -> Any:
     return ds.pixel_array
 
 
-def _prepare_reuse_outputs(inputs: list[tuple[Path, Any]], backend: str, *, scaled: bool) -> list[Any] | None:
+def _prepare_reuse_outputs(
+    inputs: list[tuple[Path, Any]],
+    backend: str,
+    *,
+    scaled: bool,
+    dicomsdl_htj2k_decoder: str,
+) -> list[Any] | None:
     if backend != "dicomsdl":
         return None
     try:
@@ -183,7 +208,7 @@ def _prepare_reuse_outputs(inputs: list[tuple[Path, Any]], backend: str, *, scal
 
     outputs: list[Any] = []
     for _, ds in inputs:
-        probe = ds.to_array(frame=-1, scaled=scaled)
+        probe = ds.to_array(frame=-1, scaled=scaled, htj2k_decoder=dicomsdl_htj2k_decoder)
         outputs.append(np.empty_like(probe))
     return outputs
 
@@ -225,7 +250,7 @@ def _prepare_pydicom_reuse_context(inputs: list[tuple[Path, Any]]) -> PydicomReu
 
 
 def _prepare_dicomsdl_view_copyto_context(
-    inputs: list[tuple[Path, Any]], *, scaled: bool
+    inputs: list[tuple[Path, Any]], *, scaled: bool, dicomsdl_htj2k_decoder: str
 ) -> DicomsdlViewCopytoContext:
     try:
         import numpy as np
@@ -241,7 +266,7 @@ def _prepare_dicomsdl_view_copyto_context(
             outputs.append(np.empty_like(view))
             use_view.append(True)
         except Exception:
-            probe = ds.to_array(frame=-1, scaled=scaled)
+            probe = ds.to_array(frame=-1, scaled=scaled, htj2k_decoder=dicomsdl_htj2k_decoder)
             outputs.append(np.empty_like(probe))
             use_view.append(False)
 
@@ -257,6 +282,7 @@ def _benchmark_codec(
     repeat: int,
     scaled: bool,
     dicomsdl_mode: str,
+    dicomsdl_htj2k_decoder: str,
     pydicom_mode: str,
     verbose: bool,
     decoder_threads: int = -1,
@@ -265,9 +291,16 @@ def _benchmark_codec(
     dicomsdl_view_copyto: DicomsdlViewCopytoContext | None = None
     pydicom_reuse: PydicomReuseContext | None = None
     if backend == "dicomsdl" and dicomsdl_mode == "decode_into":
-        reusable_outputs = _prepare_reuse_outputs(inputs, backend, scaled=scaled)
+        reusable_outputs = _prepare_reuse_outputs(
+            inputs,
+            backend,
+            scaled=scaled,
+            dicomsdl_htj2k_decoder=dicomsdl_htj2k_decoder,
+        )
     if backend == "dicomsdl" and dicomsdl_mode == "to_array_view_copyto":
-        dicomsdl_view_copyto = _prepare_dicomsdl_view_copyto_context(inputs, scaled=scaled)
+        dicomsdl_view_copyto = _prepare_dicomsdl_view_copyto_context(
+            inputs, scaled=scaled, dicomsdl_htj2k_decoder=dicomsdl_htj2k_decoder
+        )
         fallback_count = sum(1 for enabled in dicomsdl_view_copyto.use_view if not enabled)
         if fallback_count > 0:
             print(
@@ -288,7 +321,11 @@ def _benchmark_codec(
             if backend == "dicomsdl":
                 if dicomsdl_mode == "decode_into" and reusable_outputs is not None:
                     _ = ds.decode_into(
-                        reusable_outputs[index], frame=-1, scaled=scaled, threads=decoder_threads
+                        reusable_outputs[index],
+                        frame=-1,
+                        scaled=scaled,
+                        threads=decoder_threads,
+                        htj2k_decoder=dicomsdl_htj2k_decoder,
                     )
                 elif dicomsdl_mode == "to_array_view_copyto" and dicomsdl_view_copyto is not None:
                     if dicomsdl_view_copyto.use_view[index]:
@@ -301,11 +338,14 @@ def _benchmark_codec(
                             frame=-1,
                             scaled=scaled,
                             threads=decoder_threads,
+                            htj2k_decoder=dicomsdl_htj2k_decoder,
                         )
                 elif dicomsdl_mode == "to_array_view":
                     _ = ds.to_array_view(frame=-1)
                 else:
-                    _ = ds.to_array(frame=-1, scaled=scaled)
+                    _ = ds.to_array(
+                        frame=-1, scaled=scaled, htj2k_decoder=dicomsdl_htj2k_decoder
+                    )
             elif pydicom_reuse is not None:
                 if pydicom_reuse.use_numpy_handler[index]:
                     flat = pydicom_reuse.get_pixeldata(ds, read_only=True)
@@ -328,7 +368,11 @@ def _benchmark_codec(
             if backend == "dicomsdl":
                 if dicomsdl_mode == "decode_into" and reusable_outputs is not None:
                     arr = ds.decode_into(
-                        reusable_outputs[index], frame=-1, scaled=scaled, threads=decoder_threads
+                        reusable_outputs[index],
+                        frame=-1,
+                        scaled=scaled,
+                        threads=decoder_threads,
+                        htj2k_decoder=dicomsdl_htj2k_decoder,
                     )
                 elif dicomsdl_mode == "to_array_view_copyto" and dicomsdl_view_copyto is not None:
                     if dicomsdl_view_copyto.use_view[index]:
@@ -341,12 +385,15 @@ def _benchmark_codec(
                             frame=-1,
                             scaled=scaled,
                             threads=decoder_threads,
+                            htj2k_decoder=dicomsdl_htj2k_decoder,
                         )
                     arr = dicomsdl_view_copyto.outputs[index]
                 elif dicomsdl_mode == "to_array_view":
                     arr = ds.to_array_view(frame=-1)
                 else:
-                    arr = ds.to_array(frame=-1, scaled=scaled)
+                    arr = ds.to_array(
+                        frame=-1, scaled=scaled, htj2k_decoder=dicomsdl_htj2k_decoder
+                    )
             elif pydicom_reuse is not None:
                 if pydicom_reuse.use_numpy_handler[index]:
                     flat = pydicom_reuse.get_pixeldata(ds, read_only=True)
@@ -409,9 +456,23 @@ def _print_backend_report(
     print(f"\n== {backend} ==")
     print(f"WG04 root: {root}")
     print(f"scaled output: {scaled}")
-    print(f"decode mode: {mode}")
+    mode_set = sorted({row.mode for row in stats})
+    if len(mode_set) <= 1:
+        mode_display = mode
+    else:
+        mode_display = "mixed(" + ", ".join(mode_set) + ")"
+    print(f"decode mode: {mode_display}")
     if backend == "dicomsdl" and mode in ("decode_into", "to_array_view_copyto"):
         print("decode_into threads hint: -1 (all CPUs)")
+    if backend == "dicomsdl" and mode == "to_array":
+        j2k_forced = sorted(
+            row.codec for row in stats if row.codec in _J2K_CODECS and row.mode == "decode_into"
+        )
+        if j2k_forced:
+            print(
+                "note: base table forces J2K codecs to decode_into(..., threads=-1): "
+                + ", ".join(j2k_forced)
+            )
     print(
         f"{'Codec':<5} {'Files':>5} {'Decodes':>8} {'Time(s)':>9} "
         f"{'ms/decode':>10} {'MPix/s':>10} {'MiB/s':>10} Label"
@@ -423,19 +484,27 @@ def _print_backend_report(
             f"{row.ms_per_decode:>10.3f} {row.mpix_s:>10.3f} {row.mib_s:>10.3f} {row.label}"
         )
 
-    total_decodes = sum(row.decodes for row in stats)
-    total_pixels = sum(row.total_pixels for row in stats)
-    total_bytes = sum(row.total_bytes for row in stats)
-    total_elapsed = sum(row.elapsed_s for row in stats)
+    total_rows = [row for row in stats if not _is_htj2k_codec(row.codec)]
+    excluded_htj2k = len(stats) - len(total_rows)
+    if not total_rows:
+        total_rows = stats
+        excluded_htj2k = 0
+
+    total_decodes = sum(row.decodes for row in total_rows)
+    total_pixels = sum(row.total_pixels for row in total_rows)
+    total_bytes = sum(row.total_bytes for row in total_rows)
+    total_elapsed = sum(row.elapsed_s for row in total_rows)
     total_mpix = (total_pixels / 1_000_000.0 / total_elapsed) if total_elapsed > 0.0 else 0.0
     total_mib = (total_bytes / (1024.0 * 1024.0) / total_elapsed) if total_elapsed > 0.0 else 0.0
     total_ms = (total_elapsed * 1000.0 / total_decodes) if total_decodes else 0.0
 
     print("-" * 88)
     print(
-        f"{'TOTAL':<5} {sum(row.files for row in stats):>5d} {total_decodes:>8d} {total_elapsed:>9.3f} "
+        f"{'TOTAL':<5} {sum(row.files for row in total_rows):>5d} {total_decodes:>8d} {total_elapsed:>9.3f} "
         f"{total_ms:>10.3f} {total_mpix:>10.3f} {total_mib:>10.3f}"
     )
+    if excluded_htj2k > 0:
+        print(f"note: TOTAL excludes {excluded_htj2k} HTJ2K codec row(s).")
 
 
 def _build_comparison_rows(
@@ -445,17 +514,17 @@ def _build_comparison_rows(
     *,
     compression_ratio_by_codec: dict[str, float] | None = None,
     compression_pairs_by_codec: dict[str, int] | None = None,
-) -> list[dict[str, float | int | str]]:
+) -> list[dict[str, float | int | str | None]]:
     dicomsdl_map = {row.codec: row for row in dicomsdl_stats}
     pydicom_map = {row.codec: row for row in pydicom_stats}
 
-    rows: list[dict[str, float | int | str]] = []
+    rows: list[dict[str, float | int | str | None]] = []
     for codec in codecs:
         d = dicomsdl_map.get(codec)
         p = pydicom_map.get(codec)
-        if d is None or p is None:
+        if d is None:
             continue
-        speedup = (p.ms_per_decode / d.ms_per_decode) if d.ms_per_decode > 0.0 else 0.0
+
         compression_ratio = (
             float(compression_ratio_by_codec.get(codec, 0.0))
             if compression_ratio_by_codec is not None
@@ -466,26 +535,37 @@ def _build_comparison_rows(
             if compression_pairs_by_codec is not None
             else 0
         )
-        rows.append(
-            {
-                "codec": codec,
-                "files": d.files,
-                "decodes": d.decodes,
-                "dicomsdl_ms_per_decode": d.ms_per_decode,
-                "pydicom_ms_per_decode": p.ms_per_decode,
-                "dicomsdl_mpix_s": d.mpix_s,
-                "pydicom_mpix_s": p.mpix_s,
-                "dicomsdl_elapsed_s": d.elapsed_s,
-                "pydicom_elapsed_s": p.elapsed_s,
-                "dicomsdl_total_pixels": d.total_pixels,
-                "pydicom_total_pixels": p.total_pixels,
-                "dicomsdl_total_bytes": d.total_bytes,
-                "pydicom_total_bytes": p.total_bytes,
-                "speedup_dicomsdl_vs_pydicom": speedup,
-                "avg_compression_ratio_vs_ref": compression_ratio,
-                "compression_pairs": compression_pairs,
-            }
-        )
+
+        row: dict[str, float | int | str | None] = {
+            "codec": codec,
+            "files": d.files,
+            "decodes": d.decodes,
+            "dicomsdl_ms_per_decode": d.ms_per_decode,
+            "dicomsdl_mpix_s": d.mpix_s,
+            "dicomsdl_elapsed_s": d.elapsed_s,
+            "dicomsdl_total_pixels": d.total_pixels,
+            "dicomsdl_total_bytes": d.total_bytes,
+            "avg_compression_ratio_vs_ref": compression_ratio,
+            "compression_pairs": compression_pairs,
+        }
+
+        if p is None:
+            row["pydicom_ms_per_decode"] = None
+            row["pydicom_mpix_s"] = None
+            row["pydicom_elapsed_s"] = None
+            row["pydicom_total_pixels"] = None
+            row["pydicom_total_bytes"] = None
+            row["speedup_dicomsdl_vs_pydicom"] = None
+        else:
+            speedup = (p.ms_per_decode / d.ms_per_decode) if d.ms_per_decode > 0.0 else 0.0
+            row["pydicom_ms_per_decode"] = p.ms_per_decode
+            row["pydicom_mpix_s"] = p.mpix_s
+            row["pydicom_elapsed_s"] = p.elapsed_s
+            row["pydicom_total_pixels"] = p.total_pixels
+            row["pydicom_total_bytes"] = p.total_bytes
+            row["speedup_dicomsdl_vs_pydicom"] = speedup
+
+        rows.append(row)
     return rows
 
 
@@ -522,7 +602,13 @@ def _build_single_comparison_row(
     }
 
 
-def _print_comparison_table(rows: list[dict[str, float | int | str]]) -> None:
+def _format_optional_float(value: float | int | None, *, width: int, precision: int) -> str:
+    if value is None:
+        return f"{'n/a':>{width}}"
+    return f"{float(value):>{width}.{precision}f}"
+
+
+def _print_comparison_table(rows: list[dict[str, float | int | str | None]]) -> None:
     print("\n== Comparison (dicomsdl vs pydicom) ==")
     print(
         f"{'Codec':<5} {'Files':>5} {'Decodes':>8} {'dicomsdl ms':>12} {'pydicom ms':>11} "
@@ -535,21 +621,43 @@ def _print_comparison_table(rows: list[dict[str, float | int | str]]) -> None:
             compression_ratio_text = f"{float(row.get('avg_compression_ratio_vs_ref', 0.0)):>10.2f}"
         else:
             compression_ratio_text = f"{'n/a':>10}"
+        dicomsdl_ms_text = _format_optional_float(
+            row.get("dicomsdl_ms_per_decode"), width=12, precision=3
+        )
+        pydicom_ms_text = _format_optional_float(
+            row.get("pydicom_ms_per_decode"), width=11, precision=3
+        )
+        dicomsdl_mpix_text = _format_optional_float(row.get("dicomsdl_mpix_s"), width=16, precision=3)
+        pydicom_mpix_text = _format_optional_float(row.get("pydicom_mpix_s"), width=15, precision=3)
+        speedup_text = _format_optional_float(
+            row.get("speedup_dicomsdl_vs_pydicom"), width=10, precision=2
+        )
         print(
             f"{str(row['codec']):<5} {int(row['files']):>5d} {int(row['decodes']):>8d} "
-            f"{float(row['dicomsdl_ms_per_decode']):>12.3f} {float(row['pydicom_ms_per_decode']):>11.3f} "
-            f"{float(row['dicomsdl_mpix_s']):>16.3f} {float(row['pydicom_mpix_s']):>15.3f} "
-            f"{float(row['speedup_dicomsdl_vs_pydicom']):>10.2f} {compression_ratio_text}"
+            f"{dicomsdl_ms_text} {pydicom_ms_text} "
+            f"{dicomsdl_mpix_text} {pydicom_mpix_text} "
+            f"{speedup_text} {compression_ratio_text}"
         )
 
     base_rows = [row for row in rows if not str(row.get("codec", "")).endswith("*")]
+    comparable_rows = [
+        row
+        for row in base_rows
+        if row.get("pydicom_elapsed_s") is not None and not _is_htj2k_codec(str(row.get("codec", "")))
+    ]
+    excluded_htj2k = sum(1 for row in base_rows if _is_htj2k_codec(str(row.get("codec", ""))))
+    excluded_missing = sum(
+        1
+        for row in base_rows
+        if row.get("pydicom_elapsed_s") is None and not _is_htj2k_codec(str(row.get("codec", "")))
+    )
 
-    if base_rows:
-        total_decodes = sum(int(row["decodes"]) for row in base_rows)
-        total_dicomsdl_elapsed = sum(float(row["dicomsdl_elapsed_s"]) for row in base_rows)
-        total_pydicom_elapsed = sum(float(row["pydicom_elapsed_s"]) for row in base_rows)
-        total_dicomsdl_pixels = sum(int(row["dicomsdl_total_pixels"]) for row in base_rows)
-        total_pydicom_pixels = sum(int(row["pydicom_total_pixels"]) for row in base_rows)
+    if comparable_rows:
+        total_decodes = sum(int(row["decodes"]) for row in comparable_rows)
+        total_dicomsdl_elapsed = sum(float(row["dicomsdl_elapsed_s"]) for row in comparable_rows)
+        total_pydicom_elapsed = sum(float(row["pydicom_elapsed_s"]) for row in comparable_rows)
+        total_dicomsdl_pixels = sum(int(row["dicomsdl_total_pixels"]) for row in comparable_rows)
+        total_pydicom_pixels = sum(int(row["pydicom_total_pixels"]) for row in comparable_rows)
 
         total_dicomsdl_ms = (
             total_dicomsdl_elapsed * 1000.0 / total_decodes if total_decodes > 0 else 0.0
@@ -568,12 +676,12 @@ def _print_comparison_table(rows: list[dict[str, float | int | str]]) -> None:
             else 0.0
         )
         total_speedup = (total_pydicom_ms / total_dicomsdl_ms) if total_dicomsdl_ms > 0.0 else 0.0
-        total_compression_pairs = sum(int(row.get("compression_pairs", 0)) for row in base_rows)
+        total_compression_pairs = sum(int(row.get("compression_pairs", 0)) for row in comparable_rows)
         if total_compression_pairs > 0:
             total_compression_ratio = sum(
                 float(row.get("avg_compression_ratio_vs_ref", 0.0)) *
                 int(row.get("compression_pairs", 0))
-                for row in base_rows
+                for row in comparable_rows
             ) / total_compression_pairs
             total_compression_text = f"{total_compression_ratio:>10.2f}"
         else:
@@ -581,11 +689,19 @@ def _print_comparison_table(rows: list[dict[str, float | int | str]]) -> None:
 
         print("-" * 112)
         print(
-            f"{'TOTAL':<5} {sum(int(row['files']) for row in base_rows):>5d} {total_decodes:>8d} "
+            f"{'TOTAL':<5} {sum(int(row['files']) for row in comparable_rows):>5d} {total_decodes:>8d} "
             f"{total_dicomsdl_ms:>12.3f} {total_pydicom_ms:>11.3f} "
             f"{total_dicomsdl_mpix:>16.3f} {total_pydicom_mpix:>15.3f} "
             f"{total_speedup:>10.2f} {total_compression_text}"
         )
+    if base_rows and len(comparable_rows) != len(base_rows):
+        notes: list[str] = []
+        if excluded_htj2k > 0:
+            notes.append(f"{excluded_htj2k} HTJ2K codec(s)")
+        if excluded_missing > 0:
+            notes.append(f"{excluded_missing} codec(s) without pydicom decode results")
+        if notes:
+            print("note: TOTAL excludes " + "; ".join(notes) + ".")
 
     if any(str(row.get("codec", "")).endswith("*") for row in rows):
         print(
@@ -697,6 +813,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="dicomsdl decode mode.",
     )
     parser.add_argument(
+        "--dicomsdl-htj2k-decoder",
+        choices=("auto", "openjph", "openjpeg"),
+        default="auto",
+        help="HTJ2K backend selection for dicomsdl decode paths.",
+    )
+    parser.add_argument(
         "--pydicom-mode",
         choices=_PYDICOM_MODE_ORDER,
         default="pixel_array",
@@ -756,6 +878,7 @@ def main(argv: list[str]) -> int:
 
     selected_backends = list(_BACKEND_ORDER) if args.backend == "both" else [args.backend]
     dicomsdl_mode = "decode_into" if args.reuse_output else args.dicomsdl_mode
+    dicomsdl_htj2k_decoder = args.dicomsdl_htj2k_decoder
     pydicom_mode = "reuse_output" if args.reuse_output_pydicom else args.pydicom_mode
 
     if args.scaled and "pydicom" in selected_backends:
@@ -781,6 +904,7 @@ def main(argv: list[str]) -> int:
 
     codecs = args.codecs if args.codecs else list(_CODEC_ORDER)
     stats_by_backend: dict[str, list[CodecStats]] = {}
+    skipped_codecs_by_backend: dict[str, dict[str, str]] = {}
     modules_by_backend: dict[str, Any] = {}
 
     for backend in selected_backends:
@@ -792,24 +916,44 @@ def main(argv: list[str]) -> int:
         modules_by_backend[backend] = module
 
         backend_stats: list[CodecStats] = []
+        skipped_for_backend: dict[str, str] = {}
         for codec in codecs:
-            paths = _codec_paths(root, codec)
-            inputs = _preload_inputs(paths, backend, module)
-            row = _benchmark_codec(
-                backend,
-                codec,
-                inputs,
-                warmup=args.warmup,
-                repeat=args.repeat,
-                scaled=args.scaled,
-                dicomsdl_mode=dicomsdl_mode,
-                pydicom_mode=pydicom_mode,
-                verbose=args.verbose,
-                decoder_threads=-1,
-            )
-            backend_stats.append(row)
+            try:
+                codec_dicomsdl_mode = dicomsdl_mode
+                if backend == "dicomsdl" and codec in _J2K_CODECS and dicomsdl_mode == "to_array":
+                    codec_dicomsdl_mode = "decode_into"
+
+                paths = _codec_paths(root, codec)
+                inputs = _preload_inputs(paths, backend, module)
+                row = _benchmark_codec(
+                    backend,
+                    codec,
+                    inputs,
+                    warmup=args.warmup,
+                    repeat=args.repeat,
+                    scaled=args.scaled,
+                    dicomsdl_mode=codec_dicomsdl_mode,
+                    dicomsdl_htj2k_decoder=dicomsdl_htj2k_decoder,
+                    pydicom_mode=pydicom_mode,
+                    verbose=args.verbose,
+                    decoder_threads=-1,
+                )
+                backend_stats.append(row)
+            except Exception as exc:
+                if backend == "pydicom" and codec in _HTJ2K_CODECS:
+                    reason = str(exc).strip() or exc.__class__.__name__
+                    skipped_for_backend[codec] = reason
+                    print(
+                        f"note: skipping pydicom codec {codec} (HTJ2K unsupported): {reason}",
+                        file=sys.stderr,
+                    )
+                    continue
+                print(f"failed to benchmark {backend} codec {codec}: {exc}", file=sys.stderr)
+                return 1
 
         stats_by_backend[backend] = backend_stats
+        if skipped_for_backend:
+            skipped_codecs_by_backend[backend] = skipped_for_backend
         _print_backend_report(
             root,
             backend,
@@ -818,7 +962,7 @@ def main(argv: list[str]) -> int:
             mode=(dicomsdl_mode if backend == "dicomsdl" else pydicom_mode),
         )
 
-    comparison_rows: list[dict[str, float | int | str]] = []
+    comparison_rows: list[dict[str, float | int | str | None]] = []
     raw_best_stats_by_backend: dict[str, CodecStats] = {}
     compression_ratio_by_codec: dict[str, float] = {}
     compression_pairs_by_codec: dict[str, int] = {}
@@ -847,6 +991,7 @@ def main(argv: list[str]) -> int:
                 repeat=args.repeat,
                 scaled=args.scaled,
                 dicomsdl_mode=_RAW_BEST_DICOMSDL_MODE,
+                dicomsdl_htj2k_decoder=dicomsdl_htj2k_decoder,
                 pydicom_mode=pydicom_mode,
                 verbose=args.verbose,
                 decoder_threads=-1,
@@ -861,6 +1006,7 @@ def main(argv: list[str]) -> int:
                 repeat=args.repeat,
                 scaled=args.scaled,
                 dicomsdl_mode=dicomsdl_mode,
+                dicomsdl_htj2k_decoder=dicomsdl_htj2k_decoder,
                 pydicom_mode=_RAW_BEST_PYDICOM_MODE,
                 verbose=args.verbose,
                 decoder_threads=-1,
@@ -894,6 +1040,7 @@ def main(argv: list[str]) -> int:
                 repeat=args.repeat,
                 scaled=args.scaled,
                 dicomsdl_mode="decode_into",
+                dicomsdl_htj2k_decoder=dicomsdl_htj2k_decoder,
                 pydicom_mode=pydicom_mode,
                 verbose=args.verbose,
                 decoder_threads=args.j2k_multicpu_threads,
@@ -926,6 +1073,7 @@ def main(argv: list[str]) -> int:
             "reuse_output": bool(args.reuse_output),
             "reuse_output_pydicom": bool(args.reuse_output_pydicom),
             "dicomsdl_mode": dicomsdl_mode,
+            "dicomsdl_htj2k_decoder": dicomsdl_htj2k_decoder,
             "pydicom_mode": pydicom_mode,
             "dicomsdl_decode_into_threads_default": -1,
             "codecs": codecs,
@@ -937,6 +1085,7 @@ def main(argv: list[str]) -> int:
                 backend: asdict(row) for backend, row in raw_best_stats_by_backend.items()
             },
             "comparison": comparison_rows,
+            "skipped_codecs_by_backend": skipped_codecs_by_backend,
             "j2k_multicpu": {
                 "enabled": bool(args.include_j2k_multicpu),
                 "threads": int(args.j2k_multicpu_threads),

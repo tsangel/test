@@ -77,6 +77,7 @@ add_library(dicomsdl STATIC
 	src/pixel_decoder_raw.cpp
 	src/pixel_decoder_rle.cpp
 	src/pixel_decoder_jpeg2k.cpp
+	src/pixel_decoder_htj2k.cpp
 	src/pixel_decoder_jpegls.cpp
 	src/pixel_decoder_jpeg.cpp
 )
@@ -111,6 +112,15 @@ if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/libdeflate/CMakeLists.txt")
 	message(FATAL_ERROR
 		"libdeflate not found at ${CMAKE_CURRENT_SOURCE_DIR}/extern/libdeflate. "
 		"Initialize submodules (git submodule update --init --recursive).")
+endif()
+
+option(DICOMSDL_ENABLE_OPENJPH "Enable OpenJPH backend for HTJ2K decoding" ON)
+if(DICOMSDL_ENABLE_OPENJPH)
+	if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/openjph/CMakeLists.txt")
+		message(FATAL_ERROR
+			"openjph not found at ${CMAKE_CURRENT_SOURCE_DIR}/extern/openjph. "
+			"Initialize submodules (git submodule update --init --recursive).")
+	endif()
 endif()
 
 # Keep CharLS pinned while upstream regression remains unresolved.
@@ -200,6 +210,31 @@ set(LIBDEFLATE_COMPRESSION_SUPPORT OFF CACHE BOOL "Disable libdeflate compressio
 set(LIBDEFLATE_DECOMPRESSION_SUPPORT ON CACHE BOOL "Enable libdeflate decompression codepaths" FORCE)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/libdeflate EXCLUDE_FROM_ALL)
 
+if(DICOMSDL_ENABLE_OPENJPH)
+	if(DEFINED BUILD_SHARED_LIBS)
+		set(_dicomsdl_openjph_build_shared_libs_defined TRUE)
+		set(_dicomsdl_openjph_build_shared_libs "${BUILD_SHARED_LIBS}")
+	else()
+		set(_dicomsdl_openjph_build_shared_libs_defined FALSE)
+	endif()
+
+	set(BUILD_SHARED_LIBS OFF)
+	set(OJPH_ENABLE_TIFF_SUPPORT OFF CACHE BOOL "Disable OpenJPH TIFF support" FORCE)
+	set(OJPH_BUILD_TESTS OFF CACHE BOOL "Disable OpenJPH tests" FORCE)
+	set(OJPH_BUILD_EXECUTABLES OFF CACHE BOOL "Disable OpenJPH executables" FORCE)
+	set(OJPH_BUILD_STREAM_EXPAND OFF CACHE BOOL "Disable OpenJPH stream expand executable" FORCE)
+	set(OJPH_BUILD_FUZZER OFF CACHE BOOL "Disable OpenJPH fuzzer target" FORCE)
+	add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/openjph EXCLUDE_FROM_ALL)
+
+	if(_dicomsdl_openjph_build_shared_libs_defined)
+		set(BUILD_SHARED_LIBS "${_dicomsdl_openjph_build_shared_libs}")
+	else()
+		unset(BUILD_SHARED_LIBS)
+	endif()
+	unset(_dicomsdl_openjph_build_shared_libs)
+	unset(_dicomsdl_openjph_build_shared_libs_defined)
+endif()
+
 set(_dicomsdl_libturbojpeg_prefix "${CMAKE_CURRENT_BINARY_DIR}/extern/libjpeg-turbo")
 set(_dicomsdl_libturbojpeg_build_dir "${_dicomsdl_libturbojpeg_prefix}/build")
 set(_dicomsdl_libturbojpeg_install_dir "${_dicomsdl_libturbojpeg_prefix}/install")
@@ -276,6 +311,12 @@ if(TARGET openjp2_static)
 	target_link_libraries(dicomsdl PRIVATE openjp2_static)
 else()
 	target_link_libraries(dicomsdl PRIVATE openjp2)
+endif()
+if(DICOMSDL_ENABLE_OPENJPH)
+	target_link_libraries(dicomsdl PRIVATE openjph)
+	target_compile_definitions(dicomsdl PRIVATE DICOMSDL_HAS_OPENJPH=1)
+else()
+	target_compile_definitions(dicomsdl PRIVATE DICOMSDL_HAS_OPENJPH=0)
 endif()
 target_link_libraries(dicomsdl PRIVATE charls)
 target_link_libraries(dicomsdl PRIVATE dicomsdl_turbojpeg)

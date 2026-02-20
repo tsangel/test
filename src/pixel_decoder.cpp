@@ -774,6 +774,10 @@ void decode_into(const DataSet& ds, std::size_t frame_index,
 		detail::decode_rle_into(ds, info, frame_index, dst, dst_strides, effective_opt);
 		return;
 	case detail::decode_backend::jpeg_family:
+		if (info.ts.is_htj2k()) {
+			detail::decode_htj2k_into(ds, info, frame_index, dst, dst_strides, effective_opt);
+			return;
+		}
 		if (info.ts.is_jpeg2000()) {
 			detail::decode_jpeg2k_into(ds, info, frame_index, dst, dst_strides, effective_opt);
 			return;

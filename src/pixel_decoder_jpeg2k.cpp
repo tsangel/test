@@ -716,6 +716,7 @@ void decode_jpeg2k_into(const DataSet& ds, const DataSet::pixel_info_t& info,
 		    "pixel::decode_into file={} frame={} reason=JPEG2000 frame has empty codestream",
 		    ds.path(), frame_index);
 	}
+
 	auto image = decode_openjpeg_image(ds, frame_index, frame_source, opt);
 	validate_decoded_image(ds, frame_index, info, *image, rows, cols, samples_per_pixel);
 

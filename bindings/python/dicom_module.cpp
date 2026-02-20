@@ -1,4 +1,5 @@
 #include <array>
+#include <cctype>
 #include <cstring>
 #include <cstdint>
 #include <limits>
@@ -120,8 +121,35 @@ DecodedArrayOutput make_writable_numpy_array(
 	return DecodedArrayOutput{std::move(array), bytes};
 }
 
+std::string normalize_htj2k_decoder_name(std::string decoder) {
+	std::string normalized{};
+	normalized.reserve(decoder.size());
+	for (const unsigned char ch : decoder) {
+		if (ch == '_' || ch == '-' || ch == ' ' || ch == '\t') {
+			continue;
+		}
+		normalized.push_back(static_cast<char>(std::tolower(ch)));
+	}
+	return normalized;
+}
+
+dicom::pixel::htj2k_decoder parse_htj2k_decoder(std::string decoder) {
+	const auto normalized = normalize_htj2k_decoder_name(std::move(decoder));
+	if (normalized.empty() || normalized == "auto" || normalized == "autoselect") {
+		return dicom::pixel::htj2k_decoder::auto_select;
+	}
+	if (normalized == "openjph" || normalized == "ojph") {
+		return dicom::pixel::htj2k_decoder::openjph;
+	}
+	if (normalized == "openjpeg" || normalized == "openjp2") {
+		return dicom::pixel::htj2k_decoder::openjpeg;
+	}
+	throw nb::value_error("htj2k_decoder must be one of: 'auto', 'openjph', 'openjpeg'");
+}
+
 DecodedArrayLayout build_decode_layout(
-    const DataSet& self, long frame, bool scaled, int decoder_threads = -1) {
+    const DataSet& self, long frame, bool scaled, int decoder_threads = -1,
+    dicom::pixel::htj2k_decoder htj2k_decoder_backend = dicom::pixel::htj2k_decoder::auto_select) {
 	if (frame < -1) {
 		throw nb::value_error("frame must be >= -1");
 	}
@@ -152,6 +180,7 @@ DecodedArrayLayout build_decode_layout(
 	layout.opt.alignment = 1;
 	layout.opt.scaled = scaled;
 	layout.opt.decoder_threads = decoder_threads;
+	layout.opt.htj2k_decoder_backend = htj2k_decoder_backend;
 	const bool effective_scaled = dicom::pixel::should_use_scaled_output(self, layout.opt);
 	layout.opt.scaled = effective_scaled;
 
@@ -316,8 +345,10 @@ nb::object dataset_to_array_view(const DataSet& self, long frame) {
 	    nb::device::cpu::value, 0, 'C'));
 }
 
-nb::object dataset_to_array(const DataSet& self, long frame, bool scaled) {
-	const auto layout = build_decode_layout(self, frame, scaled, -1);
+nb::object dataset_to_array(
+    const DataSet& self, long frame, bool scaled, const std::string& htj2k_decoder) {
+	const auto layout = build_decode_layout(
+	    self, frame, scaled, -1, parse_htj2k_decoder(htj2k_decoder));
 	auto out = make_writable_numpy_array(
 	    layout.ndim, layout.shape, layout.strides, layout.spec.dtype, layout.required_bytes);
 	decode_layout_into(self, layout, out.bytes);
@@ -346,8 +377,9 @@ private:
 };
 
 nb::object dataset_decode_into_array(const DataSet& self, nb::handle out,
-    long frame, bool scaled, int threads) {
-	const auto layout = build_decode_layout(self, frame, scaled, threads);
+    long frame, bool scaled, int threads, const std::string& htj2k_decoder) {
+	const auto layout = build_decode_layout(
+	    self, frame, scaled, threads, parse_htj2k_decoder(htj2k_decoder));
 
 	PyWritableBufferView writable(out);
 	const auto& view = writable.view();
@@ -912,6 +944,7 @@ NB_MODULE(_dicomsdl, m) {
 		    &dataset_to_array,
 		    nb::arg("frame") = -1,
 		    nb::arg("scaled") = false,
+		    nb::arg("htj2k_decoder") = "auto",
 		    "Decode pixel samples and return a NumPy array.\n"
 		    "\n"
 		    "Parameters\n"
@@ -922,6 +955,8 @@ NB_MODULE(_dicomsdl, m) {
 		    "    If True, apply Modality LUT/Rescale when available.\n"
 		    "    Scaled output is ignored when SamplesPerPixel != 1, or when both\n"
 		    "    Modality LUT Sequence and Rescale Slope/Intercept are absent.\n"
+		    "htj2k_decoder : {'auto', 'openjph', 'openjpeg'}, optional\n"
+		    "    HTJ2K backend selection. 'auto' prefers OpenJPH then falls back to OpenJPEG.\n"
 		    "\n"
 		    "Returns\n"
 		    "-------\n"
@@ -943,6 +978,7 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::arg("frame") = 0,
 		    nb::arg("scaled") = false,
 		    nb::arg("threads") = -1,
+		    nb::arg("htj2k_decoder") = "auto",
 		    "Decode pixel samples into an existing writable C-contiguous buffer.\n"
 		    "\n"
 		    "Parameters\n"
@@ -959,6 +995,8 @@ NB_MODULE(_dicomsdl, m) {
 		    "    Default is -1 (use all CPUs).\n"
 		    "    0 uses library default, -1 uses all CPUs, >0 sets explicit thread count.\n"
 		    "    Currently applied to JPEG 2000; unsupported decoders may ignore it.\n"
+		    "htj2k_decoder : {'auto', 'openjph', 'openjpeg'}, optional\n"
+		    "    HTJ2K backend selection. 'auto' prefers OpenJPH then falls back to OpenJPEG.\n"
 		    "\n"
 		    "Returns\n"
 		    "-------\n"
@@ -967,7 +1005,8 @@ NB_MODULE(_dicomsdl, m) {
 		    &dataset_to_array,
 		    nb::arg("frame") = -1,
 		    nb::arg("scaled") = false,
-		    "Alias of to_array(frame=-1, scaled=False).")
+		    nb::arg("htj2k_decoder") = "auto",
+		    "Alias of to_array(frame=-1, scaled=False, htj2k_decoder='auto').")
 		.def("get_dataelement",
 		    [](DataSet& self, const Tag& tag) -> DataElement& {
 		        return *self.get_dataelement(tag);

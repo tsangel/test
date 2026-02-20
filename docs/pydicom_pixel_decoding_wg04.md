@@ -10,6 +10,8 @@ and how to compare it with `dicomsdl` using the same driver script.
   - CLI argument `root` (if provided)
   - `DICOMSDL_WG04_IMAGES_BASE` environment variable
   - default: `/Users/tsangel/workspace.dev/sample/nema/WG04/IMAGES`
+- HTJ2K backend override for dicomsdl:
+  - `--dicomsdl-htj2k-decoder auto|openjph|openjpeg`
 
 Supported codec directories:
 
@@ -17,6 +19,8 @@ Supported codec directories:
 - `RLE`
 - `J2KR`
 - `J2KI`
+- `htj2kll`
+- `htj2kly`
 - `JLSL`
 - `JLSN`
 - `JPLL`
@@ -29,7 +33,7 @@ python benchmarks/python/benchmark_wg04_pixel_decode.py \
   --backend both \
   --warmup 1 \
   --repeat 3 \
-  --json build/wg04_pixel_decode_compare_r3.json
+  --json build/wg04_pixel_decode_compare_r3_htj2k.json
 ```
 
 `pydicom`에서 출력 버퍼 재사용 모드:
@@ -59,6 +63,8 @@ python benchmarks/python/benchmark_wg04_pixel_decode.py \
 - Datasets are preloaded once per backend and codec before timed runs.
 - `dicomsdl` path:
   - default decode call: `ds.to_array(frame=-1, scaled=False)`
+  - for `J2KR`/`J2KI` in the base table, the driver forces
+    `ds.decode_into(out, frame=-1, scaled=False, threads=-1)` to apply multi-CPU decoding
   - with `--reuse-output`: `ds.decode_into(out, frame=-1, scaled=False, threads=-1)`
   - in this benchmark driver, `decode_into` uses `threads=-1` by default
     (JPEG 2000: auto/all CPUs).
@@ -80,19 +86,33 @@ python benchmarks/python/benchmark_wg04_pixel_decode.py \
 
 | Codec | dicomsdl ms/decode | pydicom ms/decode | dcm/pyd x | CR(ref/x) |
 | --- | ---: | ---: | ---: | ---: |
-| REF  | 0.428 | 0.486 | 1.14 | 1.00 |
-| RLE  | 4.925 | 52.145 | 10.59 | 2.25 |
-| J2KR | 42.887 | 72.867 | 1.70 | 3.79 |
-| J2KI | 19.151 | 48.806 | 2.55 | 32.03 |
-| JLSL | 38.056 | 57.333 | 1.51 | 4.13 |
-| JLSN | 32.938 | 54.069 | 1.64 | 9.72 |
-| JPLL | 15.149 | 45.785 | 3.02 | 3.12 |
-| JPLY | 7.109 | 33.830 | 4.76 | 29.17 |
-| TOTAL | 19.680 | 45.487 | 2.31 | 10.03 |
+| REF  | 0.325 | 0.411 | 1.27 | 1.00 |
+| RLE  | 4.783 | 51.387 | 10.74 | 2.25 |
+| J2KR | 39.542 | 70.990 | 1.80 | 3.79 |
+| J2KI | 17.959 | 49.152 | 2.74 | 32.03 |
+| JLSL | 36.235 | 56.174 | 1.55 | 4.13 |
+| JLSN | 32.412 | 53.363 | 1.65 | 9.72 |
+| JPLL | 14.484 | 44.534 | 3.07 | 3.12 |
+| JPLY | 6.972 | 31.860 | 4.57 | 29.17 |
+| TOTAL | 18.625 | 44.654 | 2.40 | 10.03 |
 
 `dcm/pyd x` means `pydicom_ms_per_decode / dicomsdl_ms_per_decode`.
 Values greater than `1.0` indicate `dicomsdl` is faster for that codec.
 `CR(ref/x)` means case-matched average `size(REF_case) / size(codec_case)`.
+`TOTAL` excludes `htj2k*` rows (`htj2kll`, `htj2kly`).
+
+## HTJ2K backend snapshot (separate table, main-table aligned)
+
+Condition:
+- `--backend dicomsdl --dicomsdl-mode to_array --warmup 1 --repeat 3`
+- same decode mode/iteration settings as the main table; only `--dicomsdl-htj2k-decoder` changes
+
+| Variant | dicomsdl ms/decode | CR(ref/x) |
+| --- | ---: | ---: |
+| htj2kll (openjpeg) | 13.039 | 3.39 |
+| htj2kll (openjph)  | 23.961 | 3.39 |
+| htj2kly (openjpeg) | 15.599 | 39.24 |
+| htj2kly (openjph)  | 21.610 | 39.24 |
 
 ## Notes
 
@@ -101,7 +121,13 @@ Values greater than `1.0` indicate `dicomsdl` is faster for that codec.
   `Invalid SOS parameters for sequential JPEG`
   may appear on stderr. In this benchmark run, decoding still completed and
   timing data was collected.
+- In this environment, `pydicom` did not decode HTJ2K transfer syntaxes
+  (`1.2.840.10008.1.2.4.201`, `1.2.840.10008.1.2.4.203`), so those rows are
+  reported in the separate HTJ2K table as `dicomsdl`-only (`pydicom=n/a`).
 - `--scaled` is intentionally restricted to `dicomsdl` mode in this script.
   Cross-backend comparisons should use `scaled=False`.
 - Full numeric output is stored in
-  `build/wg04_pixel_decode_compare_r3.json` from the command above.
+  `build/wg04_pixel_decode_compare_r3_htj2k.json` from the command above.
+- HTJ2K backend-only JSON snapshots:
+  - `build/wg04_htj2k_openjpeg_r3_toarray_postopt.json`
+  - `build/wg04_htj2k_openjph_r3_toarray_postopt.json`

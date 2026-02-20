@@ -16,3 +16,6 @@
 [submodule "extern/libdeflate"]
 	path = extern/libdeflate
 	url = https://github.com/ebiggers/libdeflate.git
+[submodule "extern/openjph"]
+	path = extern/openjph
+	url = https://github.com/aous72/OpenJPH.git
