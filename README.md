@@ -22,6 +22,14 @@ If you explicitly need to test another CharLS revision, configure with:
 cmake -S . -B build -DDICOMSDL_ALLOW_UNPINNED_CHARLS=ON
 ```
 
+## JPEG (libjpeg-turbo)
+
+`extern/libjpeg-turbo` is built as a static dependency and linked into `dicomsdl`.
+
+- JPEG Lossless SV1 (`1.2.840.10008.1.2.4.70`) is supported in the current decoder path.
+- JPEG Extended 12-bit (Process 2/4, `1.2.840.10008.1.2.4.51`) WG04 codestreams are
+  decoded with a compatibility fix for malformed `SOF1 + SOS(Se=0)` headers.
+
 ## C++ Build
 
 ```

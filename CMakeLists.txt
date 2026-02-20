@@ -65,6 +65,7 @@ endif()
 set(DICOM_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 include(CTest)
+include(ExternalProject)
 
 add_library(dicomsdl STATIC
 	src/dataset.cpp
@@ -77,6 +78,7 @@ add_library(dicomsdl STATIC
 	src/pixel_decoder_rle.cpp
 	src/pixel_decoder_jpeg2k.cpp
 	src/pixel_decoder_jpegls.cpp
+	src/pixel_decoder_jpeg_turbo.cpp
 )
 set_target_properties(dicomsdl PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(dicomsdl PROPERTIES
@@ -98,6 +100,11 @@ endif()
 if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/charls/CMakeLists.txt")
 	message(FATAL_ERROR
 		"charls not found at ${CMAKE_CURRENT_SOURCE_DIR}/extern/charls. "
+		"Initialize submodules (git submodule update --init --recursive).")
+endif()
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/libjpeg-turbo/CMakeLists.txt")
+	message(FATAL_ERROR
+		"libjpeg-turbo not found at ${CMAKE_CURRENT_SOURCE_DIR}/extern/libjpeg-turbo. "
 		"Initialize submodules (git submodule update --init --recursive).")
 endif()
 
@@ -179,6 +186,68 @@ endif()
 unset(_dicomsdl_charls_build_shared_libs)
 unset(_dicomsdl_charls_build_shared_libs_defined)
 
+set(_dicomsdl_libturbojpeg_prefix "${CMAKE_CURRENT_BINARY_DIR}/extern/libjpeg-turbo")
+set(_dicomsdl_libturbojpeg_build_dir "${_dicomsdl_libturbojpeg_prefix}/build")
+set(_dicomsdl_libturbojpeg_install_dir "${_dicomsdl_libturbojpeg_prefix}/install")
+set(_dicomsdl_libturbojpeg_cmake_args
+	-DCMAKE_INSTALL_PREFIX=${_dicomsdl_libturbojpeg_install_dir}
+	-DCMAKE_INSTALL_LIBDIR=lib
+	-DCMAKE_INSTALL_INCLUDEDIR=include
+	-DCMAKE_POSITION_INDEPENDENT_CODE=ON
+	-DENABLE_SHARED=OFF
+	-DENABLE_STATIC=ON
+	-DWITH_TURBOJPEG=ON
+	-DWITH_JAVA=OFF
+	-DWITH_TOOLS=OFF
+	-DWITH_TESTS=OFF
+	-DWITH_FUZZ=OFF
+)
+if(NOT CMAKE_CONFIGURATION_TYPES AND CMAKE_BUILD_TYPE)
+	list(APPEND _dicomsdl_libturbojpeg_cmake_args
+		-DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+	)
+endif()
+if(CMAKE_TOOLCHAIN_FILE)
+	list(APPEND _dicomsdl_libturbojpeg_cmake_args
+		-DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
+	)
+endif()
+if(APPLE)
+	if(CMAKE_OSX_ARCHITECTURES)
+		list(APPEND _dicomsdl_libturbojpeg_cmake_args
+			-DCMAKE_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}
+		)
+	endif()
+	if(DEFINED CMAKE_OSX_DEPLOYMENT_TARGET AND NOT CMAKE_OSX_DEPLOYMENT_TARGET STREQUAL "")
+		list(APPEND _dicomsdl_libturbojpeg_cmake_args
+			-DCMAKE_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}
+		)
+	endif()
+endif()
+
+if(MSVC OR CMAKE_C_SIMULATE_ID STREQUAL "MSVC")
+	set(_dicomsdl_libturbojpeg_filename "turbojpeg-static${CMAKE_STATIC_LIBRARY_SUFFIX}")
+else()
+	set(_dicomsdl_libturbojpeg_filename "${CMAKE_STATIC_LIBRARY_PREFIX}turbojpeg${CMAKE_STATIC_LIBRARY_SUFFIX}")
+endif()
+set(_dicomsdl_libturbojpeg_archive
+	"${_dicomsdl_libturbojpeg_install_dir}/lib/${_dicomsdl_libturbojpeg_filename}")
+
+ExternalProject_Add(dicomsdl_libturbojpeg
+	SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/extern/libjpeg-turbo"
+	BINARY_DIR "${_dicomsdl_libturbojpeg_build_dir}"
+	PREFIX "${_dicomsdl_libturbojpeg_prefix}"
+	CMAKE_ARGS ${_dicomsdl_libturbojpeg_cmake_args}
+	BUILD_BYPRODUCTS "${_dicomsdl_libturbojpeg_archive}"
+)
+
+add_library(dicomsdl_turbojpeg STATIC IMPORTED GLOBAL)
+set_target_properties(dicomsdl_turbojpeg PROPERTIES
+	IMPORTED_LOCATION "${_dicomsdl_libturbojpeg_archive}"
+)
+add_dependencies(dicomsdl_turbojpeg dicomsdl_libturbojpeg)
+add_dependencies(dicomsdl dicomsdl_libturbojpeg)
+
 unset(EXECUTABLE_OUTPUT_PATH)
 unset(EXECUTABLE_OUTPUT_PATH CACHE)
 unset(LIBRARY_OUTPUT_PATH)
@@ -187,6 +256,7 @@ unset(LIBRARY_OUTPUT_PATH CACHE)
 target_include_directories(dicomsdl PRIVATE
 	${CMAKE_CURRENT_SOURCE_DIR}/extern/openjpeg/src/lib/openjp2
 	${CMAKE_CURRENT_BINARY_DIR}/extern/openjpeg/src/lib/openjp2
+	${CMAKE_CURRENT_SOURCE_DIR}/extern/libjpeg-turbo/src
 )
 if(TARGET openjp2_static)
 	target_link_libraries(dicomsdl PRIVATE openjp2_static)
@@ -194,6 +264,7 @@ else()
 	target_link_libraries(dicomsdl PRIVATE openjp2)
 endif()
 target_link_libraries(dicomsdl PRIVATE charls)
+target_link_libraries(dicomsdl PRIVATE dicomsdl_turbojpeg)
 option(DICOMSDL_ENABLE_INFO_LOGS "Compile in INFO-level logging (otherwise info logs are compiled out)" OFF)
 if(DICOMSDL_ENABLE_INFO_LOGS)
 	target_compile_definitions(dicomsdl PUBLIC DICOMSDL_ENABLE_INFO_LOGS=1)

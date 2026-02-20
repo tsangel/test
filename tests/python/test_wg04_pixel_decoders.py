@@ -33,6 +33,8 @@ _J2KR_DIR = _WG04_IMAGES_ROOT / "J2KR"
 _J2KI_DIR = _WG04_IMAGES_ROOT / "J2KI"
 _JLSL_DIR = _WG04_IMAGES_ROOT / "JLSL"
 _JLSN_DIR = _WG04_IMAGES_ROOT / "JLSN"
+_JPLL_DIR = _WG04_IMAGES_ROOT / "JPLL"
+_JPLY_DIR = _WG04_IMAGES_ROOT / "JPLY"
 
 
 def _series_key(path: Path) -> str:
@@ -73,14 +75,19 @@ _J2KR_PAIRS = _pairs(_J2KR_DIR)
 _J2KI_PAIRS = _pairs(_J2KI_DIR)
 _JLSL_PAIRS = _pairs(_JLSL_DIR)
 _JLSN_PAIRS = _pairs(_JLSN_DIR)
+_JPLL_PAIRS = _pairs(_JPLL_DIR)
+_JPLY_PAIRS = _pairs(_JPLY_DIR)
 _RLE_IDS = [compressed.name for compressed, _ in _RLE_PAIRS]
 _J2KR_IDS = [compressed.name for compressed, _ in _J2KR_PAIRS]
 _J2KI_IDS = [compressed.name for compressed, _ in _J2KI_PAIRS]
 _JLSL_IDS = [compressed.name for compressed, _ in _JLSL_PAIRS]
 _JLSN_IDS = [compressed.name for compressed, _ in _JLSN_PAIRS]
+_JPLL_IDS = [compressed.name for compressed, _ in _JPLL_PAIRS]
+_JPLY_IDS = [compressed.name for compressed, _ in _JPLY_PAIRS]
 
 _J2KI_MAX_MAE = 55.0
 _JLSN_MAX_ABS_ERROR = 10.0
+_JPLY_MAX_MAE = 60.0
 
 
 def _decode(path: Path):
@@ -168,4 +175,31 @@ def test_wg04_jlsn_matches_ref_with_max_abs_tolerance(jlsn_path: Path, ref_path:
     assert max_abs_error <= _JLSN_MAX_ABS_ERROR, (
         f"{jlsn_path.name}: max abs error too high "
         f"({max_abs_error:.3f} > {_JLSN_MAX_ABS_ERROR:.3f})"
+    )
+
+
+@pytest.mark.parametrize("jpll_path,ref_path", _JPLL_PAIRS, ids=_JPLL_IDS)
+def test_wg04_jpll_matches_ref(jpll_path: Path, ref_path: Path):
+    decoded = _decode(jpll_path)
+    reference = _decode(ref_path)
+    _assert_same_pixels(decoded, reference, jpll_path.name)
+
+
+@pytest.mark.parametrize("jply_path,ref_path", _JPLY_PAIRS, ids=_JPLY_IDS)
+def test_wg04_jply_matches_ref_with_mae_tolerance(jply_path: Path, ref_path: Path):
+    decoded = _decode(jply_path)
+    reference = _decode(ref_path)
+
+    assert decoded.shape == reference.shape, (
+        f"{jply_path.name}: shape mismatch decoded={decoded.shape} reference={reference.shape}"
+    )
+    if decoded.dtype != reference.dtype:
+        # Some WG04 JPLY samples report unsigned metadata while REF uses signed int16.
+        assert decoded.dtype == np.uint16 and reference.dtype == np.int16, (
+            f"{jply_path.name}: dtype mismatch decoded={decoded.dtype} reference={reference.dtype}"
+        )
+
+    mae = _mae(decoded, reference)
+    assert mae <= _JPLY_MAX_MAE, (
+        f"{jply_path.name}: MAE too high ({mae:.3f} > {_JPLY_MAX_MAE:.3f})"
     )
