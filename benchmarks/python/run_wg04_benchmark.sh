@@ -70,7 +70,7 @@ fi
 
 echo
 echo "[1/4] Full WG04 benchmark (dicomsdl + pydicom)"
-run_bench "${MAIN_JSON}" --backend both
+run_bench "${MAIN_JSON}" --backend both --dicomsdl-htj2k-decoder openjpeg
 
 echo
 echo "[2/4] HTJ2K benchmark (openjpeg)"

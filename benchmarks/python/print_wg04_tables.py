@@ -87,6 +87,42 @@ def _print_main_table(main_payload: dict[str, Any]) -> None:
         print(f"| TOTAL | {total_dcm_ms:.3f} | {total_pyd_ms:.3f} | {total_speedup:.2f} | {total_cr:.2f} |")
 
 
+def _print_htj2k_openjpeg_vs_pydicom_table(
+    main_payload: dict[str, Any], openjpeg_payload: dict[str, Any]
+) -> None:
+    dcm_openjpeg = _codec_row_map(openjpeg_payload, "dicomsdl")
+    pyd = _codec_row_map(main_payload, "pydicom")
+    cr_by_codec, pairs_by_codec = _compression_maps(main_payload)
+
+    print("\n| Variant | dicomsdl ms/decode | pydicom ms/decode | dcm/pyd x | CR(ref/x) |")
+    print("| --- | ---: | ---: | ---: | ---: |")
+
+    row_count = 0
+    for codec in _HTJ2K_CODECS:
+        d = dcm_openjpeg.get(codec)
+        p = pyd.get(codec)
+        if d is None and p is None:
+            continue
+
+        d_ms = float(d.get("ms_per_decode", 0.0)) if d is not None else None
+        p_ms = float(p.get("ms_per_decode", 0.0)) if p is not None else None
+        speedup = (p_ms / d_ms) if d_ms is not None and p_ms is not None and d_ms > 0.0 else None
+        pairs = int(pairs_by_codec.get(codec, 0))
+        cr = float(cr_by_codec.get(codec, 0.0)) if pairs > 0 else None
+
+        d_ms_text = f"{d_ms:.3f}" if d_ms is not None else "n/a"
+        p_ms_text = f"{p_ms:.3f}" if p_ms is not None else "n/a"
+        speedup_text = f"{speedup:.2f}" if speedup is not None else "n/a"
+        cr_text = f"{cr:.2f}" if cr is not None else "n/a"
+
+        print(f"| {codec} (openjpeg) | {d_ms_text} | {p_ms_text} | {speedup_text} | {cr_text} |")
+        row_count += 1
+
+    if row_count == 0:
+        print("| htj2kll (openjpeg) | n/a | n/a | n/a | n/a |")
+        print("| htj2kly (openjpeg) | n/a | n/a | n/a | n/a |")
+
+
 def _print_htj2k_table(
     main_payload: dict[str, Any],
     openjpeg_payload: dict[str, Any],
@@ -138,6 +174,7 @@ def main() -> int:
     openjph_payload = _load_json(args.htj2k_openjph_json)
 
     _print_main_table(main_payload)
+    _print_htj2k_openjpeg_vs_pydicom_table(main_payload, openjpeg_payload)
     _print_htj2k_table(main_payload, openjpeg_payload, openjph_payload)
     return 0
 

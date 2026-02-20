@@ -49,9 +49,9 @@ if defined WG04_ROOT echo WG04_ROOT: %WG04_ROOT%
 echo.
 echo [1/4] Full WG04 benchmark ^(dicomsdl + pydicom^)
 if defined WG04_ROOT (
-  "%PYTHON_BIN%" "%BENCH_SCRIPT%" "%ROOT_ARG%" --backend both --warmup %WARMUP% --repeat %REPEAT% --json "%MAIN_JSON%"
+  "%PYTHON_BIN%" "%BENCH_SCRIPT%" "%ROOT_ARG%" --backend both --dicomsdl-htj2k-decoder openjpeg --warmup %WARMUP% --repeat %REPEAT% --json "%MAIN_JSON%"
 ) else (
-  "%PYTHON_BIN%" "%BENCH_SCRIPT%" --backend both --warmup %WARMUP% --repeat %REPEAT% --json "%MAIN_JSON%"
+  "%PYTHON_BIN%" "%BENCH_SCRIPT%" --backend both --dicomsdl-htj2k-decoder openjpeg --warmup %WARMUP% --repeat %REPEAT% --json "%MAIN_JSON%"
 )
 if errorlevel 1 exit /b 1
 

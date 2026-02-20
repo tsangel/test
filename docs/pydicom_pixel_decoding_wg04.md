@@ -31,6 +31,7 @@ Supported codec directories:
 ```bash
 python benchmarks/python/benchmark_wg04_pixel_decode.py \
   --backend both \
+  --dicomsdl-htj2k-decoder openjpeg \
   --warmup 1 \
   --repeat 3 \
   --json build/wg04_pixel_decode_compare_r3_htj2k.json
@@ -82,19 +83,18 @@ python benchmarks/python/benchmark_wg04_pixel_decode.py \
   - `MiB/s`
   - `CR(ref/x)`: case-matched 평균 `REF 파일크기 / codec 파일크기`
 
-## Snapshot result (`--warmup 1 --repeat 3`, dicomsdl default threads `-1`)
+## Snapshot result (`--warmup 1 --repeat 3`, HTJ2K compare target: dicomsdl `openjpeg`)
 
 | Codec | dicomsdl ms/decode | pydicom ms/decode | dcm/pyd x | CR(ref/x) |
 | --- | ---: | ---: | ---: | ---: |
-| REF  | 0.325 | 0.411 | 1.27 | 1.00 |
-| RLE  | 4.783 | 51.387 | 10.74 | 2.25 |
-| J2KR | 39.542 | 70.990 | 1.80 | 3.79 |
-| J2KI | 17.959 | 49.152 | 2.74 | 32.03 |
-| JLSL | 36.235 | 56.174 | 1.55 | 4.13 |
-| JLSN | 32.412 | 53.363 | 1.65 | 9.72 |
-| JPLL | 14.484 | 44.534 | 3.07 | 3.12 |
-| JPLY | 6.972 | 31.860 | 4.57 | 29.17 |
-| TOTAL | 18.625 | 44.654 | 2.40 | 10.03 |
+| REF | 0.467 | 0.648 | 1.39 | 1.00 |
+| RLE | 5.049 | 47.090 | 9.33 | 2.25 |
+| J2KR | 40.780 | 74.590 | 1.83 | 3.79 |
+| J2KI | 17.858 | 48.745 | 2.73 | 32.03 |
+| JLSL | 36.500 | 57.317 | 1.57 | 4.13 |
+| JLSN | 32.795 | 53.521 | 1.63 | 9.72 |
+| JPLL | 14.617 | 45.091 | 3.08 | 3.12 |
+| TOTAL | 19.949 | 45.786 | 2.30 | 8.42 |
 
 `dcm/pyd x` means `pydicom_ms_per_decode / dicomsdl_ms_per_decode`.
 Values greater than `1.0` indicate `dicomsdl` is faster for that codec.
@@ -107,12 +107,21 @@ Condition:
 - `--backend dicomsdl --dicomsdl-mode to_array --warmup 1 --repeat 3`
 - same decode mode/iteration settings as the main table; only `--dicomsdl-htj2k-decoder` changes
 
+HTJ2K cross-backend comparison target in this note:
+- `htj2kll (openjpeg)` vs `pydicom`
+- `htj2kly (openjpeg)` vs `pydicom`
+
+| Variant | dicomsdl ms/decode | pydicom ms/decode | dcm/pyd x | CR(ref/x) |
+| --- | ---: | ---: | ---: | ---: |
+| htj2kll (openjpeg) | 12.839 | 40.286 | 3.14 | 3.39 |
+| htj2kly (openjpeg) | 14.681 | 37.233 | 2.54 | 39.24 |
+
 | Variant | dicomsdl ms/decode | CR(ref/x) |
 | --- | ---: | ---: |
-| htj2kll (openjpeg) | 13.039 | 3.39 |
-| htj2kll (openjph)  | 23.961 | 3.39 |
-| htj2kly (openjpeg) | 15.599 | 39.24 |
-| htj2kly (openjph)  | 21.610 | 39.24 |
+| htj2kll (openjpeg) | 12.839 | 3.39 |
+| htj2kll (openjph) | 22.163 | 3.39 |
+| htj2kly (openjpeg) | 14.681 | 39.24 |
+| htj2kly (openjph) | 19.330 | 39.24 |
 
 ## Notes
 
@@ -121,9 +130,9 @@ Condition:
   `Invalid SOS parameters for sequential JPEG`
   may appear on stderr. In this benchmark run, decoding still completed and
   timing data was collected.
-- In this environment, `pydicom` did not decode HTJ2K transfer syntaxes
-  (`1.2.840.10008.1.2.4.201`, `1.2.840.10008.1.2.4.203`), so those rows are
-  reported in the separate HTJ2K table as `dicomsdl`-only (`pydicom=n/a`).
+- HTJ2K (`1.2.840.10008.1.2.4.201`, `1.2.840.10008.1.2.4.203`) decoding in
+  `pydicom` depends on plugin availability/runtime compatibility. If decode fails
+  in a run, HTJ2K rows are reported as `pydicom=n/a`.
 - `--scaled` is intentionally restricted to `dicomsdl` mode in this script.
   Cross-backend comparisons should use `scaled=False`.
 - Full numeric output is stored in
