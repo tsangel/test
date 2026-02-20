@@ -107,6 +107,11 @@ if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/libjpeg-turbo/CMakeLists.txt")
 		"libjpeg-turbo not found at ${CMAKE_CURRENT_SOURCE_DIR}/extern/libjpeg-turbo. "
 		"Initialize submodules (git submodule update --init --recursive).")
 endif()
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/libdeflate/CMakeLists.txt")
+	message(FATAL_ERROR
+		"libdeflate not found at ${CMAKE_CURRENT_SOURCE_DIR}/extern/libdeflate. "
+		"Initialize submodules (git submodule update --init --recursive).")
+endif()
 
 # Keep CharLS pinned while upstream regression remains unresolved.
 # The known-good submodule revision corresponds to tag 2.2.1.
@@ -185,6 +190,15 @@ else()
 endif()
 unset(_dicomsdl_charls_build_shared_libs)
 unset(_dicomsdl_charls_build_shared_libs_defined)
+
+set(LIBDEFLATE_BUILD_STATIC_LIB ON CACHE BOOL "Build libdeflate static library" FORCE)
+set(LIBDEFLATE_BUILD_SHARED_LIB OFF CACHE BOOL "Disable libdeflate shared library" FORCE)
+set(LIBDEFLATE_BUILD_GZIP OFF CACHE BOOL "Disable libdeflate-gzip executable" FORCE)
+set(LIBDEFLATE_BUILD_TESTS OFF CACHE BOOL "Disable libdeflate tests" FORCE)
+set(LIBDEFLATE_INSTALL OFF CACHE BOOL "Disable libdeflate install targets" FORCE)
+set(LIBDEFLATE_COMPRESSION_SUPPORT OFF CACHE BOOL "Disable libdeflate compression codepaths" FORCE)
+set(LIBDEFLATE_DECOMPRESSION_SUPPORT ON CACHE BOOL "Enable libdeflate decompression codepaths" FORCE)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/libdeflate EXCLUDE_FROM_ALL)
 
 set(_dicomsdl_libturbojpeg_prefix "${CMAKE_CURRENT_BINARY_DIR}/extern/libjpeg-turbo")
 set(_dicomsdl_libturbojpeg_build_dir "${_dicomsdl_libturbojpeg_prefix}/build")
@@ -265,6 +279,14 @@ else()
 endif()
 target_link_libraries(dicomsdl PRIVATE charls)
 target_link_libraries(dicomsdl PRIVATE dicomsdl_turbojpeg)
+if(TARGET libdeflate::libdeflate_static)
+	target_link_libraries(dicomsdl PRIVATE libdeflate::libdeflate_static)
+elseif(TARGET libdeflate_static)
+	target_link_libraries(dicomsdl PRIVATE libdeflate_static)
+else()
+	message(FATAL_ERROR "libdeflate static target was not generated")
+endif()
+target_compile_definitions(dicomsdl PRIVATE DICOMSDL_HAS_LIBDEFLATE=1)
 option(DICOMSDL_ENABLE_INFO_LOGS "Compile in INFO-level logging (otherwise info logs are compiled out)" OFF)
 if(DICOMSDL_ENABLE_INFO_LOGS)
 	target_compile_definitions(dicomsdl PUBLIC DICOMSDL_ENABLE_INFO_LOGS=1)

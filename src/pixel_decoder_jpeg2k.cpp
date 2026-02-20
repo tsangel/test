@@ -250,6 +250,31 @@ std::string decode_failure_message(OPJ_CODEC_FORMAT format, const openjpeg_log_s
 	return fmt::format("{} decode failed ({})", openjpeg_format_name(format), fallback);
 }
 
+OPJ_UINT32 resolve_openjpeg_thread_count(const DataSet& ds, const decode_opts& opt) {
+	int configured_threads = opt.decoder_threads;
+	if (configured_threads < -1) {
+		diag::error_and_throw(
+		    "pixel::decode_into file={} reason=invalid decoder_threads {} (expected -1, 0, or positive)",
+		    ds.path(), configured_threads);
+	}
+	if (configured_threads == 0) {
+		return 0;
+	}
+	if (configured_threads == -1) {
+		configured_threads = opj_get_num_cpus();
+	}
+	if (configured_threads <= 0) {
+		return 0;
+	}
+	if (static_cast<unsigned long long>(configured_threads) >
+	    static_cast<unsigned long long>(std::numeric_limits<OPJ_UINT32>::max())) {
+		diag::error_and_throw(
+		    "pixel::decode_into file={} reason=decoder_threads {} exceeds OpenJPEG limit {}",
+		    ds.path(), configured_threads, std::numeric_limits<OPJ_UINT32>::max());
+	}
+	return static_cast<OPJ_UINT32>(configured_threads);
+}
+
 jpeg2k_frame_source load_jpeg2k_frame_source(const DataSet& ds, std::size_t frame_index) {
 	const auto& pixel_data = ds["PixelData"_tag];
 	if (!pixel_data || !pixel_data.vr().is_pixel_sequence()) {
@@ -292,6 +317,20 @@ jpeg2k_frame_source load_jpeg2k_frame_source(const DataSet& ds, std::size_t fram
 		diag::error_and_throw(
 		    "pixel::decode_into file={} frame={} reason=JPEG2000 frame has no fragments",
 		    ds.path(), frame_index);
+	}
+	for (const auto& fragment : fragments) {
+		if (fragment.length == 0) {
+			diag::error_and_throw(
+			    "pixel::decode_into file={} frame={} reason=JPEG2000 zero-length fragment is not supported",
+			    ds.path(), frame_index);
+		}
+	}
+
+	auto* mutable_sequence = const_cast<PixelSequence*>(pixel_sequence);
+	source.contiguous = mutable_sequence->frame_encoded_span(frame_index);
+	if (!source.contiguous.empty()) {
+		source.total_size = source.contiguous.size();
+		return source;
 	}
 
 	const auto* stream = pixel_sequence->stream();
@@ -345,8 +384,9 @@ opj_stream_ptr create_openjpeg_stream(jpeg2k_frame_source& source) {
 	return stream;
 }
 
-opj_image_ptr decode_openjpeg_image_with_format(
-    jpeg2k_frame_source& source, OPJ_CODEC_FORMAT format, std::string& failure) {
+opj_image_ptr decode_openjpeg_image_with_format(const DataSet& ds,
+    jpeg2k_frame_source& source, OPJ_CODEC_FORMAT format, const decode_opts& opt,
+    std::string& failure) {
 	opj_dparameters_t parameters{};
 	opj_set_default_decoder_parameters(&parameters);
 
@@ -362,6 +402,12 @@ opj_image_ptr decode_openjpeg_image_with_format(
 
 	if (!opj_setup_decoder(codec.get(), &parameters)) {
 		failure = decode_failure_message(format, sink, "setup");
+		return {};
+	}
+	const auto thread_count = resolve_openjpeg_thread_count(ds, opt);
+	if (thread_count > 0 && !opj_codec_set_threads(codec.get(), thread_count)) {
+		failure = fmt::format(
+		    "{} failed to set decode threads ({})", openjpeg_format_name(format), thread_count);
 		return {};
 	}
 
@@ -397,7 +443,7 @@ opj_image_ptr decode_openjpeg_image_with_format(
 }
 
 opj_image_ptr decode_openjpeg_image(const DataSet& ds, std::size_t frame_index,
-    jpeg2k_frame_source& source) {
+    jpeg2k_frame_source& source, const decode_opts& opt) {
 	const auto prefer_jp2 = frame_looks_like_jp2(source);
 
 	std::string first_failure{};
@@ -406,11 +452,11 @@ opj_image_ptr decode_openjpeg_image(const DataSet& ds, std::size_t frame_index,
 	const auto second_format = prefer_jp2 ? OPJ_CODEC_J2K : OPJ_CODEC_JP2;
 
 	if (auto image = decode_openjpeg_image_with_format(
-	        source, first_format, first_failure)) {
+	        ds, source, first_format, opt, first_failure)) {
 		return image;
 	}
 	if (auto image = decode_openjpeg_image_with_format(
-	        source, second_format, second_failure)) {
+	        ds, source, second_format, opt, second_failure)) {
 		return image;
 	}
 
@@ -670,7 +716,7 @@ void decode_jpeg2k_into(const DataSet& ds, const DataSet::pixel_info_t& info,
 		    "pixel::decode_into file={} frame={} reason=JPEG2000 frame has empty codestream",
 		    ds.path(), frame_index);
 	}
-	auto image = decode_openjpeg_image(ds, frame_index, frame_source);
+	auto image = decode_openjpeg_image(ds, frame_index, frame_source, opt);
 	validate_decoded_image(ds, frame_index, info, *image, rows, cols, samples_per_pixel);
 
 	if (opt.scaled) {

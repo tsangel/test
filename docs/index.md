@@ -19,6 +19,7 @@ cpp_api
 dev_notes
 LOGGING
 python_dataset_access_benchmarks
+pydicom_pixel_decoding_wg04
 tag_path_lookup
 ```
 

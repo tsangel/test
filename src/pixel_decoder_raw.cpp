@@ -1,5 +1,7 @@
 #include "pixel_decoder_detail.hpp"
 
+#include <cstring>
+
 #include "dicom_endian.h"
 #include "diagnostics.h"
 
@@ -137,6 +139,16 @@ void decode_raw_into(const DataSet& ds, const DataSet::pixel_info_t& info,
 	if (opt.scaled) {
 		decode_mono_scaled_into_f32(
 		    ds, info, src_frame, dst, dst_strides, rows, cols, src_row_bytes);
+		return;
+	}
+
+	// Fast path for raw copies when no byte swap or planar transform work is needed.
+	const bool equivalent_single_channel_layout = samples_per_pixel == 1;
+	const bool interleaved_no_transform =
+	    transform == planar_transform::interleaved_to_interleaved;
+	if (!needs_swap && dst_strides.row == src_row_bytes &&
+	    (equivalent_single_channel_layout || interleaved_no_transform)) {
+		std::memcpy(dst.data(), src_frame, src_row_bytes * rows);
 		return;
 	}
 

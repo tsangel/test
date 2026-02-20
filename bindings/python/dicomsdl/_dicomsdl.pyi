@@ -31,6 +31,16 @@ class DataSet:
 
     def to_array(self, frame: int = ..., scaled: bool = ...) -> Any: ...
 
+    def to_array_view(self, frame: int = ...) -> Any: ...
+
+    def decode_into(
+        self,
+        out: Any,
+        frame: int = ...,
+        scaled: bool = ...,
+        threads: int = ...,
+    ) -> Any: ...
+
     def pixel_array(self, frame: int = ..., scaled: bool = ...) -> Any: ...
 
     def to_pil_image(

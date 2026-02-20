@@ -873,6 +873,10 @@ struct decode_opts {
 	// true: output float32 after Modality LUT (if present) or Rescale
 	// applies only when SamplesPerPixel=1 and modality transform metadata exists.
 	bool scaled{false};
+	// Decoder thread count hint:
+	//  0: library default, -1: auto(all CPUs), >0: explicit thread count.
+	// Backends may ignore this option when unsupported.
+	int decoder_threads{0};
 };
 
 struct strides {
@@ -1395,7 +1399,6 @@ private:
 	uid::WellKnown transfer_syntax_uid_{};
 	bool little_endian_{true};
 	bool explicit_vr_{true};
-	alignas(std::uint64_t) std::uint8_t buf8_[8];  // temporary buffer for tag, vr and length
 	std::size_t offset_{0};  // absolute offset within the root stream where this dataset starts
 	std::vector<DataElement> elements_;
 	std::map<std::uint32_t, DataElement> element_map_;

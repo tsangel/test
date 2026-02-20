@@ -16,6 +16,9 @@
 #include <vector>
 #include <span>
 #include <cctype>
+#include <limits>
+
+#include <libdeflate.h>
 
 using namespace dicom::literals;
 namespace diag = dicom::diag;
@@ -30,6 +33,102 @@ inline const uid::WellKnown kPapyrusImplicitVrLittleEndianUid =
 	uid::lookup("Papyrus3ImplicitVRLittleEndian").value_or(uid::WellKnown{});
 inline const uid::WellKnown kExplicitVrBigEndianUid =
 	uid::lookup("ExplicitVRBigEndian").value_or(uid::WellKnown{});
+inline const uid::WellKnown kDeflatedExplicitVrLittleEndianUid =
+	uid::lookup("DeflatedExplicitVRLittleEndian").value_or(uid::WellKnown{});
+
+const char* libdeflate_result_name(enum libdeflate_result result) noexcept {
+	switch (result) {
+	case LIBDEFLATE_SUCCESS:
+		return "LIBDEFLATE_SUCCESS";
+	case LIBDEFLATE_BAD_DATA:
+		return "LIBDEFLATE_BAD_DATA";
+	case LIBDEFLATE_SHORT_OUTPUT:
+		return "LIBDEFLATE_SHORT_OUTPUT";
+	case LIBDEFLATE_INSUFFICIENT_SPACE:
+		return "LIBDEFLATE_INSUFFICIENT_SPACE";
+	default:
+		return "LIBDEFLATE_UNKNOWN";
+	}
+}
+
+std::vector<std::uint8_t> inflate_deflated_image(std::span<const std::uint8_t> full_input,
+    std::size_t deflated_start_offset, const std::string& file_path) {
+	if (deflated_start_offset > full_input.size()) {
+		diag::error_and_throw(
+		    fmt::format(
+		        "DataSet::read_attached_stream file={} offset=0x{:X} reason=invalid deflated data start offset",
+		        file_path, deflated_start_offset));
+	}
+
+	const auto compressed_input = full_input.subspan(deflated_start_offset);
+	if (compressed_input.empty()) {
+		return std::vector<std::uint8_t>(full_input.begin(),
+		    full_input.begin() + static_cast<std::ptrdiff_t>(deflated_start_offset));
+	}
+
+	struct libdeflate_decompressor* decompressor = libdeflate_alloc_decompressor();
+	if (!decompressor) {
+		diag::error_and_throw(
+		    fmt::format(
+		        "DataSet::read_attached_stream file={} offset=0x{:X} reason=failed to allocate libdeflate decompressor",
+		        file_path, deflated_start_offset));
+	}
+
+	std::size_t tail_capacity = std::max<std::size_t>(compressed_input.size() * 4, 1u << 20);
+	if (deflated_start_offset > std::numeric_limits<std::size_t>::max() - tail_capacity) {
+		libdeflate_free_decompressor(decompressor);
+		diag::error_and_throw(
+		    fmt::format(
+		        "DataSet::read_attached_stream file={} offset=0x{:X} reason=deflated output too large",
+		        file_path, deflated_start_offset));
+	}
+
+	std::vector<std::uint8_t> output(deflated_start_offset + tail_capacity);
+	if (deflated_start_offset > 0) {
+		std::memcpy(output.data(), full_input.data(), deflated_start_offset);
+	}
+
+	size_t actual_out = 0;
+	enum libdeflate_result result = LIBDEFLATE_INSUFFICIENT_SPACE;
+	while (true) {
+		result = libdeflate_deflate_decompress(decompressor, compressed_input.data(),
+		    compressed_input.size(), output.data() + deflated_start_offset,
+		    output.size() - deflated_start_offset, &actual_out);
+		if (result == LIBDEFLATE_SUCCESS) {
+			output.resize(deflated_start_offset + actual_out);
+			break;
+		}
+		if (result != LIBDEFLATE_INSUFFICIENT_SPACE) {
+			libdeflate_free_decompressor(decompressor);
+			diag::error_and_throw(
+			    fmt::format(
+			        "DataSet::read_attached_stream file={} offset=0x{:X} reason=deflate decompression failed result={}",
+			        file_path, deflated_start_offset, libdeflate_result_name(result)));
+		}
+
+		const auto current_tail_capacity = output.size() - deflated_start_offset;
+		if (current_tail_capacity > std::numeric_limits<std::size_t>::max() / 2) {
+			libdeflate_free_decompressor(decompressor);
+			diag::error_and_throw(
+			    fmt::format(
+			        "DataSet::read_attached_stream file={} offset=0x{:X} reason=deflated output too large",
+			        file_path, deflated_start_offset));
+		}
+
+		const auto next_tail_capacity = current_tail_capacity * 2;
+		if (deflated_start_offset > std::numeric_limits<std::size_t>::max() - next_tail_capacity) {
+			libdeflate_free_decompressor(decompressor);
+			diag::error_and_throw(
+			    fmt::format(
+			        "DataSet::read_attached_stream file={} offset=0x{:X} reason=deflated output too large",
+			        file_path, deflated_start_offset));
+		}
+		output.resize(deflated_start_offset + next_tail_capacity);
+	}
+
+	libdeflate_free_decompressor(decompressor);
+	return output;
+}
 
 std::unique_ptr<InFileStream> make_file_stream(const std::string& path) {
 	auto stream = std::make_unique<InFileStream>();
@@ -626,6 +725,35 @@ void DataSet::read_attached_stream(const ReadOptions& options) {
 		diag::error(
 		    "DataSet::read_attached_stream file={} transfer_syntax_uid={} reason=unknown transfer syntax UID",
 		    path(), *uid_value);
+	}
+
+	if (transfer_syntax_uid_ == kDeflatedExplicitVrLittleEndianUid) {
+		std::size_t deflated_start_offset = stream_->tell();
+		if (const auto* meta_group_length = get_dataelement("(0002,0000)"_tag); *meta_group_length) {
+			if (auto group_length = meta_group_length->to_long();
+			    group_length && *group_length >= 0) {
+				const auto offset_candidate = meta_group_length->offset() +
+				    meta_group_length->length() + static_cast<std::size_t>(*group_length);
+				if (offset_candidate <= stream_->endoffset()) {
+					deflated_start_offset = offset_candidate;
+				}
+			}
+		}
+
+		const auto full_size = stream_->endoffset();
+		const auto full_span = stream_->get_span(0, full_size);
+		if (deflated_start_offset > full_span.size()) {
+			diag::error_and_throw(
+			    fmt::format(
+			        "DataSet::read_attached_stream file={} offset=0x{:X} reason=invalid deflated data start offset",
+			        path(), deflated_start_offset));
+		}
+
+		auto inflated_image = inflate_deflated_image(full_span, deflated_start_offset, path());
+
+		const std::string stream_identifier = path();
+		attach_to_memory(stream_identifier, std::move(inflated_image));
+		stream_->seek(deflated_start_offset);
 	}
 
 	read_elements_until(options.load_until, stream_.get());

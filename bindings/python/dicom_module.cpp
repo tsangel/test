@@ -1,6 +1,7 @@
 #include <array>
 #include <cstring>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <sstream>
@@ -22,6 +23,7 @@
 #include <nanobind/stl/vector.h>
 
 #include <dicom.h>
+#include <dicom_endian.h>
 #include <diagnostics.h>
 
 namespace nb = nanobind;
@@ -50,6 +52,25 @@ nb::object readonly_memoryview_from_span(const void* data, std::size_t size) {
 struct DecodedArraySpec {
 	nb::dlpack::dtype dtype{};
 	std::size_t bytes_per_sample{0};
+};
+
+struct DecodedArrayOutput {
+	nb::ndarray<nb::numpy> array;
+	std::span<std::uint8_t> bytes;
+};
+
+struct DecodedArrayLayout {
+	DecodedArraySpec spec{};
+	dicom::pixel::decode_opts opt{};
+	dicom::pixel::strides dst_strides{};
+	std::array<std::size_t, 4> shape{};
+	std::array<std::int64_t, 4> strides{};
+	std::size_t ndim{0};
+	std::size_t frame_stride{0};
+	std::size_t frames{0};
+	std::size_t frame_index{0};
+	std::size_t required_bytes{0};
+	bool decode_all_frames{false};
 };
 
 DecodedArraySpec decoded_array_spec(const DataSet::pixel_info_t& info, bool scaled) {
@@ -81,128 +102,278 @@ DecodedArraySpec decoded_array_spec(const DataSet::pixel_info_t& info, bool scal
 	throw nb::value_error("to_array requires a known pixel sample dtype");
 }
 
-nb::object make_numpy_array_from_decoded(std::vector<std::uint8_t>&& decoded,
+DecodedArrayOutput make_writable_numpy_array(
     std::size_t ndim, const std::array<std::size_t, 4>& shape,
-    const std::array<std::int64_t, 4>& strides, const nb::dlpack::dtype& dtype) {
-	auto* storage = new std::vector<std::uint8_t>(std::move(decoded));
-	void* data_ptr = storage->empty() ? nullptr : static_cast<void*>(storage->data());
-	nb::capsule owner(storage, [](void* ptr) noexcept {
-		delete static_cast<std::vector<std::uint8_t>*>(ptr);
+    const std::array<std::int64_t, 4>& strides, const nb::dlpack::dtype& dtype,
+    std::size_t required_bytes) {
+	auto storage = std::make_unique<std::uint8_t[]>(required_bytes);
+	void* data_ptr = required_bytes == 0 ? nullptr : static_cast<void*>(storage.get());
+	nb::capsule owner(data_ptr, [](void* ptr) noexcept {
+		delete[] static_cast<std::uint8_t*>(ptr);
 	});
-	return nb::cast(nb::ndarray<nb::numpy>(
+	nb::ndarray<nb::numpy> array(
 	    data_ptr, ndim, shape.data(), owner, strides.data(), dtype,
-	    nb::device::cpu::value, 0, 'C'));
+	    nb::device::cpu::value, 0, 'C');
+	const auto bytes = std::span<std::uint8_t>(
+	    static_cast<std::uint8_t*>(data_ptr), required_bytes);
+	(void)storage.release();
+	return DecodedArrayOutput{std::move(array), bytes};
 }
 
-nb::object dataset_to_array(const DataSet& self, long frame, bool scaled) {
+DecodedArrayLayout build_decode_layout(
+    const DataSet& self, long frame, bool scaled, int decoder_threads = 0) {
 	if (frame < -1) {
 		throw nb::value_error("frame must be >= -1");
+	}
+	if (decoder_threads < -1) {
+		throw nb::value_error("threads must be -1, 0, or positive");
 	}
 
 	const auto& info = self.pixel_info();
 	if (!info.has_pixel_data) {
 		throw nb::value_error(
-		    "to_array requires PixelData, FloatPixelData, or DoubleFloatPixelData");
+		    "to_array/decode_into requires PixelData, FloatPixelData, or DoubleFloatPixelData");
 	}
 	if (info.rows <= 0 || info.cols <= 0 || info.samples_per_pixel <= 0) {
-		throw nb::value_error("to_array requires positive Rows/Columns/SamplesPerPixel");
+		throw nb::value_error(
+		    "to_array/decode_into requires positive Rows/Columns/SamplesPerPixel");
 	}
 	if (info.frames <= 0) {
-		throw nb::value_error("to_array requires NumberOfFrames >= 1");
+		throw nb::value_error("to_array/decode_into requires NumberOfFrames >= 1");
 	}
 
+	DecodedArrayLayout layout{};
 	const auto rows = static_cast<std::size_t>(info.rows);
 	const auto cols = static_cast<std::size_t>(info.cols);
 	const auto samples_per_pixel = static_cast<std::size_t>(info.samples_per_pixel);
-	const auto frames = static_cast<std::size_t>(info.frames);
+	layout.frames = static_cast<std::size_t>(info.frames);
 
-	dicom::pixel::decode_opts opt{};
-	opt.planar_out = dicom::pixel::planar::interleaved;
-	opt.alignment = 1;
-	opt.scaled = scaled;
-	const bool effective_scaled = dicom::pixel::should_use_scaled_output(self, opt);
-	opt.scaled = effective_scaled;
+	layout.opt.planar_out = dicom::pixel::planar::interleaved;
+	layout.opt.alignment = 1;
+	layout.opt.scaled = scaled;
+	layout.opt.decoder_threads = decoder_threads;
+	const bool effective_scaled = dicom::pixel::should_use_scaled_output(self, layout.opt);
+	layout.opt.scaled = effective_scaled;
 
-	const auto dst_strides = self.calc_strides(opt);
-	const auto spec = decoded_array_spec(info, effective_scaled);
-	const auto row_stride = dst_strides.row;
-	const auto frame_stride = dst_strides.frame;
-	const auto bytes_per_sample = spec.bytes_per_sample;
+	layout.dst_strides = self.calc_strides(layout.opt);
+	layout.spec = decoded_array_spec(info, effective_scaled);
+
+	const auto bytes_per_sample = layout.spec.bytes_per_sample;
 	if (bytes_per_sample == 0) {
-		throw nb::value_error("to_array could not determine output sample size");
+		throw nb::value_error("to_array/decode_into could not determine output sample size");
 	}
-	if ((row_stride % bytes_per_sample) != 0 || (frame_stride % bytes_per_sample) != 0) {
-		throw std::runtime_error("to_array stride is not aligned to output sample size");
+	const auto row_stride = layout.dst_strides.row;
+	layout.frame_stride = layout.dst_strides.frame;
+	if ((row_stride % bytes_per_sample) != 0 || (layout.frame_stride % bytes_per_sample) != 0) {
+		throw std::runtime_error(
+		    "to_array/decode_into stride is not aligned to output sample size");
 	}
 	const auto row_stride_elems = row_stride / bytes_per_sample;
-	const auto frame_stride_elems = frame_stride / bytes_per_sample;
+	const auto frame_stride_elems = layout.frame_stride / bytes_per_sample;
 	const auto col_stride_elems = samples_per_pixel;
 
-	const bool decode_all_frames = (frame == -1) && (frames > 1);
-	if (!decode_all_frames) {
-		const auto frame_index = (frame < 0) ? std::size_t{0} : static_cast<std::size_t>(frame);
-		if (frame_index >= frames) {
-			throw nb::index_error("to_array frame index out of range");
+	if (layout.frames != 0 &&
+	    layout.frame_stride > (std::numeric_limits<std::size_t>::max() / layout.frames)) {
+		throw std::overflow_error("to_array/decode_into output buffer size overflow");
+	}
+
+	layout.decode_all_frames = (frame == -1) && (layout.frames > 1);
+	if (!layout.decode_all_frames) {
+		layout.frame_index = (frame < 0) ? std::size_t{0} : static_cast<std::size_t>(frame);
+		if (layout.frame_index >= layout.frames) {
+			throw nb::index_error("to_array/decode_into frame index out of range");
 		}
+		layout.required_bytes = layout.frame_stride;
 
-		std::vector<std::uint8_t> decoded(frame_stride);
-		self.decode_into(frame_index, std::span<std::uint8_t>(decoded), dst_strides, opt);
-
-		std::array<std::size_t, 4> shape{};
-		std::array<std::int64_t, 4> strides{};
-		std::size_t ndim = 0;
 		if (samples_per_pixel == 1) {
-			ndim = 2;
-			shape[0] = rows;
-			shape[1] = cols;
-			strides[0] = static_cast<std::int64_t>(row_stride_elems);
-			strides[1] = 1;
+			layout.ndim = 2;
+			layout.shape[0] = rows;
+			layout.shape[1] = cols;
+			layout.strides[0] = static_cast<std::int64_t>(row_stride_elems);
+			layout.strides[1] = 1;
 		} else {
-			ndim = 3;
-			shape[0] = rows;
-			shape[1] = cols;
-			shape[2] = samples_per_pixel;
-			strides[0] = static_cast<std::int64_t>(row_stride_elems);
-			strides[1] = static_cast<std::int64_t>(col_stride_elems);
-			strides[2] = 1;
+			layout.ndim = 3;
+			layout.shape[0] = rows;
+			layout.shape[1] = cols;
+			layout.shape[2] = samples_per_pixel;
+			layout.strides[0] = static_cast<std::int64_t>(row_stride_elems);
+			layout.strides[1] = static_cast<std::int64_t>(col_stride_elems);
+			layout.strides[2] = 1;
 		}
-
-		return make_numpy_array_from_decoded(
-		    std::move(decoded), ndim, shape, strides, spec.dtype);
+		return layout;
 	}
 
-	std::vector<std::uint8_t> decoded(frame_stride * frames);
-	for (std::size_t frame_index = 0; frame_index < frames; ++frame_index) {
-		auto frame_span = std::span<std::uint8_t>(
-		    decoded.data() + frame_index * frame_stride, frame_stride);
-		self.decode_into(frame_index, frame_span, dst_strides, opt);
-	}
-
-	std::array<std::size_t, 4> shape{};
-	std::array<std::int64_t, 4> strides{};
-	std::size_t ndim = 0;
+	layout.required_bytes = layout.frame_stride * layout.frames;
 	if (samples_per_pixel == 1) {
-		ndim = 3;
-		shape[0] = frames;
-		shape[1] = rows;
-		shape[2] = cols;
-		strides[0] = static_cast<std::int64_t>(frame_stride_elems);
-		strides[1] = static_cast<std::int64_t>(row_stride_elems);
-		strides[2] = 1;
+		layout.ndim = 3;
+		layout.shape[0] = layout.frames;
+		layout.shape[1] = rows;
+		layout.shape[2] = cols;
+		layout.strides[0] = static_cast<std::int64_t>(frame_stride_elems);
+		layout.strides[1] = static_cast<std::int64_t>(row_stride_elems);
+		layout.strides[2] = 1;
 	} else {
-		ndim = 4;
-		shape[0] = frames;
-		shape[1] = rows;
-		shape[2] = cols;
-		shape[3] = samples_per_pixel;
-		strides[0] = static_cast<std::int64_t>(frame_stride_elems);
-		strides[1] = static_cast<std::int64_t>(row_stride_elems);
-		strides[2] = static_cast<std::int64_t>(col_stride_elems);
-		strides[3] = 1;
+		layout.ndim = 4;
+		layout.shape[0] = layout.frames;
+		layout.shape[1] = rows;
+		layout.shape[2] = cols;
+		layout.shape[3] = samples_per_pixel;
+		layout.strides[0] = static_cast<std::int64_t>(frame_stride_elems);
+		layout.strides[1] = static_cast<std::int64_t>(row_stride_elems);
+		layout.strides[2] = static_cast<std::int64_t>(col_stride_elems);
+		layout.strides[3] = 1;
+	}
+	return layout;
+}
+
+void decode_layout_into(const DataSet& self, const DecodedArrayLayout& layout,
+    std::span<std::uint8_t> out) {
+	if (out.size() < layout.required_bytes) {
+		throw nb::value_error("decode_into output buffer is smaller than required size");
+	}
+	if (!layout.decode_all_frames) {
+		self.decode_into(layout.frame_index, out, layout.dst_strides, layout.opt);
+		return;
 	}
 
-	return make_numpy_array_from_decoded(
-	    std::move(decoded), ndim, shape, strides, spec.dtype);
+	for (std::size_t frame_index = 0; frame_index < layout.frames; ++frame_index) {
+		auto frame_span = out.subspan(frame_index * layout.frame_stride, layout.frame_stride);
+		self.decode_into(frame_index, frame_span, layout.dst_strides, layout.opt);
+	}
+}
+
+const DataElement* raw_source_element(const DataSet& self, dicom::pixel::dtype sv_dtype) {
+	switch (sv_dtype) {
+	case dicom::pixel::dtype::f32:
+		return self.get_dataelement(Tag("FloatPixelData"));
+	case dicom::pixel::dtype::f64:
+		return self.get_dataelement(Tag("DoubleFloatPixelData"));
+	default:
+		return self.get_dataelement(Tag("PixelData"));
+	}
+}
+
+nb::object dataset_to_array_view(const DataSet& self, long frame) {
+	const auto layout = build_decode_layout(self, frame, false, 0);
+	const auto& info = self.pixel_info();
+
+	if (!info.ts.is_uncompressed()) {
+		throw nb::value_error("to_array_view requires an uncompressed transfer syntax");
+	}
+	if (info.samples_per_pixel > 1 &&
+	    info.planar_configuration != dicom::pixel::planar::interleaved) {
+		throw nb::value_error(
+		    "to_array_view requires PlanarConfiguration=interleaved when SamplesPerPixel > 1");
+	}
+	if (layout.spec.bytes_per_sample > 1 &&
+	    (self.is_little_endian() != dicom::endian::host_is_little_endian())) {
+		throw nb::value_error(
+		    "to_array_view requires source endianness to match host endianness");
+	}
+
+	const auto* source = raw_source_element(self, info.sv_dtype);
+	if (!source || !(*source)) {
+		throw nb::value_error("to_array_view requires source pixel data to be present");
+	}
+	if (source->vr().is_pixel_sequence()) {
+		throw nb::value_error("to_array_view does not support encapsulated PixelData");
+	}
+
+	const auto src = source->value_span();
+	const auto rows = static_cast<std::size_t>(info.rows);
+	const auto cols = static_cast<std::size_t>(info.cols);
+	const auto samples_per_pixel = static_cast<std::size_t>(info.samples_per_pixel);
+	const auto src_row_components =
+	    (info.planar_configuration == dicom::pixel::planar::interleaved)
+	        ? samples_per_pixel
+	        : std::size_t{1};
+	const auto src_row_bytes = cols * src_row_components * layout.spec.bytes_per_sample;
+	std::size_t src_frame_bytes = src_row_bytes * rows;
+	if (info.planar_configuration == dicom::pixel::planar::planar) {
+		src_frame_bytes *= samples_per_pixel;
+	}
+	if (layout.frames != 0 &&
+	    src_frame_bytes > (std::numeric_limits<std::size_t>::max() / layout.frames)) {
+		throw nb::value_error("to_array_view source frame size overflow");
+	}
+	const auto total_required_bytes = src_frame_bytes * layout.frames;
+	if (src.size() < total_required_bytes) {
+		throw nb::value_error("to_array_view source pixel data is smaller than expected");
+	}
+	if (src_frame_bytes < layout.required_bytes) {
+		throw nb::value_error("to_array_view requires contiguous source frame layout");
+	}
+
+	const auto byte_offset = layout.decode_all_frames ? std::size_t{0} : layout.frame_index * src_frame_bytes;
+	if (src.size() < byte_offset + layout.required_bytes) {
+		throw nb::value_error("to_array_view requested frame is out of source bounds");
+	}
+
+	const auto* data_ptr = layout.required_bytes == 0 ? nullptr : (src.data() + byte_offset);
+	nb::object owner = nb::cast(&self, nb::rv_policy::reference);
+	return nb::cast(nb::ndarray<nb::numpy, const std::uint8_t>(
+	    data_ptr, layout.ndim, layout.shape.data(), owner, layout.strides.data(), layout.spec.dtype,
+	    nb::device::cpu::value, 0, 'C'));
+}
+
+nb::object dataset_to_array(const DataSet& self, long frame, bool scaled) {
+	const auto layout = build_decode_layout(self, frame, scaled, 0);
+	auto out = make_writable_numpy_array(
+	    layout.ndim, layout.shape, layout.strides, layout.spec.dtype, layout.required_bytes);
+	decode_layout_into(self, layout, out.bytes);
+	return nb::cast(std::move(out.array));
+}
+
+class PyWritableBufferView {
+public:
+	explicit PyWritableBufferView(nb::handle obj) {
+		const int flags = PyBUF_WRITABLE | PyBUF_C_CONTIGUOUS | PyBUF_FORMAT | PyBUF_ND;
+		if (PyObject_GetBuffer(obj.ptr(), &view_, flags) != 0) {
+			throw nb::type_error(
+			    "decode_into expects a writable C-contiguous buffer object");
+		}
+	}
+
+	~PyWritableBufferView() { PyBuffer_Release(&view_); }
+
+	PyWritableBufferView(const PyWritableBufferView&) = delete;
+	PyWritableBufferView& operator=(const PyWritableBufferView&) = delete;
+
+	const Py_buffer& view() const { return view_; }
+
+private:
+	Py_buffer view_{};
+};
+
+nb::object dataset_decode_into_array(const DataSet& self, nb::handle out,
+    long frame, bool scaled, int threads) {
+	const auto layout = build_decode_layout(self, frame, scaled, threads);
+
+	PyWritableBufferView writable(out);
+	const auto& view = writable.view();
+	if (view.itemsize <= 0) {
+		throw nb::value_error("decode_into requires a valid output itemsize");
+	}
+	const auto actual_itemsize = static_cast<std::size_t>(view.itemsize);
+	if (actual_itemsize != layout.spec.bytes_per_sample) {
+		throw nb::value_error("decode_into output itemsize does not match decoded sample size");
+	}
+	if (view.len < 0) {
+		throw nb::value_error("decode_into output buffer length is invalid");
+	}
+	const auto actual_bytes = static_cast<std::size_t>(view.len);
+	if (actual_bytes != layout.required_bytes) {
+		throw nb::value_error(
+		    "decode_into output buffer size does not match expected decoded size");
+	}
+	if (layout.required_bytes > 0 && view.buf == nullptr) {
+		throw nb::value_error("decode_into output buffer is null");
+	}
+
+	auto out_span = std::span<std::uint8_t>(
+	    static_cast<std::uint8_t*>(view.buf), actual_bytes);
+	decode_layout_into(self, layout, out_span);
+	return nb::borrow<nb::object>(out);
 }
 
 class PyBufferView {
@@ -757,6 +928,40 @@ NB_MODULE(_dicomsdl, m) {
 		    "numpy.ndarray\n"
 		    "    Shape is (rows, cols) or (rows, cols, samples) for a single frame,\n"
 		    "    and (frames, rows, cols) or (frames, rows, cols, samples) when decoding all frames.")
+		.def("to_array_view",
+		    &dataset_to_array_view,
+		    nb::arg("frame") = -1,
+		    "Return a zero-copy read-only NumPy view over uncompressed source pixel data.\n"
+		    "\n"
+		    "This requires:\n"
+		    "- uncompressed transfer syntax\n"
+		    "- frame layout compatible with interleaved output\n"
+		    "- source endianness matching host endianness for sample sizes > 1.")
+		.def("decode_into",
+		    &dataset_decode_into_array,
+		    nb::arg("out"),
+		    nb::arg("frame") = 0,
+		    nb::arg("scaled") = false,
+		    nb::arg("threads") = 0,
+		    "Decode pixel samples into an existing writable C-contiguous buffer.\n"
+		    "\n"
+		    "Parameters\n"
+		    "----------\n"
+		    "out : buffer-like\n"
+		    "    Destination NumPy array or writable contiguous buffer. Size must\n"
+		    "    exactly match the decoded output for the requested frame selection.\n"
+		    "frame : int, optional\n"
+		    "    -1 decodes all frames (multi-frame only), otherwise decode the selected frame index.\n"
+		    "scaled : bool, optional\n"
+		    "    If True, apply Modality LUT/Rescale when available.\n"
+		    "threads : int, optional\n"
+		    "    Decoder thread count hint.\n"
+		    "    0 uses library default, -1 uses all CPUs, >0 sets explicit thread count.\n"
+		    "    Currently applied to JPEG 2000; unsupported decoders may ignore it.\n"
+		    "\n"
+		    "Returns\n"
+		    "-------\n"
+		    "Same object as `out` for call chaining.")
 		.def("pixel_array",
 		    &dataset_to_array,
 		    nb::arg("frame") = -1,

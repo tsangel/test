@@ -13,3 +13,6 @@
 [submodule "extern/openjpeg"]
 	path = extern/openjpeg
 	url = https://github.com/uclouvain/openjpeg.git
+[submodule "extern/libdeflate"]
+	path = extern/libdeflate
+	url = https://github.com/ebiggers/libdeflate.git
