@@ -46,10 +46,11 @@ jobs:
           git submodule set-url extern/libdeflate https://github.com/ebiggers/libdeflate.git
           git submodule set-url extern/nanobind https://github.com/wjakob/nanobind.git
           git submodule set-url extern/openjpeg https://github.com/uclouvain/openjpeg.git
+          git submodule set-url extern/openjph https://github.com/aous72/OpenJPH.git
           git submodule sync --recursive
           for attempt in 1 2 3; do
             if git -c protocol.version=2 submodule update --init --force --depth=1 --recursive \
-              extern/charls extern/fmt extern/libjpeg-turbo extern/libdeflate extern/nanobind extern/openjpeg; then
+              extern/charls extern/fmt extern/libjpeg-turbo extern/libdeflate extern/nanobind extern/openjpeg extern/openjph; then
               exit 0
             fi
             echo "Submodule init failed (attempt ${attempt}), retrying..."
