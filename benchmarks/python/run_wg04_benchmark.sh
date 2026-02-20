@@ -10,6 +10,7 @@ WARMUP="${WARMUP:-1}"
 REPEAT="${REPEAT:-3}"
 WG04_ROOT="${WG04_ROOT:-}"
 PYTHON_BIN="${PYTHON_BIN:-}"
+USE_INSTALLED_DICOMSDL="${USE_INSTALLED_DICOMSDL:-0}"
 
 MAIN_JSON="${MAIN_JSON:-${ROOT_DIR}/build/wg04_pixel_decode_compare_r3_htj2k.json}"
 HTJ2K_OPENJPEG_JSON="${HTJ2K_OPENJPEG_JSON:-${ROOT_DIR}/build/wg04_htj2k_openjpeg_r3_toarray_postopt.json}"
@@ -57,12 +58,21 @@ run_bench() {
   cmd+=("$@" "--warmup" "${WARMUP}" "--repeat" "${REPEAT}" "--json" "${output_json}")
 
   echo "+ ${cmd[*]}"
-  PYTHONPATH="${ROOT_DIR}/bindings/python${PYTHONPATH:+:${PYTHONPATH}}" "${cmd[@]}"
+  if [[ "${USE_INSTALLED_DICOMSDL}" == "1" ]]; then
+    "${cmd[@]}"
+  else
+    PYTHONPATH="${ROOT_DIR}/bindings/python${PYTHONPATH:+:${PYTHONPATH}}" "${cmd[@]}"
+  fi
 }
 
 resolve_python
 
 echo "Using Python: ${PYTHON_BIN}"
+if [[ "${USE_INSTALLED_DICOMSDL}" == "1" ]]; then
+  echo "DICOMSDL source: installed"
+else
+  echo "DICOMSDL source: workspace"
+fi
 echo "WARMUP/REPEAT: ${WARMUP}/${REPEAT}"
 if [[ -n "${WG04_ROOT}" ]]; then
   echo "WG04_ROOT: ${WG04_ROOT}"
@@ -92,11 +102,18 @@ run_bench "${HTJ2K_OPENJPH_JSON}" \
 
 echo
 echo "[4/4] Markdown tables"
-PYTHONPATH="${ROOT_DIR}/bindings/python${PYTHONPATH:+:${PYTHONPATH}}" \
+if [[ "${USE_INSTALLED_DICOMSDL}" == "1" ]]; then
   "${PYTHON_BIN}" "${PRINT_SCRIPT}" \
-  --main-json "${MAIN_JSON}" \
-  --htj2k-openjpeg-json "${HTJ2K_OPENJPEG_JSON}" \
-  --htj2k-openjph-json "${HTJ2K_OPENJPH_JSON}"
+    --main-json "${MAIN_JSON}" \
+    --htj2k-openjpeg-json "${HTJ2K_OPENJPEG_JSON}" \
+    --htj2k-openjph-json "${HTJ2K_OPENJPH_JSON}"
+else
+  PYTHONPATH="${ROOT_DIR}/bindings/python${PYTHONPATH:+:${PYTHONPATH}}" \
+    "${PYTHON_BIN}" "${PRINT_SCRIPT}" \
+    --main-json "${MAIN_JSON}" \
+    --htj2k-openjpeg-json "${HTJ2K_OPENJPEG_JSON}" \
+    --htj2k-openjph-json "${HTJ2K_OPENJPH_JSON}"
+fi
 
 echo
 echo "Done."

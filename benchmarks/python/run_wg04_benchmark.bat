@@ -10,6 +10,7 @@ set "PRINT_SCRIPT=%SCRIPT_DIR%\print_wg04_tables.py"
 
 if "%WARMUP%"=="" set "WARMUP=1"
 if "%REPEAT%"=="" set "REPEAT=3"
+if "%USE_INSTALLED_DICOMSDL%"=="" set "USE_INSTALLED_DICOMSDL=0"
 
 if "%MAIN_JSON%"=="" set "MAIN_JSON=%ROOT_DIR%\build\wg04_pixel_decode_compare_r3_htj2k.json"
 if "%HTJ2K_OPENJPEG_JSON%"=="" set "HTJ2K_OPENJPEG_JSON=%ROOT_DIR%\build\wg04_htj2k_openjpeg_r3_toarray_postopt.json"
@@ -31,10 +32,15 @@ if errorlevel 1 (
   exit /b 1
 )
 
-if defined PYTHONPATH (
-  set "PYTHONPATH=%ROOT_DIR%\bindings\python;%PYTHONPATH%"
+if "%USE_INSTALLED_DICOMSDL%"=="1" (
+  set "DICOMSDL_IMPORT_SOURCE=installed"
 ) else (
-  set "PYTHONPATH=%ROOT_DIR%\bindings\python"
+  if defined PYTHONPATH (
+    set "PYTHONPATH=%ROOT_DIR%\bindings\python;%PYTHONPATH%"
+  ) else (
+    set "PYTHONPATH=%ROOT_DIR%\bindings\python"
+  )
+  set "DICOMSDL_IMPORT_SOURCE=workspace"
 )
 
 if defined WG04_ROOT (
@@ -44,6 +50,7 @@ if defined WG04_ROOT (
 )
 
 echo Using Python: %PYTHON_BIN%
+echo DICOMSDL source: %DICOMSDL_IMPORT_SOURCE%
 echo WARMUP/REPEAT: %WARMUP%/%REPEAT%
 if defined WG04_ROOT echo WG04_ROOT: %WG04_ROOT%
 
