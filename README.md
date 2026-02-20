@@ -88,6 +88,58 @@ pytest -q tests/python
 
 Windows에서는 PowerShell/`cmd`에서 가상환경 활성화만 플랫폼에 맞게 바꿔주면 동일합니다.
 
+### WG04 Pixel Decode Benchmark
+
+WG04 샘플(`REF`, `RLE`, `J2KR`, `J2KI`, `JLSL`, `JLSN`, `JPLL`, `JPLY`)을 codec별로
+pixel decode 벤치마크할 수 있습니다.
+
+```bash
+export DICOMSDL_WG04_IMAGES_BASE=/Users/tsangel/workspace.dev/sample/nema/WG04/IMAGES
+python benchmarks/python/benchmark_wg04_pixel_decode.py --warmup 1 --repeat 5
+```
+
+기본 `dicomsdl` 경로(`to_array`)는 현재 JPEG 2000 디코드에서
+`decoder_threads=-1`(all CPUs auto)을 사용합니다.
+
+`dicomsdl` vs `pydicom` 비교 테이블:
+
+```bash
+python benchmarks/python/benchmark_wg04_pixel_decode.py --backend both --warmup 1 --repeat 5
+```
+
+`dicomsdl`에서 출력 버퍼 재사용(`decode_into`) 모드:
+
+```bash
+python benchmarks/python/benchmark_wg04_pixel_decode.py --backend dicomsdl --reuse-output --repeat 10
+```
+
+`--reuse-output` 경로도 기본 thread hint는 `threads=-1`입니다.
+
+`pydicom`에서 출력 버퍼 재사용 모드(비압축은 `numpy_handler(read_only)+copyto`,
+압축은 `pixel_array+copyto` fallback):
+
+```bash
+python benchmarks/python/benchmark_wg04_pixel_decode.py --backend pydicom --reuse-output-pydicom --repeat 10
+```
+
+특정 codec만 실행:
+
+```bash
+python benchmarks/python/benchmark_wg04_pixel_decode.py --codec JLSL --codec JLSN --repeat 10
+```
+
+JSON 리포트 저장:
+
+```bash
+python benchmarks/python/benchmark_wg04_pixel_decode.py --backend both --json build/wg04_pixel_decode_bench.json
+```
+
+최신 스냅샷(2026-02-20, `--backend both --warmup 1 --repeat 3`)에서는
+`TOTAL` 기준 `dicomsdl 19.680 ms/decode` vs `pydicom 45.487 ms/decode`로
+약 `2.31x` (`dcm/pyd x`)를 기록했습니다.
+상세 표는 `docs/pydicom_pixel_decoding_wg04.md`, 원본 수치는
+`build/wg04_pixel_decode_compare_r3.json`에서 확인할 수 있습니다.
+
 ## Python Wheel Quick Commands
 
 ### macOS / Linux

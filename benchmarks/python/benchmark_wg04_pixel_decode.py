@@ -101,6 +101,44 @@ def _codec_paths(root: Path, codec: str) -> list[Path]:
     return files
 
 
+def _case_id_from_filename(name: str) -> str:
+    # WG04 files follow "<case>_<codec>" naming (e.g., CT1_J2KR, CT1_UNC).
+    # Use the case token to pair compressed files with REF for compression ratio.
+    if "_" not in name:
+        return name
+    return name.rsplit("_", 1)[0]
+
+
+def _build_compression_ratio_maps(
+    root: Path, codecs: list[str]
+) -> tuple[dict[str, float], dict[str, int]]:
+    ref_paths = _codec_paths(root, _RAW_BEST_CODEC)
+    ref_sizes = {_case_id_from_filename(path.name): path.stat().st_size for path in ref_paths}
+
+    ratio_by_codec: dict[str, float] = {}
+    pairs_by_codec: dict[str, int] = {}
+
+    for codec in codecs:
+        codec_paths = _codec_paths(root, codec)
+        codec_sizes = {_case_id_from_filename(path.name): path.stat().st_size for path in codec_paths}
+        common_cases = sorted(set(ref_sizes) & set(codec_sizes))
+        if not common_cases:
+            continue
+
+        ratios: list[float] = []
+        for case_id in common_cases:
+            codec_size = codec_sizes[case_id]
+            if codec_size <= 0:
+                continue
+            ratios.append(ref_sizes[case_id] / codec_size)
+
+        if ratios:
+            ratio_by_codec[codec] = statistics.mean(ratios)
+            pairs_by_codec[codec] = len(ratios)
+
+    return ratio_by_codec, pairs_by_codec
+
+
 def _import_backend(backend: str) -> Any:
     if backend == "dicomsdl":
         import dicomsdl as mod
@@ -221,7 +259,7 @@ def _benchmark_codec(
     dicomsdl_mode: str,
     pydicom_mode: str,
     verbose: bool,
-    decoder_threads: int = 0,
+    decoder_threads: int = -1,
 ) -> CodecStats:
     reusable_outputs: list[Any] | None = None
     dicomsdl_view_copyto: DicomsdlViewCopytoContext | None = None
@@ -372,6 +410,8 @@ def _print_backend_report(
     print(f"WG04 root: {root}")
     print(f"scaled output: {scaled}")
     print(f"decode mode: {mode}")
+    if backend == "dicomsdl" and mode in ("decode_into", "to_array_view_copyto"):
+        print("decode_into threads hint: -1 (all CPUs)")
     print(
         f"{'Codec':<5} {'Files':>5} {'Decodes':>8} {'Time(s)':>9} "
         f"{'ms/decode':>10} {'MPix/s':>10} {'MiB/s':>10} Label"
@@ -399,7 +439,12 @@ def _print_backend_report(
 
 
 def _build_comparison_rows(
-    codecs: list[str], dicomsdl_stats: list[CodecStats], pydicom_stats: list[CodecStats]
+    codecs: list[str],
+    dicomsdl_stats: list[CodecStats],
+    pydicom_stats: list[CodecStats],
+    *,
+    compression_ratio_by_codec: dict[str, float] | None = None,
+    compression_pairs_by_codec: dict[str, int] | None = None,
 ) -> list[dict[str, float | int | str]]:
     dicomsdl_map = {row.codec: row for row in dicomsdl_stats}
     pydicom_map = {row.codec: row for row in pydicom_stats}
@@ -411,6 +456,16 @@ def _build_comparison_rows(
         if d is None or p is None:
             continue
         speedup = (p.ms_per_decode / d.ms_per_decode) if d.ms_per_decode > 0.0 else 0.0
+        compression_ratio = (
+            float(compression_ratio_by_codec.get(codec, 0.0))
+            if compression_ratio_by_codec is not None
+            else 0.0
+        )
+        compression_pairs = (
+            int(compression_pairs_by_codec.get(codec, 0))
+            if compression_pairs_by_codec is not None
+            else 0
+        )
         rows.append(
             {
                 "codec": codec,
@@ -427,13 +482,20 @@ def _build_comparison_rows(
                 "dicomsdl_total_bytes": d.total_bytes,
                 "pydicom_total_bytes": p.total_bytes,
                 "speedup_dicomsdl_vs_pydicom": speedup,
+                "avg_compression_ratio_vs_ref": compression_ratio,
+                "compression_pairs": compression_pairs,
             }
         )
     return rows
 
 
 def _build_single_comparison_row(
-    codec: str, dicomsdl_row: CodecStats, pydicom_row: CodecStats
+    codec: str,
+    dicomsdl_row: CodecStats,
+    pydicom_row: CodecStats,
+    *,
+    compression_ratio: float = 0.0,
+    compression_pairs: int = 0,
 ) -> dict[str, float | int | str]:
     speedup = (
         pydicom_row.ms_per_decode / dicomsdl_row.ms_per_decode
@@ -455,6 +517,8 @@ def _build_single_comparison_row(
         "dicomsdl_total_bytes": dicomsdl_row.total_bytes,
         "pydicom_total_bytes": pydicom_row.total_bytes,
         "speedup_dicomsdl_vs_pydicom": speedup,
+        "avg_compression_ratio_vs_ref": float(compression_ratio),
+        "compression_pairs": int(compression_pairs),
     }
 
 
@@ -462,15 +526,20 @@ def _print_comparison_table(rows: list[dict[str, float | int | str]]) -> None:
     print("\n== Comparison (dicomsdl vs pydicom) ==")
     print(
         f"{'Codec':<5} {'Files':>5} {'Decodes':>8} {'dicomsdl ms':>12} {'pydicom ms':>11} "
-        f"{'dicomsdl MPix/s':>16} {'pydicom MPix/s':>15} {'dcm/pyd x':>10}"
+        f"{'dicomsdl MPix/s':>16} {'pydicom MPix/s':>15} {'dcm/pyd x':>10} {'CR(ref/x)':>10}"
     )
-    print("-" * 101)
+    print("-" * 112)
     for row in rows:
+        compression_pairs = int(row.get("compression_pairs", 0))
+        if compression_pairs > 0:
+            compression_ratio_text = f"{float(row.get('avg_compression_ratio_vs_ref', 0.0)):>10.2f}"
+        else:
+            compression_ratio_text = f"{'n/a':>10}"
         print(
             f"{str(row['codec']):<5} {int(row['files']):>5d} {int(row['decodes']):>8d} "
             f"{float(row['dicomsdl_ms_per_decode']):>12.3f} {float(row['pydicom_ms_per_decode']):>11.3f} "
             f"{float(row['dicomsdl_mpix_s']):>16.3f} {float(row['pydicom_mpix_s']):>15.3f} "
-            f"{float(row['speedup_dicomsdl_vs_pydicom']):>10.2f}"
+            f"{float(row['speedup_dicomsdl_vs_pydicom']):>10.2f} {compression_ratio_text}"
         )
 
     base_rows = [row for row in rows if not str(row.get("codec", "")).endswith("*")]
@@ -499,12 +568,23 @@ def _print_comparison_table(rows: list[dict[str, float | int | str]]) -> None:
             else 0.0
         )
         total_speedup = (total_pydicom_ms / total_dicomsdl_ms) if total_dicomsdl_ms > 0.0 else 0.0
-        print("-" * 101)
+        total_compression_pairs = sum(int(row.get("compression_pairs", 0)) for row in base_rows)
+        if total_compression_pairs > 0:
+            total_compression_ratio = sum(
+                float(row.get("avg_compression_ratio_vs_ref", 0.0)) *
+                int(row.get("compression_pairs", 0))
+                for row in base_rows
+            ) / total_compression_pairs
+            total_compression_text = f"{total_compression_ratio:>10.2f}"
+        else:
+            total_compression_text = f"{'n/a':>10}"
+
+        print("-" * 112)
         print(
             f"{'TOTAL':<5} {sum(int(row['files']) for row in base_rows):>5d} {total_decodes:>8d} "
             f"{total_dicomsdl_ms:>12.3f} {total_pydicom_ms:>11.3f} "
             f"{total_dicomsdl_mpix:>16.3f} {total_pydicom_mpix:>15.3f} "
-            f"{total_speedup:>10.2f}"
+            f"{total_speedup:>10.2f} {total_compression_text}"
         )
 
     if any(str(row.get("codec", "")).endswith("*") for row in rows):
@@ -596,6 +676,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help=(
             "Backward-compatible alias for --dicomsdl-mode=decode_into. "
+            "Uses decode_into(..., threads=-1) by default. "
             "Ignored for non-dicomsdl backends."
         ),
     )
@@ -724,7 +805,7 @@ def main(argv: list[str]) -> int:
                 dicomsdl_mode=dicomsdl_mode,
                 pydicom_mode=pydicom_mode,
                 verbose=args.verbose,
-                decoder_threads=0,
+                decoder_threads=-1,
             )
             backend_stats.append(row)
 
@@ -739,9 +820,19 @@ def main(argv: list[str]) -> int:
 
     comparison_rows: list[dict[str, float | int | str]] = []
     raw_best_stats_by_backend: dict[str, CodecStats] = {}
+    compression_ratio_by_codec: dict[str, float] = {}
+    compression_pairs_by_codec: dict[str, int] = {}
+    if "dicomsdl" in selected_backends and "pydicom" in selected_backends:
+        compression_ratio_by_codec, compression_pairs_by_codec = _build_compression_ratio_maps(
+            root, codecs
+        )
     if "dicomsdl" in stats_by_backend and "pydicom" in stats_by_backend:
         comparison_rows = _build_comparison_rows(
-            codecs, stats_by_backend["dicomsdl"], stats_by_backend["pydicom"]
+            codecs,
+            stats_by_backend["dicomsdl"],
+            stats_by_backend["pydicom"],
+            compression_ratio_by_codec=compression_ratio_by_codec,
+            compression_pairs_by_codec=compression_pairs_by_codec,
         )
 
         if _RAW_BEST_CODEC in codecs:
@@ -758,7 +849,7 @@ def main(argv: list[str]) -> int:
                 dicomsdl_mode=_RAW_BEST_DICOMSDL_MODE,
                 pydicom_mode=pydicom_mode,
                 verbose=args.verbose,
-                decoder_threads=0,
+                decoder_threads=-1,
             )
 
             pydicom_inputs = _preload_inputs(raw_paths, "pydicom", modules_by_backend["pydicom"])
@@ -772,7 +863,7 @@ def main(argv: list[str]) -> int:
                 dicomsdl_mode=dicomsdl_mode,
                 pydicom_mode=_RAW_BEST_PYDICOM_MODE,
                 verbose=args.verbose,
-                decoder_threads=0,
+                decoder_threads=-1,
             )
 
             comparison_rows.append(
@@ -780,6 +871,8 @@ def main(argv: list[str]) -> int:
                     f"{_RAW_BEST_CODEC}*",
                     raw_best_stats_by_backend["dicomsdl"],
                     raw_best_stats_by_backend["pydicom"],
+                    compression_ratio=float(compression_ratio_by_codec.get(_RAW_BEST_CODEC, 0.0)),
+                    compression_pairs=int(compression_pairs_by_codec.get(_RAW_BEST_CODEC, 0)),
                 )
             )
 
@@ -834,6 +927,7 @@ def main(argv: list[str]) -> int:
             "reuse_output_pydicom": bool(args.reuse_output_pydicom),
             "dicomsdl_mode": dicomsdl_mode,
             "pydicom_mode": pydicom_mode,
+            "dicomsdl_decode_into_threads_default": -1,
             "codecs": codecs,
             "results": {
                 backend: [asdict(row) for row in rows]

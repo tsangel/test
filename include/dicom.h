@@ -874,9 +874,9 @@ struct decode_opts {
 	// applies only when SamplesPerPixel=1 and modality transform metadata exists.
 	bool scaled{false};
 	// Decoder thread count hint:
-	//  0: library default, -1: auto(all CPUs), >0: explicit thread count.
+	//  -1: auto(all CPUs) [default], 0: library default, >0: explicit thread count.
 	// Backends may ignore this option when unsupported.
-	int decoder_threads{0};
+	int decoder_threads{-1};
 };
 
 struct strides {

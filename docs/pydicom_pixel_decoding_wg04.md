@@ -52,11 +52,16 @@ python benchmarks/python/benchmark_wg04_pixel_decode.py \
   --repeat 10
 ```
 
+기본 설정에서 `decode_into` thread hint는 `threads=-1`(all CPUs)입니다.
+
 ## Measurement method
 
 - Datasets are preloaded once per backend and codec before timed runs.
 - `dicomsdl` path:
-  - decode call: `ds.to_array(frame=-1, scaled=False)`
+  - default decode call: `ds.to_array(frame=-1, scaled=False)`
+  - with `--reuse-output`: `ds.decode_into(out, frame=-1, scaled=False, threads=-1)`
+  - in this benchmark driver, `decode_into` uses `threads=-1` by default
+    (JPEG 2000: auto/all CPUs).
 - `pydicom` path:
   - decode call: `ds.pixel_array`
   - before each timed decode, `_pixel_id` is reset to force re-decode and avoid
@@ -69,23 +74,25 @@ python benchmarks/python/benchmark_wg04_pixel_decode.py \
   - `ms/decode`
   - `MPix/s`
   - `MiB/s`
+  - `CR(ref/x)`: case-matched 평균 `REF 파일크기 / codec 파일크기`
 
-## Snapshot result (`--warmup 1 --repeat 3`)
+## Snapshot result (`--warmup 1 --repeat 3`, dicomsdl default threads `-1`)
 
-| Codec | dicomsdl ms/decode | pydicom ms/decode | dcm/pyd x |
-| --- | ---: | ---: | ---: |
-| REF  | 0.605 | 0.391 | 0.65 |
-| RLE  | 4.982 | 53.148 | 10.67 |
-| J2KR | 254.430 | 72.186 | 0.28 |
-| J2KI | 62.363 | 47.267 | 0.76 |
-| JLSL | 35.631 | 55.878 | 1.57 |
-| JLSN | 32.300 | 53.079 | 1.64 |
-| JPLL | 14.383 | 43.757 | 3.04 |
-| JPLY | 6.853 | 31.323 | 4.57 |
-| TOTAL | 58.808 | 44.638 | 0.76 |
+| Codec | dicomsdl ms/decode | pydicom ms/decode | dcm/pyd x | CR(ref/x) |
+| --- | ---: | ---: | ---: | ---: |
+| REF  | 0.428 | 0.486 | 1.14 | 1.00 |
+| RLE  | 4.925 | 52.145 | 10.59 | 2.25 |
+| J2KR | 42.887 | 72.867 | 1.70 | 3.79 |
+| J2KI | 19.151 | 48.806 | 2.55 | 32.03 |
+| JLSL | 38.056 | 57.333 | 1.51 | 4.13 |
+| JLSN | 32.938 | 54.069 | 1.64 | 9.72 |
+| JPLL | 15.149 | 45.785 | 3.02 | 3.12 |
+| JPLY | 7.109 | 33.830 | 4.76 | 29.17 |
+| TOTAL | 19.680 | 45.487 | 2.31 | 10.03 |
 
 `dcm/pyd x` means `pydicom_ms_per_decode / dicomsdl_ms_per_decode`.
 Values greater than `1.0` indicate `dicomsdl` is faster for that codec.
+`CR(ref/x)` means case-matched average `size(REF_case) / size(codec_case)`.
 
 ## Notes
 

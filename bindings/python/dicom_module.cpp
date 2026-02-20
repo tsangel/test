@@ -121,7 +121,7 @@ DecodedArrayOutput make_writable_numpy_array(
 }
 
 DecodedArrayLayout build_decode_layout(
-    const DataSet& self, long frame, bool scaled, int decoder_threads = 0) {
+    const DataSet& self, long frame, bool scaled, int decoder_threads = -1) {
 	if (frame < -1) {
 		throw nb::value_error("frame must be >= -1");
 	}
@@ -317,7 +317,7 @@ nb::object dataset_to_array_view(const DataSet& self, long frame) {
 }
 
 nb::object dataset_to_array(const DataSet& self, long frame, bool scaled) {
-	const auto layout = build_decode_layout(self, frame, scaled, 0);
+	const auto layout = build_decode_layout(self, frame, scaled, -1);
 	auto out = make_writable_numpy_array(
 	    layout.ndim, layout.shape, layout.strides, layout.spec.dtype, layout.required_bytes);
 	decode_layout_into(self, layout, out.bytes);
@@ -942,7 +942,7 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::arg("out"),
 		    nb::arg("frame") = 0,
 		    nb::arg("scaled") = false,
-		    nb::arg("threads") = 0,
+		    nb::arg("threads") = -1,
 		    "Decode pixel samples into an existing writable C-contiguous buffer.\n"
 		    "\n"
 		    "Parameters\n"
@@ -956,6 +956,7 @@ NB_MODULE(_dicomsdl, m) {
 		    "    If True, apply Modality LUT/Rescale when available.\n"
 		    "threads : int, optional\n"
 		    "    Decoder thread count hint.\n"
+		    "    Default is -1 (use all CPUs).\n"
 		    "    0 uses library default, -1 uses all CPUs, >0 sets explicit thread count.\n"
 		    "    Currently applied to JPEG 2000; unsupported decoders may ignore it.\n"
 		    "\n"
