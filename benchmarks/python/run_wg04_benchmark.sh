@@ -25,20 +25,10 @@ resolve_python() {
     return
   fi
 
-  local candidates=(
-    "${ROOT_DIR}/.venv312/bin/python"
-    "${ROOT_DIR}/.venv/bin/python"
-    "python3"
-    "python"
-  )
+  local candidates=("python3" "python")
   local py
   for py in "${candidates[@]}"; do
-    if [[ "${py}" == "python3" || "${py}" == "python" ]]; then
-      command -v "${py}" >/dev/null 2>&1 || continue
-      PYTHON_BIN="${py}"
-      return
-    fi
-    [[ -x "${py}" ]] || continue
+    command -v "${py}" >/dev/null 2>&1 || continue
     PYTHON_BIN="${py}"
     return
   done

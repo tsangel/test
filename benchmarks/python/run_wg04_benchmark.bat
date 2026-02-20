@@ -16,15 +16,7 @@ if "%MAIN_JSON%"=="" set "MAIN_JSON=%ROOT_DIR%\build\wg04_pixel_decode_compare_r
 if "%HTJ2K_OPENJPEG_JSON%"=="" set "HTJ2K_OPENJPEG_JSON=%ROOT_DIR%\build\wg04_htj2k_openjpeg_r3_toarray_postopt.json"
 if "%HTJ2K_OPENJPH_JSON%"=="" set "HTJ2K_OPENJPH_JSON=%ROOT_DIR%\build\wg04_htj2k_openjph_r3_toarray_postopt.json"
 
-if "%PYTHON_BIN%"=="" (
-  if exist "%ROOT_DIR%\.venv312\Scripts\python.exe" (
-    set "PYTHON_BIN=%ROOT_DIR%\.venv312\Scripts\python.exe"
-  ) else if exist "%ROOT_DIR%\.venv\Scripts\python.exe" (
-    set "PYTHON_BIN=%ROOT_DIR%\.venv\Scripts\python.exe"
-  ) else (
-    set "PYTHON_BIN=python"
-  )
-)
+if "%PYTHON_BIN%"=="" set "PYTHON_BIN=python"
 
 "%PYTHON_BIN%" --version >nul 2>nul
 if errorlevel 1 (
