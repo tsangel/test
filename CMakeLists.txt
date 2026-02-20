@@ -218,7 +218,19 @@ if(DICOMSDL_ENABLE_OPENJPH)
 		set(_dicomsdl_openjph_build_shared_libs_defined FALSE)
 	endif()
 
+	if(DEFINED CACHE{BUILD_SHARED_LIBS})
+		set(_dicomsdl_openjph_build_shared_libs_cache_defined TRUE)
+		get_property(
+			_dicomsdl_openjph_build_shared_libs_cache
+			CACHE BUILD_SHARED_LIBS
+			PROPERTY VALUE
+		)
+	else()
+		set(_dicomsdl_openjph_build_shared_libs_cache_defined FALSE)
+	endif()
+
 	set(BUILD_SHARED_LIBS OFF)
+	set(BUILD_SHARED_LIBS OFF CACHE BOOL "Force static OpenJPH build in dicomsdl superbuild" FORCE)
 	set(OJPH_ENABLE_TIFF_SUPPORT OFF CACHE BOOL "Disable OpenJPH TIFF support" FORCE)
 	set(OJPH_BUILD_TESTS OFF CACHE BOOL "Disable OpenJPH tests" FORCE)
 	set(OJPH_BUILD_EXECUTABLES OFF CACHE BOOL "Disable OpenJPH executables" FORCE)
@@ -231,8 +243,16 @@ if(DICOMSDL_ENABLE_OPENJPH)
 	else()
 		unset(BUILD_SHARED_LIBS)
 	endif()
+
+	if(_dicomsdl_openjph_build_shared_libs_cache_defined)
+		set(BUILD_SHARED_LIBS "${_dicomsdl_openjph_build_shared_libs_cache}" CACHE BOOL "" FORCE)
+	else()
+		unset(BUILD_SHARED_LIBS CACHE)
+	endif()
 	unset(_dicomsdl_openjph_build_shared_libs)
 	unset(_dicomsdl_openjph_build_shared_libs_defined)
+	unset(_dicomsdl_openjph_build_shared_libs_cache)
+	unset(_dicomsdl_openjph_build_shared_libs_cache_defined)
 endif()
 
 set(_dicomsdl_libturbojpeg_prefix "${CMAKE_CURRENT_BINARY_DIR}/extern/libjpeg-turbo")
