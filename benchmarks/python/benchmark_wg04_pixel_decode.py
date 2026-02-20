@@ -63,6 +63,26 @@ def _is_htj2k_codec(codec: str) -> bool:
     return normalized.lower().startswith("htj2k")
 
 
+def _pydicom_skip_reason(codec: str, exc: Exception) -> str | None:
+    reason = str(exc).strip() or exc.__class__.__name__
+    if codec in _HTJ2K_CODECS:
+        return f"HTJ2K unsupported: {reason}"
+
+    if codec == "JPLY":
+        reason_lc = reason.lower()
+        if (
+            "unable to decode as exceptions were raised by all available plugins" in reason_lc
+            and (
+                "jpeg extended" in reason_lc
+                or "libjpeg error code '-1038'" in reason_lc
+                or "scan start must be zero and scan stop must be 63" in reason_lc
+            )
+        ):
+            return f"JPEG Extended unsupported in available pydicom plugins: {reason}"
+
+    return None
+
+
 @dataclass
 class CodecStats:
     backend: str
@@ -940,14 +960,15 @@ def main(argv: list[str]) -> int:
                 )
                 backend_stats.append(row)
             except Exception as exc:
-                if backend == "pydicom" and codec in _HTJ2K_CODECS:
-                    reason = str(exc).strip() or exc.__class__.__name__
-                    skipped_for_backend[codec] = reason
-                    print(
-                        f"note: skipping pydicom codec {codec} (HTJ2K unsupported): {reason}",
-                        file=sys.stderr,
-                    )
-                    continue
+                if backend == "pydicom":
+                    skip_reason = _pydicom_skip_reason(codec, exc)
+                    if skip_reason is not None:
+                        skipped_for_backend[codec] = skip_reason
+                        print(
+                            f"note: skipping pydicom codec {codec}: {skip_reason}",
+                            file=sys.stderr,
+                        )
+                        continue
                 print(f"failed to benchmark {backend} codec {codec}: {exc}", file=sys.stderr)
                 return 1
 
