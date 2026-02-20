@@ -33,7 +33,7 @@ class DataSet:
 
     def pixel_array(self, frame: int = ..., scaled: bool = ...) -> Any: ...
 
-    def to_image(
+    def to_pil_image(
         self,
         frame: int = ...,
         *,

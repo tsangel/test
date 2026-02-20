@@ -372,7 +372,7 @@ void validate_decoded_header(const DataSet& ds, std::size_t frame_index,
 
 } // namespace
 
-void decode_jpeg_turbo_into(const DataSet& ds, const DataSet::pixel_info_t& info,
+void decode_jpeg_into(const DataSet& ds, const DataSet::pixel_info_t& info,
     std::size_t frame_index, std::span<std::uint8_t> dst,
     const strides& dst_strides, const decode_opts& opt) {
 	if (!info.has_pixel_data) {

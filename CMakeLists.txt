@@ -78,7 +78,7 @@ add_library(dicomsdl STATIC
 	src/pixel_decoder_rle.cpp
 	src/pixel_decoder_jpeg2k.cpp
 	src/pixel_decoder_jpegls.cpp
-	src/pixel_decoder_jpeg_turbo.cpp
+	src/pixel_decoder_jpeg.cpp
 )
 set_target_properties(dicomsdl PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(dicomsdl PROPERTIES

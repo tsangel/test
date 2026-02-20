@@ -782,7 +782,7 @@ void decode_into(const DataSet& ds, std::size_t frame_index,
 			detail::decode_jpegls_into(ds, info, frame_index, dst, dst_strides, effective_opt);
 			return;
 		}
-		detail::decode_jpeg_turbo_into(ds, info, frame_index, dst, dst_strides, effective_opt);
+		detail::decode_jpeg_into(ds, info, frame_index, dst, dst_strides, effective_opt);
 		return;
 	default:
 		diag::error_and_throw(

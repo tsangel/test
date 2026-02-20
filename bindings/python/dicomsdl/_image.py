@@ -39,7 +39,7 @@ def _normalize_mono_to_uint8(array, window: tuple[float, float] | None):
     try:
         import numpy as np
     except ImportError as exc:  # pragma: no cover - numpy is required for to_array anyway.
-        raise ImportError("DataSet.to_image requires NumPy to be installed.") from exc
+        raise ImportError("DataSet.to_pil_image requires NumPy to be installed.") from exc
 
     if array.dtype == np.uint8 and window is None:
         return array
@@ -68,7 +68,7 @@ def _normalize_color_to_uint8(array):
     try:
         import numpy as np
     except ImportError as exc:  # pragma: no cover - numpy is required for to_array anyway.
-        raise ImportError("DataSet.to_image requires NumPy to be installed.") from exc
+        raise ImportError("DataSet.to_pil_image requires NumPy to be installed.") from exc
 
     if array.dtype == np.uint8:
         return array
@@ -100,7 +100,7 @@ def _should_convert_ybr_to_rgb(photometric: str | None) -> bool:
     }
 
 
-def _dataset_to_image(
+def _dataset_to_pil_image(
     self: _dicomsdl.DataSet,
     frame: int = 0,
     *,
@@ -113,7 +113,9 @@ def _dataset_to_image(
     try:
         from PIL import Image
     except ImportError as exc:
-        raise ImportError("DataSet.to_image requires Pillow. Install with 'pip install pillow'.") from exc
+        raise ImportError(
+            "DataSet.to_pil_image requires Pillow. Install with 'pip install pillow'."
+        ) from exc
 
     array = self.to_array(frame=frame, scaled=True)
     if array.ndim == 2:
@@ -127,11 +129,11 @@ def _dataset_to_image(
     if array.ndim == 3:
         channels = int(array.shape[2])
         if channels not in (3, 4):
-            raise ValueError(f"unsupported color shape for to_image: {array.shape}")
+            raise ValueError(f"unsupported color shape for to_pil_image: {array.shape}")
 
         photometric = _get_tag_upper_text(self, "PhotometricInterpretation")
         if photometric == "PALETTE COLOR":
-            raise NotImplementedError("to_image does not yet support PALETTE COLOR.")
+            raise NotImplementedError("to_pil_image does not yet support PALETTE COLOR.")
 
         color = _normalize_color_to_uint8(array)
         if _should_convert_ybr_to_rgb(photometric):
@@ -142,7 +144,7 @@ def _dataset_to_image(
         mode = "RGB" if channels == 3 else "RGBA"
         return Image.fromarray(color, mode=mode)
 
-    raise ValueError(f"unsupported pixel array ndim for to_image: {array.ndim}")
+    raise ValueError(f"unsupported pixel array ndim for to_pil_image: {array.ndim}")
 
 
-_dicomsdl.DataSet.to_image = _dataset_to_image
+_dicomsdl.DataSet.to_pil_image = _dataset_to_pil_image
