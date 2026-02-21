@@ -73,3 +73,22 @@ def test_len_delegates_to_root_dataset():
 	df = dicom.read_file(_test_file())
 	assert len(df) == df.dataset.size()
 	assert len(df) > 0
+
+
+def test_dump_available_on_file_and_dataset():
+	df = dicom.read_file(_test_file())
+	text_from_file = df.dump()
+	text_from_dataset = df.dataset.dump()
+	text_from_file_short = df.dump(40)
+	text_from_dataset_short = df.dataset.dump(40)
+	text_from_file_no_offset = df.dump(80, False)
+	text_from_dataset_no_offset = df.dataset.dump(80, False)
+	assert "TAG\tVR\tLEN\tVM\tOFFSET\tVALUE\tKEYWORD" in text_from_file
+	assert "TAG\tVR\tLEN\tVM\tOFFSET\tVALUE\tKEYWORD" in text_from_dataset
+	assert "TAG\tVR\tLEN\tVM\tVALUE\tKEYWORD" in text_from_file_no_offset
+	assert "TAG\tVR\tLEN\tVM\tVALUE\tKEYWORD" in text_from_dataset_no_offset
+	assert "OFFSET\tVALUE" not in text_from_file_no_offset
+	assert "OFFSET\tVALUE" not in text_from_dataset_no_offset
+	assert "'00020010'" in text_from_file
+	assert isinstance(text_from_file_short, str)
+	assert isinstance(text_from_dataset_short, str)

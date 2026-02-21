@@ -935,6 +935,10 @@ NB_MODULE(_dicomsdl, m) {
 		    "Remove a DataElement by tag if it exists")
 		.def("dump_elements", &DataSet::dump_elements,
 		    "Print internal element storage for debugging")
+		.def("dump", &DataSet::dump,
+		    nb::arg("max_print_chars") = static_cast<std::size_t>(80),
+		    nb::arg("include_offset") = true,
+		    "Return a human-readable DataSet dump as text")
 		.def("get_dataelement",
 		    [](DataSet& self, const Tag& tag) -> DataElement& {
 		        return *self.get_dataelement(tag);
@@ -1053,6 +1057,10 @@ NB_MODULE(_dicomsdl, m) {
 		.def("__len__",
 		    [](DicomFile& self) { return self.dataset().size(); },
 		    "Number of active DataElements currently available in the root DataSet")
+		.def("dump", &DicomFile::dump,
+		    nb::arg("max_print_chars") = static_cast<std::size_t>(80),
+		    nb::arg("include_offset") = true,
+		    "Return a human-readable root DataSet dump as text")
 		.def("__iter__",
 		    [](DicomFile& self) {
 			    return PyDataElementIterator(self.dataset());

@@ -69,6 +69,7 @@ include(ExternalProject)
 
 add_library(dicomsdl STATIC
 	src/dataset.cpp
+	src/dumpdataset.cpp
 	src/dicomfile.cpp
 	src/sequence.cpp
 	src/dataelement.cpp
@@ -384,6 +385,11 @@ if(DICOM_BUILD_EXAMPLES)
 		examples/simple_read.cpp
 	)
 	target_link_libraries(simple_read PRIVATE dicomsdl)
+
+	add_executable(dicomdump
+		examples/dicomdump.cpp
+	)
+	target_link_libraries(dicomdump PRIVATE dicomsdl)
 endif()
 
 option(DICOM_BUILD_PYTHON "Build Python bindings with nanobind" ON)

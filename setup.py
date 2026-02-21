@@ -97,6 +97,11 @@ setup(
     package_data={"dicomsdl": ["py.typed", "*.pyi"]},
     ext_modules=[CMakeExtension("dicomsdl._dicomsdl")],
     cmdclass={"build_ext": CMakeBuild},
+    entry_points={
+        "console_scripts": [
+            "dicomdump=dicomsdl.dicomdump:main",
+        ],
+    },
     include_package_data=True,
     zip_safe=False,
 )

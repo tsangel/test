@@ -1319,6 +1319,9 @@ public:
 
 	/// Print elements to stdout (debug).
 	void dump_elements() const;
+	/// Render a human-readable dataset dump as text.
+	[[nodiscard]] std::string dump(
+	    std::size_t max_print_chars = 80, bool include_offset = true) const;
 
 	/// Read all elements from the attached stream with options.
 	void read_attached_stream(const ReadOptions& options);
@@ -1410,6 +1413,8 @@ public:
 	[[nodiscard]] InStream& stream();
 	[[nodiscard]] const InStream& stream() const;
 	[[nodiscard]] std::size_t size() const;
+	[[nodiscard]] std::string dump(
+	    std::size_t max_print_chars = 80, bool include_offset = true) const;
 	DataElement* add_dataelement(Tag tag, VR vr = VR::None, std::size_t offset = 0, std::size_t length = 0);
 	void remove_dataelement(Tag tag);
 	DataElement* get_dataelement(Tag tag);

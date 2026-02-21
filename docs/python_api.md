@@ -28,6 +28,9 @@ for elem in df:
 # Add an element (offset/length refer to original file offsets)
 df.add_dataelement(tag=dicom.keyword_to_tag_vr("PatientName")[0], vr=dicom.VR.PN, offset=0, length=0)
 
+# Hide OFFSET column when needed
+print(df.dump(include_offset=False))
+
 # If you need explicit root dataset object:
 ds = df.dataset
 ```

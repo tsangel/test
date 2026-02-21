@@ -6,17 +6,17 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cctype>
 #include <cstring>
 #include <fmt/format.h>
 #include <iostream>
+#include <limits>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
-#include <span>
-#include <cctype>
-#include <limits>
 
 #include <libdeflate.h>
 
