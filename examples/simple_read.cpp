@@ -9,13 +9,13 @@ int main(int argc, char* argv[]) {
     }
 
     const std::string path = argv[1];
-    auto dataset = dicom::read_file(path);
-    if (!dataset) {
+    auto file = dicom::read_file(path);
+    if (!file) {
         std::cerr << "Failed to read: " << path << "\n";
         return 1;
     }
 
-    std::cout << "Loaded: " << dataset->path()
-              << " (bytes=" << dataset->stream().datasize() << ")\n";
+    std::cout << "Loaded: " << file->path()
+              << " (bytes=" << file->stream().datasize() << ")\n";
     return 0;
 }

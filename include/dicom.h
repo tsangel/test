@@ -848,7 +848,7 @@ inline constexpr bool WellKnown::ends_with_ffd9_marker() const noexcept {
 
 class Sequence;
 class PixelSequence;
-
+class DicomFile;
 class DataSet;
 /// Options controlling how a DataSet is read from a stream.
 struct ReadOptions {
@@ -909,10 +909,10 @@ struct modality_lut {
 	std::vector<float> values;
 };
 
-/// Returns whether scaled float output is effectively applied for this dataset and options.
+/// Returns whether scaled float output is effectively applied for this file and options.
 /// Scaled output is ignored when SamplesPerPixel != 1, or when both Modality LUT Sequence
 /// and Rescale Slope/Intercept are absent.
-[[nodiscard]] bool should_use_scaled_output(const DataSet& ds, const decode_opts& opt = {});
+[[nodiscard]] bool should_use_scaled_output(const DicomFile& df, const decode_opts& opt = {});
 
 /// Decode a single frame into caller-provided buffer.
 /// Current implementation supports raw(uncompressed), RLE, JPEG (via libjpeg-turbo),
@@ -924,9 +924,9 @@ struct modality_lut {
 /// - JPEG-LS: integral up to 16-bit
 /// - JPEG 2000: integral up to 32-bit
 /// When scaled output is effectively enabled, output sample type is float32.
-void decode_into(const DataSet& ds, std::size_t frame_index,
+void decode_into(const DicomFile& df, std::size_t frame_index,
     std::span<std::uint8_t> dst, const decode_opts& opt = {});
-void decode_into(const DataSet& ds, std::size_t frame_index,
+void decode_into(const DicomFile& df, std::size_t frame_index,
     std::span<std::uint8_t> dst, const strides& dst_strides, const decode_opts& opt = {});
 
 } // namespace pixel
@@ -1226,23 +1226,25 @@ private:
 };
 
 
-	/// Root or nested DICOM dataset. Holds elements and the underlying stream identifier,
-	/// and supports lazy reading/iteration of elements.
-	class DataSet {
-	public:
-		using iterator = DataElementIterator<std::vector<DataElement>::iterator,
-		    std::map<std::uint32_t, DataElement>::iterator, DataElement&, DataElement*>;
-		using const_iterator = DataElementIterator<std::vector<DataElement>::const_iterator,
-		    std::map<std::uint32_t, DataElement>::const_iterator, const DataElement&, const DataElement*>;
+/// Root or nested DICOM dataset. Holds elements and the underlying stream identifier,
+/// and supports lazy reading/iteration of elements.
+class DataSet {
+public:
+	using iterator = DataElementIterator<std::vector<DataElement>::iterator,
+	    std::map<std::uint32_t, DataElement>::iterator, DataElement&, DataElement*>;
+	using const_iterator = DataElementIterator<std::vector<DataElement>::const_iterator,
+	    std::map<std::uint32_t, DataElement>::const_iterator, const DataElement&, const DataElement*>;
 
-		/// Construct an empty root dataset.
-		DataSet();
-		/// Construct a child dataset sharing the same root stream.
-		explicit DataSet(DataSet* root_dataset);
-		~DataSet();
-		DataSet(const DataSet&) = delete;
-		DataSet& operator=(const DataSet&) = delete;
-		DataSet(DataSet&&) noexcept = default;
+	/// Construct an empty root dataset.
+	DataSet();
+	/// Construct a child dataset inheriting parse/file context from an existing dataset tree.
+	explicit DataSet(DataSet* root_dataset);
+	/// Construct a root dataset owned by DicomFile.
+	explicit DataSet(DicomFile* root_file);
+	~DataSet();
+	DataSet(const DataSet&) = delete;
+	DataSet& operator=(const DataSet&) = delete;
+	DataSet(DataSet&&) noexcept = default;
 	DataSet& operator=(DataSet&&) noexcept = default;
 
 	/// Attach the dataset to a DICOM file on disk. Lazy: parsing happens on first access.
@@ -1263,17 +1265,17 @@ private:
 	void attach_to_memory(const std::string& name, const std::uint8_t* data,
 	    std::size_t size, bool copy = true);
 
-		/// Attach by taking ownership of a movable buffer.
-		/// @param name Identifier reported by path() and logs.
-		/// @param buffer Buffer that will be moved into the DataSet.
-		/// @note DataSet keeps file/memory mappings alive for as long as the instance exists.
-		/// Destroy or reset all DataSet instances that reference a path before deleting or
-		/// overwriting the underlying file; some OSes (especially Windows) may refuse removal
-		/// while a mapping handle is open.
-		void attach_to_memory(std::string name, std::vector<std::uint8_t>&& buffer);
+	/// Attach by taking ownership of a movable buffer.
+	/// @param name Identifier reported by path() and logs.
+	/// @param buffer Buffer that will be moved into the DataSet.
+	/// @note DataSet keeps file/memory mappings alive for as long as the instance exists.
+	/// Destroy or reset all DataSet instances that reference a path before deleting or
+	/// overwriting the underlying df; some OSes (especially Windows) may refuse removal
+	/// while a mapping handle is open.
+	void attach_to_memory(std::string name, std::vector<std::uint8_t>&& buffer);
 
-		/// Returns the current stream identifier (file path, provided name, or "<memory>").
-		const std::string& path() const;
+	/// Returns the current stream identifier (file path, provided name, or "<memory>").
+	const std::string& path() const;
 
 	/// Access the underlying input stream (root dataset only).
 	InStream& stream();
@@ -1292,7 +1294,7 @@ private:
 
 	/// Add or replace a data element (vector-backed, preserves insertion order).
 	/// @return Pointer to the inserted element.
-	DataElement* add_dataelement(Tag tag, VR vr=VR::None, std::size_t offset=0, std::size_t length=0);
+	DataElement* add_dataelement(Tag tag, VR vr = VR::None, std::size_t offset = 0, std::size_t length = 0);
 
 	/// Remove a data element by tag (no-op if missing).
 	void remove_dataelement(Tag tag);
@@ -1319,13 +1321,13 @@ private:
 	void dump_elements() const;
 
 	/// Read all elements from the attached stream with options.
-		void read_attached_stream(const ReadOptions& options);
+	void read_attached_stream(const ReadOptions& options);
 
-		/// Read elements until the given tag boundary.
-		void read_elements_until(Tag load_until, InStream* stream);
+	/// Read elements until the given tag boundary.
+	void read_elements_until(Tag load_until, InStream* stream);
 
-		/// Ensure the given tag (and preceding tags) are loaded.
-		void ensure_loaded(Tag tag);
+	/// Ensure the given tag (and preceding tags) are loaded.
+	void ensure_loaded(Tag tag);
 
 	/// Const version of ensure_loaded.
 	void ensure_loaded(Tag tag) const;
@@ -1337,59 +1339,13 @@ private:
 	[[nodiscard]] inline bool is_explicit_vr() const { return explicit_vr_; }
 
 	/// Well-known transfer syntax UID for this dataset.
-	[[nodiscard]] inline uid::WellKnown transfer_syntax_uid() const { return transfer_syntax_uid_; }
-
-	struct pixel_info_t {
-		uid::WellKnown ts{};
-		int rows{0};
-		int cols{0};
-		int samples_per_pixel{1};
-		int bits_allocated{0};
-		pixel::dtype sv_dtype{pixel::dtype::unknown};
-		int frames{1};
-		pixel::planar planar_configuration{pixel::planar::interleaved};
-		bool has_pixel_data{false};
-	};
-
-	/// Read pixel-related metadata from the dataset tags.
-	/// Results are cached inside DataSet. Set recalc=true to force refresh.
-	[[nodiscard]] const pixel_info_t& pixel_info(bool recalc = false) const;
-
-	/// Calculate output strides for one decoded frame with the given options.
-	[[nodiscard]] pixel::strides calc_strides(const pixel::decode_opts& opt = {}) const;
-
-	/// Read Modality LUT Sequence (0028,3000) item #0 as a lookup table.
-	/// Returns std::nullopt when Modality LUT Sequence is absent.
-	/// Throws when the sequence exists but descriptor/data are invalid.
-	[[nodiscard]] std::optional<pixel::modality_lut> modality_lut() const;
-
-	/// Decode selected frame into caller-provided buffer.
-	void decode_into(std::size_t frame_index, std::span<std::uint8_t> dst,
-	    const pixel::decode_opts& opt = {}) const {
-		pixel::decode_into(*this, frame_index, dst, opt);
-	}
-	void decode_into(std::size_t frame_index, std::span<std::uint8_t> dst,
-	    const pixel::strides& dst_strides, const pixel::decode_opts& opt = {}) const {
-		pixel::decode_into(*this, frame_index, dst, dst_strides, opt);
-	}
-
-	/// Decode frame 0 into caller-provided buffer.
-	void decode_into(std::span<std::uint8_t> dst, const pixel::decode_opts& opt = {}) const {
-		pixel::decode_into(*this, 0, dst, opt);
-	}
-	void decode_into(std::span<std::uint8_t> dst, const pixel::strides& dst_strides,
-	    const pixel::decode_opts& opt = {}) const {
-		pixel::decode_into(*this, 0, dst, dst_strides, opt);
-	}
-
-	/// Decode selected frame and return decoded bytes as an owning vector.
-	[[nodiscard]] std::vector<std::uint8_t> pixel_data(std::size_t frame_index = 0,
-	    const pixel::decode_opts& opt = {}) const {
-		const auto dst_strides = calc_strides(opt);
-		std::vector<std::uint8_t> out(dst_strides.frame);
-		pixel::decode_into(*this, frame_index, std::span<std::uint8_t>(out), dst_strides, opt);
-		return out;
-	}
+	[[nodiscard]] uid::WellKnown transfer_syntax_uid() const;
+	/// Root dataset context for this dataset tree.
+	[[nodiscard]] DataSet* root_dataset() const noexcept;
+	/// Root file/session context (nullptr for standalone DataSet).
+	[[nodiscard]] DicomFile* root_file() const noexcept { return root_file_; }
+	/// Number of active DataElements currently available in this dataset.
+	[[nodiscard]] std::size_t size() const;
 
 	/// Begin iterator over active elements (vector + map merge).
 	iterator begin();
@@ -1410,30 +1366,118 @@ private:
 	const_iterator cend() const;
 
 private:
-	void invalidate_pixel_info_cache() const { pixel_info_cache_.reset(); }
+	friend class DicomFile;
 	void attach_to_stream(std::string identifier, std::unique_ptr<InStream> stream);
-	void set_transfer_syntax(uid::WellKnown transfer_syntax);
+	void set_root_file(DicomFile* root_file) noexcept { root_file_ = root_file; }
 	std::unique_ptr<InStream> stream_;
-	DataSet* root_dataset_{this};
+	DicomFile* root_file_{nullptr};
+	DataSet* root_dataset_{nullptr};
 	Tag last_tag_loaded_{Tag::from_value(0)};
-	uid::WellKnown transfer_syntax_uid_{};
 	bool little_endian_{true};
 	bool explicit_vr_{true};
 	std::size_t offset_{0};  // absolute offset within the root stream where this dataset starts
 	std::vector<DataElement> elements_;
 	std::map<std::uint32_t, DataElement> element_map_;
+};
+
+/// Owns root DataSet and file-level parse/decode session state.
+class DicomFile {
+public:
+	using iterator = DataSet::iterator;
+	using const_iterator = DataSet::const_iterator;
+	struct pixel_info_t {
+		uid::WellKnown ts{};
+		int rows{0};
+		int cols{0};
+		int samples_per_pixel{1};
+		int bits_allocated{0};
+		pixel::dtype sv_dtype{pixel::dtype::unknown};
+		int frames{1};
+		pixel::planar planar_configuration{pixel::planar::interleaved};
+		bool has_pixel_data{false};
+	};
+
+	DicomFile();
+	~DicomFile();
+	DicomFile(const DicomFile&) = delete;
+	DicomFile& operator=(const DicomFile&) = delete;
+	DicomFile(DicomFile&&) noexcept = default;
+	DicomFile& operator=(DicomFile&&) noexcept = default;
+
+	[[nodiscard]] DataSet& dataset();
+	[[nodiscard]] const DataSet& dataset() const;
+	[[nodiscard]] const std::string& path() const;
+	[[nodiscard]] InStream& stream();
+	[[nodiscard]] const InStream& stream() const;
+	[[nodiscard]] std::size_t size() const;
+	DataElement* add_dataelement(Tag tag, VR vr = VR::None, std::size_t offset = 0, std::size_t length = 0);
+	void remove_dataelement(Tag tag);
+	DataElement* get_dataelement(Tag tag);
+	const DataElement* get_dataelement(Tag tag) const;
+	DataElement* get_dataelement(std::string_view tag_path);
+	const DataElement* get_dataelement(std::string_view tag_path) const;
+	DataElement& operator[](Tag tag);
+	const DataElement& operator[](Tag tag) const;
+	iterator begin();
+	iterator end();
+	const_iterator begin() const;
+	const_iterator end() const;
+	const_iterator cbegin() const;
+	const_iterator cend() const;
+
+	void attach_to_file(const std::string& path);
+	void attach_to_memory(const std::uint8_t* data, std::size_t size, bool copy = true);
+	void attach_to_memory(const std::string& name, const std::uint8_t* data,
+	    std::size_t size, bool copy = true);
+	void attach_to_memory(std::string name, std::vector<std::uint8_t>&& buffer);
+	void read_attached_stream(const ReadOptions& options = {});
+
+	[[nodiscard]] uid::WellKnown transfer_syntax_uid() const { return transfer_syntax_uid_; }
+	[[nodiscard]] const pixel_info_t& pixel_info(bool recalc = false) const;
+	[[nodiscard]] pixel::strides calc_strides(const pixel::decode_opts& opt = {}) const;
+	[[nodiscard]] std::optional<pixel::modality_lut> modality_lut() const;
+	void decode_into(std::size_t frame_index, std::span<std::uint8_t> dst,
+	    const pixel::decode_opts& opt = {}) const {
+		pixel::decode_into(*this, frame_index, dst, opt);
+	}
+	void decode_into(std::size_t frame_index, std::span<std::uint8_t> dst,
+	    const pixel::strides& dst_strides, const pixel::decode_opts& opt = {}) const {
+		pixel::decode_into(*this, frame_index, dst, dst_strides, opt);
+	}
+	void decode_into(std::span<std::uint8_t> dst, const pixel::decode_opts& opt = {}) const {
+		pixel::decode_into(*this, 0, dst, opt);
+	}
+	void decode_into(std::span<std::uint8_t> dst, const pixel::strides& dst_strides,
+	    const pixel::decode_opts& opt = {}) const {
+		pixel::decode_into(*this, 0, dst, dst_strides, opt);
+	}
+	[[nodiscard]] std::vector<std::uint8_t> pixel_data(std::size_t frame_index = 0,
+	    const pixel::decode_opts& opt = {}) const {
+		const auto dst_strides = calc_strides(opt);
+		std::vector<std::uint8_t> out(dst_strides.frame);
+		pixel::decode_into(*this, frame_index, std::span<std::uint8_t>(out), dst_strides, opt);
+		return out;
+	}
+
+private:
+	friend class DataSet;
+	void invalidate_pixel_info_cache() const { pixel_info_cache_.reset(); }
+	void set_transfer_syntax(uid::WellKnown transfer_syntax);
+
+	std::unique_ptr<DataSet> root_dataset_;
+	uid::WellKnown transfer_syntax_uid_{};
 	mutable std::optional<pixel_info_t> pixel_info_cache_{};
 };
 
 /// Represents a DICOM SQ element value: an ordered list of nested DataSets.
-	class Sequence {
-	public:
-		/// Construct a sequence tied to the given root dataset.
-		explicit Sequence(DataSet* root_dataset);
-		~Sequence();
-		Sequence(const Sequence&) = delete;
-		Sequence& operator=(const Sequence&) = delete;
-		Sequence(Sequence&&) noexcept = default;
+class Sequence {
+public:
+	/// Construct a sequence tied to the given root dataset context.
+	explicit Sequence(DataSet* root_dataset);
+	~Sequence();
+	Sequence(const Sequence&) = delete;
+	Sequence& operator=(const Sequence&) = delete;
+	Sequence(Sequence&&) noexcept = default;
 	Sequence& operator=(Sequence&&) noexcept = default;
 
 	/// Read sequence items from the current stream position.
@@ -1468,7 +1512,6 @@ private:
 
 private:
 	DataSet* root_dataset_{nullptr};
-	[[maybe_unused]] uid::WellKnown transfer_syntax_uid_{};
 	std::vector<std::unique_ptr<DataSet>> seq_;
 };
 
@@ -1605,16 +1648,16 @@ inline const PixelSequence* DataElement::as_pixel_sequence() const {
 	return vr_.is_pixel_sequence() ? storage_.pixseq : nullptr;
 }
 
-/// Read a DICOM dataset from disk (eager up to options.load_until).
-std::unique_ptr<DataSet> read_file(const std::string& path, ReadOptions options = {});
+/// Read a DICOM file/session from disk (eager up to options.load_until).
+std::unique_ptr<DicomFile> read_file(const std::string& path, ReadOptions options = {});
 /// Read from a raw memory buffer (identifier set to "<memory>"); copies unless options.copy is false.
-std::unique_ptr<DataSet> read_bytes(const std::uint8_t* data, std::size_t size,
+std::unique_ptr<DicomFile> read_bytes(const std::uint8_t* data, std::size_t size,
     ReadOptions options = {});
 /// Read from a named raw memory buffer.
-std::unique_ptr<DataSet> read_bytes(const std::string& name, const std::uint8_t* data,
+std::unique_ptr<DicomFile> read_bytes(const std::string& name, const std::uint8_t* data,
     std::size_t size, ReadOptions options = {});
 /// Read from an owning buffer moved into the dataset.
-std::unique_ptr<DataSet> read_bytes(std::string name, std::vector<std::uint8_t>&& buffer,
+std::unique_ptr<DicomFile> read_bytes(std::string name, std::vector<std::uint8_t>&& buffer,
     ReadOptions options = {});
 
 } // namespace dicom

@@ -2,6 +2,9 @@ import pathlib
 
 import dicomsdl as dicom
 
+def _test_file(name: str = "test_le.dcm") -> str:
+	return str(pathlib.Path(__file__).resolve().parent.parent / name)
+
 
 def test_keyword_roundtrip():
 	tag, vr = dicom.keyword_to_tag_vr("PatientName")
@@ -55,3 +58,18 @@ def test_uid_keyword_optional():
 	assert uid.keyword == "JPEGBaseline8Bit"
 	assert uid.name
 	assert uid.type
+
+
+def test_dicomfile_dir_includes_dataset_members():
+	df = dicom.read_file(_test_file())
+	names = dir(df)
+	assert "dataset" in names
+	assert "path" in names
+	assert "to_array" in names
+	assert "Rows" in names
+
+
+def test_len_delegates_to_root_dataset():
+	df = dicom.read_file(_test_file())
+	assert len(df) == df.dataset.size()
+	assert len(df) > 0

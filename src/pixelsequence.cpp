@@ -208,7 +208,10 @@ std::vector<std::uint8_t> PixelFrame::coalesce_encoded_data(const InStream& seq_
 }
 
 PixelSequence::PixelSequence(DataSet* root_dataset, uid::WellKnown transfer_syntax)
-	: root_dataset_(root_dataset), transfer_syntax_(transfer_syntax) {}
+	: root_dataset_(root_dataset ? root_dataset->root_dataset() : nullptr),
+	  transfer_syntax_(transfer_syntax.valid()
+	          ? transfer_syntax
+	          : (root_dataset_ ? root_dataset_->transfer_syntax_uid() : uid::WellKnown{})) {}
 
 PixelSequence::~PixelSequence() = default;
 

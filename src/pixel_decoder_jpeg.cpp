@@ -55,7 +55,7 @@ bool sv_dtype_is_integral(dtype sv_dtype) noexcept {
 	}
 }
 
-void validate_destination(const DataSet& ds, std::span<std::uint8_t> dst,
+void validate_destination(const DicomFile& df, std::span<std::uint8_t> dst,
     const strides& dst_strides, planar dst_planar, std::size_t rows, std::size_t cols,
     std::size_t samples_per_pixel, std::size_t bytes_per_sample) {
 	const std::size_t dst_row_components =
@@ -64,7 +64,7 @@ void validate_destination(const DataSet& ds, std::span<std::uint8_t> dst,
 	if (dst_strides.row < dst_min_row_bytes) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=row stride too small (need>={}, got={})",
-		    ds.path(), dst_min_row_bytes, dst_strides.row);
+		    df.path(), dst_min_row_bytes, dst_strides.row);
 	}
 
 	std::size_t min_frame_bytes = dst_strides.row * rows;
@@ -74,42 +74,43 @@ void validate_destination(const DataSet& ds, std::span<std::uint8_t> dst,
 	if (dst_strides.frame < min_frame_bytes) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=frame stride too small (need>={}, got={})",
-		    ds.path(), min_frame_bytes, dst_strides.frame);
+		    df.path(), min_frame_bytes, dst_strides.frame);
 	}
 	if (dst.size() < dst_strides.frame) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=destination too small (need={}, got={})",
-		    ds.path(), dst_strides.frame, dst.size());
+		    df.path(), dst_strides.frame, dst.size());
 	}
 }
 
-jpeg_frame_buffer load_jpeg_frame_buffer(const DataSet& ds, std::size_t frame_index) {
+jpeg_frame_buffer load_jpeg_frame_buffer(const DicomFile& df, std::size_t frame_index) {
+	const auto& ds = df.dataset();
 	const auto& pixel_data = ds["PixelData"_tag];
 	if (!pixel_data || !pixel_data.vr().is_pixel_sequence()) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=JPEG transfer syntax requires encapsulated PixelData",
-		    ds.path());
+		    df.path());
 	}
 
 	const auto* pixel_sequence = pixel_data.as_pixel_sequence();
 	if (!pixel_sequence) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=JPEG pixel sequence is missing",
-		    ds.path());
+		    df.path());
 	}
 
 	const auto frame_count = pixel_sequence->number_of_frames();
 	if (frame_index >= frame_count) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} frame={} reason=JPEG frame index out of range (frames={})",
-		    ds.path(), frame_index, frame_count);
+		    df.path(), frame_index, frame_count);
 	}
 
 	const auto* frame = pixel_sequence->frame(frame_index);
 	if (!frame) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} frame={} reason=JPEG frame is missing",
-		    ds.path(), frame_index);
+		    df.path(), frame_index);
 	}
 
 	jpeg_frame_buffer source{};
@@ -122,13 +123,13 @@ jpeg_frame_buffer load_jpeg_frame_buffer(const DataSet& ds, std::size_t frame_in
 	if (fragments.empty()) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} frame={} reason=JPEG frame has no fragments",
-		    ds.path(), frame_index);
+		    df.path(), frame_index);
 	}
 	for (const auto& fragment : fragments) {
 		if (fragment.length == 0) {
 			diag::error_and_throw(
 			    "pixel::decode_into file={} frame={} reason=JPEG zero-length fragment is not supported",
-			    ds.path(), frame_index);
+			    df.path(), frame_index);
 		}
 	}
 
@@ -136,7 +137,7 @@ jpeg_frame_buffer load_jpeg_frame_buffer(const DataSet& ds, std::size_t frame_in
 	if (!stream) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} frame={} reason=JPEG pixel sequence stream is missing",
-		    ds.path(), frame_index);
+		    df.path(), frame_index);
 	}
 
 	if (fragments.size() == 1) {
@@ -150,7 +151,7 @@ jpeg_frame_buffer load_jpeg_frame_buffer(const DataSet& ds, std::size_t frame_in
 	return source;
 }
 
-[[noreturn]] void throw_turbojpeg_error(const DataSet& ds, std::size_t frame_index,
+[[noreturn]] void throw_turbojpeg_error(const DicomFile& df, std::size_t frame_index,
     tjhandle handle, const char* action) {
 	const char* message = tj3GetErrorStr(handle);
 	if (!message || message[0] == '\0') {
@@ -158,7 +159,7 @@ jpeg_frame_buffer load_jpeg_frame_buffer(const DataSet& ds, std::size_t frame_in
 	}
 	diag::error_and_throw(
 	    "pixel::decode_into file={} frame={} reason={} ({})",
-	    ds.path(), frame_index, action, message);
+	    df.path(), frame_index, action, message);
 }
 
 [[nodiscard]] std::size_t colorspace_component_count(int colorspace) noexcept {
@@ -189,11 +190,11 @@ jpeg_frame_buffer load_jpeg_frame_buffer(const DataSet& ds, std::size_t frame_in
 	}
 }
 
-[[nodiscard]] int checked_int_stride(const DataSet& ds, const char* path_name, std::size_t stride) {
+[[nodiscard]] int checked_int_stride(const DicomFile& df, const char* path_name, std::size_t stride) {
 	if (stride > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason={} stride exceeds int ({})",
-		    ds.path(), path_name, stride);
+		    df.path(), path_name, stride);
 	}
 	return static_cast<int>(stride);
 }
@@ -281,7 +282,7 @@ std::optional<std::size_t> find_sequential_sos_se_patch_offset(
 	return std::nullopt;
 }
 
-void decode_with_turbojpeg(const DataSet& ds, std::size_t frame_index, tjhandle handle,
+void decode_with_turbojpeg(const DicomFile& df, std::size_t frame_index, tjhandle handle,
     std::span<const std::uint8_t> source, void* destination,
     int destination_pitch_samples, int destination_pixel_format,
     int precision_bits) {
@@ -301,12 +302,12 @@ void decode_with_turbojpeg(const DataSet& ds, std::size_t frame_index, tjhandle 
 	}
 
 	if (rc != 0) {
-		throw_turbojpeg_error(ds, frame_index, handle, "JPEG decode failed");
+		throw_turbojpeg_error(df, frame_index, handle, "JPEG decode failed");
 	}
 }
 
-void validate_decoded_header(const DataSet& ds, std::size_t frame_index,
-    const DataSet::pixel_info_t& info, std::size_t rows, std::size_t cols,
+void validate_decoded_header(const DicomFile& df, std::size_t frame_index,
+    const DicomFile::pixel_info_t& info, std::size_t rows, std::size_t cols,
     std::size_t samples_per_pixel, std::size_t src_bytes_per_sample,
     int decoded_width, int decoded_height, int decoded_precision, int decoded_lossless,
     int decoded_colorspace) {
@@ -314,86 +315,86 @@ void validate_decoded_header(const DataSet& ds, std::size_t frame_index,
 	    decoded_height != static_cast<int>(rows)) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} frame={} reason=JPEG decoded dimensions mismatch (decoded={}x{}, expected={}x{})",
-		    ds.path(), frame_index, decoded_height, decoded_width, rows, cols);
+		    df.path(), frame_index, decoded_height, decoded_width, rows, cols);
 	}
 
 	if (decoded_precision < 2 || decoded_precision > 16) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} frame={} reason=JPEG decoded precision is invalid ({})",
-		    ds.path(), frame_index, decoded_precision);
+		    df.path(), frame_index, decoded_precision);
 	}
 
 	const auto decoded_components = colorspace_component_count(decoded_colorspace);
 	if (decoded_components == 0) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} frame={} reason=JPEG colorspace {} is unsupported",
-		    ds.path(), frame_index, decoded_colorspace);
+		    df.path(), frame_index, decoded_colorspace);
 	}
 	if (decoded_components != samples_per_pixel) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} frame={} reason=JPEG component count mismatch (decoded={}, expected={})",
-		    ds.path(), frame_index, decoded_components, samples_per_pixel);
+		    df.path(), frame_index, decoded_components, samples_per_pixel);
 	}
 
 	if (info.ts.is_jpeg_lossless() && decoded_lossless == 0) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} frame={} reason=transfer syntax is JPEG lossless but codestream is lossy",
-		    ds.path(), frame_index);
+		    df.path(), frame_index);
 	}
 	if (info.ts.is_jpeg_baseline() && decoded_lossless != 0) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} frame={} reason=transfer syntax is JPEG lossy but codestream is lossless",
-		    ds.path(), frame_index);
+		    df.path(), frame_index);
 	}
 
 	const auto max_output_bits = static_cast<int>(src_bytes_per_sample * 8);
 	if (decoded_precision > max_output_bits) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} frame={} reason=JPEG decoded precision {} exceeds output {} bits",
-		    ds.path(), frame_index, decoded_precision, max_output_bits);
+		    df.path(), frame_index, decoded_precision, max_output_bits);
 	}
 	if (info.bits_allocated > 0 && decoded_precision > info.bits_allocated) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} frame={} reason=JPEG decoded precision {} exceeds BitsAllocated {}",
-		    ds.path(), frame_index, decoded_precision, info.bits_allocated);
+		    df.path(), frame_index, decoded_precision, info.bits_allocated);
 	}
 
 	if (decoded_precision <= 8 && src_bytes_per_sample != 1) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} frame={} reason=JPEG decoded precision {} requires 8-bit output but sv_dtype uses {} bytes",
-		    ds.path(), frame_index, decoded_precision, src_bytes_per_sample);
+		    df.path(), frame_index, decoded_precision, src_bytes_per_sample);
 	}
 	if (decoded_precision > 8 && src_bytes_per_sample != 2) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} frame={} reason=JPEG decoded precision {} requires 16-bit output but sv_dtype uses {} bytes",
-		    ds.path(), frame_index, decoded_precision, src_bytes_per_sample);
+		    df.path(), frame_index, decoded_precision, src_bytes_per_sample);
 	}
 }
 
 } // namespace
 
-void decode_jpeg_into(const DataSet& ds, const DataSet::pixel_info_t& info,
+void decode_jpeg_into(const DicomFile& df, const DicomFile::pixel_info_t& info,
     std::size_t frame_index, std::span<std::uint8_t> dst,
     const strides& dst_strides, const decode_opts& opt) {
 	if (!info.has_pixel_data) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=sv_dtype is unknown", ds.path());
+		    "pixel::decode_into file={} reason=sv_dtype is unknown", df.path());
 	}
 	if (!info.ts.is_jpeg_family() || info.ts.is_jpegls() || info.ts.is_jpeg2000() ||
 	    info.ts.is_jpegxl()) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=transfer syntax is not supported by libjpeg-turbo path ({})",
-		    ds.path(), ds.transfer_syntax_uid().value());
+		    df.path(), df.transfer_syntax_uid().value());
 	}
 	if (info.rows <= 0 || info.cols <= 0 || info.samples_per_pixel <= 0) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=invalid Rows/Columns/SamplesPerPixel",
-		    ds.path());
+		    df.path());
 	}
 	if (info.frames <= 0) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=invalid NumberOfFrames",
-		    ds.path());
+		    df.path());
 	}
 
 	const auto samples_per_pixel_value = info.samples_per_pixel;
@@ -401,45 +402,45 @@ void decode_jpeg_into(const DataSet& ds, const DataSet::pixel_info_t& info,
 	    samples_per_pixel_value != 4) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=only SamplesPerPixel=1/3/4 is supported in current JPEG path",
-		    ds.path());
+		    df.path());
 	}
 	const auto samples_per_pixel = static_cast<std::size_t>(samples_per_pixel_value);
 	if (opt.scaled && samples_per_pixel != 1) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=scaled output supports SamplesPerPixel=1 only",
-		    ds.path());
+		    df.path());
 	}
 	if (!sv_dtype_is_integral(info.sv_dtype)) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=JPEG supports integral sv_dtype only",
-		    ds.path());
+		    df.path());
 	}
 
 	const auto src_bytes_per_sample = sv_dtype_bytes(info.sv_dtype);
 	if (src_bytes_per_sample == 0 || src_bytes_per_sample > 2) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=JPEG supports integral sv_dtype up to 16-bit only",
-		    ds.path());
+		    df.path());
 	}
 
 	const auto frame_count = static_cast<std::size_t>(info.frames);
 	if (frame_index >= frame_count) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} frame={} reason=frame index out of range (frames={})",
-		    ds.path(), frame_index, frame_count);
+		    df.path(), frame_index, frame_count);
 	}
 
 	const auto rows = static_cast<std::size_t>(info.rows);
 	const auto cols = static_cast<std::size_t>(info.cols);
 	const auto dst_bytes_per_sample = opt.scaled ? sizeof(float) : src_bytes_per_sample;
 	validate_destination(
-	    ds, dst, dst_strides, opt.planar_out, rows, cols, samples_per_pixel, dst_bytes_per_sample);
+	    df, dst, dst_strides, opt.planar_out, rows, cols, samples_per_pixel, dst_bytes_per_sample);
 
-	const auto frame_source = load_jpeg_frame_buffer(ds, frame_index);
+	const auto frame_source = load_jpeg_frame_buffer(df, frame_index);
 	if (frame_source.view.empty()) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} frame={} reason=JPEG frame has empty codestream",
-		    ds.path(), frame_index);
+		    df.path(), frame_index);
 	}
 	std::span<const std::uint8_t> decode_source = frame_source.view;
 	std::vector<std::uint8_t> patched_source{};
@@ -453,11 +454,11 @@ void decode_jpeg_into(const DataSet& ds, const DataSet::pixel_info_t& info,
 	if (!handle.get()) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} frame={} reason=failed to initialize libjpeg-turbo decompressor",
-		    ds.path(), frame_index);
+		    df.path(), frame_index);
 	}
 
 	if (tj3DecompressHeader(handle.get(), decode_source.data(), decode_source.size()) != 0) {
-		throw_turbojpeg_error(ds, frame_index, handle.get(), "JPEG header decode failed");
+		throw_turbojpeg_error(df, frame_index, handle.get(), "JPEG header decode failed");
 	}
 
 	const int decoded_width = tj3Get(handle.get(), TJPARAM_JPEGWIDTH);
@@ -467,7 +468,7 @@ void decode_jpeg_into(const DataSet& ds, const DataSet::pixel_info_t& info,
 	const int decoded_colorspace = tj3Get(handle.get(), TJPARAM_COLORSPACE);
 
 	validate_decoded_header(
-	    ds, frame_index, info, rows, cols, samples_per_pixel, src_bytes_per_sample,
+	    df, frame_index, info, rows, cols, samples_per_pixel, src_bytes_per_sample,
 	    decoded_width, decoded_height, decoded_precision, decoded_lossless,
 	    decoded_colorspace);
 
@@ -475,7 +476,7 @@ void decode_jpeg_into(const DataSet& ds, const DataSet::pixel_info_t& info,
 	if (pixel_format == TJPF_UNKNOWN) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} frame={} reason=unsupported JPEG pixel format for SamplesPerPixel={}",
-		    ds.path(), frame_index, samples_per_pixel);
+		    df.path(), frame_index, samples_per_pixel);
 	}
 
 	const std::size_t src_row_bytes = cols * samples_per_pixel * src_bytes_per_sample;
@@ -489,24 +490,24 @@ void decode_jpeg_into(const DataSet& ds, const DataSet::pixel_info_t& info,
 		if (dst_strides.row % src_bytes_per_sample != 0) {
 			diag::error_and_throw(
 			    "pixel::decode_into file={} frame={} reason=destination row stride is not aligned to sample size {}",
-			    ds.path(), frame_index, src_bytes_per_sample);
+			    df.path(), frame_index, src_bytes_per_sample);
 		}
 		const int destination_pitch_samples = checked_int_stride(
-		    ds, "destination", dst_strides.row / src_bytes_per_sample);
-		decode_with_turbojpeg(ds, frame_index, handle.get(), decode_source,
+		    df, "destination", dst_strides.row / src_bytes_per_sample);
+		decode_with_turbojpeg(df, frame_index, handle.get(), decode_source,
 		    dst.data(), destination_pitch_samples, pixel_format, decoded_precision);
 		return;
 	}
 
 	if (src_bytes_per_sample == 1) {
 		std::vector<std::uint8_t> decoded(src_row_bytes * rows);
-		const int source_pitch_samples = checked_int_stride(ds, "source", src_row_samples);
-		decode_with_turbojpeg(ds, frame_index, handle.get(), decode_source,
+		const int source_pitch_samples = checked_int_stride(df, "source", src_row_samples);
+		decode_with_turbojpeg(df, frame_index, handle.get(), decode_source,
 		    decoded.data(), source_pitch_samples, pixel_format, decoded_precision);
 
 		if (opt.scaled) {
 			decode_mono_scaled_into_f32(
-			    ds, info, decoded.data(), dst, dst_strides, rows, cols, src_row_bytes);
+			    df, info, decoded.data(), dst, dst_strides, rows, cols, src_row_bytes);
 			return;
 		}
 
@@ -518,14 +519,14 @@ void decode_jpeg_into(const DataSet& ds, const DataSet::pixel_info_t& info,
 	}
 
 	std::vector<std::uint16_t> decoded(src_row_samples * rows);
-	const int source_pitch_samples = checked_int_stride(ds, "source", src_row_samples);
-	decode_with_turbojpeg(ds, frame_index, handle.get(), decode_source,
+	const int source_pitch_samples = checked_int_stride(df, "source", src_row_samples);
+	decode_with_turbojpeg(df, frame_index, handle.get(), decode_source,
 	    decoded.data(), source_pitch_samples, pixel_format, decoded_precision);
 	const auto* decoded_bytes = reinterpret_cast<const std::uint8_t*>(decoded.data());
 
 	if (opt.scaled) {
 		decode_mono_scaled_into_f32(
-		    ds, info, decoded_bytes, dst, dst_strides, rows, cols, src_row_bytes);
+		    df, info, decoded_bytes, dst, dst_strides, rows, cols, src_row_bytes);
 		return;
 	}
 

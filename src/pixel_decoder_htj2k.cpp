@@ -81,7 +81,7 @@ const char* htj2k_backend_name(htj2k_decoder backend) noexcept {
 	}
 }
 
-void validate_destination(const DataSet& ds, std::span<std::uint8_t> dst,
+void validate_destination(const DicomFile& df, std::span<std::uint8_t> dst,
     const strides& dst_strides, planar dst_planar, std::size_t rows, std::size_t cols,
     std::size_t samples_per_pixel, std::size_t bytes_per_sample) {
 	const std::size_t dst_row_components =
@@ -90,7 +90,7 @@ void validate_destination(const DataSet& ds, std::span<std::uint8_t> dst,
 	if (dst_strides.row < dst_min_row_bytes) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=row stride too small (need>={}, got={})",
-		    ds.path(), dst_min_row_bytes, dst_strides.row);
+		    df.path(), dst_min_row_bytes, dst_strides.row);
 	}
 
 	std::size_t min_frame_bytes = dst_strides.row * rows;
@@ -100,42 +100,43 @@ void validate_destination(const DataSet& ds, std::span<std::uint8_t> dst,
 	if (dst_strides.frame < min_frame_bytes) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=frame stride too small (need>={}, got={})",
-		    ds.path(), min_frame_bytes, dst_strides.frame);
+		    df.path(), min_frame_bytes, dst_strides.frame);
 	}
 	if (dst.size() < dst_strides.frame) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=destination too small (need={}, got={})",
-		    ds.path(), dst_strides.frame, dst.size());
+		    df.path(), dst_strides.frame, dst.size());
 	}
 }
 
-htj2k_frame_source load_htj2k_frame_source(const DataSet& ds, std::size_t frame_index) {
+htj2k_frame_source load_htj2k_frame_source(const DicomFile& df, std::size_t frame_index) {
+	const auto& ds = df.dataset();
 	const auto& pixel_data = ds["PixelData"_tag];
 	if (!pixel_data || !pixel_data.vr().is_pixel_sequence()) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=HTJ2K requires encapsulated PixelData",
-		    ds.path());
+		    df.path());
 	}
 
 	const auto* pixel_sequence = pixel_data.as_pixel_sequence();
 	if (!pixel_sequence) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=HTJ2K pixel sequence is missing",
-		    ds.path());
+		    df.path());
 	}
 
 	const auto frame_count = pixel_sequence->number_of_frames();
 	if (frame_index >= frame_count) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} frame={} reason=HTJ2K frame index out of range (frames={})",
-		    ds.path(), frame_index, frame_count);
+		    df.path(), frame_index, frame_count);
 	}
 
 	const auto* frame = pixel_sequence->frame(frame_index);
 	if (!frame) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} frame={} reason=HTJ2K frame is missing",
-		    ds.path(), frame_index);
+		    df.path(), frame_index);
 	}
 
 	htj2k_frame_source source{};
@@ -150,13 +151,13 @@ htj2k_frame_source load_htj2k_frame_source(const DataSet& ds, std::size_t frame_
 	if (fragments.empty()) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} frame={} reason=HTJ2K frame has no fragments",
-		    ds.path(), frame_index);
+		    df.path(), frame_index);
 	}
 	for (const auto& fragment : fragments) {
 		if (fragment.length == 0) {
 			diag::error_and_throw(
 			    "pixel::decode_into file={} frame={} reason=HTJ2K zero-length fragment is not supported",
-			    ds.path(), frame_index);
+			    df.path(), frame_index);
 		}
 	}
 
@@ -171,7 +172,7 @@ htj2k_frame_source load_htj2k_frame_source(const DataSet& ds, std::size_t frame_
 	if (!stream) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} frame={} reason=HTJ2K pixel sequence stream is missing",
-		    ds.path(), frame_index);
+		    df.path(), frame_index);
 	}
 	source.stream = stream;
 	source.fragments = &fragments;
@@ -181,7 +182,7 @@ htj2k_frame_source load_htj2k_frame_source(const DataSet& ds, std::size_t frame_
 		if (frag.length > std::numeric_limits<std::size_t>::max() - total_size) {
 			diag::error_and_throw(
 			    "pixel::decode_into file={} frame={} reason=HTJ2K frame size overflow",
-			    ds.path(), frame_index);
+			    df.path(), frame_index);
 		}
 		total_size += frag.length;
 	}
@@ -194,7 +195,7 @@ inline void store_htj2k_value(std::uint8_t* dst, DstT value) {
 	std::memcpy(dst, &value, sizeof(DstT));
 }
 
-std::span<const std::uint8_t> materialize_frame_codestream_for_openjph(const DataSet& ds,
+std::span<const std::uint8_t> materialize_frame_codestream_for_openjph(const DicomFile& df,
     std::size_t frame_index, const htj2k_frame_source& source, std::vector<std::uint8_t>& owned) {
 	if (!source.contiguous.empty()) {
 		return source.contiguous;
@@ -202,7 +203,7 @@ std::span<const std::uint8_t> materialize_frame_codestream_for_openjph(const Dat
 	if (!source.fragments || !source.stream) {
 		throw std::runtime_error(fmt::format(
 		    "HTJ2K frame source is not contiguous for OpenJPH (file={}, frame={})",
-		    ds.path(), frame_index));
+		    df.path(), frame_index));
 	}
 
 	owned.clear();
@@ -215,7 +216,7 @@ std::span<const std::uint8_t> materialize_frame_codestream_for_openjph(const Dat
 		if (copied > owned.size() || fragment.length > owned.size() - copied) {
 			throw std::runtime_error(fmt::format(
 			    "HTJ2K frame materialization overflow (file={}, frame={})",
-			    ds.path(), frame_index));
+			    df.path(), frame_index));
 		}
 		const auto fragment_span = source.stream->get_span(fragment.offset, fragment.length);
 		std::memcpy(owned.data() + copied, fragment_span.data(), fragment.length);
@@ -224,26 +225,26 @@ std::span<const std::uint8_t> materialize_frame_codestream_for_openjph(const Dat
 	if (copied != owned.size()) {
 		throw std::runtime_error(fmt::format(
 		    "HTJ2K frame materialization size mismatch (file={}, frame={}, expected={}, copied={})",
-		    ds.path(), frame_index, owned.size(), copied));
+		    df.path(), frame_index, owned.size(), copied));
 	}
 	return std::span<const std::uint8_t>(owned.data(), owned.size());
 }
 
-void validate_openjph_decoded_metadata(const DataSet& ds, std::size_t frame_index,
-    const DataSet::pixel_info_t& info, const ojph::param_siz& siz, std::size_t rows,
+void validate_openjph_decoded_metadata(const DicomFile& df, std::size_t frame_index,
+    const DicomFile::pixel_info_t& info, const ojph::param_siz& siz, std::size_t rows,
     std::size_t cols, std::size_t samples_per_pixel) {
 	const auto decoded_components = static_cast<std::size_t>(siz.get_num_components());
 	if (decoded_components != samples_per_pixel) {
 		throw std::runtime_error(fmt::format(
 		    "HTJ2K component count mismatch (file={}, frame={}, decoded={}, expected={})",
-		    ds.path(), frame_index, decoded_components, samples_per_pixel));
+		    df.path(), frame_index, decoded_components, samples_per_pixel));
 	}
 
 	const auto bytes_per_sample = sv_dtype_bytes(info.sv_dtype);
 	if (bytes_per_sample == 0 || bytes_per_sample > 4 || !sv_dtype_is_integral(info.sv_dtype)) {
 		throw std::runtime_error(fmt::format(
 		    "HTJ2K supports integral sv_dtype up to 32-bit only (file={}, frame={})",
-		    ds.path(), frame_index));
+		    df.path(), frame_index));
 	}
 
 	const bool expected_signed = sv_dtype_is_signed(info.sv_dtype);
@@ -251,7 +252,7 @@ void validate_openjph_decoded_metadata(const DataSet& ds, std::size_t frame_inde
 	if (!expected_signed && max_precision == 32) {
 		throw std::runtime_error(fmt::format(
 		    "HTJ2K unsigned 32-bit samples are not supported (file={}, frame={})",
-		    ds.path(), frame_index));
+		    df.path(), frame_index));
 	}
 
 	for (std::size_t c = 0; c < samples_per_pixel; ++c) {
@@ -260,48 +261,48 @@ void validate_openjph_decoded_metadata(const DataSet& ds, std::size_t frame_inde
 		if (decoded_width != cols || decoded_height != rows) {
 			throw std::runtime_error(fmt::format(
 			    "HTJ2K component {} dimensions mismatch (file={}, frame={}, decoded={}x{}, expected={}x{})",
-			    c, ds.path(), frame_index, decoded_height, decoded_width, rows, cols));
+			    c, df.path(), frame_index, decoded_height, decoded_width, rows, cols));
 		}
 
 		const auto component_signed = siz.is_signed(static_cast<ojph::ui32>(c));
 		if (component_signed != expected_signed) {
 			throw std::runtime_error(fmt::format(
 			    "HTJ2K component {} signedness mismatch (file={}, frame={}, decoded={}, expected={})",
-			    c, ds.path(), frame_index, component_signed ? 1 : 0, expected_signed ? 1 : 0));
+			    c, df.path(), frame_index, component_signed ? 1 : 0, expected_signed ? 1 : 0));
 		}
 
 		const auto precision = static_cast<std::uint32_t>(siz.get_bit_depth(static_cast<ojph::ui32>(c)));
 		if (precision == 0 || precision > max_precision) {
 			throw std::runtime_error(fmt::format(
 			    "HTJ2K component {} precision {} exceeds output {} bits (file={}, frame={})",
-			    c, precision, max_precision, ds.path(), frame_index));
+			    c, precision, max_precision, df.path(), frame_index));
 		}
 	}
 }
 
-const std::int32_t* openjph_line_as_i32(const DataSet& ds, std::size_t frame_index,
+const std::int32_t* openjph_line_as_i32(const DicomFile& df, std::size_t frame_index,
     const ojph::line_buf* line, std::size_t cols, std::vector<std::int32_t>& scratch) {
 	if (!line) {
 		throw std::runtime_error(fmt::format(
 		    "OpenJPH returned null line buffer (file={}, frame={})",
-		    ds.path(), frame_index));
+		    df.path(), frame_index));
 	}
 	if (line->size < cols) {
 		throw std::runtime_error(fmt::format(
 		    "OpenJPH line width too small (file={}, frame={}, have={}, need={})",
-		    ds.path(), frame_index, line->size, cols));
+		    df.path(), frame_index, line->size, cols));
 	}
 
 	const bool is_integer = (line->flags & ojph::line_buf::LFT_INTEGER) != 0;
 	if (is_integer && !line->i32) {
 		throw std::runtime_error(fmt::format(
 		    "OpenJPH integer line has null data pointer (file={}, frame={})",
-		    ds.path(), frame_index));
+		    df.path(), frame_index));
 	}
 	if (!is_integer && !line->f32) {
 		throw std::runtime_error(fmt::format(
 		    "OpenJPH floating-point line has null data pointer (file={}, frame={})",
-		    ds.path(), frame_index));
+		    df.path(), frame_index));
 	}
 	if (is_integer) {
 		return line->i32;
@@ -313,11 +314,11 @@ const std::int32_t* openjph_line_as_i32(const DataSet& ds, std::size_t frame_ind
 	return scratch.data();
 }
 
-void copy_openjph_line_to_interleaved(const DataSet& ds, std::size_t frame_index,
+void copy_openjph_line_to_interleaved(const DicomFile& df, std::size_t frame_index,
     const ojph::line_buf* line, std::size_t row, std::size_t comp, std::size_t cols,
     std::size_t samples_per_pixel, std::vector<std::int32_t>& decoded,
     std::vector<std::int32_t>& scratch) {
-	const auto* samples = openjph_line_as_i32(ds, frame_index, line, cols, scratch);
+	const auto* samples = openjph_line_as_i32(df, frame_index, line, cols, scratch);
 	for (std::size_t c = 0; c < cols; ++c) {
 		const auto pixel_index = row * cols + c;
 		const auto dst_index = pixel_index * samples_per_pixel + comp;
@@ -325,16 +326,16 @@ void copy_openjph_line_to_interleaved(const DataSet& ds, std::size_t frame_index
 	}
 }
 
-std::vector<std::int32_t> decode_openjph_to_interleaved(const DataSet& ds, std::size_t frame_index,
-    const DataSet::pixel_info_t& info, const htj2k_frame_source& source,
+std::vector<std::int32_t> decode_openjph_to_interleaved(const DicomFile& df, std::size_t frame_index,
+    const DicomFile::pixel_info_t& info, const htj2k_frame_source& source,
     std::size_t rows, std::size_t cols, std::size_t samples_per_pixel) {
 	std::vector<std::uint8_t> contiguous_storage{};
 	const auto codestream_bytes = materialize_frame_codestream_for_openjph(
-	    ds, frame_index, source, contiguous_storage);
+	    df, frame_index, source, contiguous_storage);
 	if (codestream_bytes.empty()) {
 		throw std::runtime_error(fmt::format(
 		    "HTJ2K frame has empty codestream (file={}, frame={})",
-		    ds.path(), frame_index));
+		    df.path(), frame_index));
 	}
 
 	ojph::mem_infile infile{};
@@ -344,20 +345,20 @@ std::vector<std::int32_t> decode_openjph_to_interleaved(const DataSet& ds, std::
 	codestream.set_planar(false);
 	codestream.read_headers(&infile);
 	const auto siz = codestream.access_siz();
-	validate_openjph_decoded_metadata(ds, frame_index, info, siz, rows, cols, samples_per_pixel);
+	validate_openjph_decoded_metadata(df, frame_index, info, siz, rows, cols, samples_per_pixel);
 	codestream.create();
 
 	if (rows != 0 && cols > std::numeric_limits<std::size_t>::max() / rows) {
 		throw std::runtime_error(fmt::format(
 		    "HTJ2K decoded pixel count overflow (file={}, frame={})",
-		    ds.path(), frame_index));
+		    df.path(), frame_index));
 	}
 	const auto pixel_count = rows * cols;
 	if (samples_per_pixel != 0 &&
 	    pixel_count > std::numeric_limits<std::size_t>::max() / samples_per_pixel) {
 		throw std::runtime_error(fmt::format(
 		    "HTJ2K decoded sample count overflow (file={}, frame={})",
-		    ds.path(), frame_index));
+		    df.path(), frame_index));
 	}
 	std::vector<std::int32_t> decoded(pixel_count * samples_per_pixel);
 	std::vector<std::int32_t> scratch_line{};
@@ -367,14 +368,14 @@ std::vector<std::int32_t> decode_openjph_to_interleaved(const DataSet& ds, std::
 			for (std::size_t row = 0; row < rows; ++row) {
 				ojph::ui32 comp_num = 0;
 				auto* line = codestream.pull(comp_num);
-				if (comp_num != static_cast<ojph::ui32>(comp)) {
-					throw std::runtime_error(fmt::format(
-					    "OpenJPH planar pull order mismatch (file={}, frame={}, expected={}, got={})",
-					    ds.path(), frame_index, comp, comp_num));
-				}
-				copy_openjph_line_to_interleaved(
-				    ds, frame_index, line, row, comp, cols, samples_per_pixel, decoded,
-				    scratch_line);
+					if (comp_num != static_cast<ojph::ui32>(comp)) {
+						throw std::runtime_error(fmt::format(
+						    "OpenJPH planar pull order mismatch (file={}, frame={}, expected={}, got={})",
+						    df.path(), frame_index, comp, comp_num));
+					}
+					copy_openjph_line_to_interleaved(
+					    df, frame_index, line, row, comp, cols, samples_per_pixel, decoded,
+					    scratch_line);
 			}
 		}
 	} else {
@@ -382,14 +383,14 @@ std::vector<std::int32_t> decode_openjph_to_interleaved(const DataSet& ds, std::
 			for (std::size_t comp = 0; comp < samples_per_pixel; ++comp) {
 				ojph::ui32 comp_num = 0;
 				auto* line = codestream.pull(comp_num);
-				if (comp_num != static_cast<ojph::ui32>(comp)) {
-					throw std::runtime_error(fmt::format(
-					    "OpenJPH interleaved pull order mismatch (file={}, frame={}, expected={}, got={})",
-					    ds.path(), frame_index, comp, comp_num));
-				}
-				copy_openjph_line_to_interleaved(
-				    ds, frame_index, line, row, comp, cols, samples_per_pixel, decoded,
-				    scratch_line);
+					if (comp_num != static_cast<ojph::ui32>(comp)) {
+						throw std::runtime_error(fmt::format(
+						    "OpenJPH interleaved pull order mismatch (file={}, frame={}, expected={}, got={})",
+						    df.path(), frame_index, comp, comp_num));
+					}
+					copy_openjph_line_to_interleaved(
+					    df, frame_index, line, row, comp, cols, samples_per_pixel, decoded,
+					    scratch_line);
 			}
 		}
 	}
@@ -423,17 +424,17 @@ void write_openjph_line_unscaled_to_dst(const std::int32_t* samples,
 }
 
 template <typename DstT>
-void decode_openjph_unscaled_into(const DataSet& ds, std::size_t frame_index,
-    const DataSet::pixel_info_t& info, const htj2k_frame_source& source,
+void decode_openjph_unscaled_into(const DicomFile& df, std::size_t frame_index,
+    const DicomFile::pixel_info_t& info, const htj2k_frame_source& source,
     std::span<std::uint8_t> dst, const strides& dst_strides, planar dst_planar,
     std::size_t rows, std::size_t cols, std::size_t samples_per_pixel) {
 	std::vector<std::uint8_t> contiguous_storage{};
 	const auto codestream_bytes = materialize_frame_codestream_for_openjph(
-	    ds, frame_index, source, contiguous_storage);
+	    df, frame_index, source, contiguous_storage);
 	if (codestream_bytes.empty()) {
 		throw std::runtime_error(fmt::format(
 		    "HTJ2K frame has empty codestream (file={}, frame={})",
-		    ds.path(), frame_index));
+		    df.path(), frame_index));
 	}
 
 	ojph::mem_infile infile{};
@@ -443,7 +444,7 @@ void decode_openjph_unscaled_into(const DataSet& ds, std::size_t frame_index,
 	codestream.set_planar(false);
 	codestream.read_headers(&infile);
 	const auto siz = codestream.access_siz();
-	validate_openjph_decoded_metadata(ds, frame_index, info, siz, rows, cols, samples_per_pixel);
+	validate_openjph_decoded_metadata(df, frame_index, info, siz, rows, cols, samples_per_pixel);
 	codestream.create();
 
 	std::vector<std::int32_t> scratch_line{};
@@ -452,30 +453,30 @@ void decode_openjph_unscaled_into(const DataSet& ds, std::size_t frame_index,
 			for (std::size_t row = 0; row < rows; ++row) {
 				ojph::ui32 comp_num = 0;
 				auto* line = codestream.pull(comp_num);
-				if (comp_num != static_cast<ojph::ui32>(comp)) {
-					throw std::runtime_error(fmt::format(
-					    "OpenJPH planar pull order mismatch (file={}, frame={}, expected={}, got={})",
-					    ds.path(), frame_index, comp, comp_num));
+					if (comp_num != static_cast<ojph::ui32>(comp)) {
+						throw std::runtime_error(fmt::format(
+						    "OpenJPH planar pull order mismatch (file={}, frame={}, expected={}, got={})",
+						    df.path(), frame_index, comp, comp_num));
+					}
+					const auto* samples = openjph_line_as_i32(df, frame_index, line, cols, scratch_line);
+					write_openjph_line_unscaled_to_dst<DstT>(
+					    samples, dst, dst_strides, dst_planar, rows, row, comp, cols, samples_per_pixel);
 				}
-				const auto* samples = openjph_line_as_i32(ds, frame_index, line, cols, scratch_line);
-				write_openjph_line_unscaled_to_dst<DstT>(
-				    samples, dst, dst_strides, dst_planar, rows, row, comp, cols, samples_per_pixel);
-			}
 		}
 	} else {
 		for (std::size_t row = 0; row < rows; ++row) {
 			for (std::size_t comp = 0; comp < samples_per_pixel; ++comp) {
 				ojph::ui32 comp_num = 0;
 				auto* line = codestream.pull(comp_num);
-				if (comp_num != static_cast<ojph::ui32>(comp)) {
-					throw std::runtime_error(fmt::format(
-					    "OpenJPH interleaved pull order mismatch (file={}, frame={}, expected={}, got={})",
-					    ds.path(), frame_index, comp, comp_num));
+					if (comp_num != static_cast<ojph::ui32>(comp)) {
+						throw std::runtime_error(fmt::format(
+						    "OpenJPH interleaved pull order mismatch (file={}, frame={}, expected={}, got={})",
+						    df.path(), frame_index, comp, comp_num));
+					}
+					const auto* samples = openjph_line_as_i32(df, frame_index, line, cols, scratch_line);
+					write_openjph_line_unscaled_to_dst<DstT>(
+					    samples, dst, dst_strides, dst_planar, rows, row, comp, cols, samples_per_pixel);
 				}
-				const auto* samples = openjph_line_as_i32(ds, frame_index, line, cols, scratch_line);
-				write_openjph_line_unscaled_to_dst<DstT>(
-				    samples, dst, dst_strides, dst_planar, rows, row, comp, cols, samples_per_pixel);
-			}
 		}
 	}
 
@@ -484,10 +485,11 @@ void decode_openjph_unscaled_into(const DataSet& ds, std::size_t frame_index,
 }
 
 template <typename SampleT>
-void write_openjph_scaled_mono_to_dst(const DataSet& ds,
+void write_openjph_scaled_mono_to_dst(const DicomFile& df,
     const std::vector<std::int32_t>& decoded, std::span<std::uint8_t> dst,
     const strides& dst_strides, std::size_t rows, std::size_t cols) {
-	const auto modality_lut = ds.modality_lut();
+	const auto& ds = df.dataset();
+	const auto modality_lut = df.modality_lut();
 	if (modality_lut) {
 		const auto last_index = static_cast<std::int64_t>(modality_lut->values.size() - 1);
 		for (std::size_t r = 0; r < rows; ++r) {
@@ -512,7 +514,7 @@ void write_openjph_scaled_mono_to_dst(const DataSet& ds,
 	const auto intercept = ds["RescaleIntercept"_tag].toDouble(0.0);
 	if (!std::isfinite(slope) || !std::isfinite(intercept)) {
 		throw std::runtime_error(fmt::format(
-		    "RescaleSlope/RescaleIntercept must be finite (file={})", ds.path()));
+		    "RescaleSlope/RescaleIntercept must be finite (file={})", df.path()));
 	}
 
 	for (std::size_t r = 0; r < rows; ++r) {
@@ -526,7 +528,7 @@ void write_openjph_scaled_mono_to_dst(const DataSet& ds,
 	}
 }
 
-bool try_decode_openjph_into(const DataSet& ds, const DataSet::pixel_info_t& info,
+bool try_decode_openjph_into(const DicomFile& df, const DicomFile::pixel_info_t& info,
     std::size_t frame_index, const htj2k_frame_source& source, std::span<std::uint8_t> dst,
     const strides& dst_strides, const decode_opts& opt, std::size_t rows, std::size_t cols,
     std::size_t samples_per_pixel, std::string& failure) {
@@ -534,68 +536,68 @@ bool try_decode_openjph_into(const DataSet& ds, const DataSet::pixel_info_t& inf
 	try {
 		if (opt.scaled) {
 			auto decoded = decode_openjph_to_interleaved(
-			    ds, frame_index, info, source, rows, cols, samples_per_pixel);
+			    df, frame_index, info, source, rows, cols, samples_per_pixel);
 			switch (info.sv_dtype) {
 			case dtype::u8:
-				write_openjph_scaled_mono_to_dst<std::uint8_t>(ds, decoded, dst, dst_strides, rows, cols);
+				write_openjph_scaled_mono_to_dst<std::uint8_t>(df, decoded, dst, dst_strides, rows, cols);
 				return true;
 			case dtype::s8:
-				write_openjph_scaled_mono_to_dst<std::int8_t>(ds, decoded, dst, dst_strides, rows, cols);
+				write_openjph_scaled_mono_to_dst<std::int8_t>(df, decoded, dst, dst_strides, rows, cols);
 				return true;
 			case dtype::u16:
-				write_openjph_scaled_mono_to_dst<std::uint16_t>(ds, decoded, dst, dst_strides, rows, cols);
+				write_openjph_scaled_mono_to_dst<std::uint16_t>(df, decoded, dst, dst_strides, rows, cols);
 				return true;
 			case dtype::s16:
-				write_openjph_scaled_mono_to_dst<std::int16_t>(ds, decoded, dst, dst_strides, rows, cols);
+				write_openjph_scaled_mono_to_dst<std::int16_t>(df, decoded, dst, dst_strides, rows, cols);
 				return true;
 			case dtype::u32:
-				write_openjph_scaled_mono_to_dst<std::uint32_t>(ds, decoded, dst, dst_strides, rows, cols);
+				write_openjph_scaled_mono_to_dst<std::uint32_t>(df, decoded, dst, dst_strides, rows, cols);
 				return true;
 			case dtype::s32:
-				write_openjph_scaled_mono_to_dst<std::int32_t>(ds, decoded, dst, dst_strides, rows, cols);
+				write_openjph_scaled_mono_to_dst<std::int32_t>(df, decoded, dst, dst_strides, rows, cols);
 				return true;
 			default:
 				throw std::runtime_error(fmt::format(
 				    "scaled output does not support sv_dtype={} (file={})",
-				    static_cast<int>(info.sv_dtype), ds.path()));
+				    static_cast<int>(info.sv_dtype), df.path()));
 			}
 		}
 
 		switch (info.sv_dtype) {
 		case dtype::u8:
 			decode_openjph_unscaled_into<std::uint8_t>(
-			    ds, frame_index, info, source, dst, dst_strides, opt.planar_out, rows, cols,
+			    df, frame_index, info, source, dst, dst_strides, opt.planar_out, rows, cols,
 			    samples_per_pixel);
 			return true;
 		case dtype::s8:
 			decode_openjph_unscaled_into<std::int8_t>(
-			    ds, frame_index, info, source, dst, dst_strides, opt.planar_out, rows, cols,
+			    df, frame_index, info, source, dst, dst_strides, opt.planar_out, rows, cols,
 			    samples_per_pixel);
 			return true;
 		case dtype::u16:
 			decode_openjph_unscaled_into<std::uint16_t>(
-			    ds, frame_index, info, source, dst, dst_strides, opt.planar_out, rows, cols,
+			    df, frame_index, info, source, dst, dst_strides, opt.planar_out, rows, cols,
 			    samples_per_pixel);
 			return true;
 		case dtype::s16:
 			decode_openjph_unscaled_into<std::int16_t>(
-			    ds, frame_index, info, source, dst, dst_strides, opt.planar_out, rows, cols,
+			    df, frame_index, info, source, dst, dst_strides, opt.planar_out, rows, cols,
 			    samples_per_pixel);
 			return true;
 		case dtype::u32:
 			decode_openjph_unscaled_into<std::uint32_t>(
-			    ds, frame_index, info, source, dst, dst_strides, opt.planar_out, rows, cols,
+			    df, frame_index, info, source, dst, dst_strides, opt.planar_out, rows, cols,
 			    samples_per_pixel);
 			return true;
 		case dtype::s32:
 			decode_openjph_unscaled_into<std::int32_t>(
-			    ds, frame_index, info, source, dst, dst_strides, opt.planar_out, rows, cols,
+			    df, frame_index, info, source, dst, dst_strides, opt.planar_out, rows, cols,
 			    samples_per_pixel);
 			return true;
 		default:
 			throw std::runtime_error(fmt::format(
 			    "JPEG2000 output does not support sv_dtype={} (file={})",
-			    static_cast<int>(info.sv_dtype), ds.path()));
+			    static_cast<int>(info.sv_dtype), df.path()));
 		}
 	} catch (const std::exception& e) {
 		failure = trimmed_message(e.what());
@@ -617,27 +619,27 @@ bool try_decode_openjph_into(const DataSet& ds, const DataSet::pixel_info_t& inf
 
 } // namespace
 
-void decode_htj2k_into(const DataSet& ds, const DataSet::pixel_info_t& info,
+void decode_htj2k_into(const DicomFile& df, const DicomFile::pixel_info_t& info,
     std::size_t frame_index, std::span<std::uint8_t> dst,
     const strides& dst_strides, const decode_opts& opt) {
 	if (!info.has_pixel_data) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=sv_dtype is unknown", ds.path());
+		    "pixel::decode_into file={} reason=sv_dtype is unknown", df.path());
 	}
 	if (!info.ts.is_htj2k()) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=transfer syntax is not HTJ2K ({})",
-		    ds.path(), ds.transfer_syntax_uid().value());
+		    df.path(), df.transfer_syntax_uid().value());
 	}
 	if (info.rows <= 0 || info.cols <= 0 || info.samples_per_pixel <= 0) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=invalid Rows/Columns/SamplesPerPixel",
-		    ds.path());
+		    df.path());
 	}
 	if (info.frames <= 0) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=invalid NumberOfFrames",
-		    ds.path());
+		    df.path());
 	}
 
 	const auto samples_per_pixel_value = info.samples_per_pixel;
@@ -645,55 +647,55 @@ void decode_htj2k_into(const DataSet& ds, const DataSet::pixel_info_t& info,
 	    samples_per_pixel_value != 4) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=only SamplesPerPixel=1/3/4 is supported in current HTJ2K path",
-		    ds.path());
+		    df.path());
 	}
 	const auto samples_per_pixel = static_cast<std::size_t>(samples_per_pixel_value);
 	if (opt.scaled && samples_per_pixel != 1) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=scaled output supports SamplesPerPixel=1 only",
-		    ds.path());
+		    df.path());
 	}
 	if (!sv_dtype_is_integral(info.sv_dtype)) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=HTJ2K supports integral sv_dtype only",
-		    ds.path());
+		    df.path());
 	}
 
 	const auto src_bytes_per_sample = sv_dtype_bytes(info.sv_dtype);
 	if (src_bytes_per_sample == 0 || src_bytes_per_sample > 4) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=HTJ2K supports integral sv_dtype up to 32-bit only",
-		    ds.path());
+		    df.path());
 	}
 
 	const auto frame_count = static_cast<std::size_t>(info.frames);
 	if (frame_index >= frame_count) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} frame={} reason=frame index out of range (frames={})",
-		    ds.path(), frame_index, frame_count);
+		    df.path(), frame_index, frame_count);
 	}
 
 	const auto rows = static_cast<std::size_t>(info.rows);
 	const auto cols = static_cast<std::size_t>(info.cols);
 	const auto dst_bytes_per_sample = opt.scaled ? sizeof(float) : src_bytes_per_sample;
 	validate_destination(
-	    ds, dst, dst_strides, opt.planar_out, rows, cols, samples_per_pixel, dst_bytes_per_sample);
+	    df, dst, dst_strides, opt.planar_out, rows, cols, samples_per_pixel, dst_bytes_per_sample);
 
-	const auto frame_source = load_htj2k_frame_source(ds, frame_index);
+	const auto frame_source = load_htj2k_frame_source(df, frame_index);
 	if (frame_source.total_size == 0) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} frame={} reason=HTJ2K frame has empty codestream",
-		    ds.path(), frame_index);
+		    df.path(), frame_index);
 	}
 
 	if (opt.htj2k_decoder_backend == htj2k_decoder::openjpeg) {
-		decode_jpeg2k_into(ds, info, frame_index, dst, dst_strides, opt);
+		decode_jpeg2k_into(df, info, frame_index, dst, dst_strides, opt);
 		return;
 	}
 
 	if (opt.htj2k_decoder_backend == htj2k_decoder::openjph) {
 		std::string openjph_failure{};
-		if (try_decode_openjph_into(ds, info, frame_index, frame_source, dst, dst_strides, opt,
+		if (try_decode_openjph_into(df, info, frame_index, frame_source, dst, dst_strides, opt,
 		        rows, cols, samples_per_pixel, openjph_failure)) {
 			return;
 		}
@@ -701,24 +703,24 @@ void decode_htj2k_into(const DataSet& ds, const DataSet::pixel_info_t& info,
 		diag::error_and_throw(
 		    "pixel::decode_into file={} frame={} reason=HTJ2K decode failed "
 		    "(backend={}): {}",
-		    ds.path(), frame_index, htj2k_backend_name(opt.htj2k_decoder_backend),
+		    df.path(), frame_index, htj2k_backend_name(opt.htj2k_decoder_backend),
 		    failure_reason.empty() ? "OpenJPH decode failed" : failure_reason);
 	}
 
 	std::string openjph_failure{};
-	if (try_decode_openjph_into(ds, info, frame_index, frame_source, dst, dst_strides, opt,
+	if (try_decode_openjph_into(df, info, frame_index, frame_source, dst, dst_strides, opt,
 	        rows, cols, samples_per_pixel, openjph_failure)) {
 		return;
 	}
 	try {
-		decode_jpeg2k_into(ds, info, frame_index, dst, dst_strides, opt);
+		decode_jpeg2k_into(df, info, frame_index, dst, dst_strides, opt);
 		return;
 	} catch (const std::exception& e) {
 		if (!openjph_failure.empty()) {
 			diag::error_and_throw(
 			    "pixel::decode_into file={} frame={} reason=HTJ2K decode failed "
 			    "(OpenJPH: {}; OpenJPEG: {})",
-			    ds.path(), frame_index, trimmed_message(openjph_failure), trimmed_message(e.what()));
+			    df.path(), frame_index, trimmed_message(openjph_failure), trimmed_message(e.what()));
 		}
 		throw;
 	}

@@ -11,13 +11,15 @@ namespace diag = dicom::diag;
 namespace dicom {
 
 Sequence::Sequence(DataSet* root_dataset)
-    : root_dataset_(root_dataset ? root_dataset : nullptr),
-      transfer_syntax_uid_(root_dataset ? root_dataset->transfer_syntax_uid() : uid::WellKnown{}) {}
+    : root_dataset_(root_dataset ? root_dataset->root_dataset() : nullptr) {}
 
 Sequence::~Sequence() = default;
 
 void Sequence::read_from_stream(InStream* stream) {
 	std::array<std::uint8_t, 8> buf8{};
+	if (!root_dataset_) {
+		diag::error_and_throw("Sequence::read_from_stream reason=no root dataset context");
+	}
 
 	bool little_endian = root_dataset_->is_little_endian();
 	
@@ -65,6 +67,9 @@ void Sequence::read_from_stream(InStream* stream) {
 }
 
 DataSet* Sequence::add_dataset() {
+	if (!root_dataset_) {
+		diag::error_and_throw("Sequence::add_dataset reason=no root dataset context");
+	}
 	seq_.push_back(std::make_unique<DataSet>(root_dataset_));
 	return seq_.back().get();
 }

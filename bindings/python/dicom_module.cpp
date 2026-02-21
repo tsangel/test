@@ -30,6 +30,7 @@
 namespace nb = nanobind;
 
 using dicom::DataSet;
+using dicom::DicomFile;
 using dicom::DataElement;
 using dicom::Sequence;
 using dicom::Tag;
@@ -74,7 +75,7 @@ struct DecodedArrayLayout {
 	bool decode_all_frames{false};
 };
 
-DecodedArraySpec decoded_array_spec(const DataSet::pixel_info_t& info, bool scaled) {
+DecodedArraySpec decoded_array_spec(const DicomFile::pixel_info_t& info, bool scaled) {
 	if (scaled) {
 		return DecodedArraySpec{nb::dtype<float>(), sizeof(float)};
 	}
@@ -148,7 +149,7 @@ dicom::pixel::htj2k_decoder parse_htj2k_decoder(std::string decoder) {
 }
 
 DecodedArrayLayout build_decode_layout(
-    const DataSet& self, long frame, bool scaled, int decoder_threads = -1,
+    const DicomFile& self, long frame, bool scaled, int decoder_threads = -1,
     dicom::pixel::htj2k_decoder htj2k_decoder_backend = dicom::pixel::htj2k_decoder::auto_select) {
 	if (frame < -1) {
 		throw nb::value_error("frame must be >= -1");
@@ -255,7 +256,7 @@ DecodedArrayLayout build_decode_layout(
 	return layout;
 }
 
-void decode_layout_into(const DataSet& self, const DecodedArrayLayout& layout,
+void decode_layout_into(const DicomFile& self, const DecodedArrayLayout& layout,
     std::span<std::uint8_t> out) {
 	if (out.size() < layout.required_bytes) {
 		throw nb::value_error("decode_into output buffer is smaller than required size");
@@ -271,20 +272,22 @@ void decode_layout_into(const DataSet& self, const DecodedArrayLayout& layout,
 	}
 }
 
-const DataElement* raw_source_element(const DataSet& self, dicom::pixel::dtype sv_dtype) {
+const DataElement* raw_source_element(const DicomFile& self, dicom::pixel::dtype sv_dtype) {
+	const auto& dataset = self.dataset();
 	switch (sv_dtype) {
 	case dicom::pixel::dtype::f32:
-		return self.get_dataelement(Tag("FloatPixelData"));
+		return dataset.get_dataelement(Tag("FloatPixelData"));
 	case dicom::pixel::dtype::f64:
-		return self.get_dataelement(Tag("DoubleFloatPixelData"));
+		return dataset.get_dataelement(Tag("DoubleFloatPixelData"));
 	default:
-		return self.get_dataelement(Tag("PixelData"));
+		return dataset.get_dataelement(Tag("PixelData"));
 	}
 }
 
-nb::object dataset_to_array_view(const DataSet& self, long frame) {
+nb::object dicomfile_to_array_view(const DicomFile& self, long frame) {
 	const auto layout = build_decode_layout(self, frame, false, 0);
 	const auto& info = self.pixel_info();
+	const auto& dataset = self.dataset();
 
 	if (!info.ts.is_uncompressed()) {
 		throw nb::value_error("to_array_view requires an uncompressed transfer syntax");
@@ -295,7 +298,7 @@ nb::object dataset_to_array_view(const DataSet& self, long frame) {
 		    "to_array_view requires PlanarConfiguration=interleaved when SamplesPerPixel > 1");
 	}
 	if (layout.spec.bytes_per_sample > 1 &&
-	    (self.is_little_endian() != dicom::endian::host_is_little_endian())) {
+	    (dataset.is_little_endian() != dicom::endian::host_is_little_endian())) {
 		throw nb::value_error(
 		    "to_array_view requires source endianness to match host endianness");
 	}
@@ -345,8 +348,8 @@ nb::object dataset_to_array_view(const DataSet& self, long frame) {
 	    nb::device::cpu::value, 0, 'C'));
 }
 
-nb::object dataset_to_array(
-    const DataSet& self, long frame, bool scaled, const std::string& htj2k_decoder) {
+nb::object dicomfile_to_array(
+    const DicomFile& self, long frame, bool scaled, const std::string& htj2k_decoder) {
 	const auto layout = build_decode_layout(
 	    self, frame, scaled, -1, parse_htj2k_decoder(htj2k_decoder));
 	auto out = make_writable_numpy_array(
@@ -376,7 +379,7 @@ private:
 	Py_buffer view_{};
 };
 
-nb::object dataset_decode_into_array(const DataSet& self, nb::handle out,
+nb::object dicomfile_decode_into_array(const DicomFile& self, nb::handle out,
     long frame, bool scaled, int threads, const std::string& htj2k_decoder) {
 	const auto layout = build_decode_layout(
 	    self, frame, scaled, threads, parse_htj2k_decoder(htj2k_decoder));
@@ -911,6 +914,8 @@ NB_MODULE(_dicomsdl, m) {
 	    "- Missing lookups return a NullElement sentinel (VR::None)")
 		.def(nb::init<>())
 	.def_prop_ro("path", &DataSet::path, "Identifier of the attached stream (file path, provided name, or '<memory>')")
+		.def("size", &DataSet::size,
+		    "Number of active DataElements currently available in this DataSet")
 		.def("add_dataelement",
 		    [](DataSet& self, const Tag& tag, std::optional<VR> vr,
 		        std::size_t offset, std::size_t length) {
@@ -930,83 +935,6 @@ NB_MODULE(_dicomsdl, m) {
 		    "Remove a DataElement by tag if it exists")
 		.def("dump_elements", &DataSet::dump_elements,
 		    "Print internal element storage for debugging")
-		.def("pixel_data",
-		    [](const DataSet& self, std::size_t frame_index) {
-			    const auto decoded = self.pixel_data(frame_index);
-			    if (decoded.empty()) {
-				    return nb::bytes("", 0);
-			    }
-			    return nb::bytes(reinterpret_cast<const char*>(decoded.data()), decoded.size());
-		    },
-		    nb::arg("frame_index") = 0,
-		    "Decode one frame with default options and return decoded bytes.")
-		.def("to_array",
-		    &dataset_to_array,
-		    nb::arg("frame") = -1,
-		    nb::arg("scaled") = false,
-		    nb::arg("htj2k_decoder") = "auto",
-		    "Decode pixel samples and return a NumPy array.\n"
-		    "\n"
-		    "Parameters\n"
-		    "----------\n"
-		    "frame : int, optional\n"
-		    "    -1 decodes all frames (multi-frame only), otherwise decode the selected frame index.\n"
-		    "scaled : bool, optional\n"
-		    "    If True, apply Modality LUT/Rescale when available.\n"
-		    "    Scaled output is ignored when SamplesPerPixel != 1, or when both\n"
-		    "    Modality LUT Sequence and Rescale Slope/Intercept are absent.\n"
-		    "htj2k_decoder : {'auto', 'openjph', 'openjpeg'}, optional\n"
-		    "    HTJ2K backend selection. 'auto' prefers OpenJPH then falls back to OpenJPEG.\n"
-		    "\n"
-		    "Returns\n"
-		    "-------\n"
-		    "numpy.ndarray\n"
-		    "    Shape is (rows, cols) or (rows, cols, samples) for a single frame,\n"
-		    "    and (frames, rows, cols) or (frames, rows, cols, samples) when decoding all frames.")
-		.def("to_array_view",
-		    &dataset_to_array_view,
-		    nb::arg("frame") = -1,
-		    "Return a zero-copy read-only NumPy view over uncompressed source pixel data.\n"
-		    "\n"
-		    "This requires:\n"
-		    "- uncompressed transfer syntax\n"
-		    "- frame layout compatible with interleaved output\n"
-		    "- source endianness matching host endianness for sample sizes > 1.")
-		.def("decode_into",
-		    &dataset_decode_into_array,
-		    nb::arg("out"),
-		    nb::arg("frame") = 0,
-		    nb::arg("scaled") = false,
-		    nb::arg("threads") = -1,
-		    nb::arg("htj2k_decoder") = "auto",
-		    "Decode pixel samples into an existing writable C-contiguous buffer.\n"
-		    "\n"
-		    "Parameters\n"
-		    "----------\n"
-		    "out : buffer-like\n"
-		    "    Destination NumPy array or writable contiguous buffer. Size must\n"
-		    "    exactly match the decoded output for the requested frame selection.\n"
-		    "frame : int, optional\n"
-		    "    -1 decodes all frames (multi-frame only), otherwise decode the selected frame index.\n"
-		    "scaled : bool, optional\n"
-		    "    If True, apply Modality LUT/Rescale when available.\n"
-		    "threads : int, optional\n"
-		    "    Decoder thread count hint.\n"
-		    "    Default is -1 (use all CPUs).\n"
-		    "    0 uses library default, -1 uses all CPUs, >0 sets explicit thread count.\n"
-		    "    Currently applied to JPEG 2000; unsupported decoders may ignore it.\n"
-		    "htj2k_decoder : {'auto', 'openjph', 'openjpeg'}, optional\n"
-		    "    HTJ2K backend selection. 'auto' prefers OpenJPH then falls back to OpenJPEG.\n"
-		    "\n"
-		    "Returns\n"
-		    "-------\n"
-		    "Same object as `out` for call chaining.")
-		.def("pixel_array",
-		    &dataset_to_array,
-		    nb::arg("frame") = -1,
-		    nb::arg("scaled") = false,
-		    nb::arg("htj2k_decoder") = "auto",
-		    "Alias of to_array(frame=-1, scaled=False, htj2k_decoder='auto').")
 		.def("get_dataelement",
 		    [](DataSet& self, const Tag& tag) -> DataElement& {
 		        return *self.get_dataelement(tag);
@@ -1114,6 +1042,161 @@ NB_MODULE(_dicomsdl, m) {
 		    },
 		    nb::keep_alive<0, 1>(), "Iterate over DataElements in tag order");
 
+	nb::class_<DicomFile>(m, "DicomFile",
+	    "DICOM file/session object that owns the root DataSet.")
+		.def_prop_ro("path", &DicomFile::path,
+		    "Identifier of the attached root stream (file path or provided memory name)")
+		.def_prop_ro("dataset",
+		    [](DicomFile& self) -> DataSet& { return self.dataset(); },
+		    nb::rv_policy::reference_internal,
+		    "Root DataSet owned by this DicomFile")
+		.def("__len__",
+		    [](DicomFile& self) { return self.dataset().size(); },
+		    "Number of active DataElements currently available in the root DataSet")
+		.def("__iter__",
+		    [](DicomFile& self) {
+			    return PyDataElementIterator(self.dataset());
+		    },
+		    nb::keep_alive<0, 1>(),
+		    "Iterate over DataElements from the root DataSet")
+		.def("pixel_data",
+		    [](const DicomFile& self, std::size_t frame_index) {
+			    const auto decoded = self.pixel_data(frame_index);
+			    if (decoded.empty()) {
+				    return nb::bytes("", 0);
+			    }
+			    return nb::bytes(reinterpret_cast<const char*>(decoded.data()), decoded.size());
+		    },
+		    nb::arg("frame_index") = 0,
+		    "Decode one frame with default options and return decoded bytes.")
+		.def("to_array",
+		    &dicomfile_to_array,
+		    nb::arg("frame") = -1,
+		    nb::arg("scaled") = false,
+		    nb::arg("htj2k_decoder") = "auto",
+		    "Decode pixel samples and return a NumPy array.\n"
+		    "\n"
+		    "Parameters\n"
+		    "----------\n"
+		    "frame : int, optional\n"
+		    "    -1 decodes all frames (multi-frame only), otherwise decode the selected frame index.\n"
+		    "scaled : bool, optional\n"
+		    "    If True, apply Modality LUT/Rescale when available.\n"
+		    "    Scaled output is ignored when SamplesPerPixel != 1, or when both\n"
+		    "    Modality LUT Sequence and Rescale Slope/Intercept are absent.\n"
+		    "htj2k_decoder : {'auto', 'openjph', 'openjpeg'}, optional\n"
+		    "    HTJ2K backend selection. 'auto' prefers OpenJPH then falls back to OpenJPEG.\n"
+		    "\n"
+		    "Returns\n"
+		    "-------\n"
+		    "numpy.ndarray\n"
+		    "    Shape is (rows, cols) or (rows, cols, samples) for a single frame,\n"
+		    "    and (frames, rows, cols) or (frames, rows, cols, samples) when decoding all frames.")
+		.def("to_array_view",
+		    &dicomfile_to_array_view,
+		    nb::arg("frame") = -1,
+		    "Return a zero-copy read-only NumPy view over uncompressed source pixel data.\n"
+		    "\n"
+		    "This requires:\n"
+		    "- uncompressed transfer syntax\n"
+		    "- frame layout compatible with interleaved output\n"
+		    "- source endianness matching host endianness for sample sizes > 1.")
+		.def("decode_into",
+		    &dicomfile_decode_into_array,
+		    nb::arg("out"),
+		    nb::arg("frame") = 0,
+		    nb::arg("scaled") = false,
+		    nb::arg("threads") = -1,
+		    nb::arg("htj2k_decoder") = "auto",
+		    "Decode pixel samples into an existing writable C-contiguous buffer.\n"
+		    "\n"
+		    "Parameters\n"
+		    "----------\n"
+		    "out : buffer-like\n"
+		    "    Destination NumPy array or writable contiguous buffer. Size must\n"
+		    "    exactly match the decoded output for the requested frame selection.\n"
+		    "frame : int, optional\n"
+		    "    -1 decodes all frames (multi-frame only), otherwise decode the selected frame index.\n"
+		    "scaled : bool, optional\n"
+		    "    If True, apply Modality LUT/Rescale when available.\n"
+		    "threads : int, optional\n"
+		    "    Decoder thread count hint.\n"
+		    "    Default is -1 (use all CPUs).\n"
+		    "    0 uses library default, -1 uses all CPUs, >0 sets explicit thread count.\n"
+		    "    Currently applied to JPEG 2000; unsupported decoders may ignore it.\n"
+		    "htj2k_decoder : {'auto', 'openjph', 'openjpeg'}, optional\n"
+		    "    HTJ2K backend selection. 'auto' prefers OpenJPH then falls back to OpenJPEG.\n"
+		    "\n"
+		    "Returns\n"
+		    "-------\n"
+		    "Same object as `out` for call chaining.")
+		.def("pixel_array",
+		    &dicomfile_to_array,
+		    nb::arg("frame") = -1,
+		    nb::arg("scaled") = false,
+		    nb::arg("htj2k_decoder") = "auto",
+		    "Alias of to_array(frame=-1, scaled=False, htj2k_decoder='auto').")
+		.def("__getitem__",
+		    [](DicomFile& self, nb::object key) -> nb::object {
+			    DataSet& dataset = self.dataset();
+			    DataElement* el = nullptr;
+
+			    if (nb::isinstance<Tag>(key)) {
+				    el = dataset.get_dataelement(nb::cast<Tag>(key));
+			    } else if (nb::isinstance<nb::int_>(key)) {
+				    el = dataset.get_dataelement(Tag(nb::cast<std::uint32_t>(key)));
+			    } else if (nb::isinstance<nb::str>(key)) {
+				    el = dataset.get_dataelement(nb::cast<std::string>(key));
+			    } else {
+				    throw nb::type_error("DicomFile indices must be Tag, int (0xGGGEEEE), or str");
+			    }
+
+			    if (!el || el == dicom::NullElement()) {
+				    return nb::none();
+			    }
+			    return dataelement_get_value_py(*el, nb::cast(&dataset, nb::rv_policy::reference));
+		    },
+		    nb::arg("key"),
+		    "Index syntax delegated to root DataSet")
+		.def("__getattr__",
+		    [](DicomFile& self, const std::string& name) -> nb::object {
+			    nb::object owner = nb::cast(&self, nb::rv_policy::reference);
+			    nb::object dataset_obj =
+			        nb::cast(&self.dataset(), nb::rv_policy::reference_internal, owner);
+			    return nb::getattr(dataset_obj, nb::str(name.c_str(), name.size()));
+		    },
+		    nb::arg("name"),
+		    "Forward unknown attributes/methods to the root DataSet.")
+		.def("__dir__",
+		    [](DicomFile& self) {
+			    nb::object self_obj = nb::cast(&self, nb::rv_policy::reference);
+			    PyObject* type_obj = reinterpret_cast<PyObject*>(Py_TYPE(self_obj.ptr()));
+			    nb::list result = nb::steal<nb::list>(PyObject_Dir(type_obj));  // class attrs
+
+			    std::unordered_set<std::string> seen;
+			    for (nb::handle item : result) {
+				    seen.insert(nb::cast<std::string>(item));
+			    }
+
+			    nb::object dataset_obj =
+			        nb::cast(&self.dataset(), nb::rv_policy::reference_internal, self_obj);
+			    nb::list dataset_dir = nb::cast<nb::list>(nb::getattr(dataset_obj, "__dir__")());
+			    for (nb::handle item : dataset_dir) {
+				    std::string name = nb::cast<std::string>(item);
+				    if (seen.insert(name).second) {
+					    result.append(nb::str(name.c_str(), name.size()));
+				    }
+			    }
+			    return result;
+		    },
+		    "dir() includes DicomFile attributes plus forwarded root DataSet attributes/keywords.")
+		.def("__repr__",
+		    [](DicomFile& self) {
+			    std::ostringstream oss;
+			    oss << "DicomFile(path='" << self.path() << "')";
+			    return oss.str();
+		    });
+
 m.def("read_file",
     [](const std::string& path, std::optional<Tag> load_until, std::optional<bool> keep_on_error) {
 	    dicom::ReadOptions opts;
@@ -1128,7 +1211,7 @@ m.def("read_file",
     nb::arg("path"),
     nb::arg("load_until") = nb::none(),
     nb::arg("keep_on_error") = nb::none(),
-    "Read a DICOM file from disk and return a DataSet.\n"
+    "Read a DICOM file from disk and return a DicomFile.\n"
     "\n"
     "Parameters\n"
     "----------\n"
@@ -1163,51 +1246,51 @@ m.def("read_bytes",
         }
         opts.copy = copy;
 
-        std::unique_ptr<dicom::DataSet> dataset;
+        std::unique_ptr<dicom::DicomFile> file;
         if (copy || total == 0) {
 	        std::vector<std::uint8_t> owned(total);
 	        if (total > 0) {
 		        std::memcpy(owned.data(), info.buf, total);
 	        }
-	        dataset = dicom::read_bytes(std::string{name}, std::move(owned), opts);
+	        file = dicom::read_bytes(std::string{name}, std::move(owned), opts);
         } else {
 	        if (elem_size != 1) {
 		        throw std::invalid_argument("read_bytes(copy=False) requires a byte-oriented buffer");
 	        }
-	        dataset = dicom::read_bytes(std::string{name},
+	        file = dicom::read_bytes(std::string{name},
 	            static_cast<const std::uint8_t*>(info.buf), total, opts);
         }
 
-        nb::object py_dataset = nb::cast(std::move(dataset));
+        nb::object py_file = nb::cast(std::move(file));
         if (!copy && total > 0) {
-	        py_dataset.attr("_buffer_owner") = buffer;
+	        py_file.attr("_buffer_owner") = buffer;
         }
-        return py_dataset;
+        return py_file;
     },
     nb::arg("data"),
     nb::arg("name") = std::string{"<memory>"},
     nb::arg("load_until") = nb::none(),
     nb::arg("keep_on_error") = nb::none(),
     nb::arg("copy") = true,
-    "Read a DataSet from a bytes-like object. Parsing is eager up to `load_until`.\n"
+    "Read a DicomFile from a bytes-like object. Parsing is eager up to `load_until`.\n"
     "\n"
     "Parameters\n"
     "----------\n"
     "data : buffer\n"
     "    1-D bytes-like object containing the Part 10 stream (or raw stream).\n"
     "name : str, optional\n"
-    "    Identifier reported by DataSet.path() and diagnostics. Default '<memory>'.\n"
+    "    Identifier reported by DicomFile.path() and diagnostics. Default '<memory>'.\n"
     "load_until : Tag | None, optional\n"
     "    Stop after this tag is read (inclusive). Defaults to reading entire buffer.\n"
     "keep_on_error : bool | None, optional\n"
     "    When True, keep partially read data instead of raising on parse errors.\n"
     "copy : bool, optional\n"
     "    When False, avoid copying and reference the caller's buffer; caller must keep\n"
-    "    the buffer alive while the DataSet exists.\n"
+    "    the buffer alive while the DicomFile exists.\n"
     "\n"
     "Warning\n"
     "-------\n"
-    "When copy=False, the source buffer must remain alive for as long as the returned DataSet;\n"
+    "When copy=False, the source buffer must remain alive for as long as the returned DicomFile;\n"
     "the binding keeps a Python reference, but mutating or freeing the underlying memory can\n"
     "still corrupt the dataset.");
 
@@ -1482,6 +1565,7 @@ m.def("uid_from_keyword",
 	    "set_default_reporter",
 	    "set_thread_reporter",
 	    "set_log_level",
+	    "DicomFile",
 	    "DataSet",
 	    "Tag",
 	    "VR",

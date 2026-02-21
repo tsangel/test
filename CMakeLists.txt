@@ -69,6 +69,7 @@ include(ExternalProject)
 
 add_library(dicomsdl STATIC
 	src/dataset.cpp
+	src/dicomfile.cpp
 	src/sequence.cpp
 	src/dataelement.cpp
 	src/instream.cpp
@@ -440,4 +441,18 @@ if(BUILD_TESTING)
 	target_link_libraries(dicomsdl_uid_consistency PRIVATE dicomsdl)
 	add_test(NAME uid_consistency COMMAND dicomsdl_uid_consistency)
 	set_tests_properties(uid_consistency PROPERTIES LABELS "dicomsdl")
+
+	add_executable(dicomsdl_separation_regression
+		tests/separation_regression.cpp
+	)
+	target_link_libraries(dicomsdl_separation_regression PRIVATE dicomsdl)
+	add_test(NAME separation_regression COMMAND dicomsdl_separation_regression)
+	set_tests_properties(separation_regression PROPERTIES LABELS "dicomsdl")
+
+	add_executable(dicomsdl_dataset_ordering_regression
+		tests/dataset_ordering_regression.cpp
+	)
+	target_link_libraries(dicomsdl_dataset_ordering_regression PRIVATE dicomsdl)
+	add_test(NAME dataset_ordering_regression COMMAND dicomsdl_dataset_ordering_regression)
+	set_tests_properties(dataset_ordering_regression PROPERTIES LABELS "dicomsdl")
 endif()

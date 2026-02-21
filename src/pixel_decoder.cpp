@@ -530,18 +530,19 @@ void dispatch_planar_transform_copy_by_bytes(planar_transform transform, std::si
 
 } // namespace
 
-void decode_mono_scaled_into_f32(const DataSet& ds, const DataSet::pixel_info_t& info,
+void decode_mono_scaled_into_f32(const DicomFile& df, const DicomFile::pixel_info_t& info,
     const std::uint8_t* src_frame, std::span<std::uint8_t> dst,
     const strides& dst_strides, std::size_t rows, std::size_t cols,
     std::size_t src_row_bytes) {
+	const auto& ds = df.dataset();
 	if (info.samples_per_pixel != 1) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=scaled output supports SamplesPerPixel=1 only",
-		    ds.path());
+		    df.path());
 	}
 
 	const auto source_little_endian = ds.is_little_endian();
-	const auto modality_lut = ds.modality_lut();
+	const auto modality_lut = df.modality_lut();
 	if (modality_lut) {
 		switch (info.sv_dtype) {
 		case dtype::u8:
@@ -577,7 +578,7 @@ void decode_mono_scaled_into_f32(const DataSet& ds, const DataSet::pixel_info_t&
 		default:
 			diag::error_and_throw(
 			    "pixel::decode_into file={} reason=Modality LUT path supports integral sv_dtype only",
-			    ds.path());
+			    df.path());
 			return;
 		}
 	}
@@ -587,7 +588,7 @@ void decode_mono_scaled_into_f32(const DataSet& ds, const DataSet::pixel_info_t&
 	if (!std::isfinite(slope) || !std::isfinite(intercept)) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=RescaleSlope/RescaleIntercept must be finite",
-		    ds.path());
+		    df.path());
 	}
 
 	switch (info.sv_dtype) {
@@ -634,7 +635,7 @@ void decode_mono_scaled_into_f32(const DataSet& ds, const DataSet::pixel_info_t&
 	default:
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=scaled output does not support sv_dtype={}",
-		    ds.path(), static_cast<int>(info.sv_dtype));
+		    df.path(), static_cast<int>(info.sv_dtype));
 		return;
 	}
 }
@@ -715,13 +716,14 @@ namespace pixel {
 
 namespace {
 
-bool has_rescale_transform_metadata(const DataSet& ds) {
+bool has_rescale_transform_metadata(const DicomFile& df) {
+	const auto& ds = df.dataset();
 	return static_cast<bool>(ds["RescaleSlope"_tag]) ||
 	    static_cast<bool>(ds["RescaleIntercept"_tag]);
 }
 
 bool should_use_scaled_output_impl(
-    const DataSet& ds, const DataSet::pixel_info_t& info, const decode_opts& opt) {
+    const DicomFile& df, const DicomFile::pixel_info_t& info, const decode_opts& opt) {
 	if (!opt.scaled) {
 		return false;
 	}
@@ -732,66 +734,67 @@ bool should_use_scaled_output_impl(
 		return false;
 	}
 
+	const auto& ds = df.dataset();
 	const bool has_modality_lut = static_cast<bool>(ds["ModalityLUTSequence"_tag]);
 	if (has_modality_lut) {
 		// Validate and load LUT eagerly so malformed metadata still fails loudly.
-		(void)ds.modality_lut();
+		(void)df.modality_lut();
 		return true;
 	}
 
-	return has_rescale_transform_metadata(ds);
+	return has_rescale_transform_metadata(df);
 }
 
 } // namespace
 
-bool should_use_scaled_output(const DataSet& ds, const decode_opts& opt) {
-	const auto& info = ds.pixel_info();
-	return should_use_scaled_output_impl(ds, info, opt);
+bool should_use_scaled_output(const DicomFile& df, const decode_opts& opt) {
+	const auto& info = df.pixel_info();
+	return should_use_scaled_output_impl(df, info, opt);
 }
 
-void decode_into(const DataSet& ds, std::size_t frame_index,
+void decode_into(const DicomFile& df, std::size_t frame_index,
     std::span<std::uint8_t> dst, const decode_opts& opt) {
-	const auto& info = ds.pixel_info();
+	const auto& info = df.pixel_info();
 	auto effective_opt = opt;
-	effective_opt.scaled = should_use_scaled_output_impl(ds, info, opt);
+	effective_opt.scaled = should_use_scaled_output_impl(df, info, opt);
 
-	const auto dst_strides = ds.calc_strides(effective_opt);
-	decode_into(ds, frame_index, dst, dst_strides, effective_opt);
+	const auto dst_strides = df.calc_strides(effective_opt);
+	decode_into(df, frame_index, dst, dst_strides, effective_opt);
 }
 
-void decode_into(const DataSet& ds, std::size_t frame_index,
+void decode_into(const DicomFile& df, std::size_t frame_index,
     std::span<std::uint8_t> dst, const strides& dst_strides, const decode_opts& opt) {
-	const auto& info = ds.pixel_info();
+	const auto& info = df.pixel_info();
 	auto effective_opt = opt;
-	effective_opt.scaled = should_use_scaled_output_impl(ds, info, opt);
+	effective_opt.scaled = should_use_scaled_output_impl(df, info, opt);
 
 	const auto backend = detail::select_decode_backend(info.ts);
 	switch (backend) {
 	case detail::decode_backend::raw:
-		detail::decode_raw_into(ds, info, frame_index, dst, dst_strides, effective_opt);
+		detail::decode_raw_into(df, info, frame_index, dst, dst_strides, effective_opt);
 		return;
 	case detail::decode_backend::rle:
-		detail::decode_rle_into(ds, info, frame_index, dst, dst_strides, effective_opt);
+		detail::decode_rle_into(df, info, frame_index, dst, dst_strides, effective_opt);
 		return;
 	case detail::decode_backend::jpeg_family:
 		if (info.ts.is_htj2k()) {
-			detail::decode_htj2k_into(ds, info, frame_index, dst, dst_strides, effective_opt);
+			detail::decode_htj2k_into(df, info, frame_index, dst, dst_strides, effective_opt);
 			return;
 		}
 		if (info.ts.is_jpeg2000()) {
-			detail::decode_jpeg2k_into(ds, info, frame_index, dst, dst_strides, effective_opt);
+			detail::decode_jpeg2k_into(df, info, frame_index, dst, dst_strides, effective_opt);
 			return;
 		}
 		if (info.ts.is_jpegls()) {
-			detail::decode_jpegls_into(ds, info, frame_index, dst, dst_strides, effective_opt);
+			detail::decode_jpegls_into(df, info, frame_index, dst, dst_strides, effective_opt);
 			return;
 		}
-		detail::decode_jpeg_into(ds, info, frame_index, dst, dst_strides, effective_opt);
+		detail::decode_jpeg_into(df, info, frame_index, dst, dst_strides, effective_opt);
 		return;
 	default:
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=unsupported transfer syntax {}",
-		    ds.path(), ds.transfer_syntax_uid().value());
+		    df.path(), df.transfer_syntax_uid().value());
 		return;
 	}
 }

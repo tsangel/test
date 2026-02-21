@@ -91,7 +91,8 @@ _JPLY_MAX_MAE = 60.0
 
 
 def _decode(path: Path):
-    return dicom.read_file(str(path)).to_array()
+    dicom_file = dicom.read_file(str(path))
+    return dicom_file.to_array()
 
 
 def _assert_same_pixels(decoded, reference, source_name: str):

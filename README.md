@@ -73,9 +73,26 @@ python examples/python/keyword_lookup_example.py PatientName Rows
 python examples/python/tag_lookup_example.py 00100010 (0008,0016)
 python examples/python/uid_lookup_example.py ExplicitVRLittleEndian 1.2.840.10008.1.2.1
 python examples/python/dump_dataset_example.py path/to/file.dcm
+python examples/python/pixel_decode_safe_example.py path/to/file.dcm --frame 0
 ```
 
 Python 코드에서는 일관되게 `import dicomsdl as dicom` 형식의 alias를 사용합니다.
+
+### Pixel Decode Safety Warning (v0.1.6 policy)
+
+pixel decode 경로는 내부적으로 pixel metadata를 캐시할 수 있습니다.
+아래 항목이 바뀌면 이전 metadata/shape/stride 가정은 무효로 간주해야 합니다.
+
+- `TransferSyntaxUID`
+- `Rows`, `Columns`, `SamplesPerPixel`, `BitsAllocated`
+- `PixelRepresentation`, `PlanarConfiguration`, `NumberOfFrames`
+- `PixelData`, `FloatPixelData`, `DoubleFloatPixelData`
+
+권장 사항:
+
+- 변경 이후에는 반드시 최신 pixel metadata를 다시 조회합니다.
+- 기존 decode 출력 버퍼(`decode_into`의 `out`)는 재사용하지 말고 다시 할당합니다.
+- C++에서는 `pixel_info(true)` 또는 새로 로드한 객체를 사용합니다.
 
 ### Run Python Tests
 
@@ -150,8 +167,8 @@ python -m pip install --upgrade pip cmake
 pip wheel . --no-build-isolation --no-deps -w dist
 pip install --force-reinstall dist/dicomsdl-*.whl
 python -c "import dicomsdl as dicom; tag, vr = dicom.keyword_to_tag_vr('PatientName'); print(int(tag), vr.str())"
-python -c "import dicomsdl as dicom; ds = dicom.read_file('sample.dcm'); print(ds.path)"
-python -c "import dicomsdl as dicom; data = b'DICM'; ds = dicom.read_bytes(data, name='inline'); print(ds.path, len(data))"
+python -c "import dicomsdl as dicom; df = dicom.read_file('sample.dcm'); print(df.path, type(df.dataset).__name__)"
+python -c "import dicomsdl as dicom; data = b'DICM'; df = dicom.read_bytes(data, name='inline'); print(df.path, len(data))"
 ```
 
 ### Windows (PowerShell)

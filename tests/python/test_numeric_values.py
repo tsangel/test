@@ -15,7 +15,8 @@ def get(ds, group, element):
 
 
 def test_numeric_scalars():
-	ds = dicom.read_file(_test_file())
+	dicom_file = dicom.read_file(_test_file())
+	ds = dicom_file.dataset
 	assert get(ds, 0x0009, 0x1070).to_long() == 337
 	assert get(ds, 0x0009, 0x1071).to_longlong() == 337
 	assert get(ds, 0x0009, 0x1072).to_long() == 337
@@ -25,7 +26,8 @@ def test_numeric_scalars():
 
 
 def test_numeric_vectors():
-	ds = dicom.read_file(_test_file())
+	dicom_file = dicom.read_file(_test_file())
+	ds = dicom_file.dataset
 	assert get(ds, 0x0009, 0x1076).to_long_vector() == [337, -338, 339, -340]
 	assert get(ds, 0x0009, 0x1077).to_long_vector() == [337, -338, 339, -340]
 	assert get(ds, 0x0009, 0x1078).to_long_vector() == [337, -338, 339, -340]
@@ -35,7 +37,8 @@ def test_numeric_vectors():
 
 
 def test_decimal_and_float():
-	ds = dicom.read_file(_test_file())
+	dicom_file = dicom.read_file(_test_file())
+	ds = dicom_file.dataset
 	assert math.isclose(get(ds, 0x0009, 0x1007).to_double(), 12.34, rel_tol=0, abs_tol=1e-6)
 	assert all(
 		math.isclose(a, b, rel_tol=0, abs_tol=1e-6)
@@ -53,13 +56,15 @@ def test_decimal_and_float():
 
 
 def test_is_from_string():
-	ds = dicom.read_file(_test_file())
+	dicom_file = dicom.read_file(_test_file())
+	ds = dicom_file.dataset
 	assert get(ds, 0x0009, 0x1014).to_long() == 12345
 	assert get(ds, 0x0009, 0x1015).to_long_vector() == [12345, 67890, 98765, 43210]
 
 
 def test_at_tags():
-	ds = dicom.read_file(_test_file())
+	dicom_file = dicom.read_file(_test_file())
+	ds = dicom_file.dataset
 	t1 = get(ds, 0x0009, 0x1004).to_tag()
 	assert t1.group == 0x0009 and t1.element == 0x1001
 	tv = get(ds, 0x0009, 0x1005).to_tag_vector()

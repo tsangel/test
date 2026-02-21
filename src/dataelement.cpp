@@ -25,6 +25,11 @@ inline std::string_view trim(std::string_view s) {
 	return s;
 }
 
+inline bool element_value_is_little_endian(const DataElement& elem) noexcept {
+	const auto* parent = elem.parent();
+	return parent ? parent->is_little_endian() : true;
+}
+
 template <typename T>
 std::optional<std::vector<T>> load_numeric_vector(const DataElement& elem) {
     static_assert(std::is_integral_v<T> || std::is_floating_point_v<T>, "numeric load requires arithmetic type");
@@ -32,7 +37,7 @@ std::optional<std::vector<T>> load_numeric_vector(const DataElement& elem) {
 	if (span.empty()) return std::nullopt;
 	if (span.size() % sizeof(T) != 0) return std::nullopt;
 
-	const bool little_endian = elem.parent() ? elem.parent()->is_little_endian() : true;
+	const bool little_endian = element_value_is_little_endian(elem);
 	const auto count = span.size() / sizeof(T);
 	std::vector<T> out;
 	out.reserve(count);
@@ -547,7 +552,7 @@ template <typename T>
 static std::optional<T> load_numeric_scalar(const DataElement& elem) {
 	const auto span = elem.value_span();
 	if (span.size() < sizeof(T)) return std::nullopt;
-	const bool little_endian = elem.parent() ? elem.parent()->is_little_endian() : true;
+	const bool little_endian = element_value_is_little_endian(elem);
 	const auto* ptr = span.data();
 	if constexpr (std::is_floating_point_v<T>) {
 		using Bits = std::conditional_t<sizeof(T)==4, std::uint32_t, std::uint64_t>;
@@ -855,7 +860,7 @@ std::optional<std::vector<Tag>> DataElement::to_tag_vector() const {
 	if (vr_ != dicom::VR::AT) return std::nullopt;
 	const auto span = value_span();
 	if (span.empty() || span.size() % 4 != 0) return std::nullopt;
-	const bool little_endian = parent() ? parent()->is_little_endian() : true;
+	const bool little_endian = element_value_is_little_endian(*this);
 	const auto count = span.size() / 4;
 	std::vector<Tag> out;
 	out.reserve(count);
@@ -872,7 +877,7 @@ std::optional<Tag> DataElement::to_tag() const {
 	if (vr_ != dicom::VR::AT) return std::nullopt;
 	const auto span = value_span();
 	if (span.size() < 4) return std::nullopt;
-	const bool little_endian = parent() ? parent()->is_little_endian() : true;
+	const bool little_endian = element_value_is_little_endian(*this);
 	const std::uint16_t g = endian::load_value<std::uint16_t>(span.data(), little_endian);
 	const std::uint16_t e = endian::load_value<std::uint16_t>(span.data() + 2, little_endian);
 	return Tag(g, e);

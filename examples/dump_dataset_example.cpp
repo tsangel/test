@@ -1,4 +1,4 @@
-#include <dicom.h>
+ #include <dicom.h>
 
 #include <exception>
 #include <iomanip>
@@ -213,8 +213,8 @@ int main(int argc, char** argv) {
 	}
 
 	try {
-		auto dataset = dicom::read_file(argv[1]);
-		dump_dataset(*dataset);
+		auto file = dicom::read_file(argv[1]);
+		dump_dataset(file->dataset());
 	} catch (const std::exception& ex) {
 		std::cerr << "Failed to read DICOM file: " << ex.what() << std::endl;
 		return 1;

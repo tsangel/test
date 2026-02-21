@@ -73,44 +73,45 @@ void check_double_vec(DataSet& ds, Tag tag, const std::vector<double>& expected)
 } // namespace
 
 int main() {
-    auto ds = dicom::read_file("tests/test_le.dcm");
-    assert(ds);
+    auto file = dicom::read_file("tests/test_le.dcm");
+    assert(file);
+	auto& ds = file->dataset();
 
     // Scalars
-    check_scalar(*ds, Tag(0x0009, 0x1070), 337, 337);
-    check_scalar(*ds, Tag(0x0009, 0x1071), 337, 337);
-    check_scalar(*ds, Tag(0x0009, 0x1072), 337, 337);
-    check_scalar(*ds, Tag(0x0009, 0x1073), 337, 337);
-    check_scalar(*ds, Tag(0x0009, 0x1074), 337, 337);
-    check_scalar(*ds, Tag(0x0009, 0x1075), 337, 337);
+    check_scalar(ds, Tag(0x0009, 0x1070), 337, 337);
+    check_scalar(ds, Tag(0x0009, 0x1071), 337, 337);
+    check_scalar(ds, Tag(0x0009, 0x1072), 337, 337);
+    check_scalar(ds, Tag(0x0009, 0x1073), 337, 337);
+    check_scalar(ds, Tag(0x0009, 0x1074), 337, 337);
+    check_scalar(ds, Tag(0x0009, 0x1075), 337, 337);
 
     // Vectors
-    check_vector(*ds, Tag(0x0009, 0x1076), {337, -338, 339, -340});
-    check_vector(*ds, Tag(0x0009, 0x1077), {337, -338, 339, -340});
-    check_vector(*ds, Tag(0x0009, 0x1078), {337, -338, 339, -340});
-    check_vector(*ds, Tag(0x0009, 0x1079), {337, 338, 339, 340});
-    check_vector(*ds, Tag(0x0009, 0x107A), {337, 338, 339, 340});
-    check_vector(*ds, Tag(0x0009, 0x107B), {337, 338, 339, 340});
+    check_vector(ds, Tag(0x0009, 0x1076), {337, -338, 339, -340});
+    check_vector(ds, Tag(0x0009, 0x1077), {337, -338, 339, -340});
+    check_vector(ds, Tag(0x0009, 0x1078), {337, -338, 339, -340});
+    check_vector(ds, Tag(0x0009, 0x1079), {337, 338, 339, 340});
+    check_vector(ds, Tag(0x0009, 0x107A), {337, 338, 339, 340});
+    check_vector(ds, Tag(0x0009, 0x107B), {337, 338, 339, 340});
 
     // Floating/decimal strings
-    check_double(*ds, Tag(0x0009, 0x1007), 12.34);
-    check_double_vec(*ds, Tag(0x0009, 0x1008), {1.2, 3.4, 5.6, 7.8, 9.0});
-    check_double(*ds, Tag(0x0009, 0x1010), 12.3400002);
-    check_double_vec(*ds, Tag(0x0009, 0x1011), {1.20000005, 3.4000001, 5.5999999, 7.80000019, 9.0});
-    check_double(*ds, Tag(0x0009, 0x1012), 12.34);
-	check_double_vec(*ds, Tag(0x0009, 0x1013), {1.2, 3.4, 5.6, 7.8, 9.0});
+    check_double(ds, Tag(0x0009, 0x1007), 12.34);
+    check_double_vec(ds, Tag(0x0009, 0x1008), {1.2, 3.4, 5.6, 7.8, 9.0});
+    check_double(ds, Tag(0x0009, 0x1010), 12.3400002);
+    check_double_vec(ds, Tag(0x0009, 0x1011), {1.20000005, 3.4000001, 5.5999999, 7.80000019, 9.0});
+    check_double(ds, Tag(0x0009, 0x1012), 12.34);
+	check_double_vec(ds, Tag(0x0009, 0x1013), {1.2, 3.4, 5.6, 7.8, 9.0});
 
 	// Integer-on-strings
-	check_scalar(*ds, Tag(0x0009, 0x1014), 12345, 12345);
-	check_vector(*ds, Tag(0x0009, 0x1015), {12345, 67890, 98765, 43210});
+	check_scalar(ds, Tag(0x0009, 0x1014), 12345, 12345);
+	check_vector(ds, Tag(0x0009, 0x1015), {12345, 67890, 98765, 43210});
 
 	// AT tags
-	if (auto t = ds->get_dataelement(Tag(0x0009, 0x1004))->to_tag()) {
+	if (auto t = ds.get_dataelement(Tag(0x0009, 0x1004))->to_tag()) {
 		assert(t->group() == 0x0009 && t->element() == 0x1001);
 	} else {
 		assert(false && "AT single tag missing");
 	}
-	if (auto tv = ds->get_dataelement(Tag(0x0009, 0x1005))->to_tag_vector()) {
+	if (auto tv = ds.get_dataelement(Tag(0x0009, 0x1005))->to_tag_vector()) {
 		assert(tv->size() == 4);
 		std::array<Tag,4> expected{Tag(0x0009,0x1001), Tag(0x0009,0x1002), Tag(0x0009,0x1003), Tag(0x0009,0x1004)};
 		for (size_t i=0;i<4;++i) assert((*tv)[i] == expected[i]);

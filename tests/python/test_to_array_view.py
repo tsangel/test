@@ -11,13 +11,13 @@ def _test_file(name: str = "test_le.dcm") -> str:
 
 
 def test_to_array_view_method_exists():
-    assert hasattr(dicom.DataSet, "to_array_view")
+    assert hasattr(dicom.DicomFile, "to_array_view")
 
 
 def test_to_array_view_matches_to_array():
-    ds = dicom.read_file(_test_file())
-    arr_view = ds.to_array_view(frame=0)
-    arr_copy = ds.to_array(frame=0, scaled=False)
+    dicom_file = dicom.read_file(_test_file())
+    arr_view = dicom_file.to_array_view(frame=0)
+    arr_copy = dicom_file.to_array(frame=0, scaled=False)
 
     assert isinstance(arr_view, np.ndarray)
     assert arr_view.shape == arr_copy.shape
@@ -26,8 +26,8 @@ def test_to_array_view_matches_to_array():
 
 
 def test_to_array_view_is_readonly():
-    ds = dicom.read_file(_test_file())
-    arr_view = ds.to_array_view(frame=0)
+    dicom_file = dicom.read_file(_test_file())
+    arr_view = dicom_file.to_array_view(frame=0)
     assert not arr_view.flags.writeable
 
     with pytest.raises(ValueError):
@@ -35,10 +35,10 @@ def test_to_array_view_is_readonly():
 
 
 def test_to_array_view_frame_validation():
-    ds = dicom.read_file(_test_file())
+    dicom_file = dicom.read_file(_test_file())
 
     with pytest.raises(IndexError):
-        ds.to_array_view(frame=1)
+        dicom_file.to_array_view(frame=1)
 
     with pytest.raises(ValueError):
-        ds.to_array_view(frame=-2)
+        dicom_file.to_array_view(frame=-2)

@@ -18,7 +18,8 @@ struct raw_source {
 	const char* name{"PixelData"};
 };
 
-raw_source select_raw_source(const DataSet& ds, dtype sv_dtype) {
+raw_source select_raw_source(const DicomFile& df, dtype sv_dtype) {
+	const auto& ds = df.dataset();
 	switch (sv_dtype) {
 	case dtype::f32:
 		return raw_source{&ds["FloatPixelData"_tag], "FloatPixelData"};
@@ -31,25 +32,26 @@ raw_source select_raw_source(const DataSet& ds, dtype sv_dtype) {
 
 } // namespace
 
-void decode_raw_into(const DataSet& ds, const DataSet::pixel_info_t& info,
+void decode_raw_into(const DicomFile& df, const DicomFile::pixel_info_t& info,
     std::size_t frame_index, std::span<std::uint8_t> dst,
     const strides& dst_strides, const decode_opts& opt) {
+	const auto& ds = df.dataset();
 	if (!info.has_pixel_data) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=sv_dtype is unknown", ds.path());
+		    "pixel::decode_into file={} reason=sv_dtype is unknown", df.path());
 	}
 
 	if (info.rows <= 0 || info.cols <= 0 || info.samples_per_pixel <= 0) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=invalid Rows/Columns/SamplesPerPixel",
-		    ds.path());
+		    df.path());
 	}
 
 	const auto samples_per_pixel_value = info.samples_per_pixel;
 	if (samples_per_pixel_value != 1 && samples_per_pixel_value != 3 && samples_per_pixel_value != 4) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=only SamplesPerPixel=1/3/4 is supported in current raw path",
-		    ds.path());
+		    df.path());
 	}
 	const auto samples_per_pixel = static_cast<std::size_t>(samples_per_pixel_value);
 
@@ -57,14 +59,14 @@ void decode_raw_into(const DataSet& ds, const DataSet::pixel_info_t& info,
 	if (src_bytes_per_sample == 0) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=only sv_dtype=u8/s8/u16/s16/u32/s32/f32/f64 is supported in current raw path",
-		    ds.path());
+		    df.path());
 	}
 	const std::size_t dst_bytes_per_sample = opt.scaled ? sizeof(float) : src_bytes_per_sample;
 
 	if (info.frames <= 0) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=invalid NumberOfFrames",
-		    ds.path());
+		    df.path());
 	}
 
 	const auto rows = static_cast<std::size_t>(info.rows);
@@ -73,18 +75,18 @@ void decode_raw_into(const DataSet& ds, const DataSet::pixel_info_t& info,
 	if (frame_index >= frame_count) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} frame={} reason=frame index out of range (frames={})",
-		    ds.path(), frame_index, frame_count);
+		    df.path(), frame_index, frame_count);
 	}
 
-	const auto source = select_raw_source(ds, info.sv_dtype);
+	const auto source = select_raw_source(df, info.sv_dtype);
 	if (!source.element || !(*source.element)) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=missing {}", ds.path(), source.name);
+		    "pixel::decode_into file={} reason=missing {}", df.path(), source.name);
 	}
 	if (source.element->vr().is_pixel_sequence()) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=encapsulated {} is not raw",
-		    ds.path(), source.name);
+		    df.path(), source.name);
 	}
 
 	const auto src_planar = info.planar_configuration;
@@ -107,7 +109,7 @@ void decode_raw_into(const DataSet& ds, const DataSet::pixel_info_t& info,
 	if (dst_strides.row < dst_min_row_bytes) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=row stride too small (need>={}, got={})",
-		    ds.path(), dst_min_row_bytes, dst_strides.row);
+		    df.path(), dst_min_row_bytes, dst_strides.row);
 	}
 	std::size_t min_frame_bytes = dst_strides.row * rows;
 	if (dst_planar == planar::planar) {
@@ -116,19 +118,19 @@ void decode_raw_into(const DataSet& ds, const DataSet::pixel_info_t& info,
 	if (dst_strides.frame < min_frame_bytes) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=frame stride too small (need>={}, got={})",
-		    ds.path(), min_frame_bytes, dst_strides.frame);
+		    df.path(), min_frame_bytes, dst_strides.frame);
 	}
 	if (dst.size() < dst_strides.frame) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=destination too small (need={}, got={})",
-		    ds.path(), dst_strides.frame, dst.size());
+		    df.path(), dst_strides.frame, dst.size());
 	}
 
 	const std::size_t src_frame_offset = frame_index * src_frame_bytes;
 	if (src.size() < src_frame_offset + src_frame_bytes) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason={} length is shorter than expected for frame {}",
-		    ds.path(), source.name, frame_index);
+		    df.path(), source.name, frame_index);
 	}
 
 	const bool source_little_endian = ds.is_little_endian();
@@ -138,7 +140,7 @@ void decode_raw_into(const DataSet& ds, const DataSet::pixel_info_t& info,
 	const auto* src_frame = src.data() + src_frame_offset;
 	if (opt.scaled) {
 		decode_mono_scaled_into_f32(
-		    ds, info, src_frame, dst, dst_strides, rows, cols, src_row_bytes);
+		    df, info, src_frame, dst, dst_strides, rows, cols, src_row_bytes);
 		return;
 	}
 

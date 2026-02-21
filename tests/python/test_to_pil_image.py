@@ -16,7 +16,8 @@ def test_to_pil_image_method_exists():
 
 
 def test_to_pil_image_single_frame_default():
-    ds = dicom.read_file(_test_file())
+    dicom_file = dicom.read_file(_test_file())
+    ds = dicom_file.dataset
     image = ds.to_pil_image(frame=0)
 
     assert isinstance(image, ImageModule.Image)
@@ -29,7 +30,8 @@ def test_to_pil_image_single_frame_default():
 
 
 def test_to_pil_image_frame_validation():
-    ds = dicom.read_file(_test_file())
+    dicom_file = dicom.read_file(_test_file())
+    ds = dicom_file.dataset
 
     with pytest.raises(ValueError):
         ds.to_pil_image(frame=-1)
@@ -39,7 +41,8 @@ def test_to_pil_image_frame_validation():
 
 
 def test_to_pil_image_explicit_window():
-    ds = dicom.read_file(_test_file())
+    dicom_file = dicom.read_file(_test_file())
+    ds = dicom_file.dataset
     image = ds.to_pil_image(window=(0.0, 400.0))
 
     arr = np.asarray(image)

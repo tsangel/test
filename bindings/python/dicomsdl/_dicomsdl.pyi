@@ -7,6 +7,7 @@ DICOMSDL_VERSION: str
 __version__: str
 
 __all__ = [
+    "DicomFile",
     "DataSet",
     "Sequence",
     "Tag",
@@ -22,11 +23,15 @@ __all__ = [
     "uid_from_keyword",
 ]
 
-
-class DataSet:
+class DicomFile:
     @property
     def path(self) -> str: ...
 
+    @property
+    def dataset(self) -> DataSet: ...
+
+    def __len__(self) -> int: ...
+    def __iter__(self): ...
     def pixel_data(self, frame_index: int = ...) -> bytes: ...
 
     def to_array(
@@ -47,6 +52,16 @@ class DataSet:
     def pixel_array(
         self, frame: int = ..., scaled: bool = ..., htj2k_decoder: str = ...
     ) -> Any: ...
+
+    def __getitem__(self, key: Tag | int | str, /) -> Any: ...
+    def __getattr__(self, name: str) -> Any: ...
+
+
+class DataSet:
+    @property
+    def path(self) -> str: ...
+
+    def size(self) -> int: ...
 
     def to_pil_image(
         self,
@@ -233,10 +248,10 @@ class Uid:
     def __bool__(self) -> bool: ...
 
 
-def read_file(path: str, /) -> DataSet: ...
+def read_file(path: str, /) -> DicomFile: ...
 
 
-def read_bytes(data: bytes | bytearray | memoryview, name: str = "<memory>", /) -> DataSet: ...
+def read_bytes(data: bytes | bytearray | memoryview, name: str = "<memory>", /) -> DicomFile: ...
 
 
 @overload

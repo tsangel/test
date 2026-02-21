@@ -122,8 +122,8 @@ def main(argv: list[str]) -> int:
     parser.add_argument("path", help="Path to a DICOM file")
     args = parser.parse_args(argv)
 
-    dataset = dicom.read_file(args.path)
-    dump_dataset(dataset)
+    dicom_file = dicom.read_file(args.path)
+    dump_dataset(dicom_file.dataset)
     return 0
 
 

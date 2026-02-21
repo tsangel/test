@@ -63,10 +63,10 @@ python benchmarks/python/benchmark_wg04_pixel_decode.py \
 
 - Datasets are preloaded once per backend and codec before timed runs.
 - `dicomsdl` path:
-  - default decode call: `ds.to_array(frame=-1, scaled=False)`
+  - default decode call: `df.to_array(frame=-1, scaled=False)`
   - for `J2KR`/`J2KI` in the base table, the driver forces
-    `ds.decode_into(out, frame=-1, scaled=False, threads=-1)` to apply multi-CPU decoding
-  - with `--reuse-output`: `ds.decode_into(out, frame=-1, scaled=False, threads=-1)`
+    `df.decode_into(out, frame=-1, scaled=False, threads=-1)` to apply multi-CPU decoding
+  - with `--reuse-output`: `df.decode_into(out, frame=-1, scaled=False, threads=-1)`
   - in this benchmark driver, `decode_into` uses `threads=-1` by default
     (JPEG 2000: auto/all CPUs).
 - `pydicom` path:
@@ -135,6 +135,9 @@ HTJ2K cross-backend comparison target in this note:
   in a run, HTJ2K rows are reported as `pydicom=n/a`.
 - `--scaled` is intentionally restricted to `dicomsdl` mode in this script.
   Cross-backend comparisons should use `scaled=False`.
+- In this benchmark flow, dataset pixel metadata is assumed immutable after
+  preload. If pixel-affecting fields are changed, regenerate pixel metadata and
+  reallocate output buffers before subsequent `decode_into` calls.
 - Full numeric output is stored in
   `build/wg04_pixel_decode_compare_r3_htj2k.json` from the command above.
 - HTJ2K backend-only JSON snapshots:

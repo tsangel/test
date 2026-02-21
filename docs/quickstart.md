@@ -24,11 +24,19 @@ print(int(tag), vr.str())
 ```python
 import dicomsdl as dicom
 
-# Read a file into a DataSet
-f = dicom.read_file("sample.dcm")
-for elem in f:
+# Read a file into a DicomFile, then access root DataSet
+df = dicom.read_file("sample.dcm")
+for elem in df.dataset:
     print(elem.tag, elem.vr)
 ```
+
+5. Pixel decode safety note
+
+- If you change pixel-related tags or transfer syntax, treat previously derived
+  pixel layout assumptions as stale.
+- Re-query pixel metadata and reallocate decode output buffers before calling
+  `decode_into` again.
+- Do not keep using an old output array shape/stride after metadata changes.
 
 ## C++ (example build)
 1. Configure & build

@@ -62,6 +62,29 @@ int main() {
 		if (!file) fail("read_file returned null");
 		if (file->path() != file_path) fail("file path mismatch");
 		if (file->stream().datasize() != 4) fail("file datasize mismatch");
+		if (file->size() != file->dataset().size()) fail("DicomFile size forwarding mismatch");
+
+		auto* rows = file->add_dataelement("Rows"_tag, dicom::VR::US, 0, 2);
+		if (!rows || rows == dicom::NullElement()) fail("DicomFile add_dataelement failed");
+		if (!file->get_dataelement("Rows"_tag) || file->get_dataelement("Rows"_tag) == dicom::NullElement()) {
+			fail("DicomFile get_dataelement(Tag) failed");
+		}
+		if (!file->get_dataelement("Rows") || file->get_dataelement("Rows") == dicom::NullElement()) {
+			fail("DicomFile get_dataelement(string_view) failed");
+		}
+		const auto& rows_ref = (*file)["Rows"_tag];
+		if (rows_ref.tag().value() != "Rows"_tag.value()) fail("DicomFile operator[] failed");
+		file->remove_dataelement("Rows"_tag);
+		if (file->get_dataelement("Rows"_tag) != dicom::NullElement()) {
+			fail("DicomFile remove_dataelement failed");
+		}
+
+		std::size_t file_iter_count = 0;
+		for (const auto& elem : *file) {
+			(void)elem;
+			++file_iter_count;
+		}
+		if (file_iter_count != file->dataset().size()) fail("DicomFile iterator mismatch");
 
 		DataSet manual;
 		manual.attach_to_file(file_path);

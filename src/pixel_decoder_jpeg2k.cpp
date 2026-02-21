@@ -250,12 +250,12 @@ std::string decode_failure_message(OPJ_CODEC_FORMAT format, const openjpeg_log_s
 	return fmt::format("{} decode failed ({})", openjpeg_format_name(format), fallback);
 }
 
-OPJ_UINT32 resolve_openjpeg_thread_count(const DataSet& ds, const decode_opts& opt) {
+OPJ_UINT32 resolve_openjpeg_thread_count(const DicomFile& df, const decode_opts& opt) {
 	int configured_threads = opt.decoder_threads;
 	if (configured_threads < -1) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=invalid decoder_threads {} (expected -1, 0, or positive)",
-		    ds.path(), configured_threads);
+		    df.path(), configured_threads);
 	}
 	if (configured_threads == 0) {
 		return 0;
@@ -270,38 +270,39 @@ OPJ_UINT32 resolve_openjpeg_thread_count(const DataSet& ds, const decode_opts& o
 	    static_cast<unsigned long long>(std::numeric_limits<OPJ_UINT32>::max())) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=decoder_threads {} exceeds OpenJPEG limit {}",
-		    ds.path(), configured_threads, std::numeric_limits<OPJ_UINT32>::max());
+		    df.path(), configured_threads, std::numeric_limits<OPJ_UINT32>::max());
 	}
 	return static_cast<OPJ_UINT32>(configured_threads);
 }
 
-jpeg2k_frame_source load_jpeg2k_frame_source(const DataSet& ds, std::size_t frame_index) {
+jpeg2k_frame_source load_jpeg2k_frame_source(const DicomFile& df, std::size_t frame_index) {
+	const auto& ds = df.dataset();
 	const auto& pixel_data = ds["PixelData"_tag];
 	if (!pixel_data || !pixel_data.vr().is_pixel_sequence()) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=JPEG2000 requires encapsulated PixelData",
-		    ds.path());
+		    df.path());
 	}
 
 	const auto* pixel_sequence = pixel_data.as_pixel_sequence();
 	if (!pixel_sequence) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=JPEG2000 pixel sequence is missing",
-		    ds.path());
+		    df.path());
 	}
 
 	const auto frame_count = pixel_sequence->number_of_frames();
 	if (frame_index >= frame_count) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} frame={} reason=JPEG2000 frame index out of range (frames={})",
-		    ds.path(), frame_index, frame_count);
+		    df.path(), frame_index, frame_count);
 	}
 
 	const auto* frame = pixel_sequence->frame(frame_index);
 	if (!frame) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} frame={} reason=JPEG2000 frame is missing",
-		    ds.path(), frame_index);
+		    df.path(), frame_index);
 	}
 
 	jpeg2k_frame_source source{};
@@ -316,13 +317,13 @@ jpeg2k_frame_source load_jpeg2k_frame_source(const DataSet& ds, std::size_t fram
 	if (fragments.empty()) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} frame={} reason=JPEG2000 frame has no fragments",
-		    ds.path(), frame_index);
+		    df.path(), frame_index);
 	}
 	for (const auto& fragment : fragments) {
 		if (fragment.length == 0) {
 			diag::error_and_throw(
 			    "pixel::decode_into file={} frame={} reason=JPEG2000 zero-length fragment is not supported",
-			    ds.path(), frame_index);
+			    df.path(), frame_index);
 		}
 	}
 
@@ -337,7 +338,7 @@ jpeg2k_frame_source load_jpeg2k_frame_source(const DataSet& ds, std::size_t fram
 	if (!stream) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} frame={} reason=JPEG2000 pixel sequence stream is missing",
-		    ds.path(), frame_index);
+		    df.path(), frame_index);
 	}
 	source.stream = stream;
 
@@ -355,13 +356,13 @@ jpeg2k_frame_source load_jpeg2k_frame_source(const DataSet& ds, std::size_t fram
 		if (frag.length == 0) {
 			diag::error_and_throw(
 			    "pixel::decode_into file={} frame={} reason=JPEG2000 zero-length fragment is not supported",
-			    ds.path(), frame_index);
+			    df.path(), frame_index);
 		}
 		source.fragment_offsets.push_back(total_size);
 		if (frag.length > std::numeric_limits<std::size_t>::max() - total_size) {
 			diag::error_and_throw(
 			    "pixel::decode_into file={} frame={} reason=JPEG2000 frame size overflow",
-			    ds.path(), frame_index);
+			    df.path(), frame_index);
 		}
 		total_size += frag.length;
 	}
@@ -384,7 +385,7 @@ opj_stream_ptr create_openjpeg_stream(jpeg2k_frame_source& source) {
 	return stream;
 }
 
-opj_image_ptr decode_openjpeg_image_with_format(const DataSet& ds,
+opj_image_ptr decode_openjpeg_image_with_format(const DicomFile& df,
     jpeg2k_frame_source& source, OPJ_CODEC_FORMAT format, const decode_opts& opt,
     std::string& failure) {
 	opj_dparameters_t parameters{};
@@ -404,7 +405,7 @@ opj_image_ptr decode_openjpeg_image_with_format(const DataSet& ds,
 		failure = decode_failure_message(format, sink, "setup");
 		return {};
 	}
-	const auto thread_count = resolve_openjpeg_thread_count(ds, opt);
+	const auto thread_count = resolve_openjpeg_thread_count(df, opt);
 	if (thread_count > 0 && !opj_codec_set_threads(codec.get(), thread_count)) {
 		failure = fmt::format(
 		    "{} failed to set decode threads ({})", openjpeg_format_name(format), thread_count);
@@ -442,7 +443,7 @@ opj_image_ptr decode_openjpeg_image_with_format(const DataSet& ds,
 	return image;
 }
 
-opj_image_ptr decode_openjpeg_image(const DataSet& ds, std::size_t frame_index,
+opj_image_ptr decode_openjpeg_image(const DicomFile& df, std::size_t frame_index,
     jpeg2k_frame_source& source, const decode_opts& opt) {
 	const auto prefer_jp2 = frame_looks_like_jp2(source);
 
@@ -452,23 +453,23 @@ opj_image_ptr decode_openjpeg_image(const DataSet& ds, std::size_t frame_index,
 	const auto second_format = prefer_jp2 ? OPJ_CODEC_J2K : OPJ_CODEC_JP2;
 
 	if (auto image = decode_openjpeg_image_with_format(
-	        ds, source, first_format, opt, first_failure)) {
+	        df, source, first_format, opt, first_failure)) {
 		return image;
 	}
 	if (auto image = decode_openjpeg_image_with_format(
-	        ds, source, second_format, opt, second_failure)) {
+	        df, source, second_format, opt, second_failure)) {
 		return image;
 	}
 
 	diag::error_and_throw(
 	    "pixel::decode_into file={} frame={} reason=JPEG2000 decode failed ({}: {}; {}: {})",
-	    ds.path(), frame_index,
+	    df.path(), frame_index,
 	    openjpeg_format_name(first_format), trimmed_message(first_failure),
 	    openjpeg_format_name(second_format), trimmed_message(second_failure));
 	return {};
 }
 
-void validate_destination(const DataSet& ds, std::span<std::uint8_t> dst,
+void validate_destination(const DicomFile& df, std::span<std::uint8_t> dst,
     const strides& dst_strides, planar dst_planar, std::size_t rows, std::size_t cols,
     std::size_t samples_per_pixel, std::size_t bytes_per_sample) {
 	const std::size_t dst_row_components =
@@ -477,7 +478,7 @@ void validate_destination(const DataSet& ds, std::span<std::uint8_t> dst,
 	if (dst_strides.row < dst_min_row_bytes) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=row stride too small (need>={}, got={})",
-		    ds.path(), dst_min_row_bytes, dst_strides.row);
+		    df.path(), dst_min_row_bytes, dst_strides.row);
 	}
 
 	std::size_t min_frame_bytes = dst_strides.row * rows;
@@ -487,16 +488,16 @@ void validate_destination(const DataSet& ds, std::span<std::uint8_t> dst,
 	if (dst_strides.frame < min_frame_bytes) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=frame stride too small (need>={}, got={})",
-		    ds.path(), min_frame_bytes, dst_strides.frame);
+		    df.path(), min_frame_bytes, dst_strides.frame);
 	}
 	if (dst.size() < dst_strides.frame) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=destination too small (need={}, got={})",
-		    ds.path(), dst_strides.frame, dst.size());
+		    df.path(), dst_strides.frame, dst.size());
 	}
 }
 
-void validate_decoded_image(const DataSet& ds, std::size_t frame_index, const DataSet::pixel_info_t& info,
+void validate_decoded_image(const DicomFile& df, std::size_t frame_index, const DicomFile::pixel_info_t& info,
     const opj_image_t& image, std::size_t rows, std::size_t cols, std::size_t samples_per_pixel) {
 	const auto decoded_rows = (image.y1 >= image.y0)
 	                              ? static_cast<std::size_t>(image.y1 - image.y0)
@@ -507,19 +508,19 @@ void validate_decoded_image(const DataSet& ds, std::size_t frame_index, const Da
 	if (decoded_rows != rows || decoded_cols != cols) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} frame={} reason=JPEG2000 decoded dimensions mismatch (decoded={}x{}, expected={}x{})",
-		    ds.path(), frame_index, decoded_rows, decoded_cols, rows, cols);
+		    df.path(), frame_index, decoded_rows, decoded_cols, rows, cols);
 	}
 	if (image.numcomps != samples_per_pixel) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} frame={} reason=JPEG2000 component count mismatch (decoded={}, expected={})",
-		    ds.path(), frame_index, image.numcomps, samples_per_pixel);
+		    df.path(), frame_index, image.numcomps, samples_per_pixel);
 	}
 
 	const auto bytes_per_sample = sv_dtype_bytes(info.sv_dtype);
 	if (bytes_per_sample == 0 || bytes_per_sample > 4 || !sv_dtype_is_integral(info.sv_dtype)) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} frame={} reason=JPEG2000 supports integral sv_dtype up to 32-bit only",
-		    ds.path(), frame_index);
+		    df.path(), frame_index);
 	}
 
 	const bool expected_signed = sv_dtype_is_signed(info.sv_dtype);
@@ -527,7 +528,7 @@ void validate_decoded_image(const DataSet& ds, std::size_t frame_index, const Da
 	if (!expected_signed && max_precision == 32) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} frame={} reason=JPEG2000 unsigned 32-bit samples are not supported",
-		    ds.path(), frame_index);
+		    df.path(), frame_index);
 	}
 
 	for (std::size_t c = 0; c < samples_per_pixel; ++c) {
@@ -535,22 +536,22 @@ void validate_decoded_image(const DataSet& ds, std::size_t frame_index, const Da
 		if (!comp.data) {
 			diag::error_and_throw(
 			    "pixel::decode_into file={} frame={} reason=JPEG2000 component {} has no decoded data",
-			    ds.path(), frame_index, c);
+			    df.path(), frame_index, c);
 		}
 		if (comp.w != cols || comp.h != rows) {
 			diag::error_and_throw(
 			    "pixel::decode_into file={} frame={} reason=JPEG2000 component {} dimensions mismatch (decoded={}x{}, expected={}x{})",
-			    ds.path(), frame_index, c, comp.h, comp.w, rows, cols);
+			    df.path(), frame_index, c, comp.h, comp.w, rows, cols);
 		}
 		if (comp.sgnd != static_cast<OPJ_UINT32>(expected_signed ? 1 : 0)) {
 			diag::error_and_throw(
 			    "pixel::decode_into file={} frame={} reason=JPEG2000 component {} signedness mismatch (decoded={}, expected={})",
-			    ds.path(), frame_index, c, comp.sgnd, expected_signed ? 1 : 0);
+			    df.path(), frame_index, c, comp.sgnd, expected_signed ? 1 : 0);
 		}
 		if (comp.prec == 0 || comp.prec > max_precision) {
 			diag::error_and_throw(
 			    "pixel::decode_into file={} frame={} reason=JPEG2000 component {} precision {} exceeds output {} bits",
-			    ds.path(), frame_index, c, comp.prec, max_precision);
+			    df.path(), frame_index, c, comp.prec, max_precision);
 		}
 	}
 }
@@ -597,16 +598,17 @@ void write_unscaled_to_dst(const opj_image_t& image, std::span<std::uint8_t> dst
 }
 
 template <typename SampleT>
-void write_scaled_mono_to_dst(const DataSet& ds, const opj_image_t& image, std::span<std::uint8_t> dst,
+void write_scaled_mono_to_dst(const DicomFile& df, const opj_image_t& image, std::span<std::uint8_t> dst,
     const strides& dst_strides, std::size_t rows, std::size_t cols) {
+	const auto& ds = df.dataset();
 	const auto* src = image.comps[0].data;
 	if (!src) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=JPEG2000 decoded component has no data",
-		    ds.path());
+		    df.path());
 	}
 
-	const auto modality_lut = ds.modality_lut();
+	const auto modality_lut = df.modality_lut();
 	if (modality_lut) {
 		const auto last_index = static_cast<std::int64_t>(modality_lut->values.size() - 1);
 		for (std::size_t r = 0; r < rows; ++r) {
@@ -632,7 +634,7 @@ void write_scaled_mono_to_dst(const DataSet& ds, const opj_image_t& image, std::
 	if (!std::isfinite(slope) || !std::isfinite(intercept)) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=RescaleSlope/RescaleIntercept must be finite",
-		    ds.path());
+		    df.path());
 	}
 
 	for (std::size_t r = 0; r < rows; ++r) {
@@ -648,27 +650,27 @@ void write_scaled_mono_to_dst(const DataSet& ds, const opj_image_t& image, std::
 
 } // namespace
 
-void decode_jpeg2k_into(const DataSet& ds, const DataSet::pixel_info_t& info,
+void decode_jpeg2k_into(const DicomFile& df, const DicomFile::pixel_info_t& info,
     std::size_t frame_index, std::span<std::uint8_t> dst,
     const strides& dst_strides, const decode_opts& opt) {
 	if (!info.has_pixel_data) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=sv_dtype is unknown", ds.path());
+		    "pixel::decode_into file={} reason=sv_dtype is unknown", df.path());
 	}
 	if (!info.ts.is_jpeg2000()) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=transfer syntax is not JPEG2000 ({})",
-		    ds.path(), ds.transfer_syntax_uid().value());
+		    df.path(), df.transfer_syntax_uid().value());
 	}
 	if (info.rows <= 0 || info.cols <= 0 || info.samples_per_pixel <= 0) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=invalid Rows/Columns/SamplesPerPixel",
-		    ds.path());
+		    df.path());
 	}
 	if (info.frames <= 0) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=invalid NumberOfFrames",
-		    ds.path());
+		    df.path());
 	}
 
 	const auto samples_per_pixel_value = info.samples_per_pixel;
@@ -676,74 +678,74 @@ void decode_jpeg2k_into(const DataSet& ds, const DataSet::pixel_info_t& info,
 	    samples_per_pixel_value != 4) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=only SamplesPerPixel=1/3/4 is supported in current JPEG2000 path",
-		    ds.path());
+		    df.path());
 	}
 	const auto samples_per_pixel = static_cast<std::size_t>(samples_per_pixel_value);
 	if (opt.scaled && samples_per_pixel != 1) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=scaled output supports SamplesPerPixel=1 only",
-		    ds.path());
+		    df.path());
 	}
 	if (!sv_dtype_is_integral(info.sv_dtype)) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=JPEG2000 supports integral sv_dtype only",
-		    ds.path());
+		    df.path());
 	}
 
 	const auto src_bytes_per_sample = sv_dtype_bytes(info.sv_dtype);
 	if (src_bytes_per_sample == 0 || src_bytes_per_sample > 4) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=JPEG2000 supports integral sv_dtype up to 32-bit only",
-		    ds.path());
+		    df.path());
 	}
 
 	const auto frame_count = static_cast<std::size_t>(info.frames);
 	if (frame_index >= frame_count) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} frame={} reason=frame index out of range (frames={})",
-		    ds.path(), frame_index, frame_count);
+		    df.path(), frame_index, frame_count);
 	}
 
 	const auto rows = static_cast<std::size_t>(info.rows);
 	const auto cols = static_cast<std::size_t>(info.cols);
 	const auto dst_bytes_per_sample = opt.scaled ? sizeof(float) : src_bytes_per_sample;
 	validate_destination(
-	    ds, dst, dst_strides, opt.planar_out, rows, cols, samples_per_pixel, dst_bytes_per_sample);
+	    df, dst, dst_strides, opt.planar_out, rows, cols, samples_per_pixel, dst_bytes_per_sample);
 
-	auto frame_source = load_jpeg2k_frame_source(ds, frame_index);
+	auto frame_source = load_jpeg2k_frame_source(df, frame_index);
 	if (frame_source.total_size == 0) {
 		diag::error_and_throw(
 		    "pixel::decode_into file={} frame={} reason=JPEG2000 frame has empty codestream",
-		    ds.path(), frame_index);
+		    df.path(), frame_index);
 	}
 
-	auto image = decode_openjpeg_image(ds, frame_index, frame_source, opt);
-	validate_decoded_image(ds, frame_index, info, *image, rows, cols, samples_per_pixel);
+	auto image = decode_openjpeg_image(df, frame_index, frame_source, opt);
+	validate_decoded_image(df, frame_index, info, *image, rows, cols, samples_per_pixel);
 
 	if (opt.scaled) {
 		switch (info.sv_dtype) {
 		case dtype::u8:
-			write_scaled_mono_to_dst<std::uint8_t>(ds, *image, dst, dst_strides, rows, cols);
+			write_scaled_mono_to_dst<std::uint8_t>(df, *image, dst, dst_strides, rows, cols);
 			return;
 		case dtype::s8:
-			write_scaled_mono_to_dst<std::int8_t>(ds, *image, dst, dst_strides, rows, cols);
+			write_scaled_mono_to_dst<std::int8_t>(df, *image, dst, dst_strides, rows, cols);
 			return;
 		case dtype::u16:
-			write_scaled_mono_to_dst<std::uint16_t>(ds, *image, dst, dst_strides, rows, cols);
+			write_scaled_mono_to_dst<std::uint16_t>(df, *image, dst, dst_strides, rows, cols);
 			return;
 		case dtype::s16:
-			write_scaled_mono_to_dst<std::int16_t>(ds, *image, dst, dst_strides, rows, cols);
+			write_scaled_mono_to_dst<std::int16_t>(df, *image, dst, dst_strides, rows, cols);
 			return;
 		case dtype::u32:
-			write_scaled_mono_to_dst<std::uint32_t>(ds, *image, dst, dst_strides, rows, cols);
+			write_scaled_mono_to_dst<std::uint32_t>(df, *image, dst, dst_strides, rows, cols);
 			return;
 		case dtype::s32:
-			write_scaled_mono_to_dst<std::int32_t>(ds, *image, dst, dst_strides, rows, cols);
+			write_scaled_mono_to_dst<std::int32_t>(df, *image, dst, dst_strides, rows, cols);
 			return;
 		default:
 			diag::error_and_throw(
 			    "pixel::decode_into file={} reason=scaled output does not support sv_dtype={}",
-			    ds.path(), static_cast<int>(info.sv_dtype));
+			    df.path(), static_cast<int>(info.sv_dtype));
 			return;
 		}
 	}
@@ -776,7 +778,7 @@ void decode_jpeg2k_into(const DataSet& ds, const DataSet::pixel_info_t& info,
 	default:
 		diag::error_and_throw(
 		    "pixel::decode_into file={} reason=JPEG2000 output does not support sv_dtype={}",
-		    ds.path(), static_cast<int>(info.sv_dtype));
+		    df.path(), static_cast<int>(info.sv_dtype));
 		return;
 	}
 }
