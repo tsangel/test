@@ -1,4 +1,6 @@
+#include <algorithm>
 #include <cstdint>
+#include <array>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -40,6 +42,91 @@ int main() {
 
 	const dicom::Tag literal_tag = "Rows"_tag;
 	if (literal_tag.value() != 0x00280010u) fail("literal tag mismatch");
+
+	if (!dicom::uid::is_valid_uid_text_strict(
+	        dicom::uid::uid_prefix())) {
+		fail("uid_prefix should be a strict-valid UID");
+	}
+	if (!dicom::uid::is_valid_uid_text_strict(
+	        dicom::uid::implementation_class_uid())) {
+		fail("implementation_class_uid should be a strict-valid UID");
+	}
+	if (dicom::uid::implementation_version_name() !=
+	    std::string_view("DICOMSDL 2026FEB")) {
+		fail("implementation_version_name mismatch");
+	}
+
+	const auto suffixed_uid = dicom::uid::make_uid_with_suffix(42u);
+	if (!suffixed_uid) fail("make_uid_with_suffix should return a value");
+	if (suffixed_uid->value() != std::string_view("1.3.6.1.4.1.56559.42")) {
+		fail("make_uid_with_suffix value mismatch");
+	}
+
+	const auto generated_uid = dicom::uid::generate_uid();
+	if (!dicom::uid::is_valid_uid_text_strict(generated_uid.value())) {
+		fail("generate_uid should return strict-valid UID text");
+	}
+	if (generated_uid.value().rfind(dicom::uid::uid_prefix(), 0) != 0) {
+		fail("generate_uid should use DICOMSDL UID prefix");
+	}
+	const auto generated_uid_nothrow = dicom::uid::try_generate_uid();
+	if (!generated_uid_nothrow) {
+		fail("try_generate_uid should return a value");
+	}
+	if (!dicom::uid::is_valid_uid_text_strict(generated_uid_nothrow->value())) {
+		fail("try_generate_uid should return strict-valid UID text");
+	}
+
+	const auto sop_uid = dicom::uid::generate_sop_instance_uid();
+	if (!dicom::uid::is_valid_uid_text_strict(sop_uid.value())) {
+		fail("generate_sop_instance_uid should return strict-valid UID text");
+	}
+
+	const auto base_uid = dicom::uid::make_generated("1.2.840.10008");
+	if (!base_uid) fail("make_generated should build base UID");
+	const auto composed_uid = base_uid->append(11u).append(22u).append(33u);
+	if (composed_uid.value() != std::string_view("1.2.840.10008.11.22.33")) {
+		fail("Generated::append should append all components");
+	}
+	const auto zero_component_uid = dicom::uid::make_generated("1.2.3");
+	if (!zero_component_uid) fail("make_generated should build base UID with small root");
+	if (zero_component_uid->append(7u).append(0u).value() != std::string_view("1.2.3.7.0")) {
+		fail("Generated::append should treat 0 as valid component");
+	}
+
+	std::string long_base{"1"};
+	while (long_base.size() + 2 <= 61) {
+		long_base += ".1";
+	}
+	const auto long_base_uid = dicom::uid::make_generated(long_base);
+	if (!long_base_uid) fail("make_generated should build long base UID");
+	const auto compact_uid = long_base_uid->append(1234567890123456789ULL);
+	if (compact_uid.value().size() > 64) fail("Generated::append compacted UID should be <= 64 chars");
+	std::string truncated_prefix = long_base.substr(0, std::min<std::size_t>(30, long_base.size()));
+	if (!truncated_prefix.empty() && truncated_prefix.back() != '.') {
+		truncated_prefix.push_back('.');
+	}
+	if (compact_uid.value().rfind(truncated_prefix, 0) != 0) {
+		fail("Generated::append compacted UID should keep 30-char base prefix");
+	}
+	if (!dicom::uid::is_valid_uid_text_strict(compact_uid.value())) {
+		fail("Generated::append compacted UID should remain strict-valid");
+	}
+
+	const auto my_study_uid = dicom::uid::generate_uid();
+	const auto series_uid = my_study_uid.append(23u);
+	const auto instance_uid = series_uid.append(34u);
+	if (!(series_uid.value().starts_with(my_study_uid.value()) &&
+	        series_uid.value().ends_with(".23"))) {
+		fail("Generated::append should append series component");
+	}
+	if (!(instance_uid.value().starts_with(series_uid.value()) &&
+	        instance_uid.value().ends_with(".34"))) {
+		fail("Generated::append should append instance component");
+	}
+	if (!dicom::uid::is_valid_uid_text_strict(instance_uid.value())) {
+		fail("Generated::append chain should remain strict-valid");
+	}
 
 	std::string tmp_dir = ".";
 	if (const char* env = std::getenv("TMPDIR"); env && *env) {

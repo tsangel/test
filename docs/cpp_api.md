@@ -29,6 +29,12 @@ int main() {
 
 Note: These attachment calls are intended for the root `DataSet` (the object returned by `read_file`/`read_bytes` or constructed directly). Sub-datasets created internally reuse the parent stream and should not reattach.
 
+## UID generation helpers
+
+- `dicom::uid::generate_uid()`: create a base generated UID.
+- `dicom::uid::Generated::append(component)`: append one UID component with fallback policy.
+- Full behavior and Python equivalents: [Generating UID](generating_uid.md)
+
 ## Key types (Doxygen)
 
 :::{doxygenstruct} dicom::Tag

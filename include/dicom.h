@@ -240,6 +240,10 @@ struct Generated {
 	[[nodiscard]] std::string_view value() const noexcept {
 		return std::string_view{buffer.data(), length};
 	}
+
+	// Append one numeric UID component.
+	[[nodiscard]] std::optional<Generated> try_append(std::uint64_t component) const noexcept;
+	[[nodiscard]] Generated append(std::uint64_t component) const;
 };
 
 inline constexpr std::optional<WellKnown> from_index(std::uint16_t idx) noexcept {
@@ -278,6 +282,48 @@ inline std::optional<Generated> make_generated(std::string_view value) {
 	uid.buffer[uid.length] = '\0';
 	return uid;
 }
+
+// Legacy DICOMSDL implementation UID metadata reused for file-meta generation.
+inline constexpr std::string_view kUidPrefix = "1.3.6.1.4.1.56559";
+inline constexpr std::string_view kImplementationClassUid = "1.3.6.1.4.1.56559.1";
+inline constexpr std::string_view kImplementationVersionName = "DICOMSDL 2026FEB";
+static_assert(
+    kUidPrefix.size() <= Generated::max_str_length - (1 + 29),
+    "kUidPrefix is too long for generate_uid() output format");
+
+[[nodiscard]] constexpr std::string_view uid_prefix() noexcept {
+	return kUidPrefix;
+}
+
+[[nodiscard]] constexpr std::string_view implementation_class_uid() noexcept {
+	return kImplementationClassUid;
+}
+
+[[nodiscard]] constexpr std::string_view implementation_version_name() noexcept {
+	return kImplementationVersionName;
+}
+
+// Strict UID validator for generated/written UIDs.
+// Unlike detail::is_valid_uid_text, this enforces component syntax:
+//  - no leading/trailing dot
+//  - no empty component
+//  - each component is digits only
+//  - multi-digit components must not start with '0'
+[[nodiscard]] bool is_valid_uid_text_strict(std::string_view text) noexcept;
+
+// Build "<root>.<suffix>" while enforcing 64-byte UID length and strict syntax.
+[[nodiscard]] std::optional<Generated> make_uid_with_suffix(
+    std::string_view root, std::uint64_t suffix) noexcept;
+
+// Convenience overload using DICOMSDL UID prefix.
+[[nodiscard]] std::optional<Generated> make_uid_with_suffix(std::uint64_t suffix) noexcept;
+
+// Generate monotonic UIDs under DICOMSDL prefix.
+[[nodiscard]] std::optional<Generated> try_generate_uid() noexcept;
+[[nodiscard]] Generated generate_uid();
+[[nodiscard]] Generated generate_sop_instance_uid();
+[[nodiscard]] Generated generate_series_instance_uid();
+[[nodiscard]] Generated generate_study_instance_uid();
 
 }  // namespace uid
 

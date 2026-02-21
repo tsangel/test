@@ -64,3 +64,6 @@ int main() {
 ## Quick build/test commands
 - Python tests: `pytest -q tests/python`
 - CTest: `cmake -S . -B build && cmake --build build && ctest --test-dir build`
+
+## Related docs
+- UID generation and append guide: [Generating UID](generating_uid.md)

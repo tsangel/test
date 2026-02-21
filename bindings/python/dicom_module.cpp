@@ -526,6 +526,18 @@ nb::object uid_or_none(std::optional<WellKnown> uid) {
 	return nb::cast(*uid);
 }
 
+std::string generated_uid_to_string(const dicom::uid::Generated& uid) {
+	const auto value = uid.value();
+	return std::string(value.data(), value.size());
+}
+
+nb::object generated_uid_or_none(std::optional<dicom::uid::Generated> uid) {
+	if (!uid) {
+		return nb::none();
+	}
+	return nb::str(uid->value().data(), uid->value().size());
+}
+
 
 WellKnown require_uid(std::optional<WellKnown> uid, const char* origin, const std::string& text) {
 	if (!uid) {
@@ -595,6 +607,11 @@ NB_MODULE(_dicomsdl, m) {
 	m.attr("DICOM_STANDARD_VERSION") = nb::str(DICOM_STANDARD_VERSION);
 	m.attr("DICOMSDL_VERSION") = nb::str(DICOMSDL_VERSION);
 	m.attr("__version__") = nb::str(DICOMSDL_VERSION);
+	m.attr("UID_PREFIX") = nb::str(dicom::uid::uid_prefix().data(), dicom::uid::uid_prefix().size());
+	m.attr("IMPLEMENTATION_CLASS_UID") = nb::str(
+	    dicom::uid::implementation_class_uid().data(), dicom::uid::implementation_class_uid().size());
+	m.attr("IMPLEMENTATION_VERSION_NAME") = nb::str(
+	    dicom::uid::implementation_version_name().data(), dicom::uid::implementation_version_name().size());
 
 	// Logging helpers: forward to diag default reporter
 	m.def("log_info", [] (const std::string& msg) {
@@ -1561,12 +1578,109 @@ m.def("uid_from_keyword",
     nb::arg("keyword"),
     "Resolve a UID keyword, raising ValueError if unknown.");
 
+m.def("uid_prefix",
+    []() {
+	    const auto value = dicom::uid::uid_prefix();
+	    return std::string(value.data(), value.size());
+    },
+    "Return DICOMSDL UID root prefix.");
+
+m.def("implementation_class_uid",
+    []() {
+	    const auto value = dicom::uid::implementation_class_uid();
+	    return std::string(value.data(), value.size());
+    },
+    "Return default Implementation Class UID used by DICOMSDL.");
+
+m.def("implementation_version_name",
+    []() {
+	    const auto value = dicom::uid::implementation_version_name();
+	    return std::string(value.data(), value.size());
+    },
+    "Return default Implementation Version Name used by DICOMSDL.");
+
+m.def("is_valid_uid_text_strict",
+    &dicom::uid::is_valid_uid_text_strict,
+    nb::arg("text"),
+    "Return True if the UID string is valid under strict DICOM UID rules.");
+
+m.def("make_uid_with_suffix",
+    [] (std::uint64_t suffix, std::optional<std::string> root) -> nb::object {
+	    if (root) {
+		    return generated_uid_or_none(dicom::uid::make_uid_with_suffix(*root, suffix));
+	    }
+	    return generated_uid_or_none(dicom::uid::make_uid_with_suffix(suffix));
+    },
+    nb::arg("suffix"),
+    nb::arg("root") = nb::none(),
+    "Build '<root>.<suffix>' and return it when valid; returns None on failure.");
+
+m.def("try_append_uid",
+    [] (const std::string& base_uid, std::uint64_t component) -> nb::object {
+	    auto generated = dicom::uid::make_generated(base_uid);
+	    if (!generated) {
+		    return nb::none();
+	    }
+	    return generated_uid_or_none(generated->try_append(component));
+    },
+    nb::arg("base_uid"),
+    nb::arg("component"),
+    "Try to append one UID component with fallback policy; returns None on failure.");
+
+m.def("append_uid",
+    [] (const std::string& base_uid, std::uint64_t component) -> std::string {
+	    auto generated = dicom::uid::make_generated(base_uid);
+	    if (!generated) {
+		    throw nb::value_error("Invalid base UID");
+	    }
+	    return generated_uid_to_string(generated->append(component));
+    },
+    nb::arg("base_uid"),
+    nb::arg("component"),
+    "Append one UID component with fallback policy; raises ValueError/RuntimeError on failure.");
+
+m.def("try_generate_uid",
+    []() -> nb::object {
+	    return generated_uid_or_none(dicom::uid::try_generate_uid());
+    },
+    "Generate a UID under DICOMSDL prefix; returns None on failure.");
+
+m.def("generate_uid",
+    []() {
+	    return generated_uid_to_string(dicom::uid::generate_uid());
+    },
+    "Generate a UID under DICOMSDL prefix. Raises RuntimeError on failure.");
+
+m.def("generate_sop_instance_uid",
+    []() {
+	    return generated_uid_to_string(dicom::uid::generate_sop_instance_uid());
+    },
+    "Generate a SOP Instance UID under DICOMSDL prefix.");
+
+m.def("generate_series_instance_uid",
+    []() {
+	    return generated_uid_to_string(dicom::uid::generate_series_instance_uid());
+    },
+    "Generate a Series Instance UID under DICOMSDL prefix.");
+
+m.def("generate_study_instance_uid",
+    []() {
+	    return generated_uid_to_string(dicom::uid::generate_study_instance_uid());
+    },
+    "Generate a Study Instance UID under DICOMSDL prefix.");
+
 	m.attr("__all__") = nb::make_tuple(
 	    "LogLevel",
 	    "Reporter",
 	    "StderrReporter",
 	    "FileReporter",
 	    "BufferingReporter",
+	    "DICOM_STANDARD_VERSION",
+	    "DICOMSDL_VERSION",
+	    "__version__",
+	    "UID_PREFIX",
+	    "IMPLEMENTATION_CLASS_UID",
+	    "IMPLEMENTATION_VERSION_NAME",
 	    "log_info",
 	    "log_warn",
 	    "log_error",
@@ -1585,5 +1699,17 @@ m.def("uid_from_keyword",
 	    "tag_to_entry",
 	    "lookup_uid",
 	    "uid_from_value",
-	    "uid_from_keyword");
+	    "uid_from_keyword",
+	    "uid_prefix",
+	    "implementation_class_uid",
+	    "implementation_version_name",
+	    "is_valid_uid_text_strict",
+	    "make_uid_with_suffix",
+	    "try_append_uid",
+	    "append_uid",
+	    "try_generate_uid",
+	    "generate_uid",
+	    "generate_sop_instance_uid",
+	    "generate_series_instance_uid",
+	    "generate_study_instance_uid");
 }

@@ -12,6 +12,8 @@ import dicomsdl as dicom
 - `tag_to_keyword(tag: Tag | str) -> str`: resolve a tag to keyword.
 - `read_file(path: str) -> DicomFile`: load a DICOM file/session from disk.
 - `read_bytes(data: bytes, name: str = "inline") -> DicomFile`: load from an in-memory buffer.
+- `generate_uid() -> str`: create a new UID under DICOMSDL prefix.
+- `append_uid(base_uid: str, component: int) -> str`: append one UID component with fallback policy.
 - `DicomFile`: owns root dataset/session state; use `.dataset` for explicit root access.
 - `DataSet`: container of DICOM elements; supports `__iter__`, `size()`, `add_dataelement`, `get_dataelement`, `__getitem__`, attribute access.
 - `VR`: DICOM VR enum; constants like `VR.AE`, `VR.UI`, string via `str(vr)` or `vr.str()`.
@@ -51,3 +53,6 @@ ds = df.dataset
 ## Performance notes
 - Keyword/tag lookups are constant-time (perfect hash).
 - On large files, prefer targeted element access over full iteration in Python hot loops.
+
+## Related docs
+- UID generation and append details: [Generating UID](generating_uid.md)

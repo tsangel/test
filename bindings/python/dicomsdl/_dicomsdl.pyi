@@ -5,8 +5,17 @@ from typing import Any, Optional, overload
 DICOM_STANDARD_VERSION: str
 DICOMSDL_VERSION: str
 __version__: str
+UID_PREFIX: str
+IMPLEMENTATION_CLASS_UID: str
+IMPLEMENTATION_VERSION_NAME: str
 
 __all__ = [
+    "DICOM_STANDARD_VERSION",
+    "DICOMSDL_VERSION",
+    "__version__",
+    "UID_PREFIX",
+    "IMPLEMENTATION_CLASS_UID",
+    "IMPLEMENTATION_VERSION_NAME",
     "DicomFile",
     "DataSet",
     "Sequence",
@@ -21,6 +30,18 @@ __all__ = [
     "lookup_uid",
     "uid_from_value",
     "uid_from_keyword",
+    "uid_prefix",
+    "implementation_class_uid",
+    "implementation_version_name",
+    "is_valid_uid_text_strict",
+    "make_uid_with_suffix",
+    "try_append_uid",
+    "append_uid",
+    "try_generate_uid",
+    "generate_uid",
+    "generate_sop_instance_uid",
+    "generate_series_instance_uid",
+    "generate_study_instance_uid",
 ]
 
 class DicomFile:
@@ -267,6 +288,30 @@ def lookup_uid(text: str, /) -> Optional[Uid]: ...
 def uid_from_value(value: str, /) -> Uid: ...
 
 def uid_from_keyword(keyword: str, /) -> Uid: ...
+
+def uid_prefix() -> str: ...
+
+def implementation_class_uid() -> str: ...
+
+def implementation_version_name() -> str: ...
+
+def is_valid_uid_text_strict(text: str, /) -> bool: ...
+
+def make_uid_with_suffix(suffix: int, root: str | None = ..., /) -> Optional[str]: ...
+
+def try_append_uid(base_uid: str, component: int, /) -> Optional[str]: ...
+
+def append_uid(base_uid: str, component: int, /) -> str: ...
+
+def try_generate_uid() -> Optional[str]: ...
+
+def generate_uid() -> str: ...
+
+def generate_sop_instance_uid() -> str: ...
+
+def generate_series_instance_uid() -> str: ...
+
+def generate_study_instance_uid() -> str: ...
 
 # Logging helpers (mirrors C++ diag convenience)
 def log_info(message: str, /) -> None: ...

@@ -60,6 +60,77 @@ def test_uid_keyword_optional():
 	assert uid.type
 
 
+def test_uid_generation_helpers():
+	assert dicom.UID_PREFIX == dicom.uid_prefix()
+	assert dicom.IMPLEMENTATION_CLASS_UID == dicom.implementation_class_uid()
+	assert dicom.IMPLEMENTATION_VERSION_NAME == dicom.implementation_version_name()
+
+	assert dicom.is_valid_uid_text_strict(dicom.UID_PREFIX)
+	assert dicom.is_valid_uid_text_strict(dicom.IMPLEMENTATION_CLASS_UID)
+	assert not dicom.is_valid_uid_text_strict("1.2..840")
+
+	suffixed = dicom.make_uid_with_suffix(42)
+	assert suffixed == "1.3.6.1.4.1.56559.42"
+	assert dicom.is_valid_uid_text_strict(suffixed)
+
+	custom = dicom.make_uid_with_suffix(7, "1.2.840.113619")
+	assert custom == "1.2.840.113619.7"
+	composed = dicom.make_uid_with_suffix(11, "1.2.840.10008")
+	assert composed is not None
+	composed = dicom.make_uid_with_suffix(22, composed)
+	assert composed is not None
+	composed = dicom.make_uid_with_suffix(33, composed)
+	assert composed == "1.2.840.10008.11.22.33"
+	zero_component = dicom.make_uid_with_suffix(7, "1.2.3")
+	assert zero_component is not None
+	zero_component = dicom.make_uid_with_suffix(0, zero_component)
+	assert zero_component == "1.2.3.7.0"
+
+	long_root = "1"
+	while len(long_root) + 2 <= 61:
+		long_root += ".1"
+	assert dicom.make_uid_with_suffix(1234567890123456789, long_root) is None
+	extended_long = dicom.try_append_uid(long_root, 1234567890123456789)
+	assert extended_long is not None
+	assert len(extended_long) <= 64
+	assert dicom.is_valid_uid_text_strict(extended_long)
+	assert extended_long.startswith(long_root[:30])
+	if not long_root[:30].endswith("."):
+		assert extended_long.startswith(long_root[:30] + ".")
+
+	assert dicom.try_append_uid("not-a-uid", 7) is None
+	extended_short = dicom.try_append_uid("1.2.840.10008", 7)
+	assert extended_short == "1.2.840.10008.7"
+	assert dicom.append_uid("1.2.840.10008", 8) == "1.2.840.10008.8"
+
+	generated = dicom.generate_uid()
+	assert generated.startswith(dicom.UID_PREFIX + ".")
+	assert dicom.is_valid_uid_text_strict(generated)
+	generated_with_components = dicom.make_uid_with_suffix(7, generated)
+	assert generated_with_components is not None
+	generated_with_components = dicom.make_uid_with_suffix(8, generated_with_components)
+	assert generated_with_components is not None
+	generated_with_components = dicom.make_uid_with_suffix(9, generated_with_components)
+	assert generated_with_components is not None
+	assert dicom.is_valid_uid_text_strict(generated_with_components)
+	assert len(generated_with_components) <= 64
+
+	optional_generated = dicom.try_generate_uid()
+	assert optional_generated is not None
+	assert dicom.is_valid_uid_text_strict(optional_generated)
+	optional_generated_with_components = dicom.make_uid_with_suffix(9, optional_generated)
+	assert optional_generated_with_components is not None
+	optional_generated_with_components = dicom.make_uid_with_suffix(8, optional_generated_with_components)
+	assert optional_generated_with_components is not None
+	optional_generated_with_components = dicom.make_uid_with_suffix(7, optional_generated_with_components)
+	assert optional_generated_with_components is not None
+	assert dicom.is_valid_uid_text_strict(optional_generated_with_components)
+
+	assert dicom.is_valid_uid_text_strict(dicom.generate_sop_instance_uid())
+	assert dicom.is_valid_uid_text_strict(dicom.generate_series_instance_uid())
+	assert dicom.is_valid_uid_text_strict(dicom.generate_study_instance_uid())
+
+
 def test_dicomfile_dir_includes_dataset_members():
 	df = dicom.read_file(_test_file())
 	names = dir(df)
