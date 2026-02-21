@@ -404,6 +404,10 @@ DataSet::const_iterator DataSet::cend() const {
 
 // Keeps elements_ strictly sorted for common sequential inserts, while element_map_
 // stores out-of-order tags so we never duplicate storage for the same tag.
+DataElement* DataSet::add_dataelement(Tag tag, VR vr) {
+	return add_dataelement(tag, vr, 0, 0);
+}
+
 DataElement* DataSet::add_dataelement(Tag tag, VR vr, std::size_t offset, std::size_t length) {
 	const auto tag_value = tag.value();
 
@@ -927,6 +931,9 @@ void DataSet::read_elements_until(Tag load_until, InStream* stream) {
 }
 
 void DataSet::ensure_loaded(Tag tag) {
+	if (!stream_ || !stream_->is_valid()) {
+		return;
+	}
 	if (tag > last_tag_loaded_) {
 		read_elements_until(tag, nullptr);
 	}

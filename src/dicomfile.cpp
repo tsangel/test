@@ -162,6 +162,10 @@ std::size_t DicomFile::size() const {
 	return root_dataset_->size();
 }
 
+DataElement* DicomFile::add_dataelement(Tag tag, VR vr) {
+	return root_dataset_->add_dataelement(tag, vr);
+}
+
 DataElement* DicomFile::add_dataelement(Tag tag, VR vr, std::size_t offset, std::size_t length) {
 	return root_dataset_->add_dataelement(tag, vr, offset, length);
 }

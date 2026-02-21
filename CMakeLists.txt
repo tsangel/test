@@ -71,6 +71,7 @@ add_library(dicomsdl STATIC
 	src/dataset.cpp
 	src/dumpdataset.cpp
 	src/dicomfile.cpp
+	src/dicom_write.cpp
 	src/uid_utils.cpp
 	src/sequence.cpp
 	src/dataelement.cpp

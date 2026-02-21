@@ -7,6 +7,7 @@
 #include <cstring>
 #include <limits>
 #include <iterator>
+#include <iosfwd>
 #include <map>
 #include <memory>
 #include <cstdio>
@@ -310,6 +311,12 @@ static_assert(
 //  - each component is digits only
 //  - multi-digit components must not start with '0'
 [[nodiscard]] bool is_valid_uid_text_strict(std::string_view text) noexcept;
+
+// Normalize UID text by trimming DICOM UI padding:
+//  - leading spaces
+//  - trailing spaces / NUL bytes
+[[nodiscard]] std::string normalize_uid_text(std::string_view text);
+[[nodiscard]] std::string normalize_uid_bytes(std::span<const std::uint8_t> bytes);
 
 // Build "<root>.<suffix>" while enforcing 64-byte UID length and strict syntax.
 [[nodiscard]] std::optional<Generated> make_uid_with_suffix(
@@ -903,6 +910,13 @@ struct ReadOptions {
 	bool copy{true};
 };
 
+struct WriteOptions {
+	bool include_preamble{true};
+	bool write_file_meta{true};
+	// When false, write_* rebuilds (0002,eeee) before serialization.
+	bool keep_existing_meta{true};
+};
+
 namespace pixel {
 
 enum class planar : std::uint8_t {
@@ -981,6 +995,16 @@ void decode_into(const DicomFile& df, std::size_t frame_index,
 /// The root DataSet owns the input stream; elements are parsed lazily on demand.
 class DataElement {
 public:
+	enum class StorageKind : std::uint16_t {
+		none = 0,
+		stream,
+		inline_bytes,
+		heap,
+		sequence,
+		pixel_sequence
+	};
+	static constexpr std::size_t kInlineStorageBytes = 8;
+
 	constexpr DataElement() noexcept = default;
 	~DataElement() { release_storage(); }
 
@@ -1012,21 +1036,25 @@ public:
 	[[nodiscard]] constexpr DataSet* parent() const noexcept { return parent_; }
 	/// Truthy when this element is present (VR not None).
 	[[nodiscard]] constexpr explicit operator bool() const noexcept { return vr_ != VR::None; }
-	/// Raw value as a byte span; for SQ/PixelData this is the encoded payload.
+	/// Raw value as a byte span for non-sequence VRs. SQ/PX returns an empty span.
 	[[nodiscard]] std::span<const std::uint8_t> value_span() const;
 	/// Pointer to stored value or nested sequence/pixel sequence.
+	[[deprecated("Use value_span() for bytes, and sequence()/pixel_sequence() for nested values.")]]
 	void* value_ptr() const;
 	/// Value multiplicity; returns -1 when not applicable or parse fails.
 	[[nodiscard]] int vm() const;
+	/// Current storage backing kind for this element value.
+	[[nodiscard]] constexpr StorageKind storage_kind() const noexcept { return storage_kind_; }
 	/// Raw storage pointer for non-sequence VRs.
-	[[nodiscard]] constexpr void* data() const noexcept { return storage_.ptr; }
+	[[deprecated("Use value_span() instead.")]]
+	[[nodiscard]] void* data() const noexcept;
 	/// Returns the nested Sequence value if VR indicates a sequence, otherwise nullptr.
 	[[nodiscard]] constexpr Sequence* sequence() const noexcept {
-		return vr_.is_sequence() ? storage_.seq : nullptr;
+		return storage_kind_ == StorageKind::sequence ? storage_.seq : nullptr;
 	}
 	/// Returns the nested PixelSequence value if VR indicates encapsulated pixel data, otherwise nullptr.
 	[[nodiscard]] constexpr PixelSequence* pixel_sequence() const noexcept {
-		return vr_.is_pixel_sequence() ? storage_.pixseq : nullptr;
+		return storage_kind_ == StorageKind::pixel_sequence ? storage_.pixseq : nullptr;
 	}
 	Sequence* as_sequence();
 	const Sequence* as_sequence() const;
@@ -1039,14 +1067,25 @@ public:
 	constexpr void set_offset(std::size_t offset) noexcept { offset_ = offset; }
 	constexpr void set_parent(DataSet* parent) noexcept { parent_ = parent; }
 
-	/// Set raw storage pointer (binary/string VRs).
-	constexpr void set_data(void* ptr) noexcept { storage_.ptr = ptr; }
-	/// Set nested sequence pointer (SQ VR only).
-	constexpr void set_sequence(Sequence* seq) noexcept { storage_.seq = seq; }
-	/// Set nested pixel sequence pointer (encapsulated pixel data).
-	constexpr void set_pixel_sequence(PixelSequence* pixseq) noexcept {
-		storage_.pixseq = pixseq;
-	}
+	/// Copy raw value bytes into inline/heap storage depending on length.
+	/// For odd-length values, one VR-specific padding byte is appended automatically.
+	void set_value_bytes(std::span<const std::uint8_t> bytes);
+	/// Encode and store a single integer value according to this element VR.
+	/// Returns false when VR is unsupported for integer assignment or value is out of range.
+	bool from_long(long value);
+	/// Encode and store textual bytes for string VRs.
+	/// For UI VR this validates normalized UID text and applies UI padding rules.
+	bool from_string_view(std::string_view value);
+	/// Encode and store a well-known UID value (UI VR only).
+	bool from_uid(uid::WellKnown uid);
+	/// Encode and store a generated UID value (UI VR only).
+	bool from_uid(const uid::Generated& uid);
+	/// Encode and store UID text after normalization/validation (UI VR only).
+	bool from_uid_string(std::string_view uid_value);
+	/// Encode and store transfer syntax UID (UI VR only).
+	bool from_transfer_syntax_uid(uid::WellKnown uid);
+	/// Encode and store SOP class UID (UI VR only).
+	bool from_sop_class_uid(uid::WellKnown uid);
 
 	// Numeric accessors (PS3.5 6.2 Value Representation)
 	/// Parse value as signed int; empty on failure.
@@ -1118,6 +1157,9 @@ public:
 	[[nodiscard]] inline long toLong(long default_value = 0) const {
 		return to_long().value_or(default_value);
 	}
+	[[nodiscard]] inline bool fromLong(long value) {
+		return from_long(value);
+	}
 	[[nodiscard]] inline long long toLongLong(long long default_value = 0) const {
 		return to_longlong().value_or(default_value);
 	}
@@ -1152,12 +1194,14 @@ public:
 private:
 	Tag tag_{};
 	VR vr_{};
+	StorageKind storage_kind_{StorageKind::none};
 	std::size_t length_{0};
 	std::size_t offset_{0};
 	union Storage {
 		void* ptr;
 		Sequence* seq;
 		PixelSequence* pixseq;
+		std::uint8_t inline_bytes[kInlineStorageBytes];
 		constexpr Storage() noexcept : ptr(nullptr) {}
 	} storage_{};
 	DataSet* parent_{nullptr};
@@ -1167,10 +1211,16 @@ private:
 	void move_from(DataElement&& other) noexcept {
 		tag_ = other.tag_;
 		vr_ = other.vr_;
+		storage_kind_ = other.storage_kind_;
 		length_ = other.length_;
 		offset_ = other.offset_;
-		storage_.ptr = other.storage_.ptr;
+		if (storage_kind_ == StorageKind::inline_bytes) {
+			std::memcpy(storage_.inline_bytes, other.storage_.inline_bytes, kInlineStorageBytes);
+		} else {
+			storage_.ptr = other.storage_.ptr;
+		}
 		parent_ = other.parent_;
+		other.storage_kind_ = StorageKind::none;
 		other.storage_.ptr = nullptr;
 	}
 };
@@ -1338,9 +1388,13 @@ public:
 	/// Absolute offset of this dataset within the root stream.
 	[[nodiscard]] std::size_t offset() const { return offset_; }
 
-	/// Add or replace a data element (vector-backed, preserves insertion order).
+	/// Add or replace a data element with no stream binding (offset/length = 0).
 	/// @return Pointer to the inserted element.
-	DataElement* add_dataelement(Tag tag, VR vr = VR::None, std::size_t offset = 0, std::size_t length = 0);
+	DataElement* add_dataelement(Tag tag, VR vr = VR::None);
+
+	/// Add or replace a data element with explicit stream binding metadata.
+	/// @return Pointer to the inserted element.
+	DataElement* add_dataelement(Tag tag, VR vr, std::size_t offset, std::size_t length);
 
 	/// Remove a data element by tag (no-op if missing).
 	void remove_dataelement(Tag tag);
@@ -1461,7 +1515,12 @@ public:
 	[[nodiscard]] std::size_t size() const;
 	[[nodiscard]] std::string dump(
 	    std::size_t max_print_chars = 80, bool include_offset = true) const;
-	DataElement* add_dataelement(Tag tag, VR vr = VR::None, std::size_t offset = 0, std::size_t length = 0);
+	void rebuild_file_meta();
+	void write_to_stream(std::ostream& os, const WriteOptions& options = {});
+	[[nodiscard]] std::vector<std::uint8_t> write_bytes(const WriteOptions& options = {});
+	void write_file(const std::string& path, const WriteOptions& options = {});
+	DataElement* add_dataelement(Tag tag, VR vr = VR::None);
+	DataElement* add_dataelement(Tag tag, VR vr, std::size_t offset, std::size_t length);
 	void remove_dataelement(Tag tag);
 	DataElement* get_dataelement(Tag tag);
 	const DataElement* get_dataelement(Tag tag) const;
@@ -1660,43 +1719,65 @@ private:
 
 inline DataElement::DataElement(Tag tag, VR vr, std::size_t length, std::size_t offset,
     DataSet* parent) noexcept
-    : tag_(tag), vr_(vr), length_(length), offset_(offset), storage_(), parent_(parent) {
+    : tag_(tag), vr_(vr), storage_kind_(StorageKind::none), length_(length), offset_(offset),
+      storage_(), parent_(parent) {
 	if (vr_.is_sequence()) {
 		storage_.seq = new Sequence(parent_);
+		storage_kind_ = StorageKind::sequence;
 	} else if (vr_.is_pixel_sequence()) {
 		const auto ts = parent_ ? parent_->transfer_syntax_uid() : uid::WellKnown{};
 		storage_.pixseq = new PixelSequence(parent_, ts);
+		storage_kind_ = StorageKind::pixel_sequence;
+	} else if (parent_) {
+		storage_kind_ = StorageKind::stream;
 	}
 }
 
 inline void DataElement::release_storage() noexcept {
-	if (!storage_.ptr) {
-		return;
-	}
-	if (vr_.is_sequence()) {
-		delete storage_.seq;
-	} else if (vr_.is_pixel_sequence()) {
-		delete storage_.pixseq;
-	} else {
+	switch (storage_kind_) {
+	case StorageKind::heap:
 		::operator delete(storage_.ptr);
+		break;
+	case StorageKind::sequence:
+		delete storage_.seq;
+		break;
+	case StorageKind::pixel_sequence:
+		delete storage_.pixseq;
+		break;
+	case StorageKind::none:
+	case StorageKind::stream:
+	case StorageKind::inline_bytes:
+		break;
 	}
 	storage_.ptr = nullptr;
+	storage_kind_ = StorageKind::none;
+}
+
+inline void* DataElement::data() const noexcept {
+	switch (storage_kind_) {
+	case StorageKind::inline_bytes:
+		return const_cast<std::uint8_t*>(storage_.inline_bytes);
+	case StorageKind::heap:
+		return storage_.ptr;
+	default:
+		return nullptr;
+	}
 }
 
 inline Sequence* DataElement::as_sequence() {
-	return vr_.is_sequence() ? storage_.seq : nullptr;
+	return storage_kind_ == StorageKind::sequence ? storage_.seq : nullptr;
 }
 
 inline const Sequence* DataElement::as_sequence() const {
-	return vr_.is_sequence() ? storage_.seq : nullptr;
+	return storage_kind_ == StorageKind::sequence ? storage_.seq : nullptr;
 }
 
 inline PixelSequence* DataElement::as_pixel_sequence() {
-	return vr_.is_pixel_sequence() ? storage_.pixseq : nullptr;
+	return storage_kind_ == StorageKind::pixel_sequence ? storage_.pixseq : nullptr;
 }
 
 inline const PixelSequence* DataElement::as_pixel_sequence() const {
-	return vr_.is_pixel_sequence() ? storage_.pixseq : nullptr;
+	return storage_kind_ == StorageKind::pixel_sequence ? storage_.pixseq : nullptr;
 }
 
 /// Read a DICOM file/session from disk (eager up to options.load_until).

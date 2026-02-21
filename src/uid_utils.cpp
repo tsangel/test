@@ -18,6 +18,9 @@ namespace dicom::uid {
 namespace {
 
 constexpr std::uint64_t kComponentHashSeed = 0x9E3779B97F4A7C15ULL;
+constexpr bool is_uid_trim_char(char ch) noexcept {
+	return ch == ' ' || ch == '\0';
+}
 
 std::uint32_t current_process_id() noexcept {
 #if defined(_WIN32)
@@ -117,6 +120,25 @@ bool append_u96_decimal(char* buffer, std::size_t capacity, std::size_t& pos,
 }
 
 }  // namespace
+
+std::string normalize_uid_text(std::string_view text) {
+	while (!text.empty() && text.front() == ' ') {
+		text.remove_prefix(1);
+	}
+	while (!text.empty() && is_uid_trim_char(text.back())) {
+		text.remove_suffix(1);
+	}
+	return std::string(text.data(), text.size());
+}
+
+std::string normalize_uid_bytes(std::span<const std::uint8_t> bytes) {
+	if (bytes.empty()) {
+		return {};
+	}
+	const std::string_view text(
+	    reinterpret_cast<const char*>(bytes.data()), bytes.size());
+	return normalize_uid_text(text);
+}
 
 bool is_valid_uid_text_strict(std::string_view text) noexcept {
 	if (text.empty() || text.size() > Generated::max_str_length) {

@@ -1,9 +1,59 @@
 import pathlib
+import struct
 
 import dicomsdl as dicom
 
 def _test_file(name: str = "test_le.dcm") -> str:
 	return str(pathlib.Path(__file__).resolve().parent.parent / name)
+
+
+def _pad_ui(text: str) -> bytes:
+	raw = text.encode("ascii")
+	if len(raw) % 2 == 1:
+		raw += b"\x00"
+	return raw
+
+
+def _pack_explicit_le(group: int, element: int, vr: str, value: bytes, *, undefined: bool = False) -> bytes:
+	header = struct.pack("<HH", group, element) + vr.encode("ascii")
+	if undefined:
+		return header + b"\x00\x00" + struct.pack("<I", 0xFFFFFFFF)
+	if vr in {"OB", "OD", "OF", "OL", "OV", "OW", "SQ", "UC", "UR", "UT", "UN"}:
+		return header + b"\x00\x00" + struct.pack("<I", len(value)) + value
+	return header + struct.pack("<H", len(value)) + value
+
+
+def _pack_item(tag_element: int, value: bytes, *, undefined: bool = False) -> bytes:
+	length = 0xFFFFFFFF if undefined else len(value)
+	return struct.pack("<HHI", 0xFFFE, tag_element, length) + value
+
+
+def _build_sequence_pixel_sample() -> bytes:
+	meta_version = _pack_explicit_le(0x0002, 0x0001, "OB", b"\x00\x01")
+	meta_ts = _pack_explicit_le(0x0002, 0x0010, "UI", _pad_ui("1.2.840.10008.1.2.1"))
+	meta_group_length = _pack_explicit_le(
+	    0x0002, 0x0000, "UL", struct.pack("<I", len(meta_version) + len(meta_ts)))
+
+	sop_class = _pack_explicit_le(0x0008, 0x0016, "UI", _pad_ui("1.2.840.10008.5.1.4.1.1.7"))
+	sop_instance = _pack_explicit_le(0x0008, 0x0018, "UI", _pad_ui("1.2.3.4.5.6.7.8.9"))
+
+	seq_item_payload = _pack_explicit_le(0x0008, 0x1155, "UI", _pad_ui("1.2.3.4.5.6"))
+	seq_item = _pack_item(0xE000, seq_item_payload, undefined=True) + _pack_item(0xE00D, b"")
+	seq_elem = (
+	    _pack_explicit_le(0x0008, 0x1110, "SQ", b"", undefined=True)
+	    + seq_item
+	    + _pack_item(0xE0DD, b"")
+	)
+
+	pixel_frag = _pack_item(0xE000, b"\x01\x02\x03\x04")
+	pixel_elem = (
+	    _pack_explicit_le(0x7FE0, 0x0010, "OB", b"", undefined=True)
+	    + _pack_item(0xE000, b"")
+	    + pixel_frag
+	    + _pack_item(0xE0DD, b"")
+	)
+
+	return b"\x00" * 128 + b"DICM" + meta_group_length + meta_version + meta_ts + sop_class + sop_instance + seq_elem + pixel_elem
 
 
 def test_keyword_roundtrip():
@@ -163,3 +213,32 @@ def test_dump_available_on_file_and_dataset():
 	assert "'00020010'" in text_from_file
 	assert isinstance(text_from_file_short, str)
 	assert isinstance(text_from_dataset_short, str)
+
+
+def test_write_roundtrip_sequence_and_pixel(tmp_path):
+	source_bytes = _build_sequence_pixel_sample()
+	source = dicom.read_bytes(source_bytes, name="seq-pixel-src")
+
+	seq = source.get_dataelement("ReferencedStudySequence")
+	assert seq.is_sequence
+	assert seq.sequence is not None
+	assert len(seq.sequence) == 1
+	pixel = source.get_dataelement("PixelData")
+	assert pixel.is_pixel_sequence
+	assert pixel.pixel_sequence is not None
+	assert pixel.pixel_sequence.number_of_frames == 1
+
+	out_bytes = source.write_bytes()
+	assert out_bytes[128:132] == b"DICM"
+	roundtrip = dicom.read_bytes(out_bytes, name="seq-pixel-roundtrip")
+	assert roundtrip.get_dataelement("ReferencedStudySequence").is_sequence
+	rt_pixel = roundtrip.get_dataelement("PixelData")
+	assert rt_pixel.is_pixel_sequence
+	assert rt_pixel.pixel_sequence is not None
+	assert rt_pixel.pixel_sequence.number_of_frames == 1
+
+	out_path = tmp_path / "roundtrip_write.dcm"
+	roundtrip.write_file(str(out_path))
+	from_file = dicom.read_file(str(out_path))
+	assert from_file.get_dataelement("ReferencedStudySequence").is_sequence
+	assert from_file.get_dataelement("PixelData").is_pixel_sequence

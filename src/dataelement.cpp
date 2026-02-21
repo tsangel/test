@@ -4,6 +4,7 @@
 
 #include <cctype>
 #include <charconv>
+#include <algorithm>
 #include <bit>
 #include <cmath>
 #include <cstring>
@@ -27,7 +28,7 @@ inline std::string_view trim(std::string_view s) {
 
 inline bool element_value_is_little_endian(const DataElement& elem) noexcept {
 	const auto* parent = elem.parent();
-	return parent ? parent->is_little_endian() : true;
+	return parent ? (parent->is_little_endian() || elem.tag().group() == 0x0002u) : true;
 }
 
 template <typename T>
@@ -76,6 +77,58 @@ std::optional<std::vector<typename Parser::result_type>> parse_string_numbers(co
 	}
 	if (out.empty()) return std::nullopt;
 	return out;
+}
+
+template <typename T>
+bool assign_integral_from_long(DataElement& element, long value, bool little_endian) {
+	static_assert(std::is_integral_v<T>, "assign_integral_from_long requires integral target type");
+	if constexpr (std::is_signed_v<T>) {
+		const auto signed_value = static_cast<std::intmax_t>(value);
+		if (signed_value < static_cast<std::intmax_t>(std::numeric_limits<T>::min()) ||
+		    signed_value > static_cast<std::intmax_t>(std::numeric_limits<T>::max())) {
+			return false;
+		}
+		const T encoded = static_cast<T>(value);
+		std::array<std::uint8_t, sizeof(T)> bytes{};
+		endian::store_value<T>(bytes.data(), encoded, little_endian);
+		element.set_value_bytes(bytes);
+		return true;
+	} else {
+		if (value < 0) {
+			return false;
+		}
+		const auto unsigned_value = static_cast<std::uintmax_t>(value);
+		if (unsigned_value > static_cast<std::uintmax_t>(std::numeric_limits<T>::max())) {
+			return false;
+		}
+		const T encoded = static_cast<T>(unsigned_value);
+		std::array<std::uint8_t, sizeof(T)> bytes{};
+		endian::store_value<T>(bytes.data(), encoded, little_endian);
+		element.set_value_bytes(bytes);
+		return true;
+	}
+}
+
+bool assign_integer_string_from_long(DataElement& element, long value) {
+	const std::string text = std::to_string(value);
+	const auto* ptr = reinterpret_cast<const std::uint8_t*>(text.data());
+	element.set_value_bytes(std::span<const std::uint8_t>(ptr, text.size()));
+	return true;
+}
+
+bool assign_uid_string(DataElement& element, std::string_view uid_text) {
+	if (element.vr() != dicom::VR::UI) {
+		return false;
+	}
+
+	std::string normalized = uid::normalize_uid_text(uid_text);
+	if (!uid::is_valid_uid_text_strict(normalized)) {
+		return false;
+	}
+
+	const auto* ptr = reinterpret_cast<const std::uint8_t*>(normalized.data());
+	element.set_value_bytes(std::span<const std::uint8_t>(ptr, normalized.size()));
+	return true;
 }
 
 struct IntParser {
@@ -209,24 +262,160 @@ DataElement* NullElement() {
 }
 
 std::span<const std::uint8_t> DataElement::value_span() const {
-	if (storage_.ptr) {
+	switch (storage_kind_) {
+	case StorageKind::inline_bytes:
+		return std::span<const std::uint8_t>(
+		    storage_.inline_bytes, std::min(length_, kInlineStorageBytes));
+	case StorageKind::heap:
+		if (!storage_.ptr) {
+			return {};
+		}
 		return std::span<const std::uint8_t>(
 		    static_cast<const std::uint8_t*>(storage_.ptr), length_);
-	}
-	if (!parent_) {
+	case StorageKind::stream:
+		if (!parent_) {
+			return {};
+		}
+		return parent_->stream().get_span(offset_, length_);
+	case StorageKind::none:
+	case StorageKind::sequence:
+	case StorageKind::pixel_sequence:
 		return {};
 	}
-	return parent_->stream().get_span(offset_, length_);
+	return {};
 }
 
 void* DataElement::value_ptr() const {
-	if (storage_.ptr) {
+	switch (storage_kind_) {
+	case StorageKind::inline_bytes:
+		return const_cast<std::uint8_t*>(storage_.inline_bytes);
+	case StorageKind::heap:
 		return storage_.ptr;
-	}
-	if (!parent_) {
+	case StorageKind::stream:
+		if (!parent_) {
+			return nullptr;
+		}
+		return parent_->stream().get_pointer(offset_, length_);
+	case StorageKind::sequence:
+		return storage_.seq;
+	case StorageKind::pixel_sequence:
+		return storage_.pixseq;
+	case StorageKind::none:
 		return nullptr;
 	}
-	return parent_->stream().get_pointer(offset_, length_);
+	return nullptr;
+}
+
+void DataElement::set_value_bytes(std::span<const std::uint8_t> bytes) {
+	if (vr_.is_sequence() || vr_.is_pixel_sequence()) {
+		diag::error_and_throw(
+		    "DataElement::set_value_bytes reason=cannot assign raw bytes to sequence storage vr={}",
+		    vr_.str());
+	}
+	release_storage();
+	const bool needs_padding = VR::pad_to_even() && ((bytes.size() & 1u) != 0u);
+	const std::uint8_t padding_byte = vr_.padding_byte();
+	const std::size_t stored_length = bytes.size() + (needs_padding ? 1u : 0u);
+	length_ = stored_length;
+	if (stored_length == 0) {
+		return;
+	}
+	if (stored_length <= kInlineStorageBytes) {
+		std::memset(storage_.inline_bytes, 0, kInlineStorageBytes);
+		if (!bytes.empty()) {
+			std::memcpy(storage_.inline_bytes, bytes.data(), bytes.size());
+		}
+		if (needs_padding) {
+			storage_.inline_bytes[bytes.size()] = padding_byte;
+		}
+		storage_kind_ = StorageKind::inline_bytes;
+		return;
+	}
+	void* storage = ::operator new(stored_length);
+	if (!bytes.empty()) {
+		std::memcpy(storage, bytes.data(), bytes.size());
+	}
+	if (needs_padding) {
+		static_cast<std::uint8_t*>(storage)[bytes.size()] = padding_byte;
+	}
+	storage_.ptr = storage;
+	storage_kind_ = StorageKind::heap;
+}
+
+bool DataElement::from_long(long value) {
+	if (vr_.is_sequence() || vr_.is_pixel_sequence()) {
+		return false;
+	}
+
+	const bool little_endian = element_value_is_little_endian(*this);
+	switch (static_cast<std::uint16_t>(vr_)) {
+	case VR::SS_val:
+		return assign_integral_from_long<std::int16_t>(*this, value, little_endian);
+	case VR::US_val:
+		return assign_integral_from_long<std::uint16_t>(*this, value, little_endian);
+	case VR::SL_val:
+		return assign_integral_from_long<std::int32_t>(*this, value, little_endian);
+	case VR::UL_val:
+		return assign_integral_from_long<std::uint32_t>(*this, value, little_endian);
+	case VR::SV_val:
+		return assign_integral_from_long<std::int64_t>(*this, value, little_endian);
+	case VR::UV_val:
+		return assign_integral_from_long<std::uint64_t>(*this, value, little_endian);
+	case VR::IS_val:
+	case VR::DS_val:
+		return assign_integer_string_from_long(*this, value);
+	default:
+		return false;
+	}
+}
+
+bool DataElement::from_string_view(std::string_view value) {
+	if (vr_.is_sequence() || vr_.is_pixel_sequence()) {
+		return false;
+	}
+	if (vr_ == dicom::VR::UI) {
+		return from_uid_string(value);
+	}
+	if (!vr_.is_string()) {
+		return false;
+	}
+
+	const auto* ptr = reinterpret_cast<const std::uint8_t*>(value.data());
+	set_value_bytes(std::span<const std::uint8_t>(ptr, value.size()));
+	return true;
+}
+
+bool DataElement::from_uid(uid::WellKnown uid) {
+	if (!uid.valid()) {
+		return false;
+	}
+	return from_uid_string(uid.value());
+}
+
+bool DataElement::from_uid(const uid::Generated& uid) {
+	return from_uid_string(uid.value());
+}
+
+bool DataElement::from_uid_string(std::string_view uid_value) {
+	return assign_uid_string(*this, uid_value);
+}
+
+bool DataElement::from_transfer_syntax_uid(uid::WellKnown uid) {
+	if (!uid.valid() || uid.uid_type() != UidType::TransferSyntax) {
+		return false;
+	}
+	return from_uid(uid);
+}
+
+bool DataElement::from_sop_class_uid(uid::WellKnown uid) {
+	if (!uid.valid()) {
+		return false;
+	}
+	const auto type = uid.uid_type();
+	if (type != UidType::SopClass && type != UidType::MetaSopClass) {
+		return false;
+	}
+	return from_uid(uid);
 }
 
 int DataElement::vm() const {

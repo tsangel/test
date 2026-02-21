@@ -531,6 +531,22 @@ std::string generated_uid_to_string(const dicom::uid::Generated& uid) {
 	return std::string(value.data(), value.size());
 }
 
+dicom::WriteOptions make_write_options(
+    bool include_preamble, bool write_file_meta, bool keep_existing_meta) {
+	dicom::WriteOptions options;
+	options.include_preamble = include_preamble;
+	options.write_file_meta = write_file_meta;
+	options.keep_existing_meta = keep_existing_meta;
+	return options;
+}
+
+nb::bytes to_python_bytes(std::vector<std::uint8_t>&& bytes) {
+	if (bytes.empty()) {
+		return nb::bytes("", 0);
+	}
+	return nb::bytes(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+}
+
 nb::object generated_uid_or_none(std::optional<dicom::uid::Generated> uid) {
 	if (!uid) {
 		return nb::none();
@@ -1078,6 +1094,33 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::arg("max_print_chars") = static_cast<std::size_t>(80),
 		    nb::arg("include_offset") = true,
 		    "Return a human-readable root DataSet dump as text")
+		.def("rebuild_file_meta",
+		    [](DicomFile& self) { self.rebuild_file_meta(); },
+		    "Rebuild file meta group (0002,eeee) with standard minimum fields.")
+		.def("write_file",
+		    [](DicomFile& self, const std::string& path, bool include_preamble,
+		        bool write_file_meta, bool keep_existing_meta) {
+			    self.write_file(
+			        path, make_write_options(include_preamble, write_file_meta, keep_existing_meta));
+		    },
+		    nb::arg("path"),
+		    nb::kw_only(),
+		    nb::arg("include_preamble") = true,
+		    nb::arg("write_file_meta") = true,
+		    nb::arg("keep_existing_meta") = true,
+		    "Write this DicomFile to `path`.")
+		.def("write_bytes",
+		    [](DicomFile& self, bool include_preamble, bool write_file_meta,
+		        bool keep_existing_meta) {
+			    return to_python_bytes(self.write_bytes(
+			        make_write_options(
+			                  include_preamble, write_file_meta, keep_existing_meta)));
+		    },
+		    nb::kw_only(),
+		    nb::arg("include_preamble") = true,
+		    nb::arg("write_file_meta") = true,
+		    nb::arg("keep_existing_meta") = true,
+		    "Serialize this DicomFile to bytes.")
 		.def("__iter__",
 		    [](DicomFile& self) {
 			    return PyDataElementIterator(self.dataset());
@@ -1319,7 +1362,7 @@ m.def("read_bytes",
     "the binding keeps a Python reference, but mutating or freeing the underlying memory can\n"
     "still corrupt the dataset.");
 
-	nb::class_<Tag>(m, "Tag")
+		nb::class_<Tag>(m, "Tag")
 		.def(nb::init<>())
 		.def(nb::init<std::uint16_t, std::uint16_t>(), nb::arg("group"), nb::arg("element"))
 		.def(nb::init<const std::string&>(), nb::arg("keyword"))

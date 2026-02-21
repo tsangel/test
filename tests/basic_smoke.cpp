@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <iostream>
+#include <sstream>
 #include <cstdlib>
 #include <cstdio>
 
@@ -128,6 +129,119 @@ int main() {
 		fail("Generated::append chain should remain strict-valid");
 	}
 
+	{
+		dicom::DataElement signed_long_elem("Rows"_tag, dicom::VR::SL, 0, 0, nullptr);
+		if (!signed_long_elem.from_long(123456789L)) {
+			fail("DataElement::from_long should encode SL");
+		}
+		if (signed_long_elem.length() != 4) {
+			fail("DataElement::from_long SL length should be 4");
+		}
+		if (signed_long_elem.to_long().value_or(0) != 123456789L) {
+			fail("DataElement::from_long SL roundtrip mismatch");
+		}
+	}
+	{
+		dicom::DataElement unsigned_short_elem("Rows"_tag, dicom::VR::US, 0, 0, nullptr);
+		if (unsigned_short_elem.from_long(-1)) {
+			fail("DataElement::from_long should reject negative value for US");
+		}
+	}
+	{
+		dicom::DataElement integer_string_elem("Rows"_tag, dicom::VR::IS, 0, 0, nullptr);
+		if (!integer_string_elem.from_long(42L)) {
+			fail("DataElement::from_long should encode IS");
+		}
+		const auto text = integer_string_elem.to_string_view();
+		if (!text || *text != "42") {
+			fail("DataElement::from_long IS string mismatch");
+		}
+	}
+	{
+		dicom::DataElement patient_name("PatientName"_tag, dicom::VR::PN, 0, 0, nullptr);
+		if (!patient_name.from_string_view("DOE^JOHN")) {
+			fail("DataElement::from_string_view should encode PN");
+		}
+		if ((patient_name.length() & 1u) != 0u) {
+			fail("DataElement::from_string_view should store even-length value");
+		}
+		const auto text = patient_name.to_string_view();
+		if (!text || *text != "DOE^JOHN") {
+			fail("DataElement::from_string_view PN roundtrip mismatch");
+		}
+		if (!patient_name.from_string_view("A")) {
+			fail("DataElement::from_string_view should encode odd-length PN");
+		}
+		if (patient_name.length() != 2) {
+			fail("DataElement::from_string_view should pad odd-length PN to even");
+		}
+	}
+	{
+		auto ts_uid = dicom::uid::from_keyword("ImplicitVRLittleEndian");
+		if (!ts_uid) {
+			fail("uid::from_keyword should resolve transfer syntax UID");
+		}
+		dicom::DataElement ts_elem("TransferSyntaxUID"_tag, dicom::VR::UI, 0, 0, nullptr);
+		if (!ts_elem.from_uid(*ts_uid)) {
+			fail("DataElement::from_uid should encode well-known UID");
+		}
+		if (!ts_elem.from_transfer_syntax_uid(*ts_uid)) {
+			fail("DataElement::from_transfer_syntax_uid should encode transfer syntax UID");
+		}
+		auto roundtrip = ts_elem.to_transfer_syntax_uid();
+		if (!roundtrip || roundtrip->value() != ts_uid->value()) {
+			fail("DataElement::from_transfer_syntax_uid roundtrip mismatch");
+		}
+		auto generated = dicom::uid::generate_uid();
+		if (!ts_elem.from_uid(generated)) {
+			fail("DataElement::from_uid(Generated) should encode generated UID");
+		}
+		auto generated_roundtrip = ts_elem.to_uid_string();
+		if (!generated_roundtrip || *generated_roundtrip != std::string(generated.value())) {
+			fail("DataElement::from_uid(Generated) roundtrip mismatch");
+		}
+	}
+	{
+		auto sop_uid = dicom::uid::from_keyword("SecondaryCaptureImageStorage");
+		if (!sop_uid) {
+			fail("uid::from_keyword should resolve SOP class UID");
+		}
+		dicom::DataElement sop_elem("SOPClassUID"_tag, dicom::VR::UI, 0, 0, nullptr);
+		if (!sop_elem.from_sop_class_uid(*sop_uid)) {
+			fail("DataElement::from_sop_class_uid should encode SOP class UID");
+		}
+		auto roundtrip = sop_elem.to_sop_class_uid();
+		if (!roundtrip || roundtrip->value() != sop_uid->value()) {
+			fail("DataElement::from_sop_class_uid roundtrip mismatch");
+		}
+		auto ts_uid = dicom::uid::from_keyword("ImplicitVRLittleEndian");
+		if (!ts_uid) {
+			fail("uid::from_keyword should resolve transfer syntax UID");
+		}
+		if (sop_elem.from_transfer_syntax_uid(*sop_uid)) {
+			fail("DataElement::from_transfer_syntax_uid should reject non-transfer-syntax UID");
+		}
+		if (sop_elem.from_sop_class_uid(*ts_uid)) {
+			fail("DataElement::from_sop_class_uid should reject transfer syntax UID");
+		}
+	}
+	{
+		dicom::DataElement uid_elem("SOPInstanceUID"_tag, dicom::VR::UI, 0, 0, nullptr);
+		if (!uid_elem.from_uid_string("1.2.3")) {
+			fail("DataElement::from_uid_string should accept valid UID text");
+		}
+		if (uid_elem.length() != 6) {
+			fail("DataElement::from_uid_string should pad odd length to even");
+		}
+		auto uid_text = uid_elem.to_uid_string();
+		if (!uid_text || *uid_text != "1.2.3") {
+			fail("DataElement::from_uid_string roundtrip mismatch");
+		}
+		if (uid_elem.from_uid_string("1..2")) {
+			fail("DataElement::from_uid_string should reject invalid UID text");
+		}
+	}
+
 	std::string tmp_dir = ".";
 	if (const char* env = std::getenv("TMPDIR"); env && *env) {
 		tmp_dir = env;
@@ -169,12 +283,11 @@ int main() {
 			fail("DicomFile dump should include Rows");
 		}
 		const std::size_t long_desc_size = 256;
-		void* long_desc_ptr = ::operator new(long_desc_size);
-		std::memset(long_desc_ptr, static_cast<int>('A'), long_desc_size);
+		std::vector<std::uint8_t> long_desc_value(long_desc_size, static_cast<std::uint8_t>('A'));
 		auto* study_desc =
 		    file->add_dataelement("StudyDescription"_tag, dicom::VR::LO, 0, long_desc_size);
 		if (!study_desc || study_desc == dicom::NullElement()) fail("DicomFile add StudyDescription failed");
-		study_desc->set_data(long_desc_ptr);
+		study_desc->set_value_bytes(long_desc_value);
 		const auto truncated_dump = file->dump();
 		const auto study_desc_pos = truncated_dump.find("'00081030'");
 		if (study_desc_pos == std::string::npos) fail("DicomFile dump should include StudyDescription");
@@ -245,6 +358,79 @@ int main() {
 	DataSet manual_mem;
 	manual_mem.attach_to_memory("manual-buffer", buffer.data(), buffer.size());
 	if (manual_mem.stream().datasize() != buffer.size()) fail("manual_mem datasize mismatch");
+
+	dicom::DicomFile generated;
+	auto add_text_element = [&](dicom::Tag tag, dicom::VR vr, std::string_view value) {
+		auto* element = generated.add_dataelement(tag, vr, 0, value.size());
+		if (!element) {
+			fail("failed to add generated text element");
+		}
+		element->set_value_bytes(std::span<const std::uint8_t>(
+		    reinterpret_cast<const std::uint8_t*>(value.data()), value.size()));
+		return element;
+	};
+
+	add_text_element("SOPClassUID"_tag, dicom::VR::UI, "1.2.840.10008.5.1.4.1.1.7");
+	add_text_element("SOPInstanceUID"_tag, dicom::VR::UI, dicom::uid::generate_sop_instance_uid().value());
+	add_text_element("PatientName"_tag, dicom::VR::PN, "WRITE^ROUNDTRIP");
+
+	auto* sequence_element = generated.add_dataelement("ReferencedStudySequence"_tag, dicom::VR::SQ);
+	if (!sequence_element || sequence_element == dicom::NullElement()) fail("failed to add sequence element");
+	auto* sequence = sequence_element->as_sequence();
+	if (!sequence) fail("sequence pointer is null");
+	auto* sequence_item = sequence->add_dataset();
+	if (!sequence_item) fail("failed to append sequence item");
+	{
+		auto* referenced_uid = sequence_item->add_dataelement("ReferencedSOPInstanceUID"_tag, dicom::VR::UI, 0, 12);
+		if (!referenced_uid) fail("failed to add sequence item UID");
+		const std::array<std::uint8_t, 12> uid_value{
+		    '1', '.', '2', '.', '3', '.', '4', '.', '5', '.', '6', '\0'};
+		referenced_uid->set_value_bytes(uid_value);
+	}
+
+	auto* pixel_element = generated.add_dataelement("PixelData"_tag, dicom::VR::PX);
+	if (!pixel_element || pixel_element == dicom::NullElement()) fail("failed to add pixel element");
+	auto* pixel_sequence = pixel_element->as_pixel_sequence();
+	if (!pixel_sequence) fail("pixel sequence pointer is null");
+	auto* frame = pixel_sequence->add_frame();
+	if (!frame) fail("failed to add pixel frame");
+	frame->set_encoded_data({0x01, 0x02, 0x03, 0x04});
+
+	dicom::WriteOptions write_opts;
+	const auto generated_bytes = generated.write_bytes(write_opts);
+	if (generated_bytes.size() < 132) fail("write_bytes should include preamble + DICM");
+
+	std::ostringstream os(std::ios::binary);
+	generated.write_to_stream(os, write_opts);
+	const auto streamed = os.str();
+	if (streamed.size() != generated_bytes.size()) fail("write_to_stream size mismatch");
+
+	auto generated_roundtrip = read_bytes("generated-roundtrip", generated_bytes.data(), generated_bytes.size());
+	if (!generated_roundtrip) fail("generated read_bytes returned null");
+	const auto* seq_roundtrip = generated_roundtrip->get_dataelement("ReferencedStudySequence"_tag);
+	if (!seq_roundtrip || seq_roundtrip == dicom::NullElement()) fail("roundtrip missing sequence");
+	const auto* seq_value = seq_roundtrip->as_sequence();
+	if (!seq_value || seq_value->size() != 1) fail("roundtrip sequence item count mismatch");
+	auto* pix_roundtrip = generated_roundtrip->get_dataelement("PixelData"_tag);
+	if (!pix_roundtrip || pix_roundtrip == dicom::NullElement()) fail("roundtrip missing pixel data");
+	if (!pix_roundtrip->vr().is_pixel_sequence()) fail("roundtrip pixel data should be pixel sequence");
+	auto* pix_value = pix_roundtrip->as_pixel_sequence();
+	if (!pix_value || pix_value->number_of_frames() != 1) fail("roundtrip pixel frame count mismatch");
+	const auto encoded_span = pix_value->frame_encoded_span(0);
+	if (encoded_span.size() != 4 ||
+	    encoded_span[0] != 0x01 || encoded_span[1] != 0x02 ||
+	    encoded_span[2] != 0x03 || encoded_span[3] != 0x04) {
+		fail("roundtrip pixel payload mismatch");
+	}
+
+	const std::string roundtrip_path = tmp_dir + "dicomsdl_basic_smoke_roundtrip.dcm";
+	generated.write_file(roundtrip_path, write_opts);
+	const auto generated_roundtrip_file = read_file(roundtrip_path);
+	if (!generated_roundtrip_file) fail("write_file roundtrip read returned null");
+	if (generated_roundtrip_file->get_dataelement("PixelData"_tag) == dicom::NullElement()) {
+		fail("write_file roundtrip missing pixel data");
+	}
+	std::remove(roundtrip_path.c_str());
 
 	std::remove(file_path.c_str());
 
