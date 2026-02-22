@@ -35,6 +35,8 @@ __all__ = [
     "Uid",
     "read_file",
     "read_bytes",
+    "load_root_elements_reserve_hint",
+    "reset_root_elements_reserve_hint",
     "keyword_to_tag_vr",
     "tag_to_keyword",
     "tag_to_entry",
@@ -389,6 +391,12 @@ def read_bytes(
     keep_on_error: bool | None = ...,
     copy: bool = ...,
 ) -> DicomFile: ...
+
+
+def load_root_elements_reserve_hint() -> int: ...
+
+
+def reset_root_elements_reserve_hint() -> None: ...
 
 
 @overload
