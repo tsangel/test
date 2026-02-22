@@ -1202,6 +1202,9 @@ public:
 	    std::vector<Tag> default_value) const {
 		return to_tag_vector().value_or(std::move(default_value));
 	}
+	[[nodiscard]] inline std::string to_uid_string(std::string default_value) const {
+		return to_uid_string().value_or(std::move(default_value));
+	}
 
 private:
 	Tag tag_{};
@@ -1408,26 +1411,30 @@ public:
 	/// Remove a data element by tag (no-op if missing).
 	void remove_dataelement(Tag tag);
 
-	/// Lookup a data element by tag. Does not load implicitly; call ensure_loaded(tag) or read_attached_stream() first.
+	/// Low-level lookup by tag (pointer form). For most user-facing code, prefer operator[].
+	/// Does not load implicitly; call ensure_loaded(tag) or read_attached_stream() first.
 	/// Never returns nullptr; missing lookups return a falsey DataElement (VR::None).
 	DataElement* get_dataelement(Tag tag);
 
-	/// Const lookup by tag. Does not load implicitly; call ensure_loaded(tag) or read_attached_stream() first.
+	/// Low-level const lookup by tag (pointer form). For most user-facing code, prefer operator[].
+	/// Does not load implicitly; call ensure_loaded(tag) or read_attached_stream() first.
 	/// Never returns nullptr; missing lookups return a falsey DataElement (VR::None).
 	const DataElement* get_dataelement(Tag tag) const;
 
-	/// Resolve a dotted tag path (e.g., "00540016.0.00181075"). Caller must ensure_loaded() the needed prefixes.
+	/// Low-level dotted tag-path resolver (e.g., "00540016.0.00181075").
+	/// Caller must ensure_loaded() the needed prefixes.
 	/// Never returns nullptr; missing lookups return a falsey DataElement (VR::None).
 	DataElement* get_dataelement(std::string_view tag_path);
 
-	/// Const resolve of a dotted tag path. Caller must ensure_loaded() the needed prefixes.
+	/// Low-level const dotted tag-path resolver.
+	/// Caller must ensure_loaded() the needed prefixes.
 	/// Never returns nullptr; missing lookups return a falsey DataElement (VR::None).
 	const DataElement* get_dataelement(std::string_view tag_path) const;
 
-	/// Map-style access by tag. Missing lookups return a falsey DataElement (VR::None).
+	/// Preferred map-style access by tag. Missing lookups return a falsey DataElement (VR::None).
 	DataElement& operator[](Tag tag);
 
-	/// Const map-style access by tag. Missing lookups return a falsey DataElement (VR::None).
+	/// Preferred const map-style access by tag. Missing lookups return a falsey DataElement (VR::None).
 	const DataElement& operator[](Tag tag) const;
 
 	/// Print elements to stdout (debug).

@@ -55,6 +55,20 @@ cmake --build build
 ./build/dicomdump --no-offset --max-print-chars 120 path/to/file.dcm
 ```
 
+### Preferred C++ DataSet access pattern
+
+```cpp
+using namespace dicom::literals;
+auto file = dicom::read_file("sample.dcm");
+auto& dataset = file->dataset();
+
+long row_count = dataset["Rows"_tag].to_long().value_or(1);
+```
+
+- Prefer `dataset[tag].to_xxx().value_or(default)` for user-facing reads with defaults.
+- Use `if (auto& e = dataset[tag]; e)` only when missing/present distinction matters.
+- Keep `get_dataelement(...)` for low-level pointer workflows and tag-path parsing.
+
 ## Python Wheel
 
 Python ≥ 3.9 is required.

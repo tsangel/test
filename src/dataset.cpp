@@ -685,15 +685,13 @@ void DataSet::read_attached_stream(const ReadOptions& options) {
 
 	if (transfer_syntax_uid() == "DeflatedExplicitVRLittleEndian"_uid) {
 		std::size_t deflated_start_offset = stream_->tell();
-		if (const auto* meta_group_length = get_dataelement("(0002,0000)"_tag);
-		    meta_group_length->is_present()) {
-			if (auto group_length = meta_group_length->to_long();
-			    group_length && *group_length >= 0) {
-				const auto offset_candidate = meta_group_length->offset() +
-				    meta_group_length->length() + static_cast<std::size_t>(*group_length);
-				if (offset_candidate <= stream_->end_offset()) {
-					deflated_start_offset = offset_candidate;
-				}
+		const auto* meta_group_length = get_dataelement("(0002,0000)"_tag);
+		if (auto group_length = meta_group_length->to_long(); group_length && *group_length >= 0) {
+			const auto offset_candidate =
+			    meta_group_length->offset() + meta_group_length->length() +
+			    static_cast<std::size_t>(*group_length);
+			if (offset_candidate <= stream_->end_offset()) {
+				deflated_start_offset = offset_candidate;
 			}
 		}
 

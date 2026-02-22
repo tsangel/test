@@ -51,13 +51,14 @@ cmake --build build
 using namespace dicom::literals;
 
 int main() {
-  constexpr dicom::Tag tag = "Rows"_tag;
-  auto [kw_tag, vr] = dicom::keyword_to_tag_vr("PatientName");
-  dicom::DataSet ds;
-  ds.attach_to_file("sample.dcm");
-  for (auto& elem : ds) {
-    // process elements
-  }
+  auto file = dicom::read_file("sample.dcm");
+  auto& ds = file->dataset();
+
+  long rows = ds["Rows"_tag].to_long().value_or(0);
+  // process rows
+
+  // Need missing/present distinction? Use:
+  // if (auto& e = ds["Rows"_tag]; e) { ... }
 }
 ```
 

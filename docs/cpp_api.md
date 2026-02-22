@@ -10,18 +10,27 @@ using namespace dicom::literals;
 int main() {
   dicom::DataSet ds;
   ds.attach_to_file("sample.dcm");
+  ds.ensure_loaded("Rows"_tag);
 
-  constexpr dicom::Tag rows = "Rows"_tag;
-  const auto elem = ds.get_dataelement(rows);
-  if (elem->is_present()) {
-    // access length, vr, etc.
-  }
+  const long rows = ds["Rows"_tag].to_long().value_or(0);
+  // use rows
 }
+```
+
+## Preferred DataElement access pattern
+
+- Use `dataset[tag].to_xxx().value_or(default)` for regular reads with defaults.
+- Use `if (auto& e = dataset[tag]; e)` only when missing/present distinction matters.
+- Keep `get_dataelement(...)` for low-level pointer workflows and tag-path parsing.
+
+```cpp
+long rows = ds["Rows"_tag].to_long().value_or(0);
+double slope = ds["RescaleSlope"_tag].to_double().value_or(1.0);
 ```
 
 ## DataSet attachment methods
 
-- `attach_to_file(const std::string& path)`: Opens `path` via `InFileStream`, sets the stream identifier to the path, and prepares the dataset for lazy reading. Metadata is parsed later (e.g., on the first `ensure_loaded`, iteration, or `get_dataelement` call).
+- `attach_to_file(const std::string& path)`: Opens `path` via `InFileStream`, sets the stream identifier to the path, and prepares the dataset for lazy reading. Metadata is parsed later (e.g., on the first `ensure_loaded`, iteration, or `operator[]`/`get_dataelement` call).
 - `attach_to_memory(const std::uint8_t* data, std::size_t size, bool copy = true)`: Wraps a raw buffer. With `copy = true` (default) it copies the bytes; with `copy = false` it references the caller-owned buffer, which **must** outlive the `DataSet`.
 - `attach_to_memory(const std::string& name, const std::uint8_t* data, std::size_t size, bool copy = true)`: Same as above, but the stream identifier becomes `name` (helpful for diagnostics).
 - `attach_to_memory(std::string name, std::vector<std::uint8_t>&& buffer)`: Moves an owning buffer into the dataset; the identifier is `name`.
@@ -57,6 +66,6 @@ Note: These attachment calls are intended for the root `DataSet` (the object ret
 
 :::{doxygenclass} dicom::DataSet
 :project: dicomsdl
-:members: DataSet, attach_to_file, attach_to_memory, path, add_dataelement, remove_dataelement, get_dataelement, dump_elements, read_attached_stream, ensure_loaded, is_little_endian, is_explicit_vr, transfer_syntax_uid, begin, end, cbegin
+:members: DataSet, attach_to_file, attach_to_memory, path, add_dataelement, remove_dataelement, operator[], get_dataelement, dump_elements, read_attached_stream, ensure_loaded, is_little_endian, is_explicit_vr, transfer_syntax_uid, begin, end, cbegin
 :undoc-members:
 :::

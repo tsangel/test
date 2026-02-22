@@ -296,18 +296,6 @@ void write_dataset(const DataSet& dataset, Writer& writer, const Encoding& encod
 	}
 }
 
-[[nodiscard]] std::optional<std::string> read_uid_element(const DataSet& dataset, Tag tag) {
-	const DataElement* element = dataset.get_dataelement(tag);
-	if (element->is_missing()) {
-		return std::nullopt;
-	}
-	auto uid_value = element->to_uid_string();
-	if (!uid_value || uid_value->empty()) {
-		return std::nullopt;
-	}
-	return *uid_value;
-}
-
 [[nodiscard]] std::string_view transfer_syntax_uid_from_flags(const DataSet& dataset) {
 	if (!dataset.is_little_endian()) {
 		return "ExplicitVRBigEndian"_uid.value();
@@ -326,7 +314,8 @@ void write_dataset(const DataSet& dataset, Writer& writer, const Encoding& encod
 		}
 	}
 
-	if (auto from_meta = read_uid_element(dataset, kTransferSyntaxUidTag)) {
+	if (auto from_meta = dataset[kTransferSyntaxUidTag].to_uid_string();
+	    from_meta && !from_meta->empty()) {
 		return *from_meta;
 	}
 
@@ -391,7 +380,8 @@ void clear_existing_meta_group(DataSet& dataset) {
 
 [[nodiscard]] std::string determine_transfer_syntax_uid_for_rebuild(
     const DicomFile& file, const DataSet& dataset) {
-	if (auto from_meta = read_uid_element(dataset, kTransferSyntaxUidTag)) {
+	if (auto from_meta = dataset[kTransferSyntaxUidTag].to_uid_string();
+	    from_meta && !from_meta->empty()) {
 		const auto normalized = uid::normalize_uid_text(*from_meta);
 		if (uid::is_valid_uid_text_strict(normalized)) {
 			return normalized;
@@ -461,9 +451,10 @@ void DicomFile::rebuild_file_meta() {
 	dataset.ensure_loaded(Tag(0xFFFFu, 0xFFFFu));
 
 	std::string sop_class_uid;
-	if (auto value = read_uid_element(dataset, kSopClassUidTag)) {
+	if (auto value = dataset[kSopClassUidTag].to_uid_string(); value && !value->empty()) {
 		sop_class_uid = uid::normalize_uid_text(*value);
-	} else if (auto value = read_uid_element(dataset, kMediaStorageSopClassUidTag)) {
+	} else if (auto value = dataset[kMediaStorageSopClassUidTag].to_uid_string();
+	           value && !value->empty()) {
 		sop_class_uid = uid::normalize_uid_text(*value);
 	} else {
 		sop_class_uid = std::string("SecondaryCaptureImageStorage"_uid.value());
@@ -473,9 +464,10 @@ void DicomFile::rebuild_file_meta() {
 	}
 
 	std::string sop_instance_uid;
-	if (auto value = read_uid_element(dataset, kSopInstanceUidTag)) {
+	if (auto value = dataset[kSopInstanceUidTag].to_uid_string(); value && !value->empty()) {
 		sop_instance_uid = uid::normalize_uid_text(*value);
-	} else if (auto value = read_uid_element(dataset, kMediaStorageSopInstanceUidTag)) {
+	} else if (auto value = dataset[kMediaStorageSopInstanceUidTag].to_uid_string();
+	           value && !value->empty()) {
 		sop_instance_uid = uid::normalize_uid_text(*value);
 	} else {
 		const auto generated = uid::generate_sop_instance_uid();

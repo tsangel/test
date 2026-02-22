@@ -450,28 +450,28 @@ std::optional<pixel::ModalityLut> DicomFile::modality_lut() const {
 		    path());
 	}
 
-	const auto* descriptor_elem = item->get_dataelement("LUTDescriptor"_tag);
-	if (descriptor_elem->is_missing()) {
+	const auto& descriptor_elem = (*item)["LUTDescriptor"_tag];
+	if (!descriptor_elem) {
 		diag::error_and_throw(
 		    "DicomFile::modality_lut file={} reason=ModalityLUTSequence item #0 missing LUTDescriptor",
 		    path());
 	}
 
 	lut_descriptor_values descriptor{};
-	if (!try_parse_lut_descriptor(*descriptor_elem, descriptor)) {
+	if (!try_parse_lut_descriptor(descriptor_elem, descriptor)) {
 		diag::error_and_throw(
 		    "DicomFile::modality_lut file={} reason=invalid LUTDescriptor",
 		    path());
 	}
 
-	const auto* lut_data_elem = item->get_dataelement("LUTData"_tag);
-	if (lut_data_elem->is_missing()) {
+	const auto& lut_data_elem = (*item)["LUTData"_tag];
+	if (!lut_data_elem) {
 		diag::error_and_throw(
 		    "DicomFile::modality_lut file={} reason=ModalityLUTSequence item #0 missing LUTData",
 		    path());
 	}
 
-	const auto lut_data = lut_data_elem->value_span();
+	const auto lut_data = lut_data_elem.value_span();
 	if (lut_data.empty()) {
 		diag::error_and_throw(
 		    "DicomFile::modality_lut file={} reason=empty LUTData",

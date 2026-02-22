@@ -1,6 +1,6 @@
 # Tag-path lookup semantics
 
-`DataSet::get_dataelement(std::string_view tag_path)` parses flexible tag-path strings to navigate nested sequences. Behavior corresponds to `src/dataset.cpp` lines 350–361.
+`DataSet::get_dataelement(std::string_view tag_path)` is a low-level path parser for nested sequence traversal. For regular tag reads, prefer `dataset[tag].to_xxx().value_or(default)` style access.
 
 ## Accepted forms
 - Hex tag, with or without parens/comma: `00100010`, `(0010,0010)`
@@ -17,8 +17,11 @@
 5. If any required element or nested dataset is missing, a falsey `DataElement` (`VR::None`) is returned.
 
 ## Notes
+- Preferred user-facing access pattern for plain tags:
+  `long rows = dataset["Rows"_tag].to_long().value_or(0);`
+- Use `if (auto& e = dataset[tag]; e)` only when you need to distinguish missing from present.
 - No implicit loading: callers must ensure the needed elements are present via `ensure_loaded(tag)` or an earlier `read_attached_stream()`.
-- The function returns a non-null `DataElement*`; callers should check `elem->is_present()` before dereferencing.
+- The function returns a non-null `DataElement*`; callers should check `if (*elem)` before consuming values.
 - Errors (malformed path, non-sequence traversal, bad index) throw and include the offending tag string.
 
 ## Examples
