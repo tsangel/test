@@ -1867,5 +1867,10 @@ std::unique_ptr<DicomFile> read_bytes(const std::string& name, const std::uint8_
 /// Read from an owning buffer moved into the dataset.
 std::unique_ptr<DicomFile> read_bytes(std::string name, std::vector<std::uint8_t>&& buffer,
     ReadOptions options = {});
+/// Return the current adaptive reserve hint used by root DataSet::read_attached_stream().
+[[nodiscard]] std::size_t load_root_elements_reserve_hint() noexcept;
+/// Reset the adaptive reserve hint used by root DataSet::read_attached_stream().
+/// Intended for deterministic benchmarking and test setup.
+void reset_root_elements_reserve_hint() noexcept;
 
 } // namespace dicom

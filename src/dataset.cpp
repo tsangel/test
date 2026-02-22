@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <bit>
 #include <cctype>
 #include <cstring>
@@ -26,6 +27,24 @@ namespace diag = dicom::diag;
 namespace dicom {
 
 DataElement* NullElement();
+namespace {
+
+constexpr std::size_t kRootElementsReserveHintInitial = 16;
+constexpr std::size_t kRootElementsReserveHintMax = 256;
+static_assert(kRootElementsReserveHintInitial <= kRootElementsReserveHintMax,
+    "Initial reserve hint must not exceed max reserve hint");
+std::atomic<std::size_t> root_elements_reserve_hint{kRootElementsReserveHintInitial};
+
+void update_root_elements_reserve_hint(std::size_t parsed_elements) noexcept {
+	const auto bounded = std::min(parsed_elements, kRootElementsReserveHintMax);
+	auto observed = root_elements_reserve_hint.load(std::memory_order_relaxed);
+	while (bounded > observed &&
+	       !root_elements_reserve_hint.compare_exchange_weak(observed, bounded,
+	           std::memory_order_relaxed, std::memory_order_relaxed)) {
+	}
+}
+
+} // namespace
 
 void apply_transfer_syntax_flags(uid::WellKnown transfer_syntax, bool& little_endian,
     bool& explicit_vr) {
@@ -647,6 +666,7 @@ void DataSet::read_attached_stream(const ReadOptions& options) {
 
 	elements_.clear();
 	element_map_.clear();
+	elements_.reserve(load_root_elements_reserve_hint());
 	if (root_file_) {
 		root_file_->invalidate_pixel_info_cache();
 	}
@@ -712,6 +732,7 @@ void DataSet::read_attached_stream(const ReadOptions& options) {
 	}
 
 	read_elements_until(options.load_until, stream_.get());
+	update_root_elements_reserve_hint(elements_.size());
 }
 
 void DataSet::read_elements_until(Tag load_until, InStream* stream) {
@@ -942,6 +963,16 @@ void DataSet::dump_elements() const {
 	for (const auto& kv : element_map_) {
 		std::cout << kv.first << " VR=" << kv.second.vr().str() << " len=" << kv.second.length() << " off=" << kv.second.offset() << "\n";
 	}
+}
+
+void reset_root_elements_reserve_hint() noexcept {
+	root_elements_reserve_hint.store(kRootElementsReserveHintInitial,
+	    std::memory_order_relaxed);
+}
+
+std::size_t load_root_elements_reserve_hint() noexcept {
+	const auto hint = root_elements_reserve_hint.load(std::memory_order_relaxed);
+	return std::min(hint, kRootElementsReserveHintMax);
 }
 
 } // namespace dicom

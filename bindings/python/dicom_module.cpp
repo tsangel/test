@@ -1393,6 +1393,18 @@ m.def("read_bytes",
     "the binding keeps a Python reference, but mutating or freeing the underlying memory can\n"
     "still corrupt the dataset.");
 
+m.def("load_root_elements_reserve_hint",
+    []() {
+	    return dicom::load_root_elements_reserve_hint();
+    },
+    "Return the current adaptive reserve hint used by root DataSet parsing.");
+
+m.def("reset_root_elements_reserve_hint",
+    []() {
+	    dicom::reset_root_elements_reserve_hint();
+    },
+    "Reset adaptive root DataSet reserve hint to its initial value.");
+
 		nb::class_<Tag>(m, "Tag")
 		.def(nb::init<>())
 		.def(nb::init<std::uint16_t, std::uint16_t>(), nb::arg("group"), nb::arg("element"))
@@ -1775,6 +1787,8 @@ m.def("generate_study_instance_uid",
 	    "Uid",
 	    "read_file",
 	    "read_bytes",
+	    "load_root_elements_reserve_hint",
+	    "reset_root_elements_reserve_hint",
 	    "keyword_to_tag_vr",
 	    "tag_to_keyword",
 	    "tag_to_entry",
