@@ -39,7 +39,7 @@ def _normalize_mono_to_uint8(array, window: tuple[float, float] | None):
     try:
         import numpy as np
     except ImportError as exc:  # pragma: no cover - numpy is required for to_array anyway.
-        raise ImportError("DataSet.to_pil_image requires NumPy to be installed.") from exc
+        raise ImportError("DicomFile.to_pil_image requires NumPy to be installed.") from exc
 
     if array.dtype == np.uint8 and window is None:
         return array
@@ -68,7 +68,7 @@ def _normalize_color_to_uint8(array):
     try:
         import numpy as np
     except ImportError as exc:  # pragma: no cover - numpy is required for to_array anyway.
-        raise ImportError("DataSet.to_pil_image requires NumPy to be installed.") from exc
+        raise ImportError("DicomFile.to_pil_image requires NumPy to be installed.") from exc
 
     if array.dtype == np.uint8:
         return array
@@ -100,8 +100,8 @@ def _should_convert_ybr_to_rgb(photometric: str | None) -> bool:
     }
 
 
-def _dataset_to_pil_image(
-    self: _dicomsdl.DataSet,
+def _dicomfile_to_pil_image(
+    self: _dicomsdl.DicomFile,
     frame: int = 0,
     *,
     window: tuple[float, float] | None = None,
@@ -114,14 +114,15 @@ def _dataset_to_pil_image(
         from PIL import Image
     except ImportError as exc:
         raise ImportError(
-            "DataSet.to_pil_image requires Pillow. Install with 'pip install pillow'."
+            "DicomFile.to_pil_image requires Pillow. Install with 'pip install pillow'."
         ) from exc
 
+    ds = self.dataset
     array = self.to_array(frame=frame, scaled=True)
     if array.ndim == 2:
-        display_window = _resolve_window(self, window, auto_window)
+        display_window = _resolve_window(ds, window, auto_window)
         mono = _normalize_mono_to_uint8(array, display_window)
-        photometric = _get_tag_upper_text(self, "PhotometricInterpretation")
+        photometric = _get_tag_upper_text(ds, "PhotometricInterpretation")
         if photometric == "MONOCHROME1":
             mono = 255 - mono
         return Image.fromarray(mono, mode="L")
@@ -131,7 +132,7 @@ def _dataset_to_pil_image(
         if channels not in (3, 4):
             raise ValueError(f"unsupported color shape for to_pil_image: {array.shape}")
 
-        photometric = _get_tag_upper_text(self, "PhotometricInterpretation")
+        photometric = _get_tag_upper_text(ds, "PhotometricInterpretation")
         if photometric == "PALETTE COLOR":
             raise NotImplementedError("to_pil_image does not yet support PALETTE COLOR.")
 
@@ -147,4 +148,4 @@ def _dataset_to_pil_image(
     raise ValueError(f"unsupported pixel array ndim for to_pil_image: {array.ndim}")
 
 
-_dicomsdl.DataSet.to_pil_image = _dataset_to_pil_image
+_dicomsdl.DicomFile.to_pil_image = _dicomfile_to_pil_image

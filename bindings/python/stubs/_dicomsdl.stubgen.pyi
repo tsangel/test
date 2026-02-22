@@ -2,7 +2,7 @@ from collections.abc import Callable
 import enum
 from typing import overload
 
-from dicomsdl._image import _dataset_to_pil_image as to_pil_image
+from dicomsdl._image import _dicomfile_to_pil_image as to_pil_image
 
 
 DICOM_STANDARD_VERSION: str = ...
