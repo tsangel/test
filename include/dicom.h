@@ -1229,13 +1229,9 @@ private:
 		vr_ = other.vr_;
 		storage_kind_ = other.storage_kind_;
 		length_ = other.length_;
-		if (storage_kind_ == StorageKind::inline_bytes) {
-			std::memcpy(storage_.inline_bytes, other.storage_.inline_bytes, kInlineStorageBytes);
-		} else if (storage_kind_ == StorageKind::stream) {
-			storage_.offset_ = other.storage_.offset_;
-		} else {
-			storage_.ptr = other.storage_.ptr;
-		}
+		static_assert(std::is_trivially_copyable_v<Storage>,
+		    "DataElement::Storage must remain trivially copyable");
+		storage_ = other.storage_;
 		parent_ = other.parent_;
 		other.storage_kind_ = StorageKind::none;
 		other.storage_.ptr = nullptr;
