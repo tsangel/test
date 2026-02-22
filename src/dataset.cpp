@@ -25,16 +25,7 @@ namespace diag = dicom::diag;
 
 namespace dicom {
 
-inline const uid::WellKnown kExplicitVrLittleEndian =
-    uid::lookup("ExplicitVRLittleEndian").value_or(uid::WellKnown{});
-inline const uid::WellKnown kImplicitVrLittleEndianUid =
-    uid::lookup("ImplicitVRLittleEndian").value_or(uid::WellKnown{});
-inline const uid::WellKnown kPapyrusImplicitVrLittleEndianUid =
-	uid::lookup("Papyrus3ImplicitVRLittleEndian").value_or(uid::WellKnown{});
-inline const uid::WellKnown kExplicitVrBigEndianUid =
-	uid::lookup("ExplicitVRBigEndian").value_or(uid::WellKnown{});
-inline const uid::WellKnown kDeflatedExplicitVrLittleEndianUid =
-	uid::lookup("DeflatedExplicitVRLittleEndian").value_or(uid::WellKnown{});
+DataElement* NullElement();
 
 void apply_transfer_syntax_flags(uid::WellKnown transfer_syntax, bool& little_endian,
     bool& explicit_vr) {
@@ -44,12 +35,12 @@ void apply_transfer_syntax_flags(uid::WellKnown transfer_syntax, bool& little_en
 	if (!transfer_syntax.valid()) {
 		return;
 	}
-	if (transfer_syntax == kExplicitVrBigEndianUid) {
+	if (transfer_syntax == "ExplicitVRBigEndian"_uid) {
 		little_endian = false;
 		return;
 	}
-	if (transfer_syntax == kImplicitVrLittleEndianUid ||
-	    transfer_syntax == kPapyrusImplicitVrLittleEndianUid) {
+	if (transfer_syntax == "ImplicitVRLittleEndian"_uid ||
+	    transfer_syntax == "Papyrus3ImplicitVRLittleEndian"_uid) {
 		explicit_vr = false;
 	}
 }
@@ -266,7 +257,7 @@ std::optional<Tag> parse_private_creator_tag(DataSetPtr* dataset, std::string_vi
 		for (std::uint32_t block = 0x10; block <= 0xFF; ++block) {
 			Tag creator_tag(static_cast<std::uint16_t>(group), static_cast<std::uint16_t>(block));
 			auto* creator_el = dataset->get_dataelement(creator_tag);
-			if (creator_el == NullElement()) {
+			if (creator_el->is_missing()) {
 				continue;
 			}
 			auto value = creator_el->to_string_view();
@@ -280,13 +271,13 @@ std::optional<Tag> parse_private_creator_tag(DataSetPtr* dataset, std::string_vi
 	return std::nullopt;
 }
 DataSet::DataSet() : root_dataset_(this) {
-	apply_transfer_syntax_flags(kExplicitVrLittleEndian, little_endian_, explicit_vr_);
+	apply_transfer_syntax_flags("ExplicitVRLittleEndian"_uid, little_endian_, explicit_vr_);
 }
 
 DataSet::DataSet(DataSet* root_dataset)
     : root_file_(root_dataset ? root_dataset->root_file_ : nullptr),
       root_dataset_(root_dataset ? root_dataset->root_dataset_ : this) {
-	apply_transfer_syntax_flags(kExplicitVrLittleEndian, little_endian_, explicit_vr_);
+	apply_transfer_syntax_flags("ExplicitVRLittleEndian"_uid, little_endian_, explicit_vr_);
 	if (root_dataset_ && root_dataset_ != this) {
 		little_endian_ = root_dataset_->little_endian_;
 		explicit_vr_ = root_dataset_->explicit_vr_;
@@ -294,7 +285,7 @@ DataSet::DataSet(DataSet* root_dataset)
 }
 
 DataSet::DataSet(DicomFile* root_file) : root_file_(root_file), root_dataset_(this) {
-	apply_transfer_syntax_flags(kExplicitVrLittleEndian, little_endian_, explicit_vr_);
+	apply_transfer_syntax_flags("ExplicitVRLittleEndian"_uid, little_endian_, explicit_vr_);
 }
 
 DataSet::~DataSet() = default;
@@ -319,15 +310,15 @@ void DataSet::attach_to_memory(std::string name, std::vector<std::uint8_t>&& buf
 	attach_to_stream(std::move(name), std::move(stream));
 }
 
-void DataSet::attach_to_substream(InStream* basestream, std::size_t size) {
-	if (!basestream) {
-		diag::error_and_throw("DataSet::attach_to_stream reason=null basestream");
+void DataSet::attach_to_substream(InStream* base_stream, std::size_t size) {
+	if (!base_stream) {
+		diag::error_and_throw("DataSet::attach_to_stream reason=null base_stream");
 	}
-	const auto base_identifier = basestream->identifier();
+	const auto base_identifier = base_stream->identifier();
 	const auto sub_identifier = fmt::format("{}@0x{:X}+{}",
 	    base_identifier.empty() ? "<substream>" : base_identifier,
-	    basestream->tell(), size);
-	auto substream = std::make_unique<InSubStream>(basestream, size);
+	    base_stream->tell(), size);
+	auto substream = std::make_unique<InSubStream>(base_stream, size);
 	attach_to_stream(sub_identifier, std::move(substream));
 }
 
@@ -503,7 +494,7 @@ const DataElement* DataSet::get_dataelement(Tag tag) const {
 //   - Nested sequences: "00082112.0.00081190" (sequence tag . index . child tag ...),
 //     keyword-friendly paths like "RadiopharmaceuticalInformationSequence.0.RadionuclideTotalDose" work too
 // Behavior:
-//   - Returns NullElement() when the tag (or nested dataset) is missing
+//   - Returns a falsey DataElement (VR::None) when the tag (or nested dataset) is missing
 //   - Uses diag::error_and_throw for malformed strings, non-sequence traversal, bad indices, etc.
 DataElement* DataSet::get_dataelement(std::string_view tag_path) {
 	DataSet* current = this;
@@ -526,7 +517,7 @@ DataElement* DataSet::get_dataelement(std::string_view tag_path) {
 		}
 
 		DataElement* element = current->get_dataelement(tag);
-		if (element == NullElement()) {
+		if (element->is_missing()) {
 			return element;
 		}
 		if (dot_pos == std::string_view::npos) {
@@ -584,7 +575,7 @@ const DataElement* DataSet::get_dataelement(std::string_view tag_path) const {
 		}
 
 		const DataElement* element = current->get_dataelement(tag);
-		if (element == NullElement()) {
+		if (element->is_missing()) {
 			return element;
 		}
 		if (dot_pos == std::string_view::npos) {
@@ -661,9 +652,9 @@ void DataSet::read_attached_stream(const ReadOptions& options) {
 	}
 	last_tag_loaded_ = Tag::from_value(0);
 	if (root_file_) {
-		root_file_->set_transfer_syntax(kExplicitVrLittleEndian);
+		root_file_->set_transfer_syntax("ExplicitVRLittleEndian"_uid);
 	} else {
-		apply_transfer_syntax_flags(kExplicitVrLittleEndian, little_endian_, explicit_vr_);
+		apply_transfer_syntax_flags("ExplicitVRLittleEndian"_uid, little_endian_, explicit_vr_);
 	}
 
 	// parse DICOM stream, starting with skipping the 128-byte preamble.
@@ -692,20 +683,21 @@ void DataSet::read_attached_stream(const ReadOptions& options) {
 		    path(), *uid_value);
 	}
 
-	if (transfer_syntax_uid() == kDeflatedExplicitVrLittleEndianUid) {
+	if (transfer_syntax_uid() == "DeflatedExplicitVRLittleEndian"_uid) {
 		std::size_t deflated_start_offset = stream_->tell();
-		if (const auto* meta_group_length = get_dataelement("(0002,0000)"_tag); *meta_group_length) {
+		if (const auto* meta_group_length = get_dataelement("(0002,0000)"_tag);
+		    meta_group_length->is_present()) {
 			if (auto group_length = meta_group_length->to_long();
 			    group_length && *group_length >= 0) {
 				const auto offset_candidate = meta_group_length->offset() +
 				    meta_group_length->length() + static_cast<std::size_t>(*group_length);
-				if (offset_candidate <= stream_->endoffset()) {
+				if (offset_candidate <= stream_->end_offset()) {
 					deflated_start_offset = offset_candidate;
 				}
 			}
 		}
 
-		const auto full_size = stream_->endoffset();
+		const auto full_size = stream_->end_offset();
 		const auto full_span = stream_->get_span(0, full_size);
 		if (deflated_start_offset > full_span.size()) {
 			diag::error_and_throw(

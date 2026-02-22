@@ -27,7 +27,7 @@ protected:
 	std::size_t filesize_{0};
 	std::string identifier_{"<unattached>"};
 
-	InStream* rootstream_{this};
+	InStream* root_stream_{this};
 
 	virtual void release_storage();
 	void reset_internal_buffer();
@@ -64,10 +64,10 @@ public:
 	void unread(std::size_t size);
 	void rewind();
 
-	[[nodiscard]] inline InStream* rootstream() const { return rootstream_; }
+	[[nodiscard]] inline InStream* root_stream() const { return root_stream_; }
 	[[nodiscard]] inline std::uint8_t* data() const { return data_; }
-	[[nodiscard]] inline std::size_t datasize() const { return endoffset_ - startoffset_; }
-	[[nodiscard]] inline std::size_t endoffset() const { return endoffset_; }
+	[[nodiscard]] inline std::size_t attached_size() const { return endoffset_ - startoffset_; }
+	[[nodiscard]] inline std::size_t end_offset() const { return endoffset_; }
 
 };
 
@@ -76,7 +76,7 @@ public:
 	InStringStream();
 	~InStringStream() override;
 
-	void attach_memory(const std::uint8_t* data, std::size_t datasize, bool copydata);
+	void attach_memory(const std::uint8_t* data, std::size_t data_size, bool copy_data);
 	void attach_memory(std::vector<std::uint8_t>&& buffer);
 
 protected:
@@ -91,7 +91,7 @@ public:
 	InFileStream();
 	~InFileStream() override;
 
-	void attach_file(const std::string& filename);
+	void attach_file(const std::string& file_path);
 	void detach_file();
 
 protected:
@@ -111,7 +111,7 @@ private:
 
 class InSubStream : public InStream {
 public:
-	InSubStream(InStream* basestream, std::size_t size);
+	InSubStream(InStream* base_stream, std::size_t size);
 	~InSubStream() override = default;
 
 protected:

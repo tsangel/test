@@ -27,7 +27,7 @@ void require_equal(const T& actual, const T& expected, const std::string& contex
 
 void check_scalar(DataSet& ds, Tag tag, long expected_long, long long expected_ll) {
 	auto* de = ds.get_dataelement(tag);
-	if (!de || de == dicom::NullElement()) fail("scalar: missing tag");
+	if (de->is_missing()) fail("scalar: missing tag");
 	auto v = de->to_long();
 	if (!v) fail("scalar: to_long returned null");
 	require_equal(*v, expected_long, "scalar long");
@@ -38,7 +38,7 @@ void check_scalar(DataSet& ds, Tag tag, long expected_long, long long expected_l
 
 void check_vector(DataSet& ds, Tag tag, const std::vector<long>& expected) {
 	auto* de = ds.get_dataelement(tag);
-	if (!de || de == dicom::NullElement()) fail("vector: missing tag");
+	if (de->is_missing()) fail("vector: missing tag");
 	auto vec = de->to_long_vector();
 	if (!vec) {
 		fail("vector: to_long_vector returned null vr=" + std::string(de->vr().str())
@@ -51,7 +51,7 @@ void check_vector(DataSet& ds, Tag tag, const std::vector<long>& expected) {
 
 void check_double(DataSet& ds, Tag tag, double expected) {
 	auto* de = ds.get_dataelement(tag);
-	if (!de || de == dicom::NullElement()) fail("double: missing tag");
+	if (de->is_missing()) fail("double: missing tag");
 	auto v = de->to_double();
 	if (!v) fail("double: to_double returned null");
 	if (std::fabs(*v - expected) >= 1e-6) fail("double: value mismatch");
@@ -59,7 +59,7 @@ void check_double(DataSet& ds, Tag tag, double expected) {
 
 void check_double_vec(DataSet& ds, Tag tag, const std::vector<double>& expected) {
 	auto* de = ds.get_dataelement(tag);
-	if (!de || de == dicom::NullElement()) fail("double_vec: missing tag");
+	if (de->is_missing()) fail("double_vec: missing tag");
 	auto vec = de->to_double_vector();
 	if (!vec) fail("double_vec: to_double_vector returned null");
 	if (vec->size() != expected.size()) fail("double_vec: size mismatch");

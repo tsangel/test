@@ -320,8 +320,8 @@ void append_dump_pixel_sequence_lines(std::string& out, const PixelSequence& pix
 			const auto& frag = fragments[fragment_index];
 			std::string preview = "(unavailable)";
 			if (seq_stream &&
-			    frag.offset <= seq_stream->endoffset() &&
-			    frag.length <= seq_stream->endoffset() - frag.offset) {
+			    frag.offset <= seq_stream->end_offset() &&
+			    frag.length <= seq_stream->end_offset() - frag.offset) {
 				preview = format_fragment_preview(
 				    seq_stream->get_span(frag.offset, frag.length));
 			}

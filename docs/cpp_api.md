@@ -13,7 +13,7 @@ int main() {
 
   constexpr dicom::Tag rows = "Rows"_tag;
   const auto elem = ds.get_dataelement(rows);
-  if (elem) {
+  if (elem->is_present()) {
     // access length, vr, etc.
   }
 }

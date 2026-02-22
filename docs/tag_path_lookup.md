@@ -12,13 +12,13 @@
 ## Resolution rules
 1. Tokens are split on `.`; each token except the last must resolve to a sequence element.
 2. Tag tokens accept parentheses/commas and are trimmed; keywords fall back to the CHD lookup.
-3. Private-creator tokens are parsed via `parse_private_creator_tag`; on failure, lookup stops and returns `NullElement()`.
+3. Private-creator tokens are parsed via `parse_private_creator_tag`; on failure, lookup stops and returns a falsey `DataElement` (`VR::None`).
 4. Sequence indices are parsed with `std::stoul`; type/VR mismatches raise `diag::error_and_throw`.
-5. If any required element or nested dataset is missing, `NullElement()` is returned.
+5. If any required element or nested dataset is missing, a falsey `DataElement` (`VR::None`) is returned.
 
 ## Notes
 - No implicit loading: callers must ensure the needed elements are present via `ensure_loaded(tag)` or an earlier `read_attached_stream()`.
-- The function returns a `DataElement*`; callers should check for `NullElement()` before dereferencing.
+- The function returns a non-null `DataElement*`; callers should check `elem->is_present()` before dereferencing.
 - Errors (malformed path, non-sequence traversal, bad index) throw and include the offending tag string.
 
 ## Examples

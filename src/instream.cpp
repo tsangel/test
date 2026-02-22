@@ -59,7 +59,7 @@ void InStream::reset_internal_buffer() {
 	if (own_data_) {
 		release_storage();
 	}
-	rootstream_ = this;
+	root_stream_ = this;
 	startoffset_ = offset_ = endoffset_ = 0;
 	data_ = nullptr;
 	filesize_ = 0;
@@ -166,18 +166,18 @@ void InStringStream::attach_memory(std::vector<std::uint8_t>&& buffer) {
 	offset_ = 0;
 	endoffset_ = owned_buffer_.size();
 	filesize_ = owned_buffer_.size();
-	rootstream_ = this;
+	root_stream_ = this;
 	own_data_ = true;
 }
 
-void InStringStream::attach_memory(const std::uint8_t* data, std::size_t datasize, bool copydata) {
-	if (datasize > 0 && data == nullptr) {
-		throw std::invalid_argument("Data pointer cannot be null when datasize > 0");
+void InStringStream::attach_memory(const std::uint8_t* data, std::size_t data_size, bool copy_data) {
+	if (data_size > 0 && data == nullptr) {
+		throw std::invalid_argument("Data pointer cannot be null when data_size > 0");
 	}
-	if (copydata) {
-		std::vector<std::uint8_t> buffer(datasize);
-		if (datasize > 0) {
-			std::memcpy(buffer.data(), data, datasize);
+	if (copy_data) {
+		std::vector<std::uint8_t> buffer(data_size);
+		if (data_size > 0) {
+			std::memcpy(buffer.data(), data, data_size);
 		}
 		attach_memory(std::move(buffer));
 		return;
@@ -186,9 +186,9 @@ void InStringStream::attach_memory(const std::uint8_t* data, std::size_t datasiz
 	data_ = const_cast<std::uint8_t*>(data);
 	startoffset_ = 0;
 	offset_ = 0;
-	endoffset_ = datasize;
-	filesize_ = datasize;
-	rootstream_ = this;
+	endoffset_ = data_size;
+	filesize_ = data_size;
+	root_stream_ = this;
 	own_data_ = false;
 }
 
@@ -229,13 +229,13 @@ void InFileStream::release_storage() {
 #endif
 }
 
-void InFileStream::attach_file(const std::string& filename) {
+void InFileStream::attach_file(const std::string& file_path) {
 	detach_file();
-	if (filename.empty()) {
-		throw std::invalid_argument("Filename cannot be empty");
+	if (file_path.empty()) {
+		throw std::invalid_argument("file_path cannot be empty");
 	}
 #if defined(_WIN32)
-	file_handle_ = CreateFileA(filename.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+	file_handle_ = CreateFileA(file_path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
 	if (file_handle_ == INVALID_HANDLE_VALUE) {
 		throw std::system_error(static_cast<int>(GetLastError()), std::system_category(), "Failed to open file");
 	}
@@ -267,10 +267,10 @@ void InFileStream::attach_file(const std::string& filename) {
 	startoffset_ = 0;
 	offset_ = 0;
 	endoffset_ = filesize;
-	rootstream_ = this;
-	filename_ = filename;
+	root_stream_ = this;
+	filename_ = file_path;
 #else
-	fd_ = ::open(filename.c_str(), O_RDONLY);
+	fd_ = ::open(file_path.c_str(), O_RDONLY);
 	if (fd_ < 0) {
 		throw std::system_error(errno, std::generic_category(), "Failed to open file");
 	}
@@ -295,8 +295,8 @@ void InFileStream::attach_file(const std::string& filename) {
 	startoffset_ = 0;
 	offset_ = 0;
 	endoffset_ = filesize;
-	rootstream_ = this;
-	filename_ = filename;
+	root_stream_ = this;
+	filename_ = file_path;
 	own_data_ = filesize > 0;
 #endif
 }
@@ -306,20 +306,20 @@ void InFileStream::detach_file() {
 	filename_.clear();
 }
 
-InSubStream::InSubStream(InStream* basestream, std::size_t size) {
-	if (!basestream) {
-		diag::error_and_throw("InSubStream::InSubStream reason=null basestream");
+InSubStream::InSubStream(InStream* base_stream, std::size_t size) {
+	if (!base_stream) {
+		diag::error_and_throw("InSubStream::InSubStream reason=null base_stream");
 	}
-	rootstream_ = basestream->rootstream();
-	startoffset_ = basestream->tell();
+	root_stream_ = base_stream->root_stream();
+	startoffset_ = base_stream->tell();
 	endoffset_ = startoffset_ + size;
-	if (endoffset_ > basestream->endoffset())
-		endoffset_ = basestream->endoffset();
+	if (endoffset_ > base_stream->end_offset())
+		endoffset_ = base_stream->end_offset();
 	offset_ = startoffset_;
 	filesize_ = endoffset_ - startoffset_;
-	std::uint8_t* root_data = rootstream_ ? rootstream_->data() : nullptr;
+	std::uint8_t* root_data = root_stream_ ? root_stream_->data() : nullptr;
 	if (!root_data) {
-		diag::error_and_throw("InSubStream::InSubStream reason=basestream missing backing data");
+		diag::error_and_throw("InSubStream::InSubStream reason=base_stream missing backing data");
 	}
 	data_ = root_data;
 	own_data_ = false;

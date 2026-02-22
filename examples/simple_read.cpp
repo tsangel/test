@@ -16,6 +16,6 @@ int main(int argc, char* argv[]) {
     }
 
     std::cout << "Loaded: " << file->path()
-              << " (bytes=" << file->stream().datasize() << ")\n";
+              << " (bytes=" << file->stream().attached_size() << ")\n";
     return 0;
 }

@@ -40,14 +40,14 @@ void require_order(const dicom::DataSet& ds, const std::vector<std::uint32_t>& e
 
 void require_missing(dicom::DataSet& ds, dicom::Tag tag, const std::string& context) {
 	auto* elem = ds.get_dataelement(tag);
-	require(elem == dicom::NullElement(), context + ": tag must be missing");
+	require(elem->is_missing(), context + ": tag must be missing");
 }
 
 void add_elem(dicom::DataSet& ds, std::uint32_t tag_value,
     std::size_t offset = 0, std::size_t length = 0) {
 	auto* elem = ds.add_dataelement(
 	    dicom::Tag::from_value(tag_value), dicom::VR::LO, offset, length);
-	require(elem != nullptr && elem != dicom::NullElement(),
+	require(elem != nullptr && *elem,
 	    "add_dataelement returned null/NullElement");
 }
 
@@ -86,7 +86,7 @@ int main() {
 		add_elem(ds, kTag20, 123, 7);
 		require_order(ds, {kTag10, kTag20, kTag30, kTag40}, "case2 readd-middle");
 		auto* elem = ds.get_dataelement(dicom::Tag::from_value(kTag20));
-		require(elem != dicom::NullElement() && elem->offset() == 123 && elem->length() == 7,
+		require(elem->is_present() && elem->offset() == 123 && elem->length() == 7,
 		    "case2 readd-middle payload mismatch");
 	}
 
@@ -142,7 +142,7 @@ int main() {
 		add_elem(ds, kTag20, 999, 11);
 		require_order(ds, {kTag10, kTag20, kTag30, kTag40}, "case6 map-readd");
 		auto* elem = ds.get_dataelement(dicom::Tag::from_value(kTag20));
-		require(elem != dicom::NullElement() && elem->offset() == 999 && elem->length() == 11,
+		require(elem->is_present() && elem->offset() == 999 && elem->length() == 11,
 		    "case6 map-readd payload mismatch");
 	}
 

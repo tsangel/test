@@ -63,8 +63,8 @@ struct DecodedArrayOutput {
 
 struct DecodedArrayLayout {
 	DecodedArraySpec spec{};
-	dicom::pixel::decode_opts opt{};
-	dicom::pixel::strides dst_strides{};
+	dicom::pixel::DecodeOptions opt{};
+	dicom::pixel::DecodeStrides dst_strides{};
 	std::array<std::size_t, 4> shape{};
 	std::array<std::int64_t, 4> strides{};
 	std::size_t ndim{0};
@@ -81,21 +81,21 @@ DecodedArraySpec decoded_array_spec(const DicomFile::pixel_info_t& info, bool sc
 	}
 
 	switch (info.sv_dtype) {
-	case dicom::pixel::dtype::u8:
+	case dicom::pixel::DataType::u8:
 		return DecodedArraySpec{nb::dtype<std::uint8_t>(), sizeof(std::uint8_t)};
-	case dicom::pixel::dtype::s8:
+	case dicom::pixel::DataType::s8:
 		return DecodedArraySpec{nb::dtype<std::int8_t>(), sizeof(std::int8_t)};
-	case dicom::pixel::dtype::u16:
+	case dicom::pixel::DataType::u16:
 		return DecodedArraySpec{nb::dtype<std::uint16_t>(), sizeof(std::uint16_t)};
-	case dicom::pixel::dtype::s16:
+	case dicom::pixel::DataType::s16:
 		return DecodedArraySpec{nb::dtype<std::int16_t>(), sizeof(std::int16_t)};
-	case dicom::pixel::dtype::u32:
+	case dicom::pixel::DataType::u32:
 		return DecodedArraySpec{nb::dtype<std::uint32_t>(), sizeof(std::uint32_t)};
-	case dicom::pixel::dtype::s32:
+	case dicom::pixel::DataType::s32:
 		return DecodedArraySpec{nb::dtype<std::int32_t>(), sizeof(std::int32_t)};
-	case dicom::pixel::dtype::f32:
+	case dicom::pixel::DataType::f32:
 		return DecodedArraySpec{nb::dtype<float>(), sizeof(float)};
-	case dicom::pixel::dtype::f64:
+	case dicom::pixel::DataType::f64:
 		return DecodedArraySpec{nb::dtype<double>(), sizeof(double)};
 	default:
 		break;
@@ -134,23 +134,23 @@ std::string normalize_htj2k_decoder_name(std::string decoder) {
 	return normalized;
 }
 
-dicom::pixel::htj2k_decoder parse_htj2k_decoder(std::string decoder) {
+dicom::pixel::Htj2kDecoder parse_htj2k_decoder(std::string decoder) {
 	const auto normalized = normalize_htj2k_decoder_name(std::move(decoder));
 	if (normalized.empty() || normalized == "auto" || normalized == "autoselect") {
-		return dicom::pixel::htj2k_decoder::auto_select;
+		return dicom::pixel::Htj2kDecoder::auto_select;
 	}
 	if (normalized == "openjph" || normalized == "ojph") {
-		return dicom::pixel::htj2k_decoder::openjph;
+		return dicom::pixel::Htj2kDecoder::openjph;
 	}
 	if (normalized == "openjpeg" || normalized == "openjp2") {
-		return dicom::pixel::htj2k_decoder::openjpeg;
+		return dicom::pixel::Htj2kDecoder::openjpeg;
 	}
 	throw nb::value_error("htj2k_decoder must be one of: 'auto', 'openjph', 'openjpeg'");
 }
 
 DecodedArrayLayout build_decode_layout(
     const DicomFile& self, long frame, bool scaled, int decoder_threads = -1,
-    dicom::pixel::htj2k_decoder htj2k_decoder_backend = dicom::pixel::htj2k_decoder::auto_select) {
+    dicom::pixel::Htj2kDecoder htj2k_decoder_backend = dicom::pixel::Htj2kDecoder::auto_select) {
 	if (frame < -1) {
 		throw nb::value_error("frame must be >= -1");
 	}
@@ -177,7 +177,7 @@ DecodedArrayLayout build_decode_layout(
 	const auto samples_per_pixel = static_cast<std::size_t>(info.samples_per_pixel);
 	layout.frames = static_cast<std::size_t>(info.frames);
 
-	layout.opt.planar_out = dicom::pixel::planar::interleaved;
+	layout.opt.planar_out = dicom::pixel::Planar::interleaved;
 	layout.opt.alignment = 1;
 	layout.opt.scaled = scaled;
 	layout.opt.decoder_threads = decoder_threads;
@@ -185,7 +185,7 @@ DecodedArrayLayout build_decode_layout(
 	const bool effective_scaled = dicom::pixel::should_use_scaled_output(self, layout.opt);
 	layout.opt.scaled = effective_scaled;
 
-	layout.dst_strides = self.calc_strides(layout.opt);
+	layout.dst_strides = self.calc_decode_strides(layout.opt);
 	layout.spec = decoded_array_spec(info, effective_scaled);
 
 	const auto bytes_per_sample = layout.spec.bytes_per_sample;
@@ -272,12 +272,12 @@ void decode_layout_into(const DicomFile& self, const DecodedArrayLayout& layout,
 	}
 }
 
-const DataElement* raw_source_element(const DicomFile& self, dicom::pixel::dtype sv_dtype) {
+const DataElement* raw_source_element(const DicomFile& self, dicom::pixel::DataType sv_dtype) {
 	const auto& dataset = self.dataset();
 	switch (sv_dtype) {
-	case dicom::pixel::dtype::f32:
+	case dicom::pixel::DataType::f32:
 		return dataset.get_dataelement(Tag("FloatPixelData"));
-	case dicom::pixel::dtype::f64:
+	case dicom::pixel::DataType::f64:
 		return dataset.get_dataelement(Tag("DoubleFloatPixelData"));
 	default:
 		return dataset.get_dataelement(Tag("PixelData"));
@@ -293,7 +293,7 @@ nb::object dicomfile_to_array_view(const DicomFile& self, long frame) {
 		throw nb::value_error("to_array_view requires an uncompressed transfer syntax");
 	}
 	if (info.samples_per_pixel > 1 &&
-	    info.planar_configuration != dicom::pixel::planar::interleaved) {
+	    info.planar_configuration != dicom::pixel::Planar::interleaved) {
 		throw nb::value_error(
 		    "to_array_view requires PlanarConfiguration=interleaved when SamplesPerPixel > 1");
 	}
@@ -304,7 +304,7 @@ nb::object dicomfile_to_array_view(const DicomFile& self, long frame) {
 	}
 
 	const auto* source = raw_source_element(self, info.sv_dtype);
-	if (!source || !(*source)) {
+	if (source->is_missing()) {
 		throw nb::value_error("to_array_view requires source pixel data to be present");
 	}
 	if (source->vr().is_pixel_sequence()) {
@@ -316,12 +316,12 @@ nb::object dicomfile_to_array_view(const DicomFile& self, long frame) {
 	const auto cols = static_cast<std::size_t>(info.cols);
 	const auto samples_per_pixel = static_cast<std::size_t>(info.samples_per_pixel);
 	const auto src_row_components =
-	    (info.planar_configuration == dicom::pixel::planar::interleaved)
+	    (info.planar_configuration == dicom::pixel::Planar::interleaved)
 	        ? samples_per_pixel
 	        : std::size_t{1};
 	const auto src_row_bytes = cols * src_row_components * layout.spec.bytes_per_sample;
 	std::size_t src_frame_bytes = src_row_bytes * rows;
-	if (info.planar_configuration == dicom::pixel::planar::planar) {
+	if (info.planar_configuration == dicom::pixel::Planar::planar) {
 		src_frame_bytes *= samples_per_pixel;
 	}
 	if (layout.frames != 0 &&
@@ -431,7 +431,7 @@ private:
 };
 
 nb::object dataelement_get_value_py(DataElement& element, nb::handle parent = nb::handle()) {
-	if (&element == dicom::NullElement()) {
+	if (!element) {
 		return nb::none();
 	}
 	if (element.vr().is_sequence()) {
@@ -688,6 +688,15 @@ NB_MODULE(_dicomsdl, m) {
 		.def_prop_ro("length", &DataElement::length)
 		.def_prop_ro("offset", &DataElement::offset)
 		.def_prop_ro("vm", &DataElement::vm)
+		.def("__bool__",
+		    [](const DataElement& element) {
+			    return static_cast<bool>(element);
+		    },
+		    "True when the element is present (VR != None); False for missing lookups.")
+		.def("is_present", &DataElement::is_present,
+		    "True when lookup resolved to a real element (not missing sentinel).")
+		.def("is_missing", &DataElement::is_missing,
+		    "True when lookup resolved to a missing element sentinel (VR.None).")
 		.def_prop_ro("is_sequence",
 	    [](const DataElement& element) { return element.vr().is_sequence(); })
 		.def_prop_ro("is_pixel_sequence",
@@ -772,7 +781,7 @@ NB_MODULE(_dicomsdl, m) {
 		            auto v = element.to_tag();
 		            return v ? nb::cast(*v) : nb::none();
 		        }
-		        return nb::cast(element.toTag(nb::cast<Tag>(default_value)));
+		        return nb::cast(element.to_tag().value_or(nb::cast<Tag>(default_value)));
 		    },
 		    nb::arg("default") = nb::none())
 		.def("to_tag_vector",
@@ -786,7 +795,7 @@ NB_MODULE(_dicomsdl, m) {
 	            auto v = element.to_int();
 	            return v ? nb::cast(*v) : nb::none();
 	        }
-	        return nb::cast(element.toInt(nb::cast<int>(default_value)));
+	        return nb::cast(element.to_int().value_or(nb::cast<int>(default_value)));
 	    },
 	    nb::arg("default") = nb::none(),
 	    "Return int or None; optional default fills on failure")
@@ -796,7 +805,7 @@ NB_MODULE(_dicomsdl, m) {
 	            auto v = element.to_long();
 	            return v ? nb::cast(*v) : nb::none();
 			    }
-			    return nb::cast(element.toLong(nb::cast<long>(default_value)));
+			    return nb::cast(element.to_long().value_or(nb::cast<long>(default_value)));
 		    },
 		    nb::arg("default") = nb::none(),
 		    "Return int or None; optional default fills on failure")
@@ -806,7 +815,8 @@ NB_MODULE(_dicomsdl, m) {
 				    auto v = element.to_longlong();
 				    return v ? nb::cast(*v) : nb::none();
 			    }
-			    return nb::cast(element.toLongLong(nb::cast<long long>(default_value)));
+			    return nb::cast(
+			        element.to_longlong().value_or(nb::cast<long long>(default_value)));
 		    },
 		    nb::arg("default") = nb::none())
 		.def("to_double",
@@ -815,7 +825,7 @@ NB_MODULE(_dicomsdl, m) {
 				    auto v = element.to_double();
 				    return v ? nb::cast(*v) : nb::none();
 	        }
-	        return nb::cast(element.toDouble(nb::cast<double>(default_value)));
+	        return nb::cast(element.to_double().value_or(nb::cast<double>(default_value)));
 	    },
 	    nb::arg("default") = nb::none())
 	.def("to_int_vector",
@@ -824,7 +834,8 @@ NB_MODULE(_dicomsdl, m) {
 	            auto v = element.to_int_vector();
 	            return v ? nb::cast(*v) : nb::none();
 	        }
-	        return nb::cast(element.toIntVector(nb::cast<std::vector<int>>(default_value)));
+	        return nb::cast(
+	            element.to_int_vector().value_or(nb::cast<std::vector<int>>(default_value)));
 	    },
 	    nb::arg("default") = nb::none())
 	.def("as_uint16_vector",
@@ -833,7 +844,8 @@ NB_MODULE(_dicomsdl, m) {
 	            auto v = element.as_uint16_vector();
 	            return v ? nb::cast(*v) : nb::none();
 	        }
-	        return nb::cast(element.asUint16Vector(nb::cast<std::vector<std::uint16_t>>(default_value)));
+	        return nb::cast(element.as_uint16_vector().value_or(
+	            nb::cast<std::vector<std::uint16_t>>(default_value)));
 	    },
 	    nb::arg("default") = nb::none(),
 	    "Interpret raw value bytes as uint16 list (honors dataset endianness)")
@@ -843,7 +855,8 @@ NB_MODULE(_dicomsdl, m) {
 	            auto v = element.as_uint8_vector();
 	            return v ? nb::cast(*v) : nb::none();
 	        }
-	        return nb::cast(element.asUint8Vector(nb::cast<std::vector<std::uint8_t>>(default_value)));
+	        return nb::cast(element.as_uint8_vector().value_or(
+	            nb::cast<std::vector<std::uint8_t>>(default_value)));
 	    },
 	    nb::arg("default") = nb::none(),
 	    "Interpret raw value bytes as uint8 list")
@@ -853,7 +866,8 @@ NB_MODULE(_dicomsdl, m) {
 	            auto v = element.to_long_vector();
 	            return v ? nb::cast(*v) : nb::none();
 			    }
-			    return nb::cast(element.toLongVector(nb::cast<std::vector<long>>(default_value)));
+			    return nb::cast(
+			        element.to_long_vector().value_or(nb::cast<std::vector<long>>(default_value)));
 		    },
 		    nb::arg("default") = nb::none())
 		.def("to_longlong_vector",
@@ -862,7 +876,8 @@ NB_MODULE(_dicomsdl, m) {
 				    auto v = element.to_longlong_vector();
 				    return v ? nb::cast(*v) : nb::none();
 			    }
-			    return nb::cast(element.toLongLongVector(nb::cast<std::vector<long long>>(default_value)));
+			    return nb::cast(element.to_longlong_vector().value_or(
+			        nb::cast<std::vector<long long>>(default_value)));
 		    },
 		    nb::arg("default") = nb::none())
 		.def("to_double_vector",
@@ -871,7 +886,8 @@ NB_MODULE(_dicomsdl, m) {
 				    auto v = element.to_double_vector();
 				    return v ? nb::cast(*v) : nb::none();
 			    }
-			    return nb::cast(element.toDoubleVector(nb::cast<std::vector<double>>(default_value)));
+			    return nb::cast(element.to_double_vector().value_or(
+			        nb::cast<std::vector<double>>(default_value)));
 		    },
 		    nb::arg("default") = nb::none())
 		.def("get_value",
@@ -880,7 +896,7 @@ NB_MODULE(_dicomsdl, m) {
 		    },
 		    "Best-effort typed access: returns int/float/str or list based on VR/VM; "
 		    "falls back to raw bytes (memoryview) for binary VRs; "
-		    "returns None for NullElement or sequences/pixel sequences.")
+		    "returns None for missing elements or sequences/pixel sequences.")
 		.def("value_span",
 		    [](const DataElement& element) {
 			    auto span = element.value_span();
@@ -944,7 +960,7 @@ NB_MODULE(_dicomsdl, m) {
 	    "- Iterable over DataElements in tag order\n"
 	    "- Indexing by Tag, packed int, or tag-path string\n"
 	    "- Attribute access by keyword (e.g., ds.PatientName)\n"
-	    "- Missing lookups return a NullElement sentinel (VR::None)")
+	    "- Missing lookups return a falsey DataElement (VR::None)")
 		.def(nb::init<>())
 	.def_prop_ro("path", &DataSet::path, "Identifier of the attached stream (file path, provided name, or '<memory>')")
 		.def("size", &DataSet::size,
@@ -954,7 +970,10 @@ NB_MODULE(_dicomsdl, m) {
 		        std::size_t offset, std::size_t length) {
 		        const VR resolved = vr.value_or(VR::None);
 		        DataElement* element = self.add_dataelement(tag, resolved, offset, length);
-		        return element ? element : dicom::NullElement();
+		        if (!element) {
+			        throw std::runtime_error("Failed to add DataElement");
+		        }
+		        return element;
 		    },
 		    nb::arg("tag"), nb::arg("vr") = nb::none(),
 		    nb::arg("offset") = 0, nb::arg("length") = 0,
@@ -977,7 +996,7 @@ NB_MODULE(_dicomsdl, m) {
 		        return *self.get_dataelement(tag);
 		    },
 		    nb::arg("tag"), nb::rv_policy::reference_internal,
-		    "Return the DataElement for a tag or a VR::None NullElement sentinel if missing")
+		    "Return the DataElement for a tag; missing lookups return a falsey DataElement (VR::None)")
 		.def("get_dataelement",
 		    [](DataSet& self, std::uint32_t packed) -> DataElement& {
 			    const Tag tag(packed);
@@ -985,7 +1004,7 @@ NB_MODULE(_dicomsdl, m) {
 		    },
 		    nb::arg("packed_tag"),
 		    nb::rv_policy::reference_internal,
-		    "Overload: pass packed 0xGGGEEEE integer; returns NullElement if missing")
+		    "Overload: pass packed 0xGGGEEEE integer; missing lookups return a falsey DataElement")
 		.def("get_dataelement",
 		    [](DataSet& self, const std::string& tag_str) -> DataElement& {
 			    return *self.get_dataelement(tag_str);
@@ -1000,7 +1019,7 @@ NB_MODULE(_dicomsdl, m) {
 		    "    e.g., '0009,xx1e,GEMS_GENIE_1'\n"
 		    "  - Nested sequences: '00082112.0.00081190' or\n"
 		    "    'RadiopharmaceuticalInformationSequence.0.RadionuclideTotalDose'\n"
-		    "Returns a DataElement or NullElement (VR::None) if not found; malformed paths raise.")
+		    "Returns a DataElement; missing lookups return a falsey DataElement (VR::None); malformed paths raise.")
 		.def("__getitem__",
 		    [](DataSet& self, nb::object key) -> nb::object {
 			    DataElement* el = nullptr;
@@ -1016,7 +1035,7 @@ NB_MODULE(_dicomsdl, m) {
 				    throw nb::type_error("DataSet indices must be Tag, int (0xGGGEEEE), or str");
 			    }
 
-			    if (!el || el == dicom::NullElement()) {
+			    if (el->is_missing()) {
 				    return nb::none();
 			    }
 			    return dataelement_get_value_py(*el, nb::cast(&self, nb::rv_policy::reference));
@@ -1030,7 +1049,7 @@ NB_MODULE(_dicomsdl, m) {
 				    try {
 					    Tag tag(name);
 					    DataElement* el = self.get_dataelement(tag);
-					    if (el && el != dicom::NullElement()) {
+					    if (el->is_present()) {
 						    return dataelement_get_value_py(*el, nb::cast(&self, nb::rv_policy::reference));
 					    }
 				    } catch (const std::exception&) {
@@ -1083,6 +1102,16 @@ NB_MODULE(_dicomsdl, m) {
 	    "DICOM file/session object that owns the root DataSet.")
 		.def_prop_ro("path", &DicomFile::path,
 		    "Identifier of the attached root stream (file path or provided memory name)")
+		.def_prop_ro("has_error", &DicomFile::has_error,
+		    "True if parsing recorded any error diagnostics or threw while reading.")
+		.def_prop_ro("error_message",
+		    [](const DicomFile& self) -> nb::object {
+			    if (!self.has_error() || self.error_message().empty()) {
+				    return nb::none();
+			    }
+			    return nb::str(self.error_message().c_str(), self.error_message().size());
+		    },
+		    "Latest captured parse error message, or None when no error was recorded.")
 		.def_prop_ro("dataset",
 		    [](DicomFile& self) -> DataSet& { return self.dataset(); },
 		    nb::rv_policy::reference_internal,
@@ -1219,7 +1248,7 @@ NB_MODULE(_dicomsdl, m) {
 				    throw nb::type_error("DicomFile indices must be Tag, int (0xGGGEEEE), or str");
 			    }
 
-			    if (!el || el == dicom::NullElement()) {
+			    if (el->is_missing()) {
 				    return nb::none();
 			    }
 			    return dataelement_get_value_py(*el, nb::cast(&dataset, nb::rv_policy::reference));
@@ -1288,7 +1317,8 @@ m.def("read_file",
     "load_until : Tag | None, optional\n"
     "    Stop after this tag is read (inclusive). Defaults to reading entire file.\n"
     "keep_on_error : bool | None, optional\n"
-    "    When True, keep partially read data instead of raising on parse errors.\n");
+    "    When True, keep partially read data instead of raising on parse errors.\n"
+    "    Inspect DicomFile.has_error and DicomFile.error_message after reading.\n");
 
 m.def("read_bytes",
     [] (nb::object buffer, const std::string& name, std::optional<Tag> load_until,
@@ -1352,6 +1382,7 @@ m.def("read_bytes",
     "    Stop after this tag is read (inclusive). Defaults to reading entire buffer.\n"
     "keep_on_error : bool | None, optional\n"
     "    When True, keep partially read data instead of raising on parse errors.\n"
+    "    Inspect DicomFile.has_error and DicomFile.error_message after reading.\n"
     "copy : bool, optional\n"
     "    When False, avoid copying and reference the caller's buffer; caller must keep\n"
     "    the buffer alive while the DicomFile exists.\n"
@@ -1377,14 +1408,21 @@ m.def("read_bytes",
 		.def("__repr__", &tag_repr)
 		.def(nb::self == nb::self);
 
-auto uid_cls = nb::class_<Uid>(m, "Uid")
-	.def(nb::init<>())
-	.def("__init__",
-	    [](Uid* self, const std::string& text) {
-		    new (self) Uid(require_uid(dicom::uid::lookup(text), "Uid.__init__", text));
-	    },
-	    nb::arg("text"),
-	    "Construct a UID from either a dotted value or keyword, raising ValueError if unknown.")
+	auto uid_cls = nb::class_<Uid>(m, "Uid")
+		.def(nb::init<>())
+		.def("__init__",
+		    [](Uid* self, const std::string& text) {
+			    try {
+				    new (self) Uid(dicom::uid::lookup_or_throw(text));
+			    } catch (const std::invalid_argument&) {
+				    std::ostringstream oss;
+				    oss << "Unknown DICOM UID from Uid.__init__: " << text;
+				    const std::string message = oss.str();
+				    throw nb::value_error(message.c_str());
+			    }
+		    },
+		    nb::arg("text"),
+		    "Construct a UID from either a dotted value or keyword, raising ValueError if unknown.")
 	.def_static("lookup",
 	    [](const std::string& text) -> nb::object {
 		    return uid_or_none(dicom::uid::lookup(text));

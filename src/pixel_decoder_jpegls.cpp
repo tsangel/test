@@ -23,14 +23,14 @@ struct jpegls_frame_buffer {
 	std::span<const std::uint8_t> view{};
 };
 
-bool sv_dtype_is_integral(dtype sv_dtype) noexcept {
+bool sv_dtype_is_integral(DataType sv_dtype) noexcept {
 	switch (sv_dtype) {
-	case dtype::u8:
-	case dtype::s8:
-	case dtype::u16:
-	case dtype::s16:
-	case dtype::u32:
-	case dtype::s32:
+	case DataType::u8:
+	case DataType::s8:
+	case DataType::u16:
+	case DataType::s16:
+	case DataType::u32:
+	case DataType::s32:
 		return true;
 	default:
 		return false;
@@ -38,29 +38,29 @@ bool sv_dtype_is_integral(dtype sv_dtype) noexcept {
 }
 
 void validate_destination(const DicomFile& df, std::span<std::uint8_t> dst,
-    const strides& dst_strides, planar dst_planar, std::size_t rows, std::size_t cols,
+    const DecodeStrides& dst_strides, Planar dst_planar, std::size_t rows, std::size_t cols,
     std::size_t samples_per_pixel, std::size_t bytes_per_sample) {
 	const std::size_t dst_row_components =
-	    (dst_planar == planar::interleaved) ? samples_per_pixel : std::size_t{1};
+	    (dst_planar == Planar::interleaved) ? samples_per_pixel : std::size_t{1};
 	const std::size_t dst_min_row_bytes = cols * dst_row_components * bytes_per_sample;
 	if (dst_strides.row < dst_min_row_bytes) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=row stride too small (need>={}, got={})",
+		    "pixel::decode_frame_into file={} reason=row stride too small (need>={}, got={})",
 		    df.path(), dst_min_row_bytes, dst_strides.row);
 	}
 
 	std::size_t min_frame_bytes = dst_strides.row * rows;
-	if (dst_planar == planar::planar) {
+	if (dst_planar == Planar::planar) {
 		min_frame_bytes *= samples_per_pixel;
 	}
 	if (dst_strides.frame < min_frame_bytes) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=frame stride too small (need>={}, got={})",
+		    "pixel::decode_frame_into file={} reason=frame stride too small (need>={}, got={})",
 		    df.path(), min_frame_bytes, dst_strides.frame);
 	}
 	if (dst.size() < dst_strides.frame) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=destination too small (need={}, got={})",
+		    "pixel::decode_frame_into file={} reason=destination too small (need={}, got={})",
 		    df.path(), dst_strides.frame, dst.size());
 	}
 }
@@ -70,28 +70,28 @@ jpegls_frame_buffer load_jpegls_frame_buffer(const DicomFile& df, std::size_t fr
 	const auto& pixel_data = ds["PixelData"_tag];
 	if (!pixel_data || !pixel_data.vr().is_pixel_sequence()) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=JPEG-LS requires encapsulated PixelData",
+		    "pixel::decode_frame_into file={} reason=JPEG-LS requires encapsulated PixelData",
 		    df.path());
 	}
 
 	const auto* pixel_sequence = pixel_data.as_pixel_sequence();
 	if (!pixel_sequence) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=JPEG-LS pixel sequence is missing",
+		    "pixel::decode_frame_into file={} reason=JPEG-LS pixel sequence is missing",
 		    df.path());
 	}
 
 	const auto frame_count = pixel_sequence->number_of_frames();
 	if (frame_index >= frame_count) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} frame={} reason=JPEG-LS frame index out of range (frames={})",
+		    "pixel::decode_frame_into file={} frame={} reason=JPEG-LS frame index out of range (frames={})",
 		    df.path(), frame_index, frame_count);
 	}
 
 	const auto* frame = pixel_sequence->frame(frame_index);
 	if (!frame) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} frame={} reason=JPEG-LS frame is missing",
+		    "pixel::decode_frame_into file={} frame={} reason=JPEG-LS frame is missing",
 		    df.path(), frame_index);
 	}
 
@@ -104,13 +104,13 @@ jpegls_frame_buffer load_jpegls_frame_buffer(const DicomFile& df, std::size_t fr
 	const auto& fragments = frame->fragments();
 	if (fragments.empty()) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} frame={} reason=JPEG-LS frame has no fragments",
+		    "pixel::decode_frame_into file={} frame={} reason=JPEG-LS frame has no fragments",
 		    df.path(), frame_index);
 	}
 	for (const auto& fragment : fragments) {
 		if (fragment.length == 0) {
 			diag::error_and_throw(
-			    "pixel::decode_into file={} frame={} reason=JPEG-LS zero-length fragment is not supported",
+			    "pixel::decode_frame_into file={} frame={} reason=JPEG-LS zero-length fragment is not supported",
 				    df.path(), frame_index);
 		}
 	}
@@ -118,7 +118,7 @@ jpegls_frame_buffer load_jpegls_frame_buffer(const DicomFile& df, std::size_t fr
 	const auto* stream = pixel_sequence->stream();
 	if (!stream) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} frame={} reason=JPEG-LS pixel sequence stream is missing",
+		    "pixel::decode_frame_into file={} frame={} reason=JPEG-LS pixel sequence stream is missing",
 		    df.path(), frame_index);
 	}
 
@@ -139,31 +139,31 @@ void validate_decoded_header(const DicomFile& df, std::size_t frame_index,
     std::size_t src_bytes_per_sample) {
 	if (frame_info.height != rows || frame_info.width != cols) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} frame={} reason=JPEG-LS decoded dimensions mismatch (decoded={}x{}, expected={}x{})",
+		    "pixel::decode_frame_into file={} frame={} reason=JPEG-LS decoded dimensions mismatch (decoded={}x{}, expected={}x{})",
 		    df.path(), frame_index, frame_info.height, frame_info.width, rows, cols);
 	}
 	if (frame_info.component_count != static_cast<int>(samples_per_pixel)) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} frame={} reason=JPEG-LS component count mismatch (decoded={}, expected={})",
+		    "pixel::decode_frame_into file={} frame={} reason=JPEG-LS component count mismatch (decoded={}, expected={})",
 		    df.path(), frame_index, frame_info.component_count, samples_per_pixel);
 	}
 
 	if (frame_info.bits_per_sample <= 0 || frame_info.bits_per_sample > 16) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} frame={} reason=JPEG-LS decoded bits-per-sample is invalid ({})",
+		    "pixel::decode_frame_into file={} frame={} reason=JPEG-LS decoded bits-per-sample is invalid ({})",
 		    df.path(), frame_index, frame_info.bits_per_sample);
 	}
 
 	const auto max_output_bits = static_cast<int>(src_bytes_per_sample * 8);
 	if (frame_info.bits_per_sample > max_output_bits) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} frame={} reason=JPEG-LS decoded precision {} exceeds output {} bits",
+		    "pixel::decode_frame_into file={} frame={} reason=JPEG-LS decoded precision {} exceeds output {} bits",
 		    df.path(), frame_index, frame_info.bits_per_sample, max_output_bits);
 	}
 
 	if (info.bits_allocated > 0 && frame_info.bits_per_sample > info.bits_allocated) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} frame={} reason=JPEG-LS decoded precision {} exceeds BitsAllocated {}",
+		    "pixel::decode_frame_into file={} frame={} reason=JPEG-LS decoded precision {} exceeds BitsAllocated {}",
 		    df.path(), frame_index, frame_info.bits_per_sample, info.bits_allocated);
 	}
 }
@@ -171,7 +171,7 @@ void validate_decoded_header(const DicomFile& df, std::size_t frame_index,
 std::uint32_t checked_u32_stride(const DicomFile& df, const char* path_name, std::size_t stride) {
 	if (stride > std::numeric_limits<std::uint32_t>::max()) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason={} stride exceeds uint32_t ({})",
+		    "pixel::decode_frame_into file={} reason={} stride exceeds uint32_t ({})",
 		    df.path(), path_name, stride);
 	}
 	return static_cast<std::uint32_t>(stride);
@@ -181,24 +181,24 @@ std::uint32_t checked_u32_stride(const DicomFile& df, const char* path_name, std
 
 void decode_jpegls_into(const DicomFile& df, const DicomFile::pixel_info_t& info,
     std::size_t frame_index, std::span<std::uint8_t> dst,
-    const strides& dst_strides, const decode_opts& opt) {
+    const DecodeStrides& dst_strides, const DecodeOptions& opt) {
 	if (!info.has_pixel_data) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=sv_dtype is unknown", df.path());
+		    "pixel::decode_frame_into file={} reason=sv_dtype is unknown", df.path());
 	}
 	if (!info.ts.is_jpegls()) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=transfer syntax is not JPEG-LS ({})",
+		    "pixel::decode_frame_into file={} reason=transfer syntax is not JPEG-LS ({})",
 		    df.path(), df.transfer_syntax_uid().value());
 	}
 	if (info.rows <= 0 || info.cols <= 0 || info.samples_per_pixel <= 0) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=invalid Rows/Columns/SamplesPerPixel",
+		    "pixel::decode_frame_into file={} reason=invalid Rows/Columns/SamplesPerPixel",
 		    df.path());
 	}
 	if (info.frames <= 0) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=invalid NumberOfFrames",
+		    "pixel::decode_frame_into file={} reason=invalid NumberOfFrames",
 		    df.path());
 	}
 
@@ -206,32 +206,32 @@ void decode_jpegls_into(const DicomFile& df, const DicomFile::pixel_info_t& info
 	if (samples_per_pixel_value != 1 && samples_per_pixel_value != 3 &&
 	    samples_per_pixel_value != 4) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=only SamplesPerPixel=1/3/4 is supported in current JPEG-LS path",
+		    "pixel::decode_frame_into file={} reason=only SamplesPerPixel=1/3/4 is supported in current JPEG-LS path",
 		    df.path());
 	}
 	const auto samples_per_pixel = static_cast<std::size_t>(samples_per_pixel_value);
 	if (opt.scaled && samples_per_pixel != 1) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=scaled output supports SamplesPerPixel=1 only",
+		    "pixel::decode_frame_into file={} reason=scaled output supports SamplesPerPixel=1 only",
 		    df.path());
 	}
 	if (!sv_dtype_is_integral(info.sv_dtype)) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=JPEG-LS supports integral sv_dtype only",
+		    "pixel::decode_frame_into file={} reason=JPEG-LS supports integral sv_dtype only",
 		    df.path());
 	}
 
 	const auto src_bytes_per_sample = sv_dtype_bytes(info.sv_dtype);
 	if (src_bytes_per_sample == 0 || src_bytes_per_sample > 2) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=JPEG-LS supports integral sv_dtype up to 16-bit only",
+		    "pixel::decode_frame_into file={} reason=JPEG-LS supports integral sv_dtype up to 16-bit only",
 		    df.path());
 	}
 
 	const auto frame_count = static_cast<std::size_t>(info.frames);
 	if (frame_index >= frame_count) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} frame={} reason=frame index out of range (frames={})",
+		    "pixel::decode_frame_into file={} frame={} reason=frame index out of range (frames={})",
 		    df.path(), frame_index, frame_count);
 	}
 
@@ -244,7 +244,7 @@ void decode_jpegls_into(const DicomFile& df, const DicomFile::pixel_info_t& info
 	const auto frame_source = load_jpegls_frame_buffer(df, frame_index);
 	if (frame_source.view.empty()) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} frame={} reason=JPEG-LS frame has empty codestream",
+		    "pixel::decode_frame_into file={} frame={} reason=JPEG-LS frame has empty codestream",
 		    df.path(), frame_index);
 	}
 
@@ -258,25 +258,25 @@ void decode_jpegls_into(const DicomFile& df, const DicomFile::pixel_info_t& info
 		interleave_mode = decoder.interleave_mode();
 	} catch (const std::exception& e) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} frame={} reason=JPEG-LS header decode failed ({})",
+		    "pixel::decode_frame_into file={} frame={} reason=JPEG-LS header decode failed ({})",
 		    df.path(), frame_index, e.what());
 	}
 
 	validate_decoded_header(
 	    df, frame_index, info, frame_info, rows, cols, samples_per_pixel, src_bytes_per_sample);
 
-	planar src_planar = planar::interleaved;
+	Planar src_planar = Planar::interleaved;
 	switch (interleave_mode) {
 	case charls::interleave_mode::none:
-		src_planar = planar::planar;
+		src_planar = Planar::planar;
 		break;
 	case charls::interleave_mode::line:
 	case charls::interleave_mode::sample:
-		src_planar = planar::interleaved;
+		src_planar = Planar::interleaved;
 		break;
 	default:
 		diag::error_and_throw(
-		    "pixel::decode_into file={} frame={} reason=JPEG-LS reported unsupported interleave mode {}",
+		    "pixel::decode_frame_into file={} frame={} reason=JPEG-LS reported unsupported interleave mode {}",
 		    df.path(), frame_index, static_cast<int>(interleave_mode));
 		return;
 	}
@@ -288,17 +288,17 @@ void decode_jpegls_into(const DicomFile& df, const DicomFile::pixel_info_t& info
 			decoder.decode(dst.data(), dst_strides.frame, decode_stride);
 		} catch (const std::exception& e) {
 			diag::error_and_throw(
-			    "pixel::decode_into file={} frame={} reason=JPEG-LS decode failed ({})",
+			    "pixel::decode_frame_into file={} frame={} reason=JPEG-LS decode failed ({})",
 			    df.path(), frame_index, e.what());
 		}
 		return;
 	}
 
 	const std::size_t src_row_components =
-	    (src_planar == planar::interleaved) ? samples_per_pixel : std::size_t{1};
+	    (src_planar == Planar::interleaved) ? samples_per_pixel : std::size_t{1};
 	const std::size_t src_row_bytes = cols * src_row_components * src_bytes_per_sample;
 	std::size_t src_frame_bytes = src_row_bytes * rows;
-	if (src_planar == planar::planar) {
+	if (src_planar == Planar::planar) {
 		src_frame_bytes *= samples_per_pixel;
 	}
 
@@ -308,7 +308,7 @@ void decode_jpegls_into(const DicomFile& df, const DicomFile::pixel_info_t& info
 		decoder.decode(decoded.data(), decoded.size(), decode_stride);
 	} catch (const std::exception& e) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} frame={} reason=JPEG-LS decode failed ({})",
+		    "pixel::decode_frame_into file={} frame={} reason=JPEG-LS decode failed ({})",
 		    df.path(), frame_index, e.what());
 	}
 

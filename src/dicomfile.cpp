@@ -3,6 +3,7 @@
 #include "dicom_endian.h"
 #include "diagnostics.h"
 
+#include <exception>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -13,15 +14,6 @@ using namespace dicom::literals;
 
 namespace {
 
-inline const uid::WellKnown kExplicitVrLittleEndian =
-    uid::lookup("ExplicitVRLittleEndian").value_or(uid::WellKnown{});
-inline const uid::WellKnown kImplicitVrLittleEndianUid =
-    uid::lookup("ImplicitVRLittleEndian").value_or(uid::WellKnown{});
-inline const uid::WellKnown kPapyrusImplicitVrLittleEndianUid =
-    uid::lookup("Papyrus3ImplicitVRLittleEndian").value_or(uid::WellKnown{});
-inline const uid::WellKnown kExplicitVrBigEndianUid =
-    uid::lookup("ExplicitVRBigEndian").value_or(uid::WellKnown{});
-
 void apply_transfer_syntax_flags_for_file(uid::WellKnown transfer_syntax, bool& little_endian,
     bool& explicit_vr) {
 	little_endian = true;
@@ -30,15 +22,59 @@ void apply_transfer_syntax_flags_for_file(uid::WellKnown transfer_syntax, bool& 
 	if (!transfer_syntax.valid()) {
 		return;
 	}
-	if (transfer_syntax == kExplicitVrBigEndianUid) {
+	if (transfer_syntax == "ExplicitVRBigEndian"_uid) {
 		little_endian = false;
 		return;
 	}
-	if (transfer_syntax == kImplicitVrLittleEndianUid ||
-	    transfer_syntax == kPapyrusImplicitVrLittleEndianUid) {
+	if (transfer_syntax == "ImplicitVRLittleEndian"_uid ||
+	    transfer_syntax == "Papyrus3ImplicitVRLittleEndian"_uid) {
 		explicit_vr = false;
 	}
 }
+
+class LastErrorCapturingReporter final : public diag::Reporter {
+public:
+	explicit LastErrorCapturingReporter(std::shared_ptr<diag::Reporter> downstream)
+	    : downstream_(std::move(downstream)) {}
+
+	void report(diag::LogLevel level, std::string_view message) override {
+		if (level == diag::LogLevel::Error) {
+			has_error_ = true;
+			last_error_message_.assign(message);
+		}
+		if (downstream_) {
+			downstream_->report(level, message);
+		}
+	}
+
+	[[nodiscard]] bool has_error() const noexcept { return has_error_; }
+	[[nodiscard]] const std::string& last_error_message() const noexcept {
+		return last_error_message_;
+	}
+
+private:
+	std::shared_ptr<diag::Reporter> downstream_;
+	bool has_error_{false};
+	std::string last_error_message_{};
+};
+
+class ThreadReporterGuard {
+public:
+	explicit ThreadReporterGuard(std::shared_ptr<diag::Reporter> reporter)
+	    : previous_(diag::tls_reporter) {
+		diag::set_thread_reporter(std::move(reporter));
+	}
+
+	~ThreadReporterGuard() {
+		diag::set_thread_reporter(previous_);
+	}
+
+	ThreadReporterGuard(const ThreadReporterGuard&) = delete;
+	ThreadReporterGuard& operator=(const ThreadReporterGuard&) = delete;
+
+private:
+	std::shared_ptr<diag::Reporter> previous_;
+};
 
 bool is_valid_alignment(std::uint16_t alignment) noexcept {
 	constexpr std::uint16_t kMaxAlignment = 4096;
@@ -49,33 +85,33 @@ bool is_valid_alignment(std::uint16_t alignment) noexcept {
 	    (alignment & static_cast<std::uint16_t>(alignment - 1)) == 0;
 }
 
-pixel::dtype dtype_from_bits_and_representation(long bits_allocated,
+pixel::DataType dtype_from_bits_and_representation(long bits_allocated,
     long pixel_representation) noexcept {
 	switch (bits_allocated) {
 	case 8:
-		return (pixel_representation == 0) ? pixel::dtype::u8 : pixel::dtype::s8;
+		return (pixel_representation == 0) ? pixel::DataType::u8 : pixel::DataType::s8;
 	case 16:
-		return (pixel_representation == 0) ? pixel::dtype::u16 : pixel::dtype::s16;
+		return (pixel_representation == 0) ? pixel::DataType::u16 : pixel::DataType::s16;
 	case 32:
-		return (pixel_representation == 0) ? pixel::dtype::u32 : pixel::dtype::s32;
+		return (pixel_representation == 0) ? pixel::DataType::u32 : pixel::DataType::s32;
 	default:
-		return pixel::dtype::unknown;
+		return pixel::DataType::unknown;
 	}
 }
 
-std::size_t bytes_per_sample_of(pixel::dtype dtype) noexcept {
+std::size_t bytes_per_sample_of(pixel::DataType dtype) noexcept {
 	switch (dtype) {
-	case pixel::dtype::u8:
-	case pixel::dtype::s8:
+	case pixel::DataType::u8:
+	case pixel::DataType::s8:
 		return 1;
-	case pixel::dtype::u16:
-	case pixel::dtype::s16:
+	case pixel::DataType::u16:
+	case pixel::DataType::s16:
 		return 2;
-	case pixel::dtype::u32:
-	case pixel::dtype::s32:
-	case pixel::dtype::f32:
+	case pixel::DataType::u32:
+	case pixel::DataType::s32:
+	case pixel::DataType::f32:
 		return 4;
-	case pixel::dtype::f64:
+	case pixel::DataType::f64:
 		return 8;
 	default:
 		return 0;
@@ -111,13 +147,13 @@ bool try_parse_lut_descriptor(const DataElement& descriptor_elem,
 		raw_first_mapped = static_cast<long>(endian::load_value<std::int16_t>(span.data() + 2, little_endian));
 		raw_bits = static_cast<long>(endian::load_value<std::int16_t>(span.data() + 4, little_endian));
 	} else {
-		const auto descriptor = descriptor_elem.toLongVector();
-		if (descriptor.size() < 3) {
+		const auto descriptor = descriptor_elem.to_long_vector();
+		if (!descriptor || descriptor->size() < 3) {
 			return false;
 		}
-		raw_entries = descriptor[0];
-		raw_first_mapped = descriptor[1];
-		raw_bits = descriptor[2];
+		raw_entries = (*descriptor)[0];
+		raw_first_mapped = (*descriptor)[1];
+		raw_bits = (*descriptor)[2];
 	}
 
 	if (raw_entries < 0 || raw_bits <= 0 || raw_bits > 16) {
@@ -133,7 +169,7 @@ bool try_parse_lut_descriptor(const DataElement& descriptor_elem,
 }  // namespace
 
 DicomFile::DicomFile() : root_dataset_(std::make_unique<DataSet>(this)) {
-	set_transfer_syntax(kExplicitVrLittleEndian);
+	set_transfer_syntax("ExplicitVRLittleEndian"_uid);
 }
 
 DicomFile::~DicomFile() = default;
@@ -239,8 +275,56 @@ void DicomFile::attach_to_memory(std::string name, std::vector<std::uint8_t>&& b
 	root_dataset_->attach_to_memory(std::move(name), std::move(buffer));
 }
 
+void DicomFile::clear_error_state() noexcept {
+	has_error_ = false;
+	error_message_.clear();
+}
+
+void DicomFile::set_error_state(std::string message) {
+	has_error_ = true;
+	error_message_ = std::move(message);
+}
+
 void DicomFile::read_attached_stream(const ReadOptions& options) {
-	root_dataset_->read_attached_stream(options);
+	clear_error_state();
+
+	std::shared_ptr<diag::Reporter> downstream = diag::tls_reporter;
+	if (!downstream) {
+		downstream = diag::default_reporter();
+	}
+	auto capturing_reporter = std::make_shared<LastErrorCapturingReporter>(downstream);
+	ThreadReporterGuard reporter_scope(capturing_reporter);
+
+	try {
+		root_dataset_->read_attached_stream(options);
+	} catch (const std::exception& ex) {
+		const std::string_view what = ex.what();
+		if (!what.empty()) {
+			set_error_state(std::string(what));
+		} else if (capturing_reporter->has_error()) {
+			set_error_state(capturing_reporter->last_error_message());
+		} else {
+			set_error_state("DicomFile::read_attached_stream reason=unknown read error");
+		}
+
+		if (!options.keep_on_error) {
+			throw;
+		}
+	} catch (...) {
+		if (capturing_reporter->has_error()) {
+			set_error_state(capturing_reporter->last_error_message());
+		} else {
+			set_error_state("DicomFile::read_attached_stream reason=unknown non-std exception");
+		}
+
+		if (!options.keep_on_error) {
+			throw;
+		}
+	}
+
+	if (!has_error_ && capturing_reporter->has_error()) {
+		set_error_state(capturing_reporter->last_error_message());
+	}
 }
 
 const DicomFile::pixel_info_t& DicomFile::pixel_info(bool recalc) const {
@@ -249,26 +333,29 @@ const DicomFile::pixel_info_t& DicomFile::pixel_info(bool recalc) const {
 
 		DicomFile::pixel_info_t info{};
 		info.ts = transfer_syntax_uid();
-		info.rows = static_cast<int>((*root_dataset_)["Rows"_tag].toLong(0));
-		info.cols = static_cast<int>((*root_dataset_)["Columns"_tag].toLong(0));
-		info.samples_per_pixel = static_cast<int>((*root_dataset_)["SamplesPerPixel"_tag].toLong(1));
-		info.bits_allocated = static_cast<int>((*root_dataset_)["BitsAllocated"_tag].toLong(0));
-		const auto pixel_representation = (*root_dataset_)["PixelRepresentation"_tag].toLong(0);
-		info.frames = static_cast<int>((*root_dataset_)["NumberOfFrames"_tag].toLong(1));
+		info.rows = static_cast<int>((*root_dataset_)["Rows"_tag].to_long().value_or(0));
+		info.cols = static_cast<int>((*root_dataset_)["Columns"_tag].to_long().value_or(0));
+		info.samples_per_pixel =
+		    static_cast<int>((*root_dataset_)["SamplesPerPixel"_tag].to_long().value_or(1));
+		info.bits_allocated =
+		    static_cast<int>((*root_dataset_)["BitsAllocated"_tag].to_long().value_or(0));
+		const auto pixel_representation =
+		    (*root_dataset_)["PixelRepresentation"_tag].to_long().value_or(0);
+		info.frames = static_cast<int>((*root_dataset_)["NumberOfFrames"_tag].to_long().value_or(1));
 		info.planar_configuration =
-		    ((*root_dataset_)["PlanarConfiguration"_tag].toLong(0) == 1)
-		        ? pixel::planar::planar
-		        : pixel::planar::interleaved;
+		    ((*root_dataset_)["PlanarConfiguration"_tag].to_long().value_or(0) == 1)
+		        ? pixel::Planar::planar
+		        : pixel::Planar::interleaved;
 		if (const auto& double_float_pixel = (*root_dataset_)["DoubleFloatPixelData"_tag];
 		    double_float_pixel) {
-			info.sv_dtype = pixel::dtype::f64;
+			info.sv_dtype = pixel::DataType::f64;
 		} else if (const auto& float_pixel = (*root_dataset_)["FloatPixelData"_tag]; float_pixel) {
-			info.sv_dtype = pixel::dtype::f32;
+			info.sv_dtype = pixel::DataType::f32;
 		} else {
 			info.sv_dtype = dtype_from_bits_and_representation(
 			    static_cast<long>(info.bits_allocated), pixel_representation);
 		}
-		info.has_pixel_data = (info.sv_dtype != pixel::dtype::unknown);
+		info.has_pixel_data = (info.sv_dtype != pixel::DataType::unknown);
 		return info;
 	};
 
@@ -278,10 +365,10 @@ const DicomFile::pixel_info_t& DicomFile::pixel_info(bool recalc) const {
 	return *pixel_info_cache_;
 }
 
-pixel::strides DicomFile::calc_strides(const pixel::decode_opts& opt) const {
+pixel::DecodeStrides DicomFile::calc_decode_strides(const pixel::DecodeOptions& opt) const {
 	if (!is_valid_alignment(opt.alignment)) {
 		diag::error_and_throw(
-		    "DicomFile::calc_strides file={} reason=alignment must be 0/1 or power-of-two <= 4096",
+		    "DicomFile::calc_decode_strides file={} reason=alignment must be 0/1 or power-of-two <= 4096",
 		    path());
 	}
 
@@ -294,17 +381,17 @@ pixel::strides DicomFile::calc_strides(const pixel::decode_opts& opt) const {
 
 	if (rows_value <= 0 || cols_value <= 0 || spp_value <= 0) {
 		diag::error_and_throw(
-		    "DicomFile::calc_strides file={} reason=invalid Rows/Columns/SamplesPerPixel",
+		    "DicomFile::calc_decode_strides file={} reason=invalid Rows/Columns/SamplesPerPixel",
 		    path());
 	}
 	if (rows_value > kMaxRowsOrColumns || cols_value > kMaxRowsOrColumns) {
 		diag::error_and_throw(
-		    "DicomFile::calc_strides file={} reason=Rows/Columns must be <= 65535",
+		    "DicomFile::calc_decode_strides file={} reason=Rows/Columns must be <= 65535",
 		    path());
 	}
 	if (spp_value > kMaxSamplesPerPixel) {
 		diag::error_and_throw(
-		    "DicomFile::calc_strides file={} reason=SamplesPerPixel must be <= 4",
+		    "DicomFile::calc_decode_strides file={} reason=SamplesPerPixel must be <= 4",
 		    path());
 	}
 
@@ -318,12 +405,12 @@ pixel::strides DicomFile::calc_strides(const pixel::decode_opts& opt) const {
 	                                  : bytes_per_sample_of(info.sv_dtype);
 	if (bytes_per_sample == 0) {
 		diag::error_and_throw(
-		    "DicomFile::calc_strides file={} reason=unsupported or unknown sv_dtype",
+		    "DicomFile::calc_decode_strides file={} reason=unsupported or unknown sv_dtype",
 		    path());
 	}
 
 	const auto planar_out = opt.planar_out;
-	const auto row_components = (planar_out == pixel::planar::planar)
+	const auto row_components = (planar_out == pixel::Planar::planar)
 	                                ? std::size_t{1}
 	                                : samples_per_pixel;
 
@@ -336,14 +423,14 @@ pixel::strides DicomFile::calc_strides(const pixel::decode_opts& opt) const {
 	}
 
 	std::size_t frame_stride = row_stride * rows;
-	if (planar_out == pixel::planar::planar) {
+	if (planar_out == pixel::Planar::planar) {
 		frame_stride *= samples_per_pixel;
 	}
 
-	return pixel::strides{row_stride, frame_stride};
+	return pixel::DecodeStrides{row_stride, frame_stride};
 }
 
-std::optional<pixel::modality_lut> DicomFile::modality_lut() const {
+std::optional<pixel::ModalityLut> DicomFile::modality_lut() const {
 	const auto& modality_lut_seq_elem = (*root_dataset_)["ModalityLUTSequence"_tag];
 	if (!modality_lut_seq_elem) {
 		return std::nullopt;
@@ -364,7 +451,7 @@ std::optional<pixel::modality_lut> DicomFile::modality_lut() const {
 	}
 
 	const auto* descriptor_elem = item->get_dataelement("LUTDescriptor"_tag);
-	if (!descriptor_elem || descriptor_elem == NullElement()) {
+	if (descriptor_elem->is_missing()) {
 		diag::error_and_throw(
 		    "DicomFile::modality_lut file={} reason=ModalityLUTSequence item #0 missing LUTDescriptor",
 		    path());
@@ -378,7 +465,7 @@ std::optional<pixel::modality_lut> DicomFile::modality_lut() const {
 	}
 
 	const auto* lut_data_elem = item->get_dataelement("LUTData"_tag);
-	if (!lut_data_elem || lut_data_elem == NullElement()) {
+	if (lut_data_elem->is_missing()) {
 		diag::error_and_throw(
 		    "DicomFile::modality_lut file={} reason=ModalityLUTSequence item #0 missing LUTData",
 		    path());
@@ -391,7 +478,7 @@ std::optional<pixel::modality_lut> DicomFile::modality_lut() const {
 		    path());
 	}
 
-	pixel::modality_lut lut{};
+	pixel::ModalityLut lut{};
 	lut.first_mapped = descriptor.first_mapped;
 	lut.values.resize(descriptor.entry_count);
 

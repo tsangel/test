@@ -24,7 +24,7 @@ int main(int argc, char** argv) {
     }
     for (int i = 1; i < argc; ++i) {
         const std::string_view keyword{argv[i]};
-        const auto tag = dicom::lookup::keyword_to_tag(keyword);
+        const auto tag = dicom::lookup::keyword_to_tag_text(keyword);
         if (tag.empty()) {
             std::cout << keyword << ": not found\n";
         } else {

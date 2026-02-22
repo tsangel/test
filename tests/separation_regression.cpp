@@ -203,7 +203,7 @@ int main() {
 	require_transfer_syntax(deflated_ds, "DeflatedExplicitVRLittleEndian"_uid, "deflated initial");
 
 	const auto* patient_name = deflated_ds.get_dataelement("PatientName"_tag);
-	if (!patient_name || patient_name == dicom::NullElement()) {
+	if (patient_name->is_missing()) {
 		fail("deflated: missing PatientName");
 	}
 	const auto patient_name_sv = patient_name->to_string_view();
@@ -245,7 +245,7 @@ int main() {
 	require_transfer_syntax(be_seq_ds, "ExplicitVRBigEndian"_uid, "be sequence");
 
 	const auto* nested_name = be_seq_ds.get_dataelement("00081111.0.00100010");
-	if (!nested_name || nested_name == dicom::NullElement()) {
+	if (nested_name->is_missing()) {
 		fail("be sequence: nested PatientName not found");
 	}
 	const auto nested_name_sv = nested_name->to_string_view();

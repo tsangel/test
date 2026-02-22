@@ -56,6 +56,11 @@ def _build_sequence_pixel_sample() -> bytes:
 	return b"\x00" * 128 + b"DICM" + meta_group_length + meta_version + meta_ts + sop_class + sop_instance + seq_elem + pixel_elem
 
 
+def _build_malformed_sample() -> bytes:
+	malformed_elem = struct.pack("<HH", 0x0010, 0x0010) + b"PN" + struct.pack("<H", 8) + b"AB"
+	return b"\x00" * 128 + b"DICM" + malformed_elem
+
+
 def test_keyword_roundtrip():
 	tag, vr = dicom.keyword_to_tag_vr("PatientName")
 	assert int(tag) == 0x00100010
@@ -80,9 +85,28 @@ def test_literal_and_file(tmp_path):
 	dcm_path.write_bytes(b"DICM")
 	obj = dicom.read_file(str(dcm_path))
 	assert pathlib.Path(obj.path).resolve() == dcm_path.resolve()
+	assert obj.has_error is False
+	assert obj.error_message is None
 
 	mem = dicom.read_bytes(b"TEST", name="memory-buffer")
 	assert mem.path == "memory-buffer"
+
+
+def test_keep_on_error_records_parse_failure():
+	malformed = _build_malformed_sample()
+
+	threw = False
+	try:
+		dicom.read_bytes(malformed, name="malformed-default")
+	except Exception:
+		threw = True
+	assert threw
+
+	kept = dicom.read_bytes(malformed, name="malformed-keep", keep_on_error=True)
+	assert kept.has_error is True
+	assert isinstance(kept.error_message, str)
+	assert kept.error_message
+	assert kept.dataset.size() >= 1
 
 
 def test_uid_lookup_roundtrip():
@@ -194,6 +218,20 @@ def test_len_delegates_to_root_dataset():
 	df = dicom.read_file(_test_file())
 	assert len(df) == df.dataset.size()
 	assert len(df) > 0
+
+
+def test_get_dataelement_truthiness_hides_sentinel():
+	df = dicom.read_file(_test_file())
+	present = df.dataset.get_dataelement("PatientName")
+	assert bool(present) is True
+	assert present.is_present() is True
+	assert present.is_missing() is False
+
+	missing = df.dataset.get_dataelement("NotARealKeyword")
+	assert bool(missing) is False
+	assert missing.is_present() is False
+	assert missing.is_missing() is True
+	assert missing.vr == getattr(dicom.VR, "None")
 
 
 def test_dump_available_on_file_and_dataset():

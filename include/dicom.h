@@ -266,7 +266,7 @@ inline constexpr std::optional<WellKnown> lookup(std::string_view text) noexcept
 	return from_index(uid_lookup::uid_index_from_text(text));
 }
 
-inline WellKnown require(std::string_view text) {
+inline WellKnown lookup_or_throw(std::string_view text) {
 	if (auto wk = lookup(text)) {
 		return *wk;
 	}
@@ -655,7 +655,7 @@ constexpr std::pair<Tag, VR> keyword_to_tag_vr(std::string_view keyword) {
 	return {Tag{}, VR{}};
 }
 
-constexpr std::string_view keyword_to_tag(std::string_view keyword) {
+constexpr std::string_view keyword_to_tag_text(std::string_view keyword) {
 	if (const auto* entry = keyword_to_entry_chd(keyword)) {
 		return entry->tag;
 	}
@@ -714,7 +714,11 @@ consteval Tag operator"" _tag(const char* text, std::size_t len) {
 }
 
 consteval uid::WellKnown operator"" _uid(const char* text, std::size_t len) {
-	return uid::WellKnown{uid_lookup::uid_index_from_text(std::string_view{text, len})};
+	const auto index = uid_lookup::uid_index_from_text(std::string_view{text, len});
+	if (index == uid_lookup::kInvalidUidIndex) {
+		throw "Unknown DICOM UID literal";
+	}
+	return uid::WellKnown{index};
 }
 
 } // namespace literals
@@ -919,12 +923,12 @@ struct WriteOptions {
 
 namespace pixel {
 
-enum class planar : std::uint8_t {
+enum class Planar : std::uint8_t {
 	interleaved = 0,
 	planar = 1,
 };
 
-enum class dtype : std::uint8_t {
+enum class DataType : std::uint8_t {
 	unknown = 0,
 	u8,
 	s8,
@@ -936,14 +940,14 @@ enum class dtype : std::uint8_t {
 	f64,
 };
 
-enum class htj2k_decoder : std::uint8_t {
+enum class Htj2kDecoder : std::uint8_t {
 	auto_select = 0,
 	openjph,
 	openjpeg,
 };
 
-struct decode_opts {
-	planar planar_out{planar::interleaved};
+struct DecodeOptions {
+	Planar planar_out{Planar::interleaved};
 	std::uint16_t alignment{1};  // 0/1: packed, power-of-two aligned (<= 4096)
 	// true: output float32 after Modality LUT (if present) or Rescale
 	// applies only when SamplesPerPixel=1 and modality transform metadata exists.
@@ -956,15 +960,15 @@ struct decode_opts {
 	//  auto_select: prefer OpenJPH when available, then fallback to OpenJPEG.
 	//  openjph: use OpenJPH only.
 	//  openjpeg: use OpenJPEG only.
-	htj2k_decoder htj2k_decoder_backend{htj2k_decoder::auto_select};
+	Htj2kDecoder htj2k_decoder_backend{Htj2kDecoder::auto_select};
 };
 
-struct strides {
+struct DecodeStrides {
 	std::size_t row{0};
 	std::size_t frame{0};
 };
 
-struct modality_lut {
+struct ModalityLut {
 	std::int64_t first_mapped{0};
 	std::vector<float> values;
 };
@@ -972,7 +976,7 @@ struct modality_lut {
 /// Returns whether scaled float output is effectively applied for this file and options.
 /// Scaled output is ignored when SamplesPerPixel != 1, or when both Modality LUT Sequence
 /// and Rescale Slope/Intercept are absent.
-[[nodiscard]] bool should_use_scaled_output(const DicomFile& df, const decode_opts& opt = {});
+[[nodiscard]] bool should_use_scaled_output(const DicomFile& df, const DecodeOptions& opt = {});
 
 /// Decode a single frame into caller-provided buffer.
 /// Current implementation supports raw(uncompressed), RLE, JPEG (via libjpeg-turbo),
@@ -984,10 +988,10 @@ struct modality_lut {
 /// - JPEG-LS: integral up to 16-bit
 /// - JPEG 2000: integral up to 32-bit
 /// When scaled output is effectively enabled, output sample type is float32.
-void decode_into(const DicomFile& df, std::size_t frame_index,
-    std::span<std::uint8_t> dst, const decode_opts& opt = {});
-void decode_into(const DicomFile& df, std::size_t frame_index,
-    std::span<std::uint8_t> dst, const strides& dst_strides, const decode_opts& opt = {});
+void decode_frame_into(const DicomFile& df, std::size_t frame_index,
+    std::span<std::uint8_t> dst, const DecodeOptions& opt = {});
+void decode_frame_into(const DicomFile& df, std::size_t frame_index,
+    std::span<std::uint8_t> dst, const DecodeStrides& dst_strides, const DecodeOptions& opt = {});
 
 } // namespace pixel
 
@@ -1009,7 +1013,6 @@ public:
 	~DataElement() { release_storage(); }
 
 	DataElement(const DataElement&) = delete;
-	DataElement(const DataElement&&) = delete;
 	DataElement& operator=(const DataElement&) = delete;
 
 	DataElement(DataElement&& other) noexcept { move_from(std::move(other)); }
@@ -1034,8 +1037,12 @@ public:
 	[[nodiscard]] constexpr std::size_t offset() const noexcept { return offset_; }
 	/// Parent dataset (if any).
 	[[nodiscard]] constexpr DataSet* parent() const noexcept { return parent_; }
+	/// True when lookup resolved to a real element (not the missing sentinel).
+	[[nodiscard]] constexpr bool is_present() const noexcept { return vr_ != VR::None; }
+	/// True when lookup resolved to the missing sentinel (VR::None).
+	[[nodiscard]] constexpr bool is_missing() const noexcept { return !is_present(); }
 	/// Truthy when this element is present (VR not None).
-	[[nodiscard]] constexpr explicit operator bool() const noexcept { return vr_ != VR::None; }
+	[[nodiscard]] constexpr explicit operator bool() const noexcept { return is_present(); }
 	/// Raw value as a byte span for non-sequence VRs. SQ/PX returns an empty span.
 	[[nodiscard]] std::span<const std::uint8_t> value_span() const;
 	/// Pointer to stored value or nested sequence/pixel sequence.
@@ -1150,44 +1157,49 @@ public:
 	UT   | keep    | trim     | (0008,0005)    | no
 	*/
 
-	// Convenience wrappers with default values
-	[[nodiscard]] inline int toInt(int default_value = 0) const {
+	// Convenience overloads with explicit fallback values (snake_case).
+	// These coexist with optional-returning to_*()/as_*() accessors.
+	[[nodiscard]] inline int to_int(int default_value) const {
 		return to_int().value_or(default_value);
 	}
-	[[nodiscard]] inline long toLong(long default_value = 0) const {
+	[[nodiscard]] inline long to_long(long default_value) const {
 		return to_long().value_or(default_value);
 	}
-	[[nodiscard]] inline bool fromLong(long value) {
-		return from_long(value);
-	}
-	[[nodiscard]] inline long long toLongLong(long long default_value = 0) const {
+	[[nodiscard]] inline long long to_longlong(long long default_value) const {
 		return to_longlong().value_or(default_value);
 	}
-	[[nodiscard]] inline std::vector<int> toIntVector(std::vector<int> default_value = {}) const {
+	[[nodiscard]] inline std::vector<int> to_int_vector(
+	    std::vector<int> default_value) const {
 		return to_int_vector().value_or(std::move(default_value));
 	}
-	[[nodiscard]] inline std::vector<std::uint16_t> asUint16Vector(std::vector<std::uint16_t> default_value = {}) const {
+	[[nodiscard]] inline std::vector<std::uint16_t> as_uint16_vector(
+	    std::vector<std::uint16_t> default_value) const {
 		return as_uint16_vector().value_or(std::move(default_value));
 	}
-	[[nodiscard]] inline std::vector<std::uint8_t> asUint8Vector(std::vector<std::uint8_t> default_value = {}) const {
+	[[nodiscard]] inline std::vector<std::uint8_t> as_uint8_vector(
+	    std::vector<std::uint8_t> default_value) const {
 		return as_uint8_vector().value_or(std::move(default_value));
 	}
-	[[nodiscard]] inline std::vector<long> toLongVector(std::vector<long> default_value = {}) const {
+	[[nodiscard]] inline std::vector<long> to_long_vector(
+	    std::vector<long> default_value) const {
 		return to_long_vector().value_or(std::move(default_value));
 	}
-	[[nodiscard]] inline std::vector<long long> toLongLongVector(std::vector<long long> default_value = {}) const {
+	[[nodiscard]] inline std::vector<long long> to_longlong_vector(
+	    std::vector<long long> default_value) const {
 		return to_longlong_vector().value_or(std::move(default_value));
 	}
-	[[nodiscard]] inline double toDouble(double default_value = 0.0) const {
+	[[nodiscard]] inline double to_double(double default_value) const {
 		return to_double().value_or(default_value);
 	}
-	[[nodiscard]] inline std::vector<double> toDoubleVector(std::vector<double> default_value = {}) const {
+	[[nodiscard]] inline std::vector<double> to_double_vector(
+	    std::vector<double> default_value) const {
 		return to_double_vector().value_or(std::move(default_value));
 	}
-	[[nodiscard]] inline Tag toTag(Tag default_value = Tag{}) const {
+	[[nodiscard]] inline Tag to_tag(Tag default_value) const {
 		return to_tag().value_or(default_value);
 	}
-	[[nodiscard]] inline std::vector<Tag> toTagVector(std::vector<Tag> default_value = {}) const {
+	[[nodiscard]] inline std::vector<Tag> to_tag_vector(
+	    std::vector<Tag> default_value) const {
 		return to_tag_vector().value_or(std::move(default_value));
 	}
 
@@ -1224,9 +1236,6 @@ private:
 		other.storage_.ptr = nullptr;
 	}
 };
-
-DataElement* NullElement();
-
 
 template <typename VecIter, typename MapIter, typename Ref, typename Ptr>
 /// Forward iterator that merges vector- and map-backed element storage.
@@ -1380,7 +1389,7 @@ public:
 	const InStream& stream() const;
 
 	/// Attach a sub-range of another stream (used internally for sequences/pixel data).
-	void attach_to_substream(InStream* basestream, std::size_t size);
+	void attach_to_substream(InStream* base_stream, std::size_t size);
 
 	/// Set the absolute offset of this dataset within the root stream.
 	void set_offset(std::size_t offset) { offset_ = offset; }
@@ -1400,21 +1409,25 @@ public:
 	void remove_dataelement(Tag tag);
 
 	/// Lookup a data element by tag. Does not load implicitly; call ensure_loaded(tag) or read_attached_stream() first.
+	/// Never returns nullptr; missing lookups return a falsey DataElement (VR::None).
 	DataElement* get_dataelement(Tag tag);
 
 	/// Const lookup by tag. Does not load implicitly; call ensure_loaded(tag) or read_attached_stream() first.
+	/// Never returns nullptr; missing lookups return a falsey DataElement (VR::None).
 	const DataElement* get_dataelement(Tag tag) const;
 
 	/// Resolve a dotted tag path (e.g., "00540016.0.00181075"). Caller must ensure_loaded() the needed prefixes.
+	/// Never returns nullptr; missing lookups return a falsey DataElement (VR::None).
 	DataElement* get_dataelement(std::string_view tag_path);
 
 	/// Const resolve of a dotted tag path. Caller must ensure_loaded() the needed prefixes.
+	/// Never returns nullptr; missing lookups return a falsey DataElement (VR::None).
 	const DataElement* get_dataelement(std::string_view tag_path) const;
 
-	/// Map-style access; throws if missing.
+	/// Map-style access by tag. Missing lookups return a falsey DataElement (VR::None).
 	DataElement& operator[](Tag tag);
 
-	/// Const map-style access; throws if missing.
+	/// Const map-style access by tag. Missing lookups return a falsey DataElement (VR::None).
 	const DataElement& operator[](Tag tag) const;
 
 	/// Print elements to stdout (debug).
@@ -1494,9 +1507,9 @@ public:
 		int cols{0};
 		int samples_per_pixel{1};
 		int bits_allocated{0};
-		pixel::dtype sv_dtype{pixel::dtype::unknown};
+		pixel::DataType sv_dtype{pixel::DataType::unknown};
 		int frames{1};
-		pixel::planar planar_configuration{pixel::planar::interleaved};
+		pixel::Planar planar_configuration{pixel::Planar::interleaved};
 		bool has_pixel_data{false};
 	};
 
@@ -1541,31 +1554,33 @@ public:
 	    std::size_t size, bool copy = true);
 	void attach_to_memory(std::string name, std::vector<std::uint8_t>&& buffer);
 	void read_attached_stream(const ReadOptions& options = {});
+	[[nodiscard]] bool has_error() const noexcept { return has_error_; }
+	[[nodiscard]] const std::string& error_message() const noexcept { return error_message_; }
 
 	[[nodiscard]] uid::WellKnown transfer_syntax_uid() const { return transfer_syntax_uid_; }
 	[[nodiscard]] const pixel_info_t& pixel_info(bool recalc = false) const;
-	[[nodiscard]] pixel::strides calc_strides(const pixel::decode_opts& opt = {}) const;
-	[[nodiscard]] std::optional<pixel::modality_lut> modality_lut() const;
+	[[nodiscard]] pixel::DecodeStrides calc_decode_strides(const pixel::DecodeOptions& opt = {}) const;
+	[[nodiscard]] std::optional<pixel::ModalityLut> modality_lut() const;
 	void decode_into(std::size_t frame_index, std::span<std::uint8_t> dst,
-	    const pixel::decode_opts& opt = {}) const {
-		pixel::decode_into(*this, frame_index, dst, opt);
+	    const pixel::DecodeOptions& opt = {}) const {
+		pixel::decode_frame_into(*this, frame_index, dst, opt);
 	}
 	void decode_into(std::size_t frame_index, std::span<std::uint8_t> dst,
-	    const pixel::strides& dst_strides, const pixel::decode_opts& opt = {}) const {
-		pixel::decode_into(*this, frame_index, dst, dst_strides, opt);
+	    const pixel::DecodeStrides& dst_strides, const pixel::DecodeOptions& opt = {}) const {
+		pixel::decode_frame_into(*this, frame_index, dst, dst_strides, opt);
 	}
-	void decode_into(std::span<std::uint8_t> dst, const pixel::decode_opts& opt = {}) const {
-		pixel::decode_into(*this, 0, dst, opt);
+	void decode_into(std::span<std::uint8_t> dst, const pixel::DecodeOptions& opt = {}) const {
+		pixel::decode_frame_into(*this, 0, dst, opt);
 	}
-	void decode_into(std::span<std::uint8_t> dst, const pixel::strides& dst_strides,
-	    const pixel::decode_opts& opt = {}) const {
-		pixel::decode_into(*this, 0, dst, dst_strides, opt);
+	void decode_into(std::span<std::uint8_t> dst, const pixel::DecodeStrides& dst_strides,
+	    const pixel::DecodeOptions& opt = {}) const {
+		pixel::decode_frame_into(*this, 0, dst, dst_strides, opt);
 	}
 	[[nodiscard]] std::vector<std::uint8_t> pixel_data(std::size_t frame_index = 0,
-	    const pixel::decode_opts& opt = {}) const {
-		const auto dst_strides = calc_strides(opt);
+	    const pixel::DecodeOptions& opt = {}) const {
+		const auto dst_strides = calc_decode_strides(opt);
 		std::vector<std::uint8_t> out(dst_strides.frame);
-		pixel::decode_into(*this, frame_index, std::span<std::uint8_t>(out), dst_strides, opt);
+		pixel::decode_frame_into(*this, frame_index, std::span<std::uint8_t>(out), dst_strides, opt);
 		return out;
 	}
 
@@ -1573,10 +1588,14 @@ private:
 	friend class DataSet;
 	void invalidate_pixel_info_cache() const { pixel_info_cache_.reset(); }
 	void set_transfer_syntax(uid::WellKnown transfer_syntax);
+	void clear_error_state() noexcept;
+	void set_error_state(std::string message);
 
 	std::unique_ptr<DataSet> root_dataset_;
 	uid::WellKnown transfer_syntax_uid_{};
 	mutable std::optional<pixel_info_t> pixel_info_cache_{};
+	bool has_error_{false};
+	std::string error_message_{};
 };
 
 /// Represents a DICOM SQ element value: an ordered list of nested DataSets.
@@ -1696,7 +1715,7 @@ private:
 	void clear_frame_encoded_data(std::size_t index);
 
 		/// Attach to a substream containing the pixel sequence payload.
-		void attach_to_stream(InStream* basestream, std::size_t size);
+		void attach_to_stream(InStream* base_stream, std::size_t size);
 		/// Read the attached pixel sequence stream (fragments, offset tables).
 		void read_attached_stream();
 	/// Access the underlying pixel sequence stream.
@@ -1781,6 +1800,7 @@ inline const PixelSequence* DataElement::as_pixel_sequence() const {
 }
 
 /// Read a DICOM file/session from disk (eager up to options.load_until).
+/// When options.keep_on_error is true, parse errors are captured in DicomFile::error_message().
 std::unique_ptr<DicomFile> read_file(const std::string& path, ReadOptions options = {});
 /// Read from a raw memory buffer (identifier set to "<memory>"); copies unless options.copy is false.
 std::unique_ptr<DicomFile> read_bytes(const std::uint8_t* data, std::size_t size,

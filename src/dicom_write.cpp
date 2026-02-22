@@ -17,6 +17,7 @@
 #include <vector>
 
 namespace dicom {
+using namespace dicom::literals;
 
 namespace {
 
@@ -35,12 +36,6 @@ constexpr Tag kImplementationVersionNameTag{0x0002u, 0x0013u};
 
 constexpr Tag kSopClassUidTag{0x0008u, 0x0016u};
 constexpr Tag kSopInstanceUidTag{0x0008u, 0x0018u};
-
-constexpr std::string_view kImplicitVrLittleEndianUid = "1.2.840.10008.1.2";
-constexpr std::string_view kExplicitVrLittleEndianUid = "1.2.840.10008.1.2.1";
-constexpr std::string_view kExplicitVrBigEndianUid = "1.2.840.10008.1.2.2";
-constexpr std::string_view kDeflatedExplicitVrLittleEndianUid = "1.2.840.10008.1.2.1.99";
-constexpr std::string_view kFallbackSopClassUid = "1.2.840.10008.5.1.4.1.1.7";
 
 struct Encoding {
 	bool little_endian{true};
@@ -263,8 +258,8 @@ void write_pixel_sequence_element(const DataElement& element, Writer& writer, co
 				diag::error_and_throw(
 				    "write_to_stream reason=pixel fragment references stream but stream is null");
 			}
-			if (fragment.offset > seq_stream->endoffset() ||
-			    fragment.length > seq_stream->endoffset() - fragment.offset) {
+			if (fragment.offset > seq_stream->end_offset() ||
+			    fragment.length > seq_stream->end_offset() - fragment.offset) {
 				diag::error_and_throw(
 				    "write_to_stream reason=pixel fragment out of bounds offset=0x{:X} length={}",
 				    fragment.offset, fragment.length);
@@ -303,7 +298,7 @@ void write_dataset(const DataSet& dataset, Writer& writer, const Encoding& encod
 
 [[nodiscard]] std::optional<std::string> read_uid_element(const DataSet& dataset, Tag tag) {
 	const DataElement* element = dataset.get_dataelement(tag);
-	if (!element || element == NullElement()) {
+	if (element->is_missing()) {
 		return std::nullopt;
 	}
 	auto uid_value = element->to_uid_string();
@@ -315,12 +310,12 @@ void write_dataset(const DataSet& dataset, Writer& writer, const Encoding& encod
 
 [[nodiscard]] std::string_view transfer_syntax_uid_from_flags(const DataSet& dataset) {
 	if (!dataset.is_little_endian()) {
-		return kExplicitVrBigEndianUid;
+		return "ExplicitVRBigEndian"_uid.value();
 	}
 	if (!dataset.is_explicit_vr()) {
-		return kImplicitVrLittleEndianUid;
+		return "ImplicitVRLittleEndian"_uid.value();
 	}
-	return kExplicitVrLittleEndianUid;
+	return "ExplicitVRLittleEndian"_uid.value();
 }
 
 [[nodiscard]] std::string infer_transfer_syntax_uid(const DicomFile& file, const DataSet& dataset) {
@@ -372,7 +367,7 @@ void for_each_file_meta_element(const DataSet& dataset, Fn&& fn) {
 
 void set_dataelement_uid(DataSet& dataset, Tag tag, std::string_view value) {
 	DataElement* element = dataset.add_dataelement(tag, VR::UI);
-	if (!element || element == NullElement()) {
+	if (!element || !(*element)) {
 		diag::error_and_throw("rebuild_file_meta reason=failed to add UID element tag={}",
 		    tag.to_string());
 	}
@@ -406,7 +401,7 @@ void clear_existing_meta_group(DataSet& dataset) {
 	if (uid::is_valid_uid_text_strict(inferred)) {
 		return inferred;
 	}
-	return std::string(kExplicitVrLittleEndianUid);
+	return std::string("ExplicitVRLittleEndian"_uid.value());
 }
 
 template <typename Writer>
@@ -471,10 +466,10 @@ void DicomFile::rebuild_file_meta() {
 	} else if (auto value = read_uid_element(dataset, kMediaStorageSopClassUidTag)) {
 		sop_class_uid = uid::normalize_uid_text(*value);
 	} else {
-		sop_class_uid = std::string(kFallbackSopClassUid);
+		sop_class_uid = std::string("SecondaryCaptureImageStorage"_uid.value());
 	}
 	if (!uid::is_valid_uid_text_strict(sop_class_uid)) {
-		sop_class_uid = std::string(kFallbackSopClassUid);
+		sop_class_uid = std::string("SecondaryCaptureImageStorage"_uid.value());
 	}
 
 	std::string sop_instance_uid;
@@ -495,9 +490,9 @@ void DicomFile::rebuild_file_meta() {
 
 	std::string transfer_syntax_uid =
 	    determine_transfer_syntax_uid_for_rebuild(*this, dataset);
-	if (transfer_syntax_uid == kDeflatedExplicitVrLittleEndianUid) {
+	if (transfer_syntax_uid == "DeflatedExplicitVRLittleEndian"_uid.value()) {
 		// Writer does not emit deflated payloads; rebuild to uncompressed LE.
-		transfer_syntax_uid = std::string(kExplicitVrLittleEndianUid);
+		transfer_syntax_uid = std::string("ExplicitVRLittleEndian"_uid.value());
 	}
 
 	clear_existing_meta_group(dataset);
@@ -524,7 +519,7 @@ std::vector<std::uint8_t> DicomFile::write_bytes(const WriteOptions& options) {
 	std::vector<std::uint8_t> output;
 	std::size_t reserve_hint = 4096;
 	if (!this->path().empty()) {
-		reserve_hint = std::max(reserve_hint, this->stream().datasize());
+		reserve_hint = std::max(reserve_hint, this->stream().attached_size());
 	}
 	if (options.include_preamble) {
 		reserve_hint += 132;

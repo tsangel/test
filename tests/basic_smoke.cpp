@@ -6,6 +6,7 @@
 #include <vector>
 #include <iostream>
 #include <sstream>
+#include <exception>
 #include <cstdlib>
 #include <cstdio>
 
@@ -241,6 +242,28 @@ int main() {
 			fail("DataElement::from_uid_string should reject invalid UID text");
 		}
 	}
+	{
+		dicom::DataElement missing_elem;
+		if (missing_elem.is_present()) {
+			fail("default DataElement should be missing");
+		}
+		if (!missing_elem.is_missing()) {
+			fail("default DataElement should report is_missing");
+		}
+		if (static_cast<bool>(missing_elem)) {
+			fail("default DataElement bool() should be false");
+		}
+		dicom::DataElement present_elem("Rows"_tag, dicom::VR::US, 0, 0, nullptr);
+		if (!present_elem.is_present()) {
+			fail("non-None VR DataElement should be present");
+		}
+		if (present_elem.is_missing()) {
+			fail("non-None VR DataElement should not be missing");
+		}
+		if (!static_cast<bool>(present_elem)) {
+			fail("present DataElement bool() should be true");
+		}
+	}
 
 	std::string tmp_dir = ".";
 	if (const char* env = std::getenv("TMPDIR"); env && *env) {
@@ -261,8 +284,10 @@ int main() {
 	{
 		const auto file = read_file(file_path);
 		if (!file) fail("read_file returned null");
+		if (file->has_error()) fail("read_file should not record errors for valid input");
+		if (!file->error_message().empty()) fail("error_message should be empty when no read error exists");
 		if (file->path() != file_path) fail("file path mismatch");
-		if (file->stream().datasize() != 4) fail("file datasize mismatch");
+		if (file->stream().attached_size() != 4) fail("file data_size mismatch");
 		if (file->size() != file->dataset().size()) fail("DicomFile size forwarding mismatch");
 		const auto file_dump = file->dump();
 		if (file_dump.find("TAG\tVR\tLEN\tVM\tOFFSET\tVALUE\tKEYWORD") == std::string::npos) {
@@ -277,7 +302,7 @@ int main() {
 		}
 
 		auto* rows = file->add_dataelement("Rows"_tag, dicom::VR::US, 0, 2);
-		if (!rows || rows == dicom::NullElement()) fail("DicomFile add_dataelement failed");
+		if (!rows || !(*rows)) fail("DicomFile add_dataelement failed");
 		const auto file_dump_after_add = file->dump();
 		if (file_dump_after_add.find("'00280010'") == std::string::npos) {
 			fail("DicomFile dump should include Rows");
@@ -286,7 +311,7 @@ int main() {
 		std::vector<std::uint8_t> long_desc_value(long_desc_size, static_cast<std::uint8_t>('A'));
 		auto* study_desc =
 		    file->add_dataelement("StudyDescription"_tag, dicom::VR::LO, 0, long_desc_size);
-		if (!study_desc || study_desc == dicom::NullElement()) fail("DicomFile add StudyDescription failed");
+		if (!study_desc || !(*study_desc)) fail("DicomFile add StudyDescription failed");
 		study_desc->set_value_bytes(long_desc_value);
 		const auto truncated_dump = file->dump();
 		const auto study_desc_pos = truncated_dump.find("'00081030'");
@@ -310,16 +335,18 @@ int main() {
 		if (wide_line.find("...") != std::string::npos) {
 			fail("DicomFile dump(max_print_chars) should relax truncation");
 		}
-		if (!file->get_dataelement("Rows"_tag) || file->get_dataelement("Rows"_tag) == dicom::NullElement()) {
+		const auto* rows_by_tag = file->get_dataelement("Rows"_tag);
+		if (rows_by_tag->is_missing()) {
 			fail("DicomFile get_dataelement(Tag) failed");
 		}
-		if (!file->get_dataelement("Rows") || file->get_dataelement("Rows") == dicom::NullElement()) {
+		const auto* rows_by_keyword = file->get_dataelement("Rows");
+		if (rows_by_keyword->is_missing()) {
 			fail("DicomFile get_dataelement(string_view) failed");
 		}
 		const auto& rows_ref = (*file)["Rows"_tag];
 		if (rows_ref.tag().value() != "Rows"_tag.value()) fail("DicomFile operator[] failed");
 		file->remove_dataelement("Rows"_tag);
-		if (file->get_dataelement("Rows"_tag) != dicom::NullElement()) {
+		if (file->get_dataelement("Rows"_tag)->is_present()) {
 			fail("DicomFile remove_dataelement failed");
 		}
 
@@ -333,7 +360,7 @@ int main() {
 		DataSet manual;
 		manual.attach_to_file(file_path);
 		if (manual.path() != file_path) fail("manual path mismatch");
-		if (manual.stream().datasize() != 4) fail("manual datasize mismatch");
+		if (manual.stream().attached_size() != 4) fail("manual data_size mismatch");
 		const auto ds_dump = file->dataset().dump();
 		if (ds_dump.find("TAG\tVR\tLEN\tVM\tOFFSET\tVALUE\tKEYWORD") == std::string::npos) {
 			fail("DataSet dump header missing");
@@ -349,15 +376,41 @@ int main() {
 
 	const std::vector<std::uint8_t> buffer{0x01, 0x02, 0x03, 0x04};
 	const auto mem = read_bytes("buffer", buffer.data(), buffer.size());
-	if (mem->stream().datasize() != buffer.size()) fail("mem datasize mismatch");
+	if (mem->stream().attached_size() != buffer.size()) fail("mem data_size mismatch");
 
 	auto owned_buffer = std::vector<std::uint8_t>{0x0A, 0x0B};
 	const auto mem_owned = read_bytes("owned-buffer", std::move(owned_buffer));
-	if (mem_owned->stream().datasize() != 2) fail("mem_owned datasize mismatch");
+	if (mem_owned->stream().attached_size() != 2) fail("mem_owned data_size mismatch");
+
+	const auto malformed = [] {
+		std::vector<std::uint8_t> bytes(128, 0);
+		bytes.insert(bytes.end(), {'D', 'I', 'C', 'M'});
+		bytes.insert(bytes.end(), {0x10, 0x00, 0x10, 0x00, 'P', 'N', 0x08, 0x00});
+		bytes.insert(bytes.end(), {'A', 'B'});
+		return bytes;
+	}();
+
+	bool malformed_threw = false;
+	try {
+		[[maybe_unused]] auto should_throw =
+		    read_bytes("malformed-default", malformed.data(), malformed.size());
+	} catch (const std::exception&) {
+		malformed_threw = true;
+	}
+	if (!malformed_threw) fail("malformed input should throw when keep_on_error is false");
+
+	dicom::ReadOptions keep_opts;
+	keep_opts.keep_on_error = true;
+	const auto malformed_keep =
+	    read_bytes("malformed-keep", malformed.data(), malformed.size(), keep_opts);
+	if (!malformed_keep) fail("malformed keep_on_error read returned null");
+	if (!malformed_keep->has_error()) fail("keep_on_error read should record has_error=true");
+	if (malformed_keep->error_message().empty()) fail("keep_on_error read should keep error_message");
+	if (malformed_keep->size() == 0) fail("keep_on_error read should preserve partially parsed elements");
 
 	DataSet manual_mem;
 	manual_mem.attach_to_memory("manual-buffer", buffer.data(), buffer.size());
-	if (manual_mem.stream().datasize() != buffer.size()) fail("manual_mem datasize mismatch");
+	if (manual_mem.stream().attached_size() != buffer.size()) fail("manual_mem data_size mismatch");
 
 	dicom::DicomFile generated;
 	auto add_text_element = [&](dicom::Tag tag, dicom::VR vr, std::string_view value) {
@@ -375,7 +428,7 @@ int main() {
 	add_text_element("PatientName"_tag, dicom::VR::PN, "WRITE^ROUNDTRIP");
 
 	auto* sequence_element = generated.add_dataelement("ReferencedStudySequence"_tag, dicom::VR::SQ);
-	if (!sequence_element || sequence_element == dicom::NullElement()) fail("failed to add sequence element");
+	if (!sequence_element || !(*sequence_element)) fail("failed to add sequence element");
 	auto* sequence = sequence_element->as_sequence();
 	if (!sequence) fail("sequence pointer is null");
 	auto* sequence_item = sequence->add_dataset();
@@ -389,7 +442,7 @@ int main() {
 	}
 
 	auto* pixel_element = generated.add_dataelement("PixelData"_tag, dicom::VR::PX);
-	if (!pixel_element || pixel_element == dicom::NullElement()) fail("failed to add pixel element");
+	if (!pixel_element || !(*pixel_element)) fail("failed to add pixel element");
 	auto* pixel_sequence = pixel_element->as_pixel_sequence();
 	if (!pixel_sequence) fail("pixel sequence pointer is null");
 	auto* frame = pixel_sequence->add_frame();
@@ -408,11 +461,11 @@ int main() {
 	auto generated_roundtrip = read_bytes("generated-roundtrip", generated_bytes.data(), generated_bytes.size());
 	if (!generated_roundtrip) fail("generated read_bytes returned null");
 	const auto* seq_roundtrip = generated_roundtrip->get_dataelement("ReferencedStudySequence"_tag);
-	if (!seq_roundtrip || seq_roundtrip == dicom::NullElement()) fail("roundtrip missing sequence");
+	if (seq_roundtrip->is_missing()) fail("roundtrip missing sequence");
 	const auto* seq_value = seq_roundtrip->as_sequence();
 	if (!seq_value || seq_value->size() != 1) fail("roundtrip sequence item count mismatch");
 	auto* pix_roundtrip = generated_roundtrip->get_dataelement("PixelData"_tag);
-	if (!pix_roundtrip || pix_roundtrip == dicom::NullElement()) fail("roundtrip missing pixel data");
+	if (pix_roundtrip->is_missing()) fail("roundtrip missing pixel data");
 	if (!pix_roundtrip->vr().is_pixel_sequence()) fail("roundtrip pixel data should be pixel sequence");
 	auto* pix_value = pix_roundtrip->as_pixel_sequence();
 	if (!pix_value || pix_value->number_of_frames() != 1) fail("roundtrip pixel frame count mismatch");
@@ -427,7 +480,7 @@ int main() {
 	generated.write_file(roundtrip_path, write_opts);
 	const auto generated_roundtrip_file = read_file(roundtrip_path);
 	if (!generated_roundtrip_file) fail("write_file roundtrip read returned null");
-	if (generated_roundtrip_file->get_dataelement("PixelData"_tag) == dicom::NullElement()) {
+	if (generated_roundtrip_file->get_dataelement("PixelData"_tag)->is_missing()) {
 		fail("write_file roundtrip missing pixel data");
 	}
 	std::remove(roundtrip_path.c_str());

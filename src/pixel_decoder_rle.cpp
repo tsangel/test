@@ -29,28 +29,28 @@ rle_frame_buffer load_rle_frame_buffer(const DicomFile& df, std::size_t frame_in
 	const auto& pixel_data = ds["PixelData"_tag];
 	if (!pixel_data || !pixel_data.vr().is_pixel_sequence()) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=RLE requires encapsulated PixelData",
+		    "pixel::decode_frame_into file={} reason=RLE requires encapsulated PixelData",
 		    df.path());
 	}
 
 	const auto* pixel_sequence = pixel_data.as_pixel_sequence();
 	if (!pixel_sequence) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=RLE pixel sequence is missing",
+		    "pixel::decode_frame_into file={} reason=RLE pixel sequence is missing",
 		    df.path());
 	}
 
 	const auto frame_count = pixel_sequence->number_of_frames();
 	if (frame_index >= frame_count) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} frame={} reason=RLE frame index out of range (frames={})",
+		    "pixel::decode_frame_into file={} frame={} reason=RLE frame index out of range (frames={})",
 		    df.path(), frame_index, frame_count);
 	}
 
 	const auto* frame = pixel_sequence->frame(frame_index);
 	if (!frame) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} frame={} reason=RLE frame is missing",
+		    "pixel::decode_frame_into file={} frame={} reason=RLE frame is missing",
 		    df.path(), frame_index);
 	}
 
@@ -63,14 +63,14 @@ rle_frame_buffer load_rle_frame_buffer(const DicomFile& df, std::size_t frame_in
 	const auto& fragments = frame->fragments();
 	if (fragments.empty()) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} frame={} reason=RLE frame has no fragments",
+		    "pixel::decode_frame_into file={} frame={} reason=RLE frame has no fragments",
 		    df.path(), frame_index);
 	}
 
 	const auto* stream = pixel_sequence->stream();
 	if (!stream) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} frame={} reason=RLE pixel sequence stream is missing",
+		    "pixel::decode_frame_into file={} frame={} reason=RLE pixel sequence stream is missing",
 		    df.path(), frame_index);
 	}
 
@@ -89,7 +89,7 @@ rle_header parse_rle_header(const DicomFile& df, std::size_t frame_index,
     std::span<const std::uint8_t> encoded_frame) {
 	if (encoded_frame.size() < 64) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} frame={} reason=RLE frame is shorter than 64-byte header",
+		    "pixel::decode_frame_into file={} frame={} reason=RLE frame is shorter than 64-byte header",
 		    df.path(), frame_index);
 	}
 
@@ -97,7 +97,7 @@ rle_header parse_rle_header(const DicomFile& df, std::size_t frame_index,
 	header.segment_count = endian::load_le<std::uint32_t>(encoded_frame.data());
 	if (header.segment_count == 0 || header.segment_count > header.offsets.size()) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} frame={} reason=invalid RLE segment count {}",
+		    "pixel::decode_frame_into file={} frame={} reason=invalid RLE segment count {}",
 		    df.path(), frame_index, header.segment_count);
 	}
 
@@ -110,7 +110,7 @@ rle_header parse_rle_header(const DicomFile& df, std::size_t frame_index,
 		const auto start = static_cast<std::size_t>(header.offsets[i]);
 		if (start < 64 || start >= encoded_frame.size()) {
 			diag::error_and_throw(
-			    "pixel::decode_into file={} frame={} reason=invalid RLE segment {} offset {}",
+			    "pixel::decode_frame_into file={} frame={} reason=invalid RLE segment {} offset {}",
 			    df.path(), frame_index, i, start);
 		}
 		const auto end = (i + 1 < header.segment_count)
@@ -118,7 +118,7 @@ rle_header parse_rle_header(const DicomFile& df, std::size_t frame_index,
 		                     : encoded_frame.size();
 		if (end < start || end > encoded_frame.size()) {
 			diag::error_and_throw(
-			    "pixel::decode_into file={} frame={} reason=invalid RLE segment {} range [{}, {})",
+			    "pixel::decode_frame_into file={} frame={} reason=invalid RLE segment {} range [{}, {})",
 			    df.path(), frame_index, i, start, end);
 		}
 	}
@@ -135,7 +135,7 @@ void decode_rle_packbits_segment(const DicomFile& df, std::size_t frame_index,
 	while (out < decoded.size()) {
 		if (in >= encoded.size()) {
 			diag::error_and_throw(
-			    "pixel::decode_into file={} frame={} reason=RLE segment {} ended early (decoded={}/{})",
+			    "pixel::decode_frame_into file={} frame={} reason=RLE segment {} ended early (decoded={}/{})",
 			    df.path(), frame_index, segment_index, out, decoded.size());
 		}
 
@@ -144,7 +144,7 @@ void decode_rle_packbits_segment(const DicomFile& df, std::size_t frame_index,
 			const auto literal_count = static_cast<std::size_t>(control) + 1;
 			if (in + literal_count > encoded.size() || out + literal_count > decoded.size()) {
 				diag::error_and_throw(
-				    "pixel::decode_into file={} frame={} reason=RLE segment {} literal run out of bounds",
+				    "pixel::decode_frame_into file={} frame={} reason=RLE segment {} literal run out of bounds",
 				    df.path(), frame_index, segment_index);
 			}
 			std::memcpy(decoded.data() + out, encoded.data() + in, literal_count);
@@ -157,7 +157,7 @@ void decode_rle_packbits_segment(const DicomFile& df, std::size_t frame_index,
 			const auto repeat_count = static_cast<std::size_t>(1 - control);
 			if (in >= encoded.size() || out + repeat_count > decoded.size()) {
 				diag::error_and_throw(
-				    "pixel::decode_into file={} frame={} reason=RLE segment {} repeat run out of bounds",
+				    "pixel::decode_frame_into file={} frame={} reason=RLE segment {} repeat run out of bounds",
 				    df.path(), frame_index, segment_index);
 			}
 			std::memset(decoded.data() + out, encoded[in], repeat_count);
@@ -176,14 +176,14 @@ std::vector<std::uint8_t> decode_rle_frame_to_planar(const DicomFile& df, std::s
 	const auto expected_segments = samples_per_pixel * bytes_per_sample;
 	if (expected_segments == 0 || expected_segments > 15) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} frame={} reason=unsupported RLE segment layout (spp={}, bytes_per_sample={})",
+		    "pixel::decode_frame_into file={} frame={} reason=unsupported RLE segment layout (spp={}, bytes_per_sample={})",
 		    df.path(), frame_index, samples_per_pixel, bytes_per_sample);
 	}
 
 	const auto header = parse_rle_header(df, frame_index, encoded_frame);
 	if (header.segment_count < expected_segments) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} frame={} reason=RLE segment count {} is smaller than expected {}",
+		    "pixel::decode_frame_into file={} frame={} reason=RLE segment count {} is smaller than expected {}",
 		    df.path(), frame_index, header.segment_count, expected_segments);
 	}
 
@@ -225,35 +225,35 @@ std::vector<std::uint8_t> decode_rle_frame_to_planar(const DicomFile& df, std::s
 
 void decode_rle_into(const DicomFile& df, const DicomFile::pixel_info_t& info,
     std::size_t frame_index, std::span<std::uint8_t> dst,
-    const strides& dst_strides, const decode_opts& opt) {
+    const DecodeStrides& dst_strides, const DecodeOptions& opt) {
 	if (!info.has_pixel_data) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=sv_dtype is unknown", df.path());
+		    "pixel::decode_frame_into file={} reason=sv_dtype is unknown", df.path());
 	}
 
 	if (info.rows <= 0 || info.cols <= 0 || info.samples_per_pixel <= 0) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=invalid Rows/Columns/SamplesPerPixel",
+		    "pixel::decode_frame_into file={} reason=invalid Rows/Columns/SamplesPerPixel",
 		    df.path());
 	}
 
 	const auto samples_per_pixel_value = info.samples_per_pixel;
 	if (samples_per_pixel_value != 1 && samples_per_pixel_value != 3 && samples_per_pixel_value != 4) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=only SamplesPerPixel=1/3/4 is supported in current RLE path",
+		    "pixel::decode_frame_into file={} reason=only SamplesPerPixel=1/3/4 is supported in current RLE path",
 		    df.path());
 	}
 	const auto samples_per_pixel = static_cast<std::size_t>(samples_per_pixel_value);
 	if (opt.scaled && samples_per_pixel != 1) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=scaled output supports SamplesPerPixel=1 only",
+		    "pixel::decode_frame_into file={} reason=scaled output supports SamplesPerPixel=1 only",
 		    df.path());
 	}
 
 	const auto src_bytes_per_sample = sv_dtype_bytes(info.sv_dtype);
 	if (src_bytes_per_sample == 0) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=only sv_dtype=u8/s8/u16/s16/u32/s32/f32/f64 is supported in current RLE path",
+		    "pixel::decode_frame_into file={} reason=only sv_dtype=u8/s8/u16/s16/u32/s32/f32/f64 is supported in current RLE path",
 		    df.path());
 	}
 
@@ -263,26 +263,26 @@ void decode_rle_into(const DicomFile& df, const DicomFile::pixel_info_t& info,
 
 	const auto dst_planar = opt.planar_out;
 	const std::size_t dst_row_components =
-	    (dst_planar == planar::interleaved) ? samples_per_pixel : std::size_t{1};
+	    (dst_planar == Planar::interleaved) ? samples_per_pixel : std::size_t{1};
 	const std::size_t dst_min_row_bytes = cols * dst_row_components * dst_bytes_per_sample;
 	if (dst_strides.row < dst_min_row_bytes) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=row stride too small (need>={}, got={})",
+		    "pixel::decode_frame_into file={} reason=row stride too small (need>={}, got={})",
 		    df.path(), dst_min_row_bytes, dst_strides.row);
 	}
 
 	std::size_t min_frame_bytes = dst_strides.row * rows;
-	if (dst_planar == planar::planar) {
+	if (dst_planar == Planar::planar) {
 		min_frame_bytes *= samples_per_pixel;
 	}
 	if (dst_strides.frame < min_frame_bytes) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=frame stride too small (need>={}, got={})",
+		    "pixel::decode_frame_into file={} reason=frame stride too small (need>={}, got={})",
 		    df.path(), min_frame_bytes, dst_strides.frame);
 	}
 	if (dst.size() < dst_strides.frame) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=destination too small (need={}, got={})",
+		    "pixel::decode_frame_into file={} reason=destination too small (need={}, got={})",
 		    df.path(), dst_strides.frame, dst.size());
 	}
 
@@ -290,7 +290,7 @@ void decode_rle_into(const DicomFile& df, const DicomFile::pixel_info_t& info,
 		const auto declared_frames = static_cast<std::size_t>(info.frames);
 		if (frame_index >= declared_frames) {
 			diag::error_and_throw(
-			    "pixel::decode_into file={} frame={} reason=frame index out of range (frames={})",
+			    "pixel::decode_frame_into file={} frame={} reason=frame index out of range (frames={})",
 			    df.path(), frame_index, declared_frames);
 		}
 	}
@@ -306,7 +306,7 @@ void decode_rle_into(const DicomFile& df, const DicomFile::pixel_info_t& info,
 		return;
 	}
 
-	const auto transform = select_planar_transform(planar::planar, dst_planar);
+	const auto transform = select_planar_transform(Planar::planar, dst_planar);
 	const bool needs_swap = (src_bytes_per_sample > 1) && !endian::host_is_little_endian();
 	run_planar_transform_copy(transform, src_bytes_per_sample, needs_swap,
 	    decoded_planar.data(), dst.data(), rows, cols, samples_per_pixel,

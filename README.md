@@ -129,6 +129,21 @@ pytest -q tests/python
 
 Windows에서는 PowerShell/`cmd`에서 가상환경 활성화만 플랫폼에 맞게 바꿔주면 동일합니다.
 
+### Update Python Stub Snapshot
+
+`nanobind` 기반 자동 생성 스텁 스냅샷은 아래 명령으로 갱신합니다.
+
+```bash
+# Build Python extension first (example: default build dir)
+cmake --build build --target _dicomsdl
+
+# Regenerate snapshot
+scripts/update_stub.sh --build-dir build
+
+# Check-only mode (used in CI)
+scripts/update_stub.sh --check --build-dir build
+```
+
 ### WG04 Pixel Decode Benchmark
 
 WG04 샘플(`REF`, `RLE`, `J2KR`, `J2KI`, `JLSL`, `JLSN`, `JPLL`, `JPLY`)을 codec별로

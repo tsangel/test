@@ -261,7 +261,7 @@ std::span<const std::uint8_t> PixelSequence::frame_encoded_span(std::size_t inde
 	// 2) Single fragment can be returned as a view without copy.
 	if (frags.size() == 1) {
 		const auto frag = frags.front();
-		if (frag.offset + frag.length > stream->endoffset()) {
+		if (frag.offset + frag.length > stream->end_offset()) {
 			diag::error_and_throw(
 			    "PixelSequence::frame_encoded_span stream={} offset=0x{:X} length={} reason=fragment exceeds stream bounds",
 			    stream->identifier(), frag.offset, frag.length);
@@ -272,7 +272,7 @@ std::span<const std::uint8_t> PixelSequence::frame_encoded_span(std::size_t inde
 	// 3) Multiple fragments: coalesce once, then reuse.
 	std::size_t total = 0;
 	for (const auto& frag : frags) {
-		if (frag.length > stream->endoffset()) {
+		if (frag.length > stream->end_offset()) {
 			diag::error_and_throw("PixelSequence::frame_encoded_span reason=invalid fragment length");
 		}
 		total += frag.length;
@@ -280,7 +280,7 @@ std::span<const std::uint8_t> PixelSequence::frame_encoded_span(std::size_t inde
 	std::vector<std::uint8_t> buffer;
 	buffer.reserve(total);
 	for (const auto& frag : frags) {
-		if (frag.offset + frag.length > stream->endoffset()) {
+		if (frag.offset + frag.length > stream->end_offset()) {
 			diag::error_and_throw(
 			    "PixelSequence::frame_encoded_span stream={} offset=0x{:X} length={} reason=fragment exceeds stream bounds",
 			    stream->identifier(), frag.offset, frag.length);
@@ -298,11 +298,11 @@ void PixelSequence::clear_frame_encoded_data(std::size_t index) {
 	}
 }
 
-void PixelSequence::attach_to_stream(InStream* basestream, std::size_t size) {
-	if (!basestream) {
-		diag::error_and_throw("PixelSequence::attach_to_stream reason=null basestream");
+void PixelSequence::attach_to_stream(InStream* base_stream, std::size_t size) {
+	if (!base_stream) {
+		diag::error_and_throw("PixelSequence::attach_to_stream reason=null base_stream");
 	}
-	stream_ = std::make_unique<InSubStream>(basestream, size);
+	stream_ = std::make_unique<InSubStream>(base_stream, size);
 }
 
 void PixelSequence::read_attached_stream() {
@@ -371,7 +371,7 @@ void PixelSequence::read_attached_stream() {
 			return a.offset < b.offset;
 		});
 
-		const std::size_t end_limit = stream->endoffset();
+		const std::size_t end_limit = stream->end_offset();
 		for (std::size_t i = 0; i < entries.size(); ++i) {
 			const auto current_offset = entries[i].offset;
 			const auto next_offset = (i + 1 < entries.size())

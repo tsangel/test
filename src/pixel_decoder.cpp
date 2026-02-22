@@ -27,30 +27,30 @@ decode_backend select_decode_backend(uid::WellKnown ts) noexcept {
 	return decode_backend::unsupported;
 }
 
-planar_transform select_planar_transform(planar src_planar, planar dst_planar) noexcept {
-	if (src_planar == planar::interleaved) {
-		return (dst_planar == planar::interleaved)
+planar_transform select_planar_transform(Planar src_planar, Planar dst_planar) noexcept {
+	if (src_planar == Planar::interleaved) {
+		return (dst_planar == Planar::interleaved)
 		           ? planar_transform::interleaved_to_interleaved
 		           : planar_transform::interleaved_to_planar;
 	}
-	return (dst_planar == planar::interleaved)
+	return (dst_planar == Planar::interleaved)
 	           ? planar_transform::planar_to_interleaved
 	           : planar_transform::planar_to_planar;
 }
 
-std::size_t sv_dtype_bytes(dtype sv_dtype) noexcept {
+std::size_t sv_dtype_bytes(DataType sv_dtype) noexcept {
 	switch (sv_dtype) {
-	case dtype::u8:
-	case dtype::s8:
+	case DataType::u8:
+	case DataType::s8:
 		return 1;
-	case dtype::u16:
-	case dtype::s16:
+	case DataType::u16:
+	case DataType::s16:
 		return 2;
-	case dtype::u32:
-	case dtype::s32:
-	case dtype::f32:
+	case DataType::u32:
+	case DataType::s32:
+	case DataType::f32:
 		return 4;
-	case dtype::f64:
+	case DataType::f64:
 		return 8;
 	default:
 		return 0;
@@ -98,7 +98,7 @@ void decode_mono_scaled_samples_into(const std::uint8_t* src_frame, std::uint8_t
 template <typename SampleT>
 void decode_mono_lut_samples_into(const std::uint8_t* src_frame, std::uint8_t* dst_base,
     std::size_t rows, std::size_t cols, std::size_t src_row_bytes, std::size_t dst_row_bytes,
-    bool source_little_endian, const modality_lut& lut) {
+    bool source_little_endian, const ModalityLut& lut) {
 	const auto last_index = static_cast<std::int64_t>(lut.values.size() - 1);
 	for (std::size_t r = 0; r < rows; ++r) {
 		const auto* src_sample = src_frame + r * src_row_bytes;
@@ -494,7 +494,7 @@ void copy_interleaved_to_interleaved_by_bytes(std::size_t bytes_per_sample,
 		return;
 	default:
 		diag::error_and_throw(
-		    "pixel::decode_into reason=unsupported bytes_per_sample={}", bytes_per_sample);
+		    "pixel::decode_frame_into reason=unsupported bytes_per_sample={}", bytes_per_sample);
 		return;
 	}
 }
@@ -523,7 +523,7 @@ void dispatch_planar_transform_copy_by_bytes(planar_transform transform, std::si
 		return;
 	default:
 		diag::error_and_throw(
-		    "pixel::decode_into reason=unsupported bytes_per_sample={}", bytes_per_sample);
+		    "pixel::decode_frame_into reason=unsupported bytes_per_sample={}", bytes_per_sample);
 		return;
 	}
 }
@@ -532,12 +532,12 @@ void dispatch_planar_transform_copy_by_bytes(planar_transform transform, std::si
 
 void decode_mono_scaled_into_f32(const DicomFile& df, const DicomFile::pixel_info_t& info,
     const std::uint8_t* src_frame, std::span<std::uint8_t> dst,
-    const strides& dst_strides, std::size_t rows, std::size_t cols,
+    const DecodeStrides& dst_strides, std::size_t rows, std::size_t cols,
     std::size_t src_row_bytes) {
 	const auto& ds = df.dataset();
 	if (info.samples_per_pixel != 1) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=scaled output supports SamplesPerPixel=1 only",
+		    "pixel::decode_frame_into file={} reason=scaled output supports SamplesPerPixel=1 only",
 		    df.path());
 	}
 
@@ -545,96 +545,96 @@ void decode_mono_scaled_into_f32(const DicomFile& df, const DicomFile::pixel_inf
 	const auto modality_lut = df.modality_lut();
 	if (modality_lut) {
 		switch (info.sv_dtype) {
-		case dtype::u8:
+		case DataType::u8:
 			decode_mono_lut_samples_into<std::uint8_t>(
 			    src_frame, dst.data(), rows, cols, src_row_bytes, dst_strides.row,
 			    source_little_endian, *modality_lut);
 			return;
-		case dtype::s8:
+		case DataType::s8:
 			decode_mono_lut_samples_into<std::int8_t>(
 			    src_frame, dst.data(), rows, cols, src_row_bytes, dst_strides.row,
 			    source_little_endian, *modality_lut);
 			return;
-		case dtype::u16:
+		case DataType::u16:
 			decode_mono_lut_samples_into<std::uint16_t>(
 			    src_frame, dst.data(), rows, cols, src_row_bytes, dst_strides.row,
 			    source_little_endian, *modality_lut);
 			return;
-		case dtype::s16:
+		case DataType::s16:
 			decode_mono_lut_samples_into<std::int16_t>(
 			    src_frame, dst.data(), rows, cols, src_row_bytes, dst_strides.row,
 			    source_little_endian, *modality_lut);
 			return;
-		case dtype::u32:
+		case DataType::u32:
 			decode_mono_lut_samples_into<std::uint32_t>(
 			    src_frame, dst.data(), rows, cols, src_row_bytes, dst_strides.row,
 			    source_little_endian, *modality_lut);
 			return;
-		case dtype::s32:
+		case DataType::s32:
 			decode_mono_lut_samples_into<std::int32_t>(
 			    src_frame, dst.data(), rows, cols, src_row_bytes, dst_strides.row,
 			    source_little_endian, *modality_lut);
 			return;
 		default:
 			diag::error_and_throw(
-			    "pixel::decode_into file={} reason=Modality LUT path supports integral sv_dtype only",
+			    "pixel::decode_frame_into file={} reason=Modality LUT path supports integral sv_dtype only",
 			    df.path());
 			return;
 		}
 	}
 
-	const auto slope = ds["RescaleSlope"_tag].toDouble(1.0);
-	const auto intercept = ds["RescaleIntercept"_tag].toDouble(0.0);
+	const auto slope = ds["RescaleSlope"_tag].to_double().value_or(1.0);
+	const auto intercept = ds["RescaleIntercept"_tag].to_double().value_or(0.0);
 	if (!std::isfinite(slope) || !std::isfinite(intercept)) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=RescaleSlope/RescaleIntercept must be finite",
+		    "pixel::decode_frame_into file={} reason=RescaleSlope/RescaleIntercept must be finite",
 		    df.path());
 	}
 
 	switch (info.sv_dtype) {
-	case dtype::u8:
+	case DataType::u8:
 		decode_mono_scaled_samples_into<std::uint8_t>(
 		    src_frame, dst.data(), rows, cols, src_row_bytes, dst_strides.row,
 		    source_little_endian, slope, intercept);
 		return;
-	case dtype::s8:
+	case DataType::s8:
 		decode_mono_scaled_samples_into<std::int8_t>(
 		    src_frame, dst.data(), rows, cols, src_row_bytes, dst_strides.row,
 		    source_little_endian, slope, intercept);
 		return;
-	case dtype::u16:
+	case DataType::u16:
 		decode_mono_scaled_samples_into<std::uint16_t>(
 		    src_frame, dst.data(), rows, cols, src_row_bytes, dst_strides.row,
 		    source_little_endian, slope, intercept);
 		return;
-	case dtype::s16:
+	case DataType::s16:
 		decode_mono_scaled_samples_into<std::int16_t>(
 		    src_frame, dst.data(), rows, cols, src_row_bytes, dst_strides.row,
 		    source_little_endian, slope, intercept);
 		return;
-	case dtype::u32:
+	case DataType::u32:
 		decode_mono_scaled_samples_into<std::uint32_t>(
 		    src_frame, dst.data(), rows, cols, src_row_bytes, dst_strides.row,
 		    source_little_endian, slope, intercept);
 		return;
-	case dtype::s32:
+	case DataType::s32:
 		decode_mono_scaled_samples_into<std::int32_t>(
 		    src_frame, dst.data(), rows, cols, src_row_bytes, dst_strides.row,
 		    source_little_endian, slope, intercept);
 		return;
-	case dtype::f32:
+	case DataType::f32:
 		decode_mono_scaled_samples_into<float>(
 		    src_frame, dst.data(), rows, cols, src_row_bytes, dst_strides.row,
 		    source_little_endian, slope, intercept);
 		return;
-	case dtype::f64:
+	case DataType::f64:
 		decode_mono_scaled_samples_into<double>(
 		    src_frame, dst.data(), rows, cols, src_row_bytes, dst_strides.row,
 		    source_little_endian, slope, intercept);
 		return;
 	default:
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=scaled output does not support sv_dtype={}",
+		    "pixel::decode_frame_into file={} reason=scaled output does not support sv_dtype={}",
 		    df.path(), static_cast<int>(info.sv_dtype));
 		return;
 	}
@@ -644,7 +644,7 @@ void run_planar_transform_copy(planar_transform transform, std::size_t bytes_per
     const std::uint8_t* src_frame, std::uint8_t* dst_base,
     std::size_t rows, std::size_t cols, std::size_t samples_per_pixel,
     std::size_t src_row_bytes, std::size_t dst_row_bytes) {
-	// For single-channel data, planar/interleaved layouts are equivalent.
+	// For single-channel data, Planar/interleaved layouts are equivalent.
 	// Route through ii kernel and avoid redundant spp=1 branches in ip/pi kernels.
 	if (samples_per_pixel == 1) {
 		if (needs_swap) {
@@ -723,7 +723,7 @@ bool has_rescale_transform_metadata(const DicomFile& df) {
 }
 
 bool should_use_scaled_output_impl(
-    const DicomFile& df, const DicomFile::pixel_info_t& info, const decode_opts& opt) {
+    const DicomFile& df, const DicomFile::pixel_info_t& info, const DecodeOptions& opt) {
 	if (!opt.scaled) {
 		return false;
 	}
@@ -747,23 +747,23 @@ bool should_use_scaled_output_impl(
 
 } // namespace
 
-bool should_use_scaled_output(const DicomFile& df, const decode_opts& opt) {
+bool should_use_scaled_output(const DicomFile& df, const DecodeOptions& opt) {
 	const auto& info = df.pixel_info();
 	return should_use_scaled_output_impl(df, info, opt);
 }
 
-void decode_into(const DicomFile& df, std::size_t frame_index,
-    std::span<std::uint8_t> dst, const decode_opts& opt) {
+void decode_frame_into(const DicomFile& df, std::size_t frame_index,
+    std::span<std::uint8_t> dst, const DecodeOptions& opt) {
 	const auto& info = df.pixel_info();
 	auto effective_opt = opt;
 	effective_opt.scaled = should_use_scaled_output_impl(df, info, opt);
 
-	const auto dst_strides = df.calc_strides(effective_opt);
-	decode_into(df, frame_index, dst, dst_strides, effective_opt);
+	const auto dst_strides = df.calc_decode_strides(effective_opt);
+	decode_frame_into(df, frame_index, dst, dst_strides, effective_opt);
 }
 
-void decode_into(const DicomFile& df, std::size_t frame_index,
-    std::span<std::uint8_t> dst, const strides& dst_strides, const decode_opts& opt) {
+void decode_frame_into(const DicomFile& df, std::size_t frame_index,
+    std::span<std::uint8_t> dst, const DecodeStrides& dst_strides, const DecodeOptions& opt) {
 	const auto& info = df.pixel_info();
 	auto effective_opt = opt;
 	effective_opt.scaled = should_use_scaled_output_impl(df, info, opt);
@@ -793,7 +793,7 @@ void decode_into(const DicomFile& df, std::size_t frame_index,
 		return;
 	default:
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=unsupported transfer syntax {}",
+		    "pixel::decode_frame_into file={} reason=unsupported transfer syntax {}",
 		    df.path(), df.transfer_syntax_uid().value());
 		return;
 	}

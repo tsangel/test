@@ -34,25 +34,25 @@ struct htj2k_frame_source {
 	std::size_t total_size{0};
 };
 
-bool sv_dtype_is_signed(dtype sv_dtype) noexcept {
+bool sv_dtype_is_signed(DataType sv_dtype) noexcept {
 	switch (sv_dtype) {
-	case dtype::s8:
-	case dtype::s16:
-	case dtype::s32:
+	case DataType::s8:
+	case DataType::s16:
+	case DataType::s32:
 		return true;
 	default:
 		return false;
 	}
 }
 
-bool sv_dtype_is_integral(dtype sv_dtype) noexcept {
+bool sv_dtype_is_integral(DataType sv_dtype) noexcept {
 	switch (sv_dtype) {
-	case dtype::u8:
-	case dtype::s8:
-	case dtype::u16:
-	case dtype::s16:
-	case dtype::u32:
-	case dtype::s32:
+	case DataType::u8:
+	case DataType::s8:
+	case DataType::u16:
+	case DataType::s16:
+	case DataType::u32:
+	case DataType::s32:
 		return true;
 	default:
 		return false;
@@ -68,13 +68,13 @@ std::string trimmed_message(std::string message) {
 	return message;
 }
 
-const char* htj2k_backend_name(htj2k_decoder backend) noexcept {
+const char* htj2k_backend_name(Htj2kDecoder backend) noexcept {
 	switch (backend) {
-	case htj2k_decoder::auto_select:
+	case Htj2kDecoder::auto_select:
 		return "auto";
-	case htj2k_decoder::openjph:
+	case Htj2kDecoder::openjph:
 		return "openjph";
-	case htj2k_decoder::openjpeg:
+	case Htj2kDecoder::openjpeg:
 		return "openjpeg";
 	default:
 		return "unknown";
@@ -82,29 +82,29 @@ const char* htj2k_backend_name(htj2k_decoder backend) noexcept {
 }
 
 void validate_destination(const DicomFile& df, std::span<std::uint8_t> dst,
-    const strides& dst_strides, planar dst_planar, std::size_t rows, std::size_t cols,
+    const DecodeStrides& dst_strides, Planar dst_planar, std::size_t rows, std::size_t cols,
     std::size_t samples_per_pixel, std::size_t bytes_per_sample) {
 	const std::size_t dst_row_components =
-	    (dst_planar == planar::interleaved) ? samples_per_pixel : std::size_t{1};
+	    (dst_planar == Planar::interleaved) ? samples_per_pixel : std::size_t{1};
 	const std::size_t dst_min_row_bytes = cols * dst_row_components * bytes_per_sample;
 	if (dst_strides.row < dst_min_row_bytes) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=row stride too small (need>={}, got={})",
+		    "pixel::decode_frame_into file={} reason=row stride too small (need>={}, got={})",
 		    df.path(), dst_min_row_bytes, dst_strides.row);
 	}
 
 	std::size_t min_frame_bytes = dst_strides.row * rows;
-	if (dst_planar == planar::planar) {
+	if (dst_planar == Planar::planar) {
 		min_frame_bytes *= samples_per_pixel;
 	}
 	if (dst_strides.frame < min_frame_bytes) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=frame stride too small (need>={}, got={})",
+		    "pixel::decode_frame_into file={} reason=frame stride too small (need>={}, got={})",
 		    df.path(), min_frame_bytes, dst_strides.frame);
 	}
 	if (dst.size() < dst_strides.frame) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=destination too small (need={}, got={})",
+		    "pixel::decode_frame_into file={} reason=destination too small (need={}, got={})",
 		    df.path(), dst_strides.frame, dst.size());
 	}
 }
@@ -114,28 +114,28 @@ htj2k_frame_source load_htj2k_frame_source(const DicomFile& df, std::size_t fram
 	const auto& pixel_data = ds["PixelData"_tag];
 	if (!pixel_data || !pixel_data.vr().is_pixel_sequence()) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=HTJ2K requires encapsulated PixelData",
+		    "pixel::decode_frame_into file={} reason=HTJ2K requires encapsulated PixelData",
 		    df.path());
 	}
 
 	const auto* pixel_sequence = pixel_data.as_pixel_sequence();
 	if (!pixel_sequence) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=HTJ2K pixel sequence is missing",
+		    "pixel::decode_frame_into file={} reason=HTJ2K pixel sequence is missing",
 		    df.path());
 	}
 
 	const auto frame_count = pixel_sequence->number_of_frames();
 	if (frame_index >= frame_count) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} frame={} reason=HTJ2K frame index out of range (frames={})",
+		    "pixel::decode_frame_into file={} frame={} reason=HTJ2K frame index out of range (frames={})",
 		    df.path(), frame_index, frame_count);
 	}
 
 	const auto* frame = pixel_sequence->frame(frame_index);
 	if (!frame) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} frame={} reason=HTJ2K frame is missing",
+		    "pixel::decode_frame_into file={} frame={} reason=HTJ2K frame is missing",
 		    df.path(), frame_index);
 	}
 
@@ -150,13 +150,13 @@ htj2k_frame_source load_htj2k_frame_source(const DicomFile& df, std::size_t fram
 	const auto& fragments = frame->fragments();
 	if (fragments.empty()) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} frame={} reason=HTJ2K frame has no fragments",
+		    "pixel::decode_frame_into file={} frame={} reason=HTJ2K frame has no fragments",
 		    df.path(), frame_index);
 	}
 	for (const auto& fragment : fragments) {
 		if (fragment.length == 0) {
 			diag::error_and_throw(
-			    "pixel::decode_into file={} frame={} reason=HTJ2K zero-length fragment is not supported",
+			    "pixel::decode_frame_into file={} frame={} reason=HTJ2K zero-length fragment is not supported",
 			    df.path(), frame_index);
 		}
 	}
@@ -171,7 +171,7 @@ htj2k_frame_source load_htj2k_frame_source(const DicomFile& df, std::size_t fram
 	const auto* stream = pixel_sequence->stream();
 	if (!stream) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} frame={} reason=HTJ2K pixel sequence stream is missing",
+		    "pixel::decode_frame_into file={} frame={} reason=HTJ2K pixel sequence stream is missing",
 		    df.path(), frame_index);
 	}
 	source.stream = stream;
@@ -181,7 +181,7 @@ htj2k_frame_source load_htj2k_frame_source(const DicomFile& df, std::size_t fram
 	for (const auto& frag : fragments) {
 		if (frag.length > std::numeric_limits<std::size_t>::max() - total_size) {
 			diag::error_and_throw(
-			    "pixel::decode_into file={} frame={} reason=HTJ2K frame size overflow",
+			    "pixel::decode_frame_into file={} frame={} reason=HTJ2K frame size overflow",
 			    df.path(), frame_index);
 		}
 		total_size += frag.length;
@@ -370,7 +370,7 @@ std::vector<std::int32_t> decode_openjph_to_interleaved(const DicomFile& df, std
 				auto* line = codestream.pull(comp_num);
 					if (comp_num != static_cast<ojph::ui32>(comp)) {
 						throw std::runtime_error(fmt::format(
-						    "OpenJPH planar pull order mismatch (file={}, frame={}, expected={}, got={})",
+						    "OpenJPH Planar pull order mismatch (file={}, frame={}, expected={}, got={})",
 						    df.path(), frame_index, comp, comp_num));
 					}
 					copy_openjph_line_to_interleaved(
@@ -402,10 +402,10 @@ std::vector<std::int32_t> decode_openjph_to_interleaved(const DicomFile& df, std
 
 template <typename DstT>
 void write_openjph_line_unscaled_to_dst(const std::int32_t* samples,
-    std::span<std::uint8_t> dst, const strides& dst_strides, planar dst_planar,
+    std::span<std::uint8_t> dst, const DecodeStrides& dst_strides, Planar dst_planar,
     std::size_t rows, std::size_t row, std::size_t comp, std::size_t cols,
     std::size_t samples_per_pixel) {
-	if (dst_planar == planar::planar && samples_per_pixel > 1) {
+	if (dst_planar == Planar::planar && samples_per_pixel > 1) {
 		const std::size_t plane_bytes = dst_strides.row * rows;
 		auto* dst_row = dst.data() + comp * plane_bytes + row * dst_strides.row;
 		for (std::size_t c = 0; c < cols; ++c) {
@@ -426,7 +426,7 @@ void write_openjph_line_unscaled_to_dst(const std::int32_t* samples,
 template <typename DstT>
 void decode_openjph_unscaled_into(const DicomFile& df, std::size_t frame_index,
     const DicomFile::pixel_info_t& info, const htj2k_frame_source& source,
-    std::span<std::uint8_t> dst, const strides& dst_strides, planar dst_planar,
+    std::span<std::uint8_t> dst, const DecodeStrides& dst_strides, Planar dst_planar,
     std::size_t rows, std::size_t cols, std::size_t samples_per_pixel) {
 	std::vector<std::uint8_t> contiguous_storage{};
 	const auto codestream_bytes = materialize_frame_codestream_for_openjph(
@@ -455,7 +455,7 @@ void decode_openjph_unscaled_into(const DicomFile& df, std::size_t frame_index,
 				auto* line = codestream.pull(comp_num);
 					if (comp_num != static_cast<ojph::ui32>(comp)) {
 						throw std::runtime_error(fmt::format(
-						    "OpenJPH planar pull order mismatch (file={}, frame={}, expected={}, got={})",
+						    "OpenJPH Planar pull order mismatch (file={}, frame={}, expected={}, got={})",
 						    df.path(), frame_index, comp, comp_num));
 					}
 					const auto* samples = openjph_line_as_i32(df, frame_index, line, cols, scratch_line);
@@ -487,7 +487,7 @@ void decode_openjph_unscaled_into(const DicomFile& df, std::size_t frame_index,
 template <typename SampleT>
 void write_openjph_scaled_mono_to_dst(const DicomFile& df,
     const std::vector<std::int32_t>& decoded, std::span<std::uint8_t> dst,
-    const strides& dst_strides, std::size_t rows, std::size_t cols) {
+    const DecodeStrides& dst_strides, std::size_t rows, std::size_t cols) {
 	const auto& ds = df.dataset();
 	const auto modality_lut = df.modality_lut();
 	if (modality_lut) {
@@ -510,8 +510,8 @@ void write_openjph_scaled_mono_to_dst(const DicomFile& df,
 		return;
 	}
 
-	const auto slope = ds["RescaleSlope"_tag].toDouble(1.0);
-	const auto intercept = ds["RescaleIntercept"_tag].toDouble(0.0);
+	const auto slope = ds["RescaleSlope"_tag].to_double().value_or(1.0);
+	const auto intercept = ds["RescaleIntercept"_tag].to_double().value_or(0.0);
 	if (!std::isfinite(slope) || !std::isfinite(intercept)) {
 		throw std::runtime_error(fmt::format(
 		    "RescaleSlope/RescaleIntercept must be finite (file={})", df.path()));
@@ -530,7 +530,7 @@ void write_openjph_scaled_mono_to_dst(const DicomFile& df,
 
 bool try_decode_openjph_into(const DicomFile& df, const DicomFile::pixel_info_t& info,
     std::size_t frame_index, const htj2k_frame_source& source, std::span<std::uint8_t> dst,
-    const strides& dst_strides, const decode_opts& opt, std::size_t rows, std::size_t cols,
+    const DecodeStrides& dst_strides, const DecodeOptions& opt, std::size_t rows, std::size_t cols,
     std::size_t samples_per_pixel, std::string& failure) {
 	failure.clear();
 	try {
@@ -538,22 +538,22 @@ bool try_decode_openjph_into(const DicomFile& df, const DicomFile::pixel_info_t&
 			auto decoded = decode_openjph_to_interleaved(
 			    df, frame_index, info, source, rows, cols, samples_per_pixel);
 			switch (info.sv_dtype) {
-			case dtype::u8:
+			case DataType::u8:
 				write_openjph_scaled_mono_to_dst<std::uint8_t>(df, decoded, dst, dst_strides, rows, cols);
 				return true;
-			case dtype::s8:
+			case DataType::s8:
 				write_openjph_scaled_mono_to_dst<std::int8_t>(df, decoded, dst, dst_strides, rows, cols);
 				return true;
-			case dtype::u16:
+			case DataType::u16:
 				write_openjph_scaled_mono_to_dst<std::uint16_t>(df, decoded, dst, dst_strides, rows, cols);
 				return true;
-			case dtype::s16:
+			case DataType::s16:
 				write_openjph_scaled_mono_to_dst<std::int16_t>(df, decoded, dst, dst_strides, rows, cols);
 				return true;
-			case dtype::u32:
+			case DataType::u32:
 				write_openjph_scaled_mono_to_dst<std::uint32_t>(df, decoded, dst, dst_strides, rows, cols);
 				return true;
-			case dtype::s32:
+			case DataType::s32:
 				write_openjph_scaled_mono_to_dst<std::int32_t>(df, decoded, dst, dst_strides, rows, cols);
 				return true;
 			default:
@@ -564,32 +564,32 @@ bool try_decode_openjph_into(const DicomFile& df, const DicomFile::pixel_info_t&
 		}
 
 		switch (info.sv_dtype) {
-		case dtype::u8:
+		case DataType::u8:
 			decode_openjph_unscaled_into<std::uint8_t>(
 			    df, frame_index, info, source, dst, dst_strides, opt.planar_out, rows, cols,
 			    samples_per_pixel);
 			return true;
-		case dtype::s8:
+		case DataType::s8:
 			decode_openjph_unscaled_into<std::int8_t>(
 			    df, frame_index, info, source, dst, dst_strides, opt.planar_out, rows, cols,
 			    samples_per_pixel);
 			return true;
-		case dtype::u16:
+		case DataType::u16:
 			decode_openjph_unscaled_into<std::uint16_t>(
 			    df, frame_index, info, source, dst, dst_strides, opt.planar_out, rows, cols,
 			    samples_per_pixel);
 			return true;
-		case dtype::s16:
+		case DataType::s16:
 			decode_openjph_unscaled_into<std::int16_t>(
 			    df, frame_index, info, source, dst, dst_strides, opt.planar_out, rows, cols,
 			    samples_per_pixel);
 			return true;
-		case dtype::u32:
+		case DataType::u32:
 			decode_openjph_unscaled_into<std::uint32_t>(
 			    df, frame_index, info, source, dst, dst_strides, opt.planar_out, rows, cols,
 			    samples_per_pixel);
 			return true;
-		case dtype::s32:
+		case DataType::s32:
 			decode_openjph_unscaled_into<std::int32_t>(
 			    df, frame_index, info, source, dst, dst_strides, opt.planar_out, rows, cols,
 			    samples_per_pixel);
@@ -621,24 +621,24 @@ bool try_decode_openjph_into(const DicomFile& df, const DicomFile::pixel_info_t&
 
 void decode_htj2k_into(const DicomFile& df, const DicomFile::pixel_info_t& info,
     std::size_t frame_index, std::span<std::uint8_t> dst,
-    const strides& dst_strides, const decode_opts& opt) {
+    const DecodeStrides& dst_strides, const DecodeOptions& opt) {
 	if (!info.has_pixel_data) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=sv_dtype is unknown", df.path());
+		    "pixel::decode_frame_into file={} reason=sv_dtype is unknown", df.path());
 	}
 	if (!info.ts.is_htj2k()) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=transfer syntax is not HTJ2K ({})",
+		    "pixel::decode_frame_into file={} reason=transfer syntax is not HTJ2K ({})",
 		    df.path(), df.transfer_syntax_uid().value());
 	}
 	if (info.rows <= 0 || info.cols <= 0 || info.samples_per_pixel <= 0) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=invalid Rows/Columns/SamplesPerPixel",
+		    "pixel::decode_frame_into file={} reason=invalid Rows/Columns/SamplesPerPixel",
 		    df.path());
 	}
 	if (info.frames <= 0) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=invalid NumberOfFrames",
+		    "pixel::decode_frame_into file={} reason=invalid NumberOfFrames",
 		    df.path());
 	}
 
@@ -646,32 +646,32 @@ void decode_htj2k_into(const DicomFile& df, const DicomFile::pixel_info_t& info,
 	if (samples_per_pixel_value != 1 && samples_per_pixel_value != 3 &&
 	    samples_per_pixel_value != 4) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=only SamplesPerPixel=1/3/4 is supported in current HTJ2K path",
+		    "pixel::decode_frame_into file={} reason=only SamplesPerPixel=1/3/4 is supported in current HTJ2K path",
 		    df.path());
 	}
 	const auto samples_per_pixel = static_cast<std::size_t>(samples_per_pixel_value);
 	if (opt.scaled && samples_per_pixel != 1) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=scaled output supports SamplesPerPixel=1 only",
+		    "pixel::decode_frame_into file={} reason=scaled output supports SamplesPerPixel=1 only",
 		    df.path());
 	}
 	if (!sv_dtype_is_integral(info.sv_dtype)) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=HTJ2K supports integral sv_dtype only",
+		    "pixel::decode_frame_into file={} reason=HTJ2K supports integral sv_dtype only",
 		    df.path());
 	}
 
 	const auto src_bytes_per_sample = sv_dtype_bytes(info.sv_dtype);
 	if (src_bytes_per_sample == 0 || src_bytes_per_sample > 4) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} reason=HTJ2K supports integral sv_dtype up to 32-bit only",
+		    "pixel::decode_frame_into file={} reason=HTJ2K supports integral sv_dtype up to 32-bit only",
 		    df.path());
 	}
 
 	const auto frame_count = static_cast<std::size_t>(info.frames);
 	if (frame_index >= frame_count) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} frame={} reason=frame index out of range (frames={})",
+		    "pixel::decode_frame_into file={} frame={} reason=frame index out of range (frames={})",
 		    df.path(), frame_index, frame_count);
 	}
 
@@ -684,16 +684,16 @@ void decode_htj2k_into(const DicomFile& df, const DicomFile::pixel_info_t& info,
 	const auto frame_source = load_htj2k_frame_source(df, frame_index);
 	if (frame_source.total_size == 0) {
 		diag::error_and_throw(
-		    "pixel::decode_into file={} frame={} reason=HTJ2K frame has empty codestream",
+		    "pixel::decode_frame_into file={} frame={} reason=HTJ2K frame has empty codestream",
 		    df.path(), frame_index);
 	}
 
-	if (opt.htj2k_decoder_backend == htj2k_decoder::openjpeg) {
+	if (opt.htj2k_decoder_backend == Htj2kDecoder::openjpeg) {
 		decode_jpeg2k_into(df, info, frame_index, dst, dst_strides, opt);
 		return;
 	}
 
-	if (opt.htj2k_decoder_backend == htj2k_decoder::openjph) {
+	if (opt.htj2k_decoder_backend == Htj2kDecoder::openjph) {
 		std::string openjph_failure{};
 		if (try_decode_openjph_into(df, info, frame_index, frame_source, dst, dst_strides, opt,
 		        rows, cols, samples_per_pixel, openjph_failure)) {
@@ -701,7 +701,7 @@ void decode_htj2k_into(const DicomFile& df, const DicomFile::pixel_info_t& info,
 		}
 		const auto failure_reason = trimmed_message(openjph_failure);
 		diag::error_and_throw(
-		    "pixel::decode_into file={} frame={} reason=HTJ2K decode failed "
+		    "pixel::decode_frame_into file={} frame={} reason=HTJ2K decode failed "
 		    "(backend={}): {}",
 		    df.path(), frame_index, htj2k_backend_name(opt.htj2k_decoder_backend),
 		    failure_reason.empty() ? "OpenJPH decode failed" : failure_reason);
@@ -718,7 +718,7 @@ void decode_htj2k_into(const DicomFile& df, const DicomFile::pixel_info_t& info,
 	} catch (const std::exception& e) {
 		if (!openjph_failure.empty()) {
 			diag::error_and_throw(
-			    "pixel::decode_into file={} frame={} reason=HTJ2K decode failed "
+			    "pixel::decode_frame_into file={} frame={} reason=HTJ2K decode failed "
 			    "(OpenJPH: {}; OpenJPEG: {})",
 			    df.path(), frame_index, trimmed_message(openjph_failure), trimmed_message(e.what()));
 		}
