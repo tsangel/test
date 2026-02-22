@@ -1034,7 +1034,8 @@ public:
 	/// Value length in bytes (may be undefined for sequences).
 	[[nodiscard]] constexpr std::size_t length() const noexcept { return length_; }
 	/// Absolute offset of the value within the root stream.
-	[[nodiscard]] constexpr std::size_t offset() const noexcept { return offset_; }
+	/// Valid for stream-backed elements and SQ/PX elements; otherwise returns 0.
+	[[nodiscard]] std::size_t offset() const noexcept;
 	/// Parent dataset (if any).
 	[[nodiscard]] constexpr DataSet* parent() const noexcept { return parent_; }
 	/// True when lookup resolved to a real element (not the missing sentinel).
@@ -1071,7 +1072,7 @@ public:
 	constexpr void set_tag(Tag tag) noexcept { tag_ = tag; }
 	constexpr void set_vr(VR vr) noexcept { vr_ = vr; }
 	constexpr void set_length(std::size_t length) noexcept { length_ = length; }
-	constexpr void set_offset(std::size_t offset) noexcept { offset_ = offset; }
+	void set_offset(std::size_t offset) noexcept;
 	constexpr void set_parent(DataSet* parent) noexcept { parent_ = parent; }
 
 	/// Copy raw value bytes into inline/heap storage depending on length.
@@ -1211,11 +1212,11 @@ private:
 	VR vr_{};
 	StorageKind storage_kind_{StorageKind::none};
 	std::size_t length_{0};
-	std::size_t offset_{0};
 	union Storage {
 		void* ptr;
 		Sequence* seq;
 		PixelSequence* pixseq;
+		std::size_t offset_;
 		std::uint8_t inline_bytes[kInlineStorageBytes];
 		constexpr Storage() noexcept : ptr(nullptr) {}
 	} storage_{};
@@ -1228,9 +1229,10 @@ private:
 		vr_ = other.vr_;
 		storage_kind_ = other.storage_kind_;
 		length_ = other.length_;
-		offset_ = other.offset_;
 		if (storage_kind_ == StorageKind::inline_bytes) {
 			std::memcpy(storage_.inline_bytes, other.storage_.inline_bytes, kInlineStorageBytes);
+		} else if (storage_kind_ == StorageKind::stream) {
+			storage_.offset_ = other.storage_.offset_;
 		} else {
 			storage_.ptr = other.storage_.ptr;
 		}
@@ -1621,6 +1623,10 @@ public:
 
 	/// Number of item datasets.
 	[[nodiscard]] inline int size() const { return static_cast<int>(seq_.size()); }
+	/// Absolute offset of this sequence value in the root stream.
+	[[nodiscard]] std::size_t value_offset() const noexcept { return value_offset_; }
+	/// Set absolute offset of this sequence value in the root stream.
+	void set_value_offset(std::size_t value_offset) noexcept { value_offset_ = value_offset; }
 
 	/// Create and append a new item dataset; returns the created dataset.
 	DataSet* add_dataset();
@@ -1648,6 +1654,7 @@ public:
 
 private:
 	DataSet* root_dataset_{nullptr};
+	std::size_t value_offset_{0};
 	std::vector<std::unique_ptr<DataSet>> seq_;
 };
 
@@ -1706,6 +1713,10 @@ private:
 	[[nodiscard]] DataSet* root_dataset() const noexcept { return root_dataset_; }
 	/// Transfer syntax associated with this pixel sequence.
 	[[nodiscard]] uid::WellKnown transfer_syntax_uid() const noexcept { return transfer_syntax_; }
+	/// Absolute offset of this pixel sequence value in the root stream.
+	[[nodiscard]] std::size_t value_offset() const noexcept { return value_offset_; }
+	/// Set absolute offset of this pixel sequence value in the root stream.
+	void set_value_offset(std::size_t value_offset) noexcept { value_offset_ = value_offset; }
 	/// Base offset of the pixel sequence within the root stream.
 	[[nodiscard]] std::size_t base_offset() const noexcept { return base_offset_; }
 	/// Offset of the basic offset table within the stream.
@@ -1734,6 +1745,7 @@ private:
 	DataSet* root_dataset_{nullptr};
 	uid::WellKnown transfer_syntax_{};
 	std::unique_ptr<InStream> stream_;
+	std::size_t value_offset_{0};
 	std::size_t base_offset_{0};
 	std::size_t basic_offset_table_offset_{0};
 	std::size_t basic_offset_table_count_{0};
@@ -1745,16 +1757,19 @@ private:
 
 inline DataElement::DataElement(Tag tag, VR vr, std::size_t length, std::size_t offset,
     DataSet* parent) noexcept
-    : tag_(tag), vr_(vr), storage_kind_(StorageKind::none), length_(length), offset_(offset),
+    : tag_(tag), vr_(vr), storage_kind_(StorageKind::none), length_(length),
       storage_(), parent_(parent) {
 	if (vr_.is_sequence()) {
 		storage_.seq = new Sequence(parent_);
+		storage_.seq->set_value_offset(offset);
 		storage_kind_ = StorageKind::sequence;
 	} else if (vr_.is_pixel_sequence()) {
 		const auto ts = parent_ ? parent_->transfer_syntax_uid() : uid::WellKnown{};
 		storage_.pixseq = new PixelSequence(parent_, ts);
+		storage_.pixseq->set_value_offset(offset);
 		storage_kind_ = StorageKind::pixel_sequence;
 	} else if (parent_) {
+		storage_.offset_ = offset;
 		storage_kind_ = StorageKind::stream;
 	}
 }
@@ -1777,6 +1792,40 @@ inline void DataElement::release_storage() noexcept {
 	}
 	storage_.ptr = nullptr;
 	storage_kind_ = StorageKind::none;
+}
+
+inline std::size_t DataElement::offset() const noexcept {
+	switch (storage_kind_) {
+	case StorageKind::stream:
+		return storage_.offset_;
+	case StorageKind::sequence:
+		return storage_.seq ? storage_.seq->value_offset() : 0;
+	case StorageKind::pixel_sequence:
+		return storage_.pixseq ? storage_.pixseq->value_offset() : 0;
+	default:
+		return 0;
+	}
+}
+
+inline void DataElement::set_offset(std::size_t offset) noexcept {
+	switch (storage_kind_) {
+	case StorageKind::stream:
+	case StorageKind::none:
+		storage_.offset_ = offset;
+		break;
+	case StorageKind::sequence:
+		if (storage_.seq) {
+			storage_.seq->set_value_offset(offset);
+		}
+		break;
+	case StorageKind::pixel_sequence:
+		if (storage_.pixseq) {
+			storage_.pixseq->set_value_offset(offset);
+		}
+		break;
+	default:
+		break;
+	}
 }
 
 inline void* DataElement::data() const noexcept {

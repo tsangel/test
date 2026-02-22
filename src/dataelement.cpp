@@ -276,7 +276,7 @@ std::span<const std::uint8_t> DataElement::value_span() const {
 		if (!parent_) {
 			return {};
 		}
-		return parent_->stream().get_span(offset_, length_);
+		return parent_->stream().get_span(storage_.offset_, length_);
 	case StorageKind::none:
 	case StorageKind::sequence:
 	case StorageKind::pixel_sequence:
@@ -295,7 +295,7 @@ void* DataElement::value_ptr() const {
 		if (!parent_) {
 			return nullptr;
 		}
-		return parent_->stream().get_pointer(offset_, length_);
+		return parent_->stream().get_pointer(storage_.offset_, length_);
 	case StorageKind::sequence:
 		return storage_.seq;
 	case StorageKind::pixel_sequence:
