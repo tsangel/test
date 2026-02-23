@@ -236,79 +236,189 @@ int main() {
 				fail("DataElement::from_int_vector should reject out-of-range value for US");
 			}
 		}
-	{
-		dicom::DataElement signed_very_long_elem("Rows"_tag, dicom::VR::SV, 0, 0, nullptr);
-		constexpr long long kValue = 4294967296LL;
-		if (!signed_very_long_elem.from_longlong(kValue)) {
-			fail("DataElement::from_longlong should encode SV");
+		{
+			dicom::DataElement signed_very_long_elem("Rows"_tag, dicom::VR::SV, 0, 0, nullptr);
+			constexpr long long kValue = 4294967296LL;
+			if (!signed_very_long_elem.from_longlong(kValue)) {
+				fail("DataElement::from_longlong should encode SV");
+			}
+			if (signed_very_long_elem.to_longlong().value_or(0) != kValue) {
+				fail("DataElement::from_longlong SV roundtrip mismatch");
+			}
+			dicom::DataElement signed_long_elem("Rows"_tag, dicom::VR::SL, 0, 0, nullptr);
+			if (signed_long_elem.from_longlong(kValue)) {
+				fail("DataElement::from_longlong should reject out-of-range value for SL");
+			}
 		}
-		if (signed_very_long_elem.to_longlong().value_or(0) != kValue) {
-			fail("DataElement::from_longlong SV roundtrip mismatch");
+		{
+			dicom::DataElement vector_elem("Rows"_tag, dicom::VR::SV, 0, 0, nullptr);
+			const std::array<long long, 2> values{4294967296LL, 7LL};
+			if (!vector_elem.from_longlong_vector(values)) {
+				fail("DataElement::from_longlong_vector should encode SV");
+			}
+			auto decoded = vector_elem.to_longlong_vector();
+			if (!decoded || *decoded != std::vector<long long>{4294967296LL, 7LL}) {
+				fail("DataElement::from_longlong_vector SV roundtrip mismatch");
+			}
+			dicom::DataElement narrow_elem("Rows"_tag, dicom::VR::SL, 0, 0, nullptr);
+			if (narrow_elem.from_longlong_vector(values)) {
+				fail("DataElement::from_longlong_vector should reject out-of-range value for SL");
+			}
 		}
-		dicom::DataElement signed_long_elem("Rows"_tag, dicom::VR::SL, 0, 0, nullptr);
-		if (signed_long_elem.from_longlong(kValue)) {
-			fail("DataElement::from_longlong should reject out-of-range value for SL");
+		{
+			dicom::DataElement fd_elem("SliceThickness"_tag, dicom::VR::FD, 0, 0, nullptr);
+			if (!fd_elem.from_double(12.5)) {
+				fail("DataElement::from_double should encode FD");
+			}
+			if (fd_elem.to_double().value_or(0.0) != 12.5) {
+				fail("DataElement::from_double FD roundtrip mismatch");
+			}
+
+			dicom::DataElement fl_elem("SliceThickness"_tag, dicom::VR::FL, 0, 0, nullptr);
+			if (!fl_elem.from_double(3.25)) {
+				fail("DataElement::from_double should encode FL");
+			}
+			if (fl_elem.to_double().value_or(0.0) != 3.25) {
+				fail("DataElement::from_double FL roundtrip mismatch");
+			}
+
+			dicom::DataElement ds_elem("SliceThickness"_tag, dicom::VR::DS, 0, 0, nullptr);
+			if (!ds_elem.from_double(1.5)) {
+				fail("DataElement::from_double should encode DS");
+			}
+			if (ds_elem.to_double().value_or(0.0) != 1.5) {
+				fail("DataElement::from_double DS roundtrip mismatch");
+			}
+
+			dicom::DataElement unsupported_elem("Rows"_tag, dicom::VR::US, 0, 0, nullptr);
+			if (unsupported_elem.from_double(1.0)) {
+				fail("DataElement::from_double should reject unsupported VR");
+			}
 		}
-	}
-	{
-		dicom::DataElement vector_elem("Rows"_tag, dicom::VR::SV, 0, 0, nullptr);
-		const std::array<long long, 2> values{4294967296LL, 7LL};
-		if (!vector_elem.from_longlong_vector(values)) {
-			fail("DataElement::from_longlong_vector should encode SV");
+		{
+			dicom::DataElement fd_vec_elem("SliceThickness"_tag, dicom::VR::FD, 0, 0, nullptr);
+			const std::array<double, 3> values{1.5, 2.25, 3.75};
+			if (!fd_vec_elem.from_double_vector(values)) {
+				fail("DataElement::from_double_vector should encode FD");
+			}
+			auto decoded = fd_vec_elem.to_double_vector();
+			if (!decoded || *decoded != std::vector<double>{1.5, 2.25, 3.75}) {
+				fail("DataElement::from_double_vector FD roundtrip mismatch");
+			}
+
+			dicom::DataElement ds_vec_elem("SliceThickness"_tag, dicom::VR::DS, 0, 0, nullptr);
+			if (!ds_vec_elem.from_double_vector(values)) {
+				fail("DataElement::from_double_vector should encode DS");
+			}
+			auto ds_decoded = ds_vec_elem.to_double_vector();
+			if (!ds_decoded || *ds_decoded != std::vector<double>{1.5, 2.25, 3.75}) {
+				fail("DataElement::from_double_vector DS roundtrip mismatch");
+			}
 		}
-		auto decoded = vector_elem.to_longlong_vector();
-		if (!decoded || *decoded != std::vector<long long>{4294967296LL, 7LL}) {
-			fail("DataElement::from_longlong_vector SV roundtrip mismatch");
+		{
+			const dicom::Tag offending_tag(0x0000, 0x0901);
+			dicom::DataElement tag_elem(offending_tag, dicom::VR::AT, 0, 0, nullptr);
+			const dicom::Tag expected(0x0010, 0x0020);
+			if (!tag_elem.from_tag(expected)) {
+				fail("DataElement::from_tag should encode AT");
+			}
+			if (tag_elem.to_tag().value_or(dicom::Tag()) != expected) {
+				fail("DataElement::from_tag AT roundtrip mismatch");
+			}
+
+			dicom::DataElement tag_vec_elem(offending_tag, dicom::VR::AT, 0, 0, nullptr);
+			const std::array<dicom::Tag, 3> tags{
+			    dicom::Tag(0x0010, 0x0010),
+			    dicom::Tag(0x0010, 0x0020),
+			    dicom::Tag(0x0008, 0x0018)};
+			if (!tag_vec_elem.from_tag_vector(tags)) {
+				fail("DataElement::from_tag_vector should encode AT");
+			}
+			auto decoded = tag_vec_elem.to_tag_vector();
+			if (!decoded ||
+			    *decoded != std::vector<dicom::Tag>{dicom::Tag(0x0010, 0x0010),
+			        dicom::Tag(0x0010, 0x0020), dicom::Tag(0x0008, 0x0018)}) {
+				fail("DataElement::from_tag_vector AT roundtrip mismatch");
+			}
+
+			dicom::DataElement unsupported_elem("Rows"_tag, dicom::VR::US, 0, 0, nullptr);
+			if (unsupported_elem.from_tag(expected)) {
+				fail("DataElement::from_tag should reject non-AT VR");
+			}
 		}
-		dicom::DataElement narrow_elem("Rows"_tag, dicom::VR::SL, 0, 0, nullptr);
-		if (narrow_elem.from_longlong_vector(values)) {
-			fail("DataElement::from_longlong_vector should reject out-of-range value for SL");
+		{
+			dicom::DataElement patient_name("PatientName"_tag, dicom::VR::PN, 0, 0, nullptr);
+			if (!patient_name.from_string_view("DOE^JOHN")) {
+				fail("DataElement::from_string_view should encode PN");
+			}
+			if ((patient_name.length() & 1u) != 0u) {
+				fail("DataElement::from_string_view should store even-length value");
+			}
+			const auto text = patient_name.to_string_view();
+			if (!text || *text != "DOE^JOHN") {
+				fail("DataElement::from_string_view PN roundtrip mismatch");
+			}
+			if (!patient_name.from_string_view("A")) {
+				fail("DataElement::from_string_view should encode odd-length PN");
+			}
+			if (patient_name.length() != 2) {
+				fail("DataElement::from_string_view should pad odd-length PN to even");
+			}
 		}
-	}
-	{
-		dicom::DataElement patient_name("PatientName"_tag, dicom::VR::PN, 0, 0, nullptr);
-		if (!patient_name.from_string_view("DOE^JOHN")) {
-			fail("DataElement::from_string_view should encode PN");
+		{
+			dicom::DataElement patient_names("PatientName"_tag, dicom::VR::PN, 0, 0, nullptr);
+			const std::array<std::string_view, 2> names{"DOE^JOHN", "SMITH^ALICE"};
+			if (!patient_names.from_string_views(names)) {
+				fail("DataElement::from_string_views should encode PN");
+			}
+			auto decoded = patient_names.to_string_views();
+			if (!decoded ||
+			    *decoded != std::vector<std::string_view>{"DOE^JOHN", "SMITH^ALICE"}) {
+				fail("DataElement::from_string_views PN roundtrip mismatch");
+			}
+
+			dicom::DataElement ui_values("SOPInstanceUID"_tag, dicom::VR::UI, 0, 0, nullptr);
+			const std::array<std::string_view, 2> uids{"1.2.3", "1.2.840.10008.1.2"};
+			if (!ui_values.from_string_views(uids)) {
+				fail("DataElement::from_string_views should encode multi-value UI");
+			}
+			auto ui_decoded = ui_values.to_string_views();
+			if (!ui_decoded ||
+			    *ui_decoded != std::vector<std::string_view>{"1.2.3", "1.2.840.10008.1.2"}) {
+				fail("DataElement::from_string_views UI roundtrip mismatch");
+			}
+
+			dicom::DataElement url_elem("RetrieveURL"_tag, dicom::VR::UR, 0, 0, nullptr);
+			const std::array<std::string_view, 2> urls{"https://a", "https://b"};
+			if (url_elem.from_string_views(urls)) {
+				fail("DataElement::from_string_views should reject multi-value UR");
+			}
 		}
-		if ((patient_name.length() & 1u) != 0u) {
-			fail("DataElement::from_string_view should store even-length value");
+		{
+			auto ts_uid = dicom::uid::from_keyword("ImplicitVRLittleEndian");
+			if (!ts_uid) {
+				fail("uid::from_keyword should resolve transfer syntax UID");
+			}
+			dicom::DataElement ts_elem("TransferSyntaxUID"_tag, dicom::VR::UI, 0, 0, nullptr);
+			if (!ts_elem.from_uid(*ts_uid)) {
+				fail("DataElement::from_uid should encode well-known UID");
+			}
+			if (!ts_elem.from_transfer_syntax_uid(*ts_uid)) {
+				fail("DataElement::from_transfer_syntax_uid should encode transfer syntax UID");
+			}
+			auto roundtrip = ts_elem.to_transfer_syntax_uid();
+			if (!roundtrip || roundtrip->value() != ts_uid->value()) {
+				fail("DataElement::from_transfer_syntax_uid roundtrip mismatch");
+			}
+			auto generated = dicom::uid::generate_uid();
+			if (!ts_elem.from_uid(generated)) {
+				fail("DataElement::from_uid(Generated) should encode generated UID");
+			}
+			auto generated_roundtrip = ts_elem.to_uid_string();
+			if (!generated_roundtrip || *generated_roundtrip != std::string(generated.value())) {
+				fail("DataElement::from_uid(Generated) roundtrip mismatch");
+			}
 		}
-		const auto text = patient_name.to_string_view();
-		if (!text || *text != "DOE^JOHN") {
-			fail("DataElement::from_string_view PN roundtrip mismatch");
-		}
-		if (!patient_name.from_string_view("A")) {
-			fail("DataElement::from_string_view should encode odd-length PN");
-		}
-		if (patient_name.length() != 2) {
-			fail("DataElement::from_string_view should pad odd-length PN to even");
-		}
-	}
-	{
-		auto ts_uid = dicom::uid::from_keyword("ImplicitVRLittleEndian");
-		if (!ts_uid) {
-			fail("uid::from_keyword should resolve transfer syntax UID");
-		}
-		dicom::DataElement ts_elem("TransferSyntaxUID"_tag, dicom::VR::UI, 0, 0, nullptr);
-		if (!ts_elem.from_uid(*ts_uid)) {
-			fail("DataElement::from_uid should encode well-known UID");
-		}
-		if (!ts_elem.from_transfer_syntax_uid(*ts_uid)) {
-			fail("DataElement::from_transfer_syntax_uid should encode transfer syntax UID");
-		}
-		auto roundtrip = ts_elem.to_transfer_syntax_uid();
-		if (!roundtrip || roundtrip->value() != ts_uid->value()) {
-			fail("DataElement::from_transfer_syntax_uid roundtrip mismatch");
-		}
-		auto generated = dicom::uid::generate_uid();
-		if (!ts_elem.from_uid(generated)) {
-			fail("DataElement::from_uid(Generated) should encode generated UID");
-		}
-		auto generated_roundtrip = ts_elem.to_uid_string();
-		if (!generated_roundtrip || *generated_roundtrip != std::string(generated.value())) {
-			fail("DataElement::from_uid(Generated) roundtrip mismatch");
-		}
-	}
 	{
 		auto sop_uid = dicom::uid::from_keyword("SecondaryCaptureImageStorage");
 		if (!sop_uid) {

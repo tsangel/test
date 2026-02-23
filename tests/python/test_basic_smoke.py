@@ -205,6 +205,34 @@ def test_uid_generation_helpers():
 	assert dicom.is_valid_uid_text_strict(dicom.generate_study_instance_uid())
 
 
+def test_dataelement_from_helpers_roundtrip():
+	ds = dicom.DataSet()
+
+	fd_elem = ds.add_dataelement(dicom.Tag("SliceThickness"), dicom.VR.FD)
+	assert fd_elem.from_double(2.5)
+	assert fd_elem.to_double() == 2.5
+
+	ds_elem = ds.add_dataelement(dicom.Tag("WindowCenter"), dicom.VR.DS)
+	assert ds_elem.from_double_vector([1.5, 2.5, 3.5])
+	assert ds_elem.to_double_vector() == [1.5, 2.5, 3.5]
+
+	at_single = ds.add_dataelement(dicom.Tag.from_value(0x00000901), dicom.VR.AT)
+	patient_id = dicom.Tag("PatientID")
+	assert at_single.from_tag(patient_id)
+	assert int(at_single.to_tag()) == int(patient_id)
+
+	at_vector = ds.add_dataelement(dicom.Tag.from_value(0x00000902), dicom.VR.AT)
+	expected_tags = [dicom.Tag("Rows"), dicom.Tag("Columns")]
+	assert at_vector.from_tag_vector(expected_tags)
+	assert [int(tag) for tag in at_vector.to_tag_vector()] == [int(tag) for tag in expected_tags]
+
+	pn_elem = ds.add_dataelement(dicom.Tag("PatientName"), dicom.VR.PN)
+	assert pn_elem.from_string_view("DOE^JOHN")
+	assert pn_elem.to_string_view() == "DOE^JOHN"
+	assert pn_elem.from_string_views(["DOE^JOHN", "SMITH^ALICE"])
+	assert pn_elem.to_string_views() == ["DOE^JOHN", "SMITH^ALICE"]
+
+
 def test_dicomfile_dir_includes_dataset_members():
 	df = dicom.read_file(_test_file())
 	names = dir(df)

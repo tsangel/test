@@ -1099,9 +1099,22 @@ public:
 	/// Encode and store multiple integer values according to this element VR.
 	/// Returns false when VR is unsupported for integer assignment or any value is out of range.
 	bool from_longlong_vector(std::span<const long long> values);
+	/// Encode and store a single floating-point value according to this element VR.
+	/// Returns false when VR is unsupported for floating-point assignment or value is out of range.
+	bool from_double(double value);
+	/// Encode and store multiple floating-point values according to this element VR.
+	/// Returns false when VR is unsupported for floating-point assignment or any value is invalid.
+	bool from_double_vector(std::span<const double> values);
+	/// Encode and store a single tag value (AT VR only).
+	bool from_tag(Tag value);
+	/// Encode and store multiple tag values (AT VR only).
+	bool from_tag_vector(std::span<const Tag> values);
 	/// Encode and store textual bytes for string VRs.
 	/// For UI VR this validates normalized UID text and applies UI padding rules.
 	bool from_string_view(std::string_view value);
+	/// Encode and store multiple textual values for string VRs.
+	/// Values are joined with '\' for delimited string VRs.
+	bool from_string_views(std::span<const std::string_view> values);
 	/// Encode and store a well-known UID value (UI VR only).
 	bool from_uid(uid::WellKnown uid);
 	/// Encode and store a generated UID value (UI VR only).

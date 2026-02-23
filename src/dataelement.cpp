@@ -232,6 +232,109 @@ bool assign_integer_string_from_values(DataElement& element, std::span<const Sou
 	return true;
 }
 
+template <typename T>
+bool assign_floating_from_double(DataElement& element, double value, bool little_endian) {
+	static_assert(
+	    std::is_floating_point_v<T>,
+	    "assign_floating_from_double requires floating-point target type");
+	if (!std::isfinite(value)) {
+		return false;
+	}
+	if constexpr (sizeof(T) < sizeof(double)) {
+		constexpr double kMax = static_cast<double>(std::numeric_limits<T>::max());
+		if (value < -kMax || value > kMax) {
+			return false;
+		}
+	}
+
+	const auto encoded = static_cast<T>(value);
+	if (!std::isfinite(encoded)) {
+		return false;
+	}
+
+	using Bits = std::conditional_t<sizeof(T) == 4, std::uint32_t, std::uint64_t>;
+	const Bits bits = std::bit_cast<Bits>(encoded);
+	element.reserve_value_bytes(sizeof(T));
+	auto dst = element.value_span();
+	endian::store_value<Bits>(const_cast<std::uint8_t*>(dst.data()), bits, little_endian);
+	return true;
+}
+
+template <typename T>
+bool assign_floating_vector_from_double(
+    DataElement& element, std::span<const double> values, bool little_endian) {
+	static_assert(
+	    std::is_floating_point_v<T>,
+	    "assign_floating_vector_from_double requires floating-point target type");
+
+	if (values.empty()) {
+		element.reserve_value_bytes(0);
+		return true;
+	}
+	if (values.size() > std::numeric_limits<std::size_t>::max() / sizeof(T)) {
+		return false;
+	}
+
+	const std::size_t total_bytes = values.size() * sizeof(T);
+	element.reserve_value_bytes(total_bytes);
+	auto dst = element.value_span();
+	auto* writable = const_cast<std::uint8_t*>(dst.data());
+	using Bits = std::conditional_t<sizeof(T) == 4, std::uint32_t, std::uint64_t>;
+	for (std::size_t i = 0; i < values.size(); ++i) {
+		const double value = values[i];
+		if (!std::isfinite(value)) {
+			return false;
+		}
+		if constexpr (sizeof(T) < sizeof(double)) {
+			constexpr double kMax = static_cast<double>(std::numeric_limits<T>::max());
+			if (value < -kMax || value > kMax) {
+				return false;
+			}
+		}
+		const auto encoded = static_cast<T>(value);
+		if (!std::isfinite(encoded)) {
+			return false;
+		}
+		const Bits bits = std::bit_cast<Bits>(encoded);
+		endian::store_value<Bits>(writable + (i * sizeof(T)), bits, little_endian);
+	}
+	return true;
+}
+
+bool assign_decimal_string_from_double(DataElement& element, double value) {
+	if (!std::isfinite(value)) {
+		return false;
+	}
+	const std::string text = fmt::format("{:.17g}", value);
+	const auto* ptr = reinterpret_cast<const std::uint8_t*>(text.data());
+	store_padded_value_bytes(element, std::span<const std::uint8_t>(ptr, text.size()));
+	return true;
+}
+
+bool assign_decimal_string_vector_from_double(
+    DataElement& element, std::span<const double> values) {
+	if (values.empty()) {
+		element.reserve_value_bytes(0);
+		return true;
+	}
+
+	std::string text;
+	text.reserve(values.size() * 24);
+	for (std::size_t i = 0; i < values.size(); ++i) {
+		const double value = values[i];
+		if (!std::isfinite(value)) {
+			return false;
+		}
+		if (i != 0) {
+			text.push_back('\\');
+		}
+		text += fmt::format("{:.17g}", value);
+	}
+	const auto* ptr = reinterpret_cast<const std::uint8_t*>(text.data());
+	store_padded_value_bytes(element, std::span<const std::uint8_t>(ptr, text.size()));
+	return true;
+}
+
 bool assign_uid_string(DataElement& element, std::string_view uid_text) {
 	if (element.vr() != dicom::VR::UI) {
 		return false;
@@ -738,6 +841,119 @@ bool DataElement::from_longlong_vector(std::span<const long long> values) {
 	return true;
 }
 
+bool DataElement::from_double(double value) {
+	if (vr_.is_sequence() || vr_.is_pixel_sequence()) {
+		return report_from_assignment_failure(
+		    "DataElement::from_double", *this, "floating-point assignment is not supported for SQ/PX");
+	}
+
+	const bool little_endian = element_value_is_little_endian(*this);
+	bool ok = false;
+	switch (static_cast<std::uint16_t>(vr_)) {
+	case VR::FL_val:
+		ok = assign_floating_from_double<float>(*this, value, little_endian);
+		break;
+	case VR::FD_val:
+		ok = assign_floating_from_double<double>(*this, value, little_endian);
+		break;
+	case VR::DS_val:
+		ok = assign_decimal_string_from_double(*this, value);
+		break;
+	default:
+		return report_from_assignment_failure(
+		    "DataElement::from_double", *this, "unsupported VR for from_double");
+	}
+
+	if (!ok) {
+		return report_from_assignment_failure(
+		    "DataElement::from_double", *this, "value out of range for VR");
+	}
+	return true;
+}
+
+bool DataElement::from_double_vector(std::span<const double> values) {
+	if (vr_.is_sequence() || vr_.is_pixel_sequence()) {
+		return report_from_assignment_failure(
+		    "DataElement::from_double_vector", *this,
+		    "floating-point assignment is not supported for SQ/PX");
+	}
+
+	const bool little_endian = element_value_is_little_endian(*this);
+	bool ok = false;
+	switch (static_cast<std::uint16_t>(vr_)) {
+	case VR::FL_val:
+		ok = assign_floating_vector_from_double<float>(*this, values, little_endian);
+		break;
+	case VR::FD_val:
+		ok = assign_floating_vector_from_double<double>(*this, values, little_endian);
+		break;
+	case VR::DS_val:
+		ok = assign_decimal_string_vector_from_double(*this, values);
+		break;
+	default:
+		return report_from_assignment_failure(
+		    "DataElement::from_double_vector", *this, "unsupported VR for from_double_vector");
+	}
+
+	if (!ok) {
+		return report_from_assignment_failure(
+		    "DataElement::from_double_vector", *this,
+		    "one or more values are out of range for VR");
+	}
+	return true;
+}
+
+bool DataElement::from_tag(Tag value) {
+	if (vr_.is_sequence() || vr_.is_pixel_sequence()) {
+		return report_from_assignment_failure(
+		    "DataElement::from_tag", *this, "tag assignment is not supported for SQ/PX");
+	}
+	if (vr_ != dicom::VR::AT) {
+		return report_from_assignment_failure(
+		    "DataElement::from_tag", *this, "AT VR required for from_tag");
+	}
+
+	const bool little_endian = element_value_is_little_endian(*this);
+	reserve_value_bytes(4);
+	auto dst = value_span();
+	auto* writable = const_cast<std::uint8_t*>(dst.data());
+	endian::store_value<std::uint16_t>(writable, value.group(), little_endian);
+	endian::store_value<std::uint16_t>(writable + 2, value.element(), little_endian);
+	return true;
+}
+
+bool DataElement::from_tag_vector(std::span<const Tag> values) {
+	if (vr_.is_sequence() || vr_.is_pixel_sequence()) {
+		return report_from_assignment_failure(
+		    "DataElement::from_tag_vector", *this, "tag assignment is not supported for SQ/PX");
+	}
+	if (vr_ != dicom::VR::AT) {
+		return report_from_assignment_failure(
+		    "DataElement::from_tag_vector", *this, "AT VR required for from_tag_vector");
+	}
+	if (values.empty()) {
+		reserve_value_bytes(0);
+		return true;
+	}
+	if (values.size() > std::numeric_limits<std::size_t>::max() / 4) {
+		return report_from_assignment_failure(
+		    "DataElement::from_tag_vector", *this, "too many tag values for AT element");
+	}
+
+	const bool little_endian = element_value_is_little_endian(*this);
+	const std::size_t total_bytes = values.size() * 4;
+	reserve_value_bytes(total_bytes);
+	auto dst = value_span();
+	auto* writable = const_cast<std::uint8_t*>(dst.data());
+	for (std::size_t i = 0; i < values.size(); ++i) {
+		const auto& tag = values[i];
+		const auto offset = i * 4;
+		endian::store_value<std::uint16_t>(writable + offset, tag.group(), little_endian);
+		endian::store_value<std::uint16_t>(writable + offset + 2, tag.element(), little_endian);
+	}
+	return true;
+}
+
 bool DataElement::from_string_view(std::string_view value) {
 	if (vr_.is_sequence() || vr_.is_pixel_sequence()) {
 		return report_from_assignment_failure(
@@ -753,6 +969,71 @@ bool DataElement::from_string_view(std::string_view value) {
 
 	const auto* ptr = reinterpret_cast<const std::uint8_t*>(value.data());
 	store_padded_value_bytes(*this, std::span<const std::uint8_t>(ptr, value.size()));
+	return true;
+}
+
+bool DataElement::from_string_views(std::span<const std::string_view> values) {
+	if (vr_.is_sequence() || vr_.is_pixel_sequence()) {
+		return report_from_assignment_failure(
+		    "DataElement::from_string_views", *this, "string assignment is not supported for SQ/PX");
+	}
+	if (values.empty()) {
+		reserve_value_bytes(0);
+		return true;
+	}
+	if (vr_ == dicom::VR::UI) {
+		std::string text;
+		text.reserve(values.size() * 66);
+		for (std::size_t i = 0; i < values.size(); ++i) {
+			std::string normalized = uid::normalize_uid_text(values[i]);
+			if (!uid::is_valid_uid_text_strict(normalized)) {
+				return report_from_assignment_failure(
+				    "DataElement::from_string_views", *this,
+				    "invalid UID text in one or more values");
+			}
+			if (i != 0) {
+				text.push_back('\\');
+			}
+			text += normalized;
+		}
+		const auto* ptr = reinterpret_cast<const std::uint8_t*>(text.data());
+		store_padded_value_bytes(*this, std::span<const std::uint8_t>(ptr, text.size()));
+		return true;
+	}
+	if (!vr_.is_string()) {
+		return report_from_assignment_failure(
+		    "DataElement::from_string_views", *this, "unsupported VR for from_string_views");
+	}
+
+	switch (static_cast<std::uint16_t>(vr_)) {
+	case VR::LT_val:
+	case VR::ST_val:
+	case VR::UT_val:
+	case VR::UR_val:
+		if (values.size() != 1) {
+			return report_from_assignment_failure(
+			    "DataElement::from_string_views", *this,
+			    "VR requires a single value for from_string_views");
+		}
+		return from_string_view(values.front());
+	default:
+		break;
+	}
+
+	std::string text;
+	std::size_t total_length = values.size() > 1 ? values.size() - 1 : 0;
+	for (const auto value : values) {
+		total_length += value.size();
+	}
+	text.reserve(total_length);
+	for (std::size_t i = 0; i < values.size(); ++i) {
+		if (i != 0) {
+			text.push_back('\\');
+		}
+		text.append(values[i].data(), values[i].size());
+	}
+	const auto* ptr = reinterpret_cast<const std::uint8_t*>(text.data());
+	store_padded_value_bytes(*this, std::span<const std::uint8_t>(ptr, text.size()));
 	return true;
 }
 

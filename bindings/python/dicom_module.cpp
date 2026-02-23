@@ -707,17 +707,46 @@ NB_MODULE(_dicomsdl, m) {
 	    },
 	    nb::rv_policy::reference_internal,
 	    "Return the nested Sequence if present; otherwise None.")
-		.def_prop_ro("pixel_sequence",
-	    [](DataElement& element) -> dicom::PixelSequence* {
-		    return element.pixel_sequence();
-	    },
-	    nb::rv_policy::reference_internal,
-	    "Return the nested PixelSequence if present; otherwise None.")
-	.def("to_uid_string",
-	    [](const DataElement& element) -> nb::object {
-	        auto v = element.to_uid_string();
-	        if (v) {
-	            return nb::cast(*v);
+			.def_prop_ro("pixel_sequence",
+		    [](DataElement& element) -> dicom::PixelSequence* {
+			    return element.pixel_sequence();
+		    },
+		    nb::rv_policy::reference_internal,
+		    "Return the nested PixelSequence if present; otherwise None.")
+		.def("from_double", &DataElement::from_double, nb::arg("value"),
+		    "Encode and store a floating-point value according to this element VR.")
+		.def("from_double_vector",
+		    [](DataElement& element, const std::vector<double>& values) {
+			    return element.from_double_vector(values);
+		    },
+		    nb::arg("values"),
+		    "Encode and store multiple floating-point values according to this element VR.")
+		.def("from_tag", &DataElement::from_tag, nb::arg("value"),
+		    "Encode and store a tag value (AT VR only).")
+		.def("from_tag_vector",
+		    [](DataElement& element, const std::vector<Tag>& values) {
+			    return element.from_tag_vector(values);
+		    },
+		    nb::arg("values"),
+		    "Encode and store multiple tag values (AT VR only).")
+		.def("from_string_view", &DataElement::from_string_view, nb::arg("value"),
+		    "Encode and store a textual value according to this element VR.")
+		.def("from_string_views",
+		    [](DataElement& element, const std::vector<std::string>& values) {
+			    std::vector<std::string_view> views;
+			    views.reserve(values.size());
+			    for (const auto& value : values) {
+				    views.push_back(value);
+			    }
+			    return element.from_string_views(views);
+		    },
+		    nb::arg("values"),
+		    "Encode and store multiple textual values according to this element VR.")
+		.def("to_uid_string",
+		    [](const DataElement& element) -> nb::object {
+		        auto v = element.to_uid_string();
+		        if (v) {
+		            return nb::cast(*v);
 	        }
 	        return nb::none();
 	    },
