@@ -1,4 +1,4 @@
-#include "big_endian_dataset_normalizer.h"
+#include "dataset_endian_converter.h"
 
 #include <dicom.h>
 #include <diagnostics.h>
@@ -29,9 +29,21 @@ constexpr std::uint16_t kPixelDataElement = 0x0010u;
 	        file_path, offset, reason));
 }
 
+[[nodiscard]] inline std::uint16_t load_u16_le(const std::uint8_t* ptr) noexcept {
+	return static_cast<std::uint16_t>((static_cast<std::uint16_t>(ptr[1]) << 8) |
+	                                  static_cast<std::uint16_t>(ptr[0]));
+}
+
 [[nodiscard]] inline std::uint16_t load_u16_be(const std::uint8_t* ptr) noexcept {
 	return static_cast<std::uint16_t>((static_cast<std::uint16_t>(ptr[0]) << 8) |
 	                                  static_cast<std::uint16_t>(ptr[1]));
+}
+
+[[nodiscard]] inline std::uint32_t load_u32_le(const std::uint8_t* ptr) noexcept {
+	return static_cast<std::uint32_t>(ptr[0]) |
+	       (static_cast<std::uint32_t>(ptr[1]) << 8) |
+	       (static_cast<std::uint32_t>(ptr[2]) << 16) |
+	       (static_cast<std::uint32_t>(ptr[3]) << 24);
 }
 
 [[nodiscard]] inline std::uint32_t load_u32_be(const std::uint8_t* ptr) noexcept {
@@ -41,9 +53,21 @@ constexpr std::uint16_t kPixelDataElement = 0x0010u;
 	       static_cast<std::uint32_t>(ptr[3]);
 }
 
+inline void store_u16_be(std::uint8_t* ptr, std::uint16_t value) noexcept {
+	ptr[0] = static_cast<std::uint8_t>((value >> 8) & 0xFFu);
+	ptr[1] = static_cast<std::uint8_t>(value & 0xFFu);
+}
+
 inline void store_u16_le(std::uint8_t* ptr, std::uint16_t value) noexcept {
 	ptr[0] = static_cast<std::uint8_t>(value & 0xFFu);
 	ptr[1] = static_cast<std::uint8_t>((value >> 8) & 0xFFu);
+}
+
+inline void store_u32_be(std::uint8_t* ptr, std::uint32_t value) noexcept {
+	ptr[0] = static_cast<std::uint8_t>((value >> 24) & 0xFFu);
+	ptr[1] = static_cast<std::uint8_t>((value >> 16) & 0xFFu);
+	ptr[2] = static_cast<std::uint8_t>((value >> 8) & 0xFFu);
+	ptr[3] = static_cast<std::uint8_t>(value & 0xFFu);
 }
 
 inline void store_u32_le(std::uint8_t* ptr, std::uint32_t value) noexcept {
@@ -89,7 +113,7 @@ void swap_lane_bytes(std::span<const std::uint8_t> src, std::span<std::uint8_t> 
 	}
 	if ((src.size() % lane_width) != 0) {
 		throw_normalizer_error(file_path, offset,
-		    "value length is not aligned to element byte width for big-endian normalization");
+		    "value length is not aligned to element byte width for dataset endian conversion");
 	}
 	for (std::size_t i = 0; i < src.size(); i += lane_width) {
 		for (std::size_t b = 0; b < lane_width; ++b) {
@@ -98,13 +122,19 @@ void swap_lane_bytes(std::span<const std::uint8_t> src, std::span<std::uint8_t> 
 	}
 }
 
-class big_endian_dataset_normalizer {
+class dataset_endian_converter {
 public:
-	big_endian_dataset_normalizer(std::span<const std::uint8_t> src,
-	    std::span<std::uint8_t> dst, const std::string& file_path) noexcept
-	    : src_(src), dst_(dst), file_path_(file_path) {}
+	enum class direction : std::uint8_t {
+		be_to_le = 0,
+		le_to_be = 1,
+	};
 
-	void normalize(std::size_t offset, std::size_t end) {
+	dataset_endian_converter(std::span<const std::uint8_t> src,
+	    std::span<std::uint8_t> dst, const std::string& file_path,
+	    direction conversion_direction) noexcept
+	    : src_(src), dst_(dst), file_path_(file_path), direction_(conversion_direction) {}
+
+	void convert(std::size_t offset, std::size_t end) {
 		auto pos = offset;
 		normalize_dataset_elements(pos, end, false);
 	}
@@ -129,8 +159,38 @@ private:
 	void ensure_available(std::size_t offset, std::size_t bytes) const {
 		if (offset > src_.size() || bytes > src_.size() - offset) {
 			throw_normalizer_error(file_path_, offset,
-			    "unexpected end of input while normalizing big-endian dataset");
+			    "unexpected end of input while converting dataset endianness");
 		}
+	}
+
+	[[nodiscard]] std::uint16_t load_u16(const std::uint8_t* ptr) const noexcept {
+		if (direction_ == direction::be_to_le) {
+			return load_u16_be(ptr);
+		}
+		return load_u16_le(ptr);
+	}
+
+	[[nodiscard]] std::uint32_t load_u32(const std::uint8_t* ptr) const noexcept {
+		if (direction_ == direction::be_to_le) {
+			return load_u32_be(ptr);
+		}
+		return load_u32_le(ptr);
+	}
+
+	void store_u16(std::uint8_t* ptr, std::uint16_t value) const noexcept {
+		if (direction_ == direction::be_to_le) {
+			store_u16_le(ptr, value);
+			return;
+		}
+		store_u16_be(ptr, value);
+	}
+
+	void store_u32(std::uint8_t* ptr, std::uint32_t value) const noexcept {
+		if (direction_ == direction::be_to_le) {
+			store_u32_le(ptr, value);
+			return;
+		}
+		store_u32_be(ptr, value);
 	}
 
 	[[nodiscard]] element_header parse_and_convert_element_header(std::size_t offset,
@@ -138,17 +198,17 @@ private:
 		ensure_available(offset, 8);
 
 		element_header header{};
-		header.group = load_u16_be(src_.data() + offset);
-		header.element = load_u16_be(src_.data() + offset + 2);
+		header.group = load_u16(src_.data() + offset);
+		header.element = load_u16(src_.data() + offset + 2);
 
-		store_u16_le(dst_.data() + offset, header.group);
-		store_u16_le(dst_.data() + offset + 2, header.element);
+		store_u16(dst_.data() + offset, header.group);
+		store_u16(dst_.data() + offset + 2, header.element);
 
 		if (header.group == kGroupItem) {
 			header.known_vr = false;
 			header.header_size = 8;
-			header.length = load_u32_be(src_.data() + offset + 4);
-			store_u32_le(dst_.data() + offset + 4, header.length);
+			header.length = load_u32(src_.data() + offset + 4);
+			store_u32(dst_.data() + offset + 4, header.length);
 			return header;
 		}
 
@@ -159,34 +219,34 @@ private:
 		if (!header.known_vr) {
 			// Unknown VR bytes: keep parser-compatible behavior (8-byte header + 32-bit VL).
 			header.header_size = 8;
-			header.length = load_u32_be(src_.data() + offset + 4);
-			store_u32_le(dst_.data() + offset + 4, header.length);
+			header.length = load_u32(src_.data() + offset + 4);
+			store_u32(dst_.data() + offset + 4, header.length);
 			return header;
 		}
 
 		header.explicit_16bit_vl = header.vr.uses_explicit_16bit_vl();
 		if (header.explicit_16bit_vl) {
 			header.header_size = 8;
-			header.length = load_u16_be(src_.data() + offset + 6);
-			store_u16_le(dst_.data() + offset + 6, static_cast<std::uint16_t>(header.length));
+			header.length = load_u16(src_.data() + offset + 6);
+			store_u16(dst_.data() + offset + 6, static_cast<std::uint16_t>(header.length));
 			return header;
 		}
 
 		// Explicit VR with reserved + 32-bit VL (normal form).
 		ensure_available(offset, 12);
-		const auto long_length = load_u32_be(src_.data() + offset + 8);
+		const auto long_length = load_u32(src_.data() + offset + 8);
 		const auto remaining_after_12 = end - (offset + 12);
 		if (long_length != 0xFFFFFFFFu && long_length > remaining_after_12) {
 			// Salvage malformed streams that used 16-bit VL despite long-form VR.
 			header.header_size = 8;
-			header.length = load_u16_be(src_.data() + offset + 6);
-			store_u16_le(dst_.data() + offset + 6, static_cast<std::uint16_t>(header.length));
+			header.length = load_u16(src_.data() + offset + 6);
+			store_u16(dst_.data() + offset + 6, static_cast<std::uint16_t>(header.length));
 			return header;
 		}
 
 		header.header_size = 12;
 		header.length = long_length;
-		store_u32_le(dst_.data() + offset + 8, header.length);
+		store_u32(dst_.data() + offset + 8, header.length);
 		return header;
 	}
 
@@ -240,7 +300,7 @@ private:
 
 			if (header.length > end - pos) {
 				throw_normalizer_error(file_path_, element_start,
-				    "value length exceeds remaining bytes during big-endian normalization");
+				    "value length exceeds remaining bytes during dataset endian conversion");
 			}
 
 			const auto value_offset = pos;
@@ -273,7 +333,7 @@ private:
 
 		if (item_length > end - pos) {
 			throw_normalizer_error(file_path_, pos,
-			    "item length exceeds remaining bytes during big-endian normalization");
+			    "item length exceeds remaining bytes during dataset endian conversion");
 		}
 
 		const auto item_end = pos + static_cast<std::size_t>(item_length);
@@ -291,7 +351,7 @@ private:
 			const auto header = parse_and_convert_element_header(pos, value_end);
 			if (header.group != kGroupItem) {
 				throw_normalizer_error(file_path_, pos,
-				    "SQ value contains a non-item tag during big-endian normalization");
+				    "SQ value contains a non-item tag during dataset endian conversion");
 			}
 
 			pos += header.header_size;
@@ -300,7 +360,7 @@ private:
 			}
 			if (header.element != kElemItem) {
 				throw_normalizer_error(file_path_, pos - header.header_size,
-				    "SQ value contains unknown item marker during big-endian normalization");
+				    "SQ value contains unknown item marker during dataset endian conversion");
 			}
 			normalize_sequence_item_payload(pos, value_end, header.length);
 		}
@@ -312,7 +372,7 @@ private:
 			const auto header = parse_and_convert_element_header(pos, end);
 			if (header.group != kGroupItem) {
 				throw_normalizer_error(file_path_, pos,
-				    "undefined-length SQ contains a non-item tag during big-endian normalization");
+				    "undefined-length SQ contains a non-item tag during dataset endian conversion");
 			}
 
 			pos += header.header_size;
@@ -324,12 +384,12 @@ private:
 			}
 			if (header.element != kElemItem) {
 				throw_normalizer_error(file_path_, pos - header.header_size,
-				    "undefined-length SQ contains unknown marker during big-endian normalization");
+				    "undefined-length SQ contains unknown marker during dataset endian conversion");
 			}
 			normalize_sequence_item_payload(pos, end, header.length);
 		}
 		throw_normalizer_error(file_path_, end,
-		    "missing sequence delimitation item in undefined-length SQ during big-endian normalization");
+		    "missing sequence delimitation item in undefined-length SQ during dataset endian conversion");
 	}
 
 	void normalize_pixel_sequence_undefined(std::size_t& pos, std::size_t end) {
@@ -338,7 +398,7 @@ private:
 			const auto header = parse_and_convert_element_header(pos, end);
 			if (header.group != kGroupItem) {
 				throw_normalizer_error(file_path_, pos,
-				    "encapsulated PixelData contains a non-item tag during big-endian normalization");
+				    "encapsulated PixelData contains a non-item tag during dataset endian conversion");
 			}
 
 			pos += header.header_size;
@@ -347,7 +407,7 @@ private:
 			}
 			if (header.element != kElemItem) {
 				throw_normalizer_error(file_path_, pos - header.header_size,
-				    "encapsulated PixelData contains unknown marker during big-endian normalization");
+				    "encapsulated PixelData contains unknown marker during dataset endian conversion");
 			}
 			if (header.length == 0xFFFFFFFFu) {
 				throw_normalizer_error(file_path_, pos - header.header_size,
@@ -355,17 +415,18 @@ private:
 			}
 			if (header.length > end - pos) {
 				throw_normalizer_error(file_path_, pos,
-				    "encapsulated PixelData item exceeds remaining bytes during big-endian normalization");
+				    "encapsulated PixelData item exceeds remaining bytes during dataset endian conversion");
 			}
 			pos += static_cast<std::size_t>(header.length);
 		}
 		throw_normalizer_error(file_path_, end,
-		    "missing sequence delimitation item in encapsulated PixelData during big-endian normalization");
+		    "missing sequence delimitation item in encapsulated PixelData during dataset endian conversion");
 	}
 
 	std::span<const std::uint8_t> src_;
 	std::span<std::uint8_t> dst_;
 	const std::string& file_path_;
+	direction direction_{direction::be_to_le};
 };
 
 } // namespace
@@ -383,9 +444,28 @@ std::vector<std::uint8_t> normalize_big_endian_dataset(
 		return output;
 	}
 
-	big_endian_dataset_normalizer normalizer(
-	    full_input, std::span<std::uint8_t>(output), file_path);
-	normalizer.normalize(dataset_start_offset, full_input.size());
+	dataset_endian_converter normalizer(full_input, std::span<std::uint8_t>(output),
+	    file_path, dataset_endian_converter::direction::be_to_le);
+	normalizer.convert(dataset_start_offset, full_input.size());
+	return output;
+}
+
+std::vector<std::uint8_t> convert_little_endian_dataset_to_big_endian(
+    std::span<const std::uint8_t> full_input, std::size_t dataset_start_offset,
+    const std::string& file_path) {
+	if (dataset_start_offset > full_input.size()) {
+		throw_normalizer_error(file_path, dataset_start_offset,
+		    "invalid little-endian dataset start offset");
+	}
+
+	std::vector<std::uint8_t> output(full_input.begin(), full_input.end());
+	if (dataset_start_offset == full_input.size()) {
+		return output;
+	}
+
+	dataset_endian_converter converter(full_input, std::span<std::uint8_t>(output),
+	    file_path, dataset_endian_converter::direction::le_to_be);
+	converter.convert(dataset_start_offset, full_input.size());
 	return output;
 }
 

@@ -15,6 +15,9 @@ namespace dicom {
 namespace pixel::detail {
 
 decode_backend select_decode_backend(uid::WellKnown ts) noexcept {
+	if (ts.is_uncompressed() && ts.is_encapsulated()) {
+		return decode_backend::encapsulated_uncompressed;
+	}
 	if (ts.is_uncompressed()) {
 		return decode_backend::raw;
 	}
@@ -711,6 +714,10 @@ void decode_frame_into(const DicomFile& df, std::size_t frame_index,
 	switch (backend) {
 	case detail::decode_backend::raw:
 		detail::decode_raw_into(df, info, frame_index, dst, dst_strides, effective_opt);
+		return;
+	case detail::decode_backend::encapsulated_uncompressed:
+		detail::decode_encapsulated_uncompressed_into(
+		    df, info, frame_index, dst, dst_strides, effective_opt);
 		return;
 	case detail::decode_backend::rle:
 		detail::decode_rle_into(df, info, frame_index, dst, dst_strides, effective_opt);

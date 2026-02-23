@@ -10,6 +10,7 @@ namespace dicom::pixel::detail {
 
 enum class decode_backend : std::uint8_t {
 	raw = 0,
+	encapsulated_uncompressed,
 	rle,
 	jpeg_family,
 	unsupported,
@@ -39,6 +40,10 @@ void run_planar_transform_copy(planar_transform transform, std::size_t bytes_per
     std::size_t src_row_bytes, std::size_t dst_row_bytes);
 
 void decode_raw_into(const DicomFile& df, const DicomFile::pixel_info_t& info,
+    std::size_t frame_index, std::span<std::uint8_t> dst,
+    const DecodeStrides& dst_strides, const DecodeOptions& opt);
+
+void decode_encapsulated_uncompressed_into(const DicomFile& df, const DicomFile::pixel_info_t& info,
     std::size_t frame_index, std::span<std::uint8_t> dst,
     const DecodeStrides& dst_strides, const DecodeOptions& opt);
 

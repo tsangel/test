@@ -100,6 +100,7 @@ setup(
     entry_points={
         "console_scripts": [
             "dicomdump=dicomsdl.dicomdump:main",
+            "dicomconv=dicomsdl.dicomconv:main",
         ],
     },
     include_package_data=True,

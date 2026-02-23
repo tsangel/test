@@ -1,8 +1,8 @@
 #include <dicom.h>
 #include <dicom_endian.h>
 #include <diagnostics.h>
-#include "deflated_dataset_inflater.h"
-#include "big_endian_dataset_normalizer.h"
+#include "dataset_deflate_codec.h"
+#include "dataset_endian_converter.h"
 #include <instream.h>
 
 #include <algorithm>
@@ -567,7 +567,7 @@ void DataSet::read_attached_stream(const ReadOptions& options) {
 	}
 	last_tag_loaded_ = Tag::from_value(0);
 	if (root_file_) {
-		root_file_->set_transfer_syntax("ExplicitVRLittleEndian"_uid);
+		root_file_->set_transfer_syntax_state_only("ExplicitVRLittleEndian"_uid);
 	} else {
 		explicit_vr_ = transfer_syntax_uses_explicit_vr("ExplicitVRLittleEndian"_uid);
 	}
@@ -587,12 +587,12 @@ void DataSet::read_attached_stream(const ReadOptions& options) {
 
 	const auto* transfer_syntax = get_dataelement("(0002,0010)"_tag);
 	if (auto well_known = transfer_syntax->to_transfer_syntax_uid()) {
-			if (root_file_) {
-				root_file_->set_transfer_syntax(*well_known);
-			} else {
-				explicit_vr_ = transfer_syntax_uses_explicit_vr(*well_known);
-			}
-		} else if (auto uid_value = transfer_syntax->to_uid_string()) {
+		if (root_file_) {
+			root_file_->set_transfer_syntax_state_only(*well_known);
+		} else {
+			explicit_vr_ = transfer_syntax_uses_explicit_vr(*well_known);
+		}
+	} else if (auto uid_value = transfer_syntax->to_uid_string()) {
 		diag::error(
 		    "DataSet::read_attached_stream file={} transfer_syntax_uid={} reason=unknown transfer syntax UID",
 		    path(), *uid_value);
@@ -632,9 +632,9 @@ void DataSet::read_attached_stream(const ReadOptions& options) {
 		attach_to_memory(stream_identifier, std::move(normalized_image));
 		stream_->seek(dataset_start_offset);
 
-			// Keep the public transfer syntax UID as-is, but parse the normalized body as LE explicit VR.
-			explicit_vr_ = true;
-		}
+		// Keep the public transfer syntax UID as-is, but parse the normalized body as LE explicit VR.
+		explicit_vr_ = true;
+	}
 
 	read_elements_until(options.load_until, stream_.get());
 	update_root_elements_reserve_hint(elements_.size());

@@ -1103,6 +1103,15 @@ NB_MODULE(_dicomsdl, m) {
 	    "DICOM file/session object that owns the root DataSet.")
 		.def_prop_ro("path", &DicomFile::path,
 		    "Identifier of the attached root stream (file path or provided memory name)")
+		.def_prop_ro("transfer_syntax_uid",
+		    [](const DicomFile& self) -> nb::object {
+			    const auto uid = self.transfer_syntax_uid();
+			    if (!uid.valid()) {
+				    return nb::none();
+			    }
+			    return nb::cast(uid);
+		    },
+		    "Current transfer syntax UID as a Uid object, or None if unavailable.")
 		.def_prop_ro("has_error", &DicomFile::has_error,
 		    "True if parsing recorded any error diagnostics or threw while reading.")
 		.def_prop_ro("error_message",
@@ -1127,6 +1136,27 @@ NB_MODULE(_dicomsdl, m) {
 		.def("rebuild_file_meta",
 		    [](DicomFile& self) { self.rebuild_file_meta(); },
 		    "Rebuild file meta group (0002,eeee) with standard minimum fields.")
+		.def("set_transfer_syntax",
+		    [](DicomFile& self, const Uid& transfer_syntax) {
+			    self.set_transfer_syntax(transfer_syntax);
+		    },
+		    nb::arg("transfer_syntax"),
+		    "Set transfer syntax using a Uid object and update file meta TransferSyntaxUID.")
+		.def("set_transfer_syntax",
+		    [](DicomFile& self, const std::string& transfer_syntax_text) {
+			    const auto uid = dicom::uid::lookup(transfer_syntax_text);
+			    if (!uid) {
+				    throw nb::value_error(
+				        ("Unknown DICOM UID: " + transfer_syntax_text).c_str());
+			    }
+			    if (uid->uid_type() != dicom::UidType::TransferSyntax) {
+				    throw nb::value_error(
+				        ("UID is not a Transfer Syntax UID: " + transfer_syntax_text).c_str());
+			    }
+			    self.set_transfer_syntax(*uid);
+		    },
+		    nb::arg("transfer_syntax"),
+		    "Set transfer syntax using a UID keyword or dotted UID string.")
 		.def("write_file",
 		    [](DicomFile& self, const std::string& path, bool include_preamble,
 		        bool write_file_meta, bool keep_existing_meta) {
@@ -1671,6 +1701,21 @@ m.def("uid_from_keyword",
     nb::arg("keyword"),
     "Resolve a UID keyword, raising ValueError if unknown.");
 
+m.def("transfer_syntax_uids",
+    []() {
+	    nb::list result;
+	    for (const auto& entry : dicom::kUidRegistry) {
+		    if (entry.uid_type != dicom::UidType::TransferSyntax) {
+			    continue;
+		    }
+		    if (auto uid = dicom::uid::from_value(entry.value)) {
+			    result.append(nb::cast(*uid));
+		    }
+	    }
+	    return result;
+    },
+    "Return all well-known Transfer Syntax UIDs in registry order.");
+
 m.def("uid_prefix",
     []() {
 	    const auto value = dicom::uid::uid_prefix();
@@ -1795,6 +1840,7 @@ m.def("generate_study_instance_uid",
 	    "lookup_uid",
 	    "uid_from_value",
 	    "uid_from_keyword",
+	    "transfer_syntax_uids",
 	    "uid_prefix",
 	    "implementation_class_uid",
 	    "implementation_version_name",

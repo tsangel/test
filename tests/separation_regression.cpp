@@ -59,6 +59,20 @@ void append_explicit_vr_le_16(std::vector<std::uint8_t>& out, dicom::Tag tag,
 	append_bytes(out, value);
 }
 
+void append_explicit_vr_le_32(std::vector<std::uint8_t>& out, dicom::Tag tag,
+    const char vr0, const char vr1, const std::vector<std::uint8_t>& value,
+    bool undefined_length = false) {
+	append_u16_le(out, tag.group());
+	append_u16_le(out, tag.element());
+	out.push_back(static_cast<std::uint8_t>(vr0));
+	out.push_back(static_cast<std::uint8_t>(vr1));
+	append_u16_le(out, 0);
+	const auto value_length =
+	    undefined_length ? 0xFFFFFFFFu : static_cast<std::uint32_t>(value.size());
+	append_u32_le(out, value_length);
+	append_bytes(out, value);
+}
+
 void append_explicit_vr_be_16(std::vector<std::uint8_t>& out, dicom::Tag tag,
     const char vr0, const char vr1, const std::vector<std::uint8_t>& value) {
 	if (value.size() > 0xFFFFu) {
@@ -186,10 +200,79 @@ std::vector<std::uint8_t> build_big_endian_malformed_ow_body() {
 	return body;
 }
 
+std::vector<std::uint8_t> build_encapsulated_uncompressed_pixel_body() {
+	std::vector<std::uint8_t> body;
+
+	append_explicit_vr_le_16(
+	    body, dicom::Tag(0x0028u, 0x0002u), 'U', 'S', std::vector<std::uint8_t>{0x01, 0x00});
+	append_explicit_vr_le_16(
+	    body, dicom::Tag(0x0028u, 0x0004u), 'C', 'S',
+	    std::vector<std::uint8_t>{'M', 'O', 'N', 'O', 'C', 'H', 'R', 'O', 'M', 'E', '2', ' '});
+	append_explicit_vr_le_16(
+	    body, dicom::Tag(0x0028u, 0x0010u), 'U', 'S', std::vector<std::uint8_t>{0x01, 0x00});
+	append_explicit_vr_le_16(
+	    body, dicom::Tag(0x0028u, 0x0011u), 'U', 'S', std::vector<std::uint8_t>{0x01, 0x00});
+	append_explicit_vr_le_16(
+	    body, dicom::Tag(0x0028u, 0x0100u), 'U', 'S', std::vector<std::uint8_t>{0x10, 0x00});
+	append_explicit_vr_le_16(
+	    body, dicom::Tag(0x0028u, 0x0101u), 'U', 'S', std::vector<std::uint8_t>{0x10, 0x00});
+	append_explicit_vr_le_16(
+	    body, dicom::Tag(0x0028u, 0x0102u), 'U', 'S', std::vector<std::uint8_t>{0x0F, 0x00});
+	append_explicit_vr_le_16(
+	    body, dicom::Tag(0x0028u, 0x0103u), 'U', 'S', std::vector<std::uint8_t>{0x00, 0x00});
+
+	std::vector<std::uint8_t> encapsulated_pixel_value;
+	append_u16_le(encapsulated_pixel_value, 0xFFFEu);
+	append_u16_le(encapsulated_pixel_value, 0xE000u);
+	append_u32_le(encapsulated_pixel_value, 0u);
+
+	append_u16_le(encapsulated_pixel_value, 0xFFFEu);
+	append_u16_le(encapsulated_pixel_value, 0xE000u);
+	append_u32_le(encapsulated_pixel_value, 2u);
+	encapsulated_pixel_value.push_back(0x34u);
+	encapsulated_pixel_value.push_back(0x12u);
+
+	append_u16_le(encapsulated_pixel_value, 0xFFFEu);
+	append_u16_le(encapsulated_pixel_value, 0xE0DDu);
+	append_u32_le(encapsulated_pixel_value, 0u);
+
+	append_explicit_vr_le_32(
+	    body, dicom::Tag(0x7FE0u, 0x0010u), 'O', 'B', encapsulated_pixel_value, true);
+	return body;
+}
+
 void require_transfer_syntax(const dicom::DataSet& ds, dicom::uid::WellKnown expected,
     const char* context) {
 	if (ds.transfer_syntax_uid() != expected) {
 		fail(std::string(context) + ": transfer syntax mismatch");
+	}
+}
+
+void require_nested_patient_name(const dicom::DataSet& ds, std::string_view expected,
+    const char* context) {
+	const auto* nested_name = ds.get_dataelement("00081111.0.00100010");
+	if (nested_name->is_missing()) {
+		fail(std::string(context) + ": nested PatientName not found");
+	}
+	const auto nested_name_sv = nested_name->to_string_view();
+	if (!nested_name_sv || *nested_name_sv != expected) {
+		fail(std::string(context) + ": nested PatientName mismatch");
+	}
+}
+
+void require_patient_name_rows_cols(const dicom::DicomFile& file, std::string_view expected_name,
+    long expected_rows, long expected_cols, const char* context) {
+	const auto* name = file.get_dataelement("PatientName"_tag);
+	if (name->is_missing()) {
+		fail(std::string(context) + ": PatientName missing");
+	}
+	const auto name_sv = name->to_string_view();
+	if (!name_sv || *name_sv != expected_name) {
+		fail(std::string(context) + ": PatientName mismatch");
+	}
+	const auto& info = file.pixel_info();
+	if (info.rows != expected_rows || info.cols != expected_cols) {
+		fail(std::string(context) + ": rows/cols mismatch");
 	}
 }
 
@@ -242,6 +325,38 @@ int main() {
 		fail("deflated reread: DicomFile pixel_info cache was not refreshed");
 	}
 
+	const auto deflated_roundtrip_bytes = deflated_file->write_bytes();
+	auto deflated_roundtrip = dicom::read_bytes(
+	    "deflated-write-roundtrip", deflated_roundtrip_bytes.data(), deflated_roundtrip_bytes.size());
+	if (!deflated_roundtrip) {
+		fail("deflated write roundtrip read_bytes returned null");
+	}
+	require_transfer_syntax(
+	    deflated_roundtrip->dataset(), "DeflatedExplicitVRLittleEndian"_uid, "deflated write");
+	const auto* deflated_roundtrip_name =
+	    deflated_roundtrip->get_dataelement("PatientName"_tag);
+	if (deflated_roundtrip_name->is_missing()) {
+		fail("deflated write: missing PatientName");
+	}
+	const auto deflated_roundtrip_name_sv = deflated_roundtrip_name->to_string_view();
+	if (!deflated_roundtrip_name_sv || *deflated_roundtrip_name_sv != "DOE^JOHN") {
+		fail("deflated write: PatientName mismatch");
+	}
+	const auto& deflated_roundtrip_info = deflated_roundtrip->pixel_info();
+	if (deflated_roundtrip_info.rows != 7 || deflated_roundtrip_info.cols != 9) {
+		fail("deflated write: rows/cols mismatch");
+	}
+	dicom::WriteOptions rebuilt_meta_opts{};
+	rebuilt_meta_opts.keep_existing_meta = false;
+	const auto deflated_rebuilt_bytes = deflated_file->write_bytes(rebuilt_meta_opts);
+	auto deflated_rebuilt = dicom::read_bytes(
+	    "deflated-write-rebuilt-meta", deflated_rebuilt_bytes.data(), deflated_rebuilt_bytes.size());
+	if (!deflated_rebuilt) {
+		fail("deflated write rebuilt-meta read_bytes returned null");
+	}
+	require_transfer_syntax(
+	    deflated_rebuilt->dataset(), "DeflatedExplicitVRLittleEndian"_uid, "deflated rebuilt");
+
 	// 2) Big-endian transfer syntax + nested sequence parse mode regression.
 	const auto be_sequence_file = build_part10(
 	    "1.2.840.10008.1.2.2", build_big_endian_sequence_body());
@@ -260,6 +375,32 @@ int main() {
 	if (!nested_name_sv || *nested_name_sv != "NEST^BE") {
 		fail("be sequence: nested PatientName mismatch");
 	}
+
+	const auto be_seq_roundtrip_bytes = be_seq->write_bytes();
+	auto be_seq_roundtrip = dicom::read_bytes(
+	    "be-sequence-write-roundtrip", be_seq_roundtrip_bytes.data(), be_seq_roundtrip_bytes.size());
+	if (!be_seq_roundtrip) {
+		fail("be sequence write roundtrip read_bytes returned null");
+	}
+	auto& be_seq_roundtrip_ds = be_seq_roundtrip->dataset();
+	require_transfer_syntax(be_seq_roundtrip_ds, "ExplicitVRBigEndian"_uid, "be sequence write");
+	const auto* nested_name_roundtrip =
+	    be_seq_roundtrip_ds.get_dataelement("00081111.0.00100010");
+	if (nested_name_roundtrip->is_missing()) {
+		fail("be sequence write: nested PatientName not found");
+	}
+	const auto nested_name_roundtrip_sv = nested_name_roundtrip->to_string_view();
+	if (!nested_name_roundtrip_sv || *nested_name_roundtrip_sv != "NEST^BE") {
+		fail("be sequence write: nested PatientName mismatch");
+	}
+	const auto be_seq_rebuilt_bytes = be_seq->write_bytes(rebuilt_meta_opts);
+	auto be_seq_rebuilt = dicom::read_bytes(
+	    "be-sequence-write-rebuilt-meta", be_seq_rebuilt_bytes.data(), be_seq_rebuilt_bytes.size());
+	if (!be_seq_rebuilt) {
+		fail("be sequence write rebuilt-meta read_bytes returned null");
+	}
+	require_transfer_syntax(
+	    be_seq_rebuilt->dataset(), "ExplicitVRBigEndian"_uid, "be sequence rebuilt");
 
 	// 3) Decode backend endianness reference regression (big-endian raw pixel data).
 	const auto be_raw_file = build_part10(
@@ -286,7 +427,70 @@ int main() {
 		fail("be raw: DicomFile pixel_data forwarding mismatch");
 	}
 
-	// 4) Malformed big-endian payload should fail during normalization.
+	const auto be_raw_roundtrip_bytes = be_raw->write_bytes();
+	auto be_raw_roundtrip = dicom::read_bytes(
+	    "be-raw-write-roundtrip", be_raw_roundtrip_bytes.data(), be_raw_roundtrip_bytes.size());
+	if (!be_raw_roundtrip) {
+		fail("be raw write roundtrip read_bytes returned null");
+	}
+	auto& be_raw_roundtrip_ds = be_raw_roundtrip->dataset();
+	require_transfer_syntax(be_raw_roundtrip_ds, "ExplicitVRBigEndian"_uid, "be raw write");
+	const auto decoded_roundtrip = be_raw_roundtrip->pixel_data(0);
+	if (decoded_roundtrip.size() != sizeof(std::uint16_t)) {
+		fail("be raw write: decoded byte length mismatch");
+	}
+	std::uint16_t decoded_roundtrip_value = 0;
+	std::memcpy(&decoded_roundtrip_value, decoded_roundtrip.data(), sizeof(decoded_roundtrip_value));
+	if (decoded_roundtrip_value != 0x1234u) {
+		fail("be raw write: endian swap/interpretation mismatch");
+	}
+
+	// 4) Encapsulated-uncompressed transfer syntax can be normalized to native uncompressed.
+	const auto encapsulated_uncompressed_file = build_part10(
+	    "1.2.840.10008.1.2.1.98", build_encapsulated_uncompressed_pixel_body());
+	auto encapsulated_uncompressed = dicom::read_bytes(
+	    "encap-uncompressed", encapsulated_uncompressed_file.data(), encapsulated_uncompressed_file.size());
+	if (!encapsulated_uncompressed) {
+		fail("encap-uncompressed read_bytes returned null");
+	}
+	require_transfer_syntax(encapsulated_uncompressed->dataset(),
+	    "EncapsulatedUncompressedExplicitVRLittleEndian"_uid, "encap-uncompressed initial");
+	const auto* pixel_data_before = encapsulated_uncompressed->get_dataelement("PixelData"_tag);
+	if (pixel_data_before->is_missing() || !pixel_data_before->vr().is_pixel_sequence()) {
+		fail("encap-uncompressed: expected encapsulated PixelData before conversion");
+	}
+	encapsulated_uncompressed->set_transfer_syntax("ExplicitVRLittleEndian"_uid);
+	auto& encapsulated_uncompressed_ds = encapsulated_uncompressed->dataset();
+	require_transfer_syntax(
+	    encapsulated_uncompressed_ds, "ExplicitVRLittleEndian"_uid, "encap-uncompressed converted");
+	const auto* pixel_data_after = encapsulated_uncompressed_ds.get_dataelement("PixelData"_tag);
+	if (pixel_data_after->is_missing() || pixel_data_after->vr().is_pixel_sequence()) {
+		fail("encap-uncompressed: expected native PixelData after conversion");
+	}
+	const auto pixel_bytes_after = pixel_data_after->value_span();
+	if (pixel_bytes_after.size() != 2 || pixel_bytes_after[0] != 0x34u || pixel_bytes_after[1] != 0x12u) {
+		fail("encap-uncompressed: native PixelData bytes mismatch");
+	}
+	const auto decoded_after_conversion = encapsulated_uncompressed->pixel_data(0);
+	if (decoded_after_conversion.size() != sizeof(std::uint16_t)) {
+		fail("encap-uncompressed: decoded frame size mismatch after conversion");
+	}
+	std::uint16_t decoded_after_conversion_value = 0;
+	std::memcpy(
+	    &decoded_after_conversion_value, decoded_after_conversion.data(), sizeof(decoded_after_conversion_value));
+	if (decoded_after_conversion_value != 0x1234u) {
+		fail("encap-uncompressed: decoded value mismatch after conversion");
+	}
+	const auto encap_to_native_bytes = encapsulated_uncompressed->write_bytes();
+	auto encap_to_native_roundtrip = dicom::read_bytes(
+	    "encap-uncompressed-to-native", encap_to_native_bytes.data(), encap_to_native_bytes.size());
+	if (!encap_to_native_roundtrip) {
+		fail("encap-uncompressed-to-native read_bytes returned null");
+	}
+	require_transfer_syntax(
+	    encap_to_native_roundtrip->dataset(), "ExplicitVRLittleEndian"_uid, "encap-uncompressed write");
+
+	// 5) Malformed big-endian payload should fail during normalization.
 	const auto be_malformed_file = build_part10(
 	    "1.2.840.10008.1.2.2", build_big_endian_malformed_ow_body());
 	bool malformed_failed = false;
@@ -299,6 +503,64 @@ int main() {
 	if (!malformed_failed) {
 		fail("be malformed: expected read failure");
 	}
+
+	// 6) Multi-step transfer syntax write/read cycles.
+	auto roundtrip_with_target_ts = [&](auto file, dicom::uid::WellKnown target_ts,
+	                                   const char* context) {
+		if (!file) {
+			fail(std::string(context) + ": null file input");
+		}
+
+		file->set_transfer_syntax(target_ts);
+
+		const auto bytes = file->write_bytes();
+		auto next = dicom::read_bytes(context, bytes.data(), bytes.size());
+		if (!next) {
+			fail(std::string(context) + ": read_bytes after write returned null");
+		}
+		require_transfer_syntax(next->dataset(), target_ts, context);
+		return next;
+	};
+
+	auto lb_cycle =
+	    dicom::read_bytes("lb-cycle-seed", be_sequence_file.data(), be_sequence_file.size());
+	if (!lb_cycle) {
+		fail("lb-cycle-seed read_bytes returned null");
+	}
+	require_nested_patient_name(lb_cycle->dataset(), "NEST^BE", "lb-cycle-seed");
+
+	lb_cycle = roundtrip_with_target_ts(
+	    std::move(lb_cycle), "ExplicitVRLittleEndian"_uid, "lb-cycle-L1");
+	require_nested_patient_name(lb_cycle->dataset(), "NEST^BE", "lb-cycle-L1");
+	lb_cycle = roundtrip_with_target_ts(
+	    std::move(lb_cycle), "ExplicitVRBigEndian"_uid, "lb-cycle-B1");
+	require_nested_patient_name(lb_cycle->dataset(), "NEST^BE", "lb-cycle-B1");
+	lb_cycle = roundtrip_with_target_ts(
+	    std::move(lb_cycle), "ExplicitVRLittleEndian"_uid, "lb-cycle-L2");
+	require_nested_patient_name(lb_cycle->dataset(), "NEST^BE", "lb-cycle-L2");
+	lb_cycle = roundtrip_with_target_ts(
+	    std::move(lb_cycle), "ExplicitVRBigEndian"_uid, "lb-cycle-B2");
+	require_nested_patient_name(lb_cycle->dataset(), "NEST^BE", "lb-cycle-B2");
+
+	auto id_cycle = dicom::read_bytes(
+	    "id-cycle-seed", deflated_rows7_cols9.data(), deflated_rows7_cols9.size());
+	if (!id_cycle) {
+		fail("id-cycle-seed read_bytes returned null");
+	}
+	require_patient_name_rows_cols(*id_cycle, "DOE^JOHN", 7, 9, "id-cycle-seed");
+
+	id_cycle = roundtrip_with_target_ts(
+	    std::move(id_cycle), "ExplicitVRLittleEndian"_uid, "id-cycle-I1");
+	require_patient_name_rows_cols(*id_cycle, "DOE^JOHN", 7, 9, "id-cycle-I1");
+	id_cycle = roundtrip_with_target_ts(
+	    std::move(id_cycle), "DeflatedExplicitVRLittleEndian"_uid, "id-cycle-D1");
+	require_patient_name_rows_cols(*id_cycle, "DOE^JOHN", 7, 9, "id-cycle-D1");
+	id_cycle = roundtrip_with_target_ts(
+	    std::move(id_cycle), "ExplicitVRLittleEndian"_uid, "id-cycle-I2");
+	require_patient_name_rows_cols(*id_cycle, "DOE^JOHN", 7, 9, "id-cycle-I2");
+	id_cycle = roundtrip_with_target_ts(
+	    std::move(id_cycle), "DeflatedExplicitVRLittleEndian"_uid, "id-cycle-D2");
+	require_patient_name_rows_cols(*id_cycle, "DOE^JOHN", 7, 9, "id-cycle-D2");
 
 	return 0;
 }

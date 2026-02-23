@@ -53,6 +53,10 @@ cmake --build build
 ./build/dicomdump path/to/file.dcm
 ./build/dicomdump path/to/a.dcm path/to/b.dcm
 ./build/dicomdump --no-offset --max-print-chars 120 path/to/file.dcm
+
+# Change Transfer Syntax UID and write to a new file
+./build/dicomconv input.dcm output.dcm ExplicitVRLittleEndian
+./build/dicomconv input.dcm output.dcm 1.2.840.10008.1.2
 ```
 
 ### Preferred C++ DataSet access pattern
@@ -95,6 +99,7 @@ python examples/python/dump_dataset_example.py path/to/file.dcm
 python examples/python/dump_dataset_example.py path/to/file.dcm --raw-preview 16
 python examples/python/raw_value_span_example.py path/to/file.dcm PixelData
 python examples/python/pixel_decode_safe_example.py path/to/file.dcm --frame 0
+python examples/python/dicomconv_example.py input.dcm output.dcm ExplicitVRLittleEndian
 ```
 
 ### Run `dicomdump` CLI
@@ -114,6 +119,18 @@ dicomdump path/to/file.dcm --no-offset
 
 # Control truncation width
 dicomdump path/to/file.dcm --max-print-chars 120
+```
+
+### Run `dicomconv` CLI
+
+`dicomsdl` wheel 설치 후 `dicomconv` 스크립트를 사용할 수 있습니다.
+
+```bash
+# Change transfer syntax by keyword
+dicomconv input.dcm output.dcm ExplicitVRLittleEndian
+
+# Change transfer syntax by dotted UID value
+dicomconv input.dcm output.dcm 1.2.840.10008.1.2
 ```
 
 Python 코드에서는 일관되게 `import dicomsdl as dicom` 형식의 alias를 사용합니다.

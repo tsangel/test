@@ -486,6 +486,11 @@ std::span<const std::uint8_t> DataElement::value_span() const {
 		}
 		return std::span<const std::uint8_t>(
 		    static_cast<const std::uint8_t*>(storage_.ptr), length_);
+	case StorageKind::owned_bytes:
+		if (!storage_.vec) {
+			return {};
+		}
+		return std::span<const std::uint8_t>(storage_.vec->data(), length_);
 	case StorageKind::stream:
 		if (!parent_) {
 			return {};
@@ -505,6 +510,8 @@ void* DataElement::value_ptr() const {
 		return const_cast<std::uint8_t*>(storage_.inline_bytes);
 	case StorageKind::heap:
 		return storage_.ptr;
+	case StorageKind::owned_bytes:
+		return storage_.vec ? storage_.vec->data() : nullptr;
 	case StorageKind::stream:
 		if (!parent_) {
 			return nullptr;
@@ -543,6 +550,12 @@ void DataElement::reserve_value_bytes(std::size_t length) {
 		return;
 	}
 
+	if (storage_kind_ == StorageKind::owned_bytes && storage_.vec) {
+		storage_.vec->resize(length);
+		length_ = length;
+		return;
+	}
+
 	if (storage_kind_ == StorageKind::heap && storage_.ptr) {
 		std::size_t capacity = 0;
 		const auto* storage_base =
@@ -575,6 +588,44 @@ void DataElement::set_value_bytes(std::span<const std::uint8_t> bytes) {
 		    vr_.str());
 	}
 	store_padded_value_bytes(*this, bytes);
+}
+
+void DataElement::set_value_bytes(std::vector<std::uint8_t>&& bytes) {
+	adopt_value_bytes(std::move(bytes));
+}
+
+void DataElement::adopt_value_bytes(std::vector<std::uint8_t>&& bytes) {
+	if (vr_.is_sequence() || vr_.is_pixel_sequence()) {
+		diag::error_and_throw(
+		    "DataElement::adopt_value_bytes reason=cannot assign raw bytes to sequence storage vr={}",
+		    vr_.str());
+	}
+
+	const bool needs_padding = VR::pad_to_even() && ((bytes.size() & 1u) != 0u);
+	if (needs_padding) {
+		if (bytes.size() == bytes.max_size()) {
+			diag::error_and_throw(
+			    "DataElement::adopt_value_bytes reason=length overflow length={}",
+			    bytes.size());
+		}
+		bytes.push_back(vr_.padding_byte());
+	}
+
+	if (bytes.empty()) {
+		reserve_value_bytes(0);
+		return;
+	}
+
+	if (bytes.size() <= kInlineStorageBytes) {
+		store_padded_value_bytes(*this,
+		    std::span<const std::uint8_t>(bytes.data(), bytes.size()));
+		return;
+	}
+
+	release_storage();
+	length_ = bytes.size();
+	storage_.vec = new std::vector<std::uint8_t>(std::move(bytes));
+	storage_kind_ = StorageKind::owned_bytes;
 }
 
 bool DataElement::from_int(int value) {

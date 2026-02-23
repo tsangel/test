@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+ cmake_minimum_required(VERSION 3.16)
 
 if(APPLE)
     if(DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
@@ -69,8 +69,8 @@ include(ExternalProject)
 
 add_library(dicomsdl STATIC
 	src/dataset.cpp
-	src/deflated_dataset_inflater.cpp
-	src/big_endian_dataset_normalizer.cpp
+	src/dataset_deflate_codec.cpp
+	src/dataset_endian_converter.cpp
 	src/dumpdataset.cpp
 	src/dicomfile.cpp
 	src/dicom_write.cpp
@@ -81,6 +81,7 @@ add_library(dicomsdl STATIC
 	src/pixelsequence.cpp
 	src/pixel_decoder.cpp
 	src/pixel_decoder_raw.cpp
+	src/pixel_decoder_encapsulated.cpp
 	src/pixel_decoder_rle.cpp
 	src/pixel_decoder_jpeg2k.cpp
 	src/pixel_decoder_htj2k.cpp
@@ -212,7 +213,7 @@ set(LIBDEFLATE_BUILD_SHARED_LIB OFF CACHE BOOL "Disable libdeflate shared librar
 set(LIBDEFLATE_BUILD_GZIP OFF CACHE BOOL "Disable libdeflate-gzip executable" FORCE)
 set(LIBDEFLATE_BUILD_TESTS OFF CACHE BOOL "Disable libdeflate tests" FORCE)
 set(LIBDEFLATE_INSTALL OFF CACHE BOOL "Disable libdeflate install targets" FORCE)
-set(LIBDEFLATE_COMPRESSION_SUPPORT OFF CACHE BOOL "Disable libdeflate compression codepaths" FORCE)
+set(LIBDEFLATE_COMPRESSION_SUPPORT ON CACHE BOOL "Enable libdeflate compression codepaths" FORCE)
 set(LIBDEFLATE_DECOMPRESSION_SUPPORT ON CACHE BOOL "Enable libdeflate decompression codepaths" FORCE)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/libdeflate EXCLUDE_FROM_ALL)
 
@@ -394,6 +395,11 @@ if(DICOM_BUILD_EXAMPLES)
 		examples/dicomdump.cpp
 	)
 	target_link_libraries(dicomdump PRIVATE dicomsdl)
+
+	add_executable(dicomconv
+		examples/dicomconv.cpp
+	)
+	target_link_libraries(dicomconv PRIVATE dicomsdl)
 
 	add_executable(batch_assign_with_error_check
 		examples/batch_assign_with_error_check.cpp

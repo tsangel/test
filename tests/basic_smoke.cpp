@@ -191,6 +191,36 @@ int main() {
 			}
 		}
 		{
+			dicom::DataElement moved_bytes_elem("Rows"_tag, dicom::VR::OB, 0, 0, nullptr);
+			std::vector<std::uint8_t> raw(1024);
+			for (std::size_t i = 0; i < raw.size(); ++i) {
+				raw[i] = static_cast<std::uint8_t>(i & 0xFFu);
+			}
+			moved_bytes_elem.set_value_bytes(std::move(raw));
+			if (moved_bytes_elem.storage_kind() != dicom::DataElement::StorageKind::owned_bytes) {
+				fail("DataElement::set_value_bytes(move) should adopt vector storage");
+			}
+			const auto bytes = moved_bytes_elem.value_span();
+			if (bytes.size() != 1024) {
+				fail("DataElement::set_value_bytes(move) size mismatch");
+			}
+			if (bytes[0] != 0x00u || bytes[1] != 0x01u || bytes[255] != 0xFFu) {
+				fail("DataElement::set_value_bytes(move) value mismatch");
+			}
+		}
+		{
+			dicom::DataElement padded_move_elem("Rows"_tag, dicom::VR::OB, 0, 0, nullptr);
+			std::vector<std::uint8_t> odd_bytes{0x11u, 0x22u, 0x33u};
+			padded_move_elem.adopt_value_bytes(std::move(odd_bytes));
+			const auto bytes = padded_move_elem.value_span();
+			if (bytes.size() != 4) {
+				fail("DataElement::adopt_value_bytes should pad odd-length values");
+			}
+			if (bytes[0] != 0x11u || bytes[1] != 0x22u || bytes[2] != 0x33u) {
+				fail("DataElement::adopt_value_bytes should preserve original payload");
+			}
+		}
+		{
 			dicom::DataElement unsigned_short_elem("Rows"_tag, dicom::VR::US, 0, 0, nullptr);
 			if (unsigned_short_elem.from_long(-1)) {
 				fail("DataElement::from_long should reject negative value for US");
@@ -417,6 +447,35 @@ int main() {
 			auto generated_roundtrip = ts_elem.to_uid_string();
 			if (!generated_roundtrip || *generated_roundtrip != std::string(generated.value())) {
 				fail("DataElement::from_uid(Generated) roundtrip mismatch");
+			}
+		}
+		{
+			const auto implicit_le = dicom::uid::from_keyword("ImplicitVRLittleEndian");
+			const auto deflated_le = dicom::uid::from_keyword("DeflatedExplicitVRLittleEndian");
+			const auto encapsulated_uncompressed =
+			    dicom::uid::from_keyword("EncapsulatedUncompressedExplicitVRLittleEndian");
+			const auto jpeg_baseline = dicom::uid::from_keyword("JPEGBaseline8Bit");
+			const auto rle_lossless = dicom::uid::from_keyword("RLELossless");
+			if (!implicit_le || !deflated_le || !encapsulated_uncompressed || !jpeg_baseline ||
+			    !rle_lossless) {
+				fail("uid::from_keyword should resolve transfer syntax classification fixtures");
+			}
+
+			if (!implicit_le->is_uncompressed() || implicit_le->is_encapsulated()) {
+				fail("ImplicitVRLittleEndian classification mismatch");
+			}
+			if (!deflated_le->is_uncompressed() || deflated_le->is_encapsulated()) {
+				fail("DeflatedExplicitVRLittleEndian classification mismatch");
+			}
+			if (!encapsulated_uncompressed->is_uncompressed() ||
+			    !encapsulated_uncompressed->is_encapsulated()) {
+				fail("EncapsulatedUncompressedExplicitVRLittleEndian classification mismatch");
+			}
+			if (jpeg_baseline->is_uncompressed() || !jpeg_baseline->is_encapsulated()) {
+				fail("JPEGBaseline8Bit classification mismatch");
+			}
+			if (!rle_lossless->is_rle() || !rle_lossless->is_encapsulated()) {
+				fail("RLELossless classification mismatch");
 			}
 		}
 	{

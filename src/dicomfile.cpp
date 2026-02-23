@@ -4,6 +4,7 @@
 #include "diagnostics.h"
 
 #include <exception>
+#include <cstddef>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -108,6 +109,60 @@ std::size_t bytes_per_sample_of(pixel::DataType dtype) noexcept {
 	}
 }
 
+[[nodiscard]] VR native_pixel_vr_from_bits_allocated(int bits_allocated) noexcept {
+	return bits_allocated > 8 ? VR::OW : VR::OB;
+}
+
+void convert_encapsulated_pixel_data_to_native(DicomFile& file) {
+	DataSet& dataset = file.dataset();
+	const auto& pixel_data = dataset["PixelData"_tag];
+	if (!pixel_data || !pixel_data.vr().is_pixel_sequence()) {
+		return;
+	}
+
+	const auto& info = file.pixel_info(true);
+	if (!info.has_pixel_data) {
+		diag::error_and_throw(
+		    "DicomFile::apply_transfer_syntax file={} reason=PixelData exists but pixel metadata is not decodable",
+		    file.path());
+	}
+	if (info.frames <= 0) {
+		diag::error_and_throw(
+		    "DicomFile::apply_transfer_syntax file={} reason=invalid NumberOfFrames for encapsulated-to-native conversion",
+		    file.path());
+	}
+
+	pixel::DecodeOptions decode_options{};
+	decode_options.planar_out = info.planar_configuration;
+	decode_options.alignment = 1;
+	decode_options.scaled = false;
+	const auto decode_strides = file.calc_decode_strides(decode_options);
+	if (decode_strides.frame == 0) {
+		diag::error_and_throw(
+		    "DicomFile::apply_transfer_syntax file={} reason=calculated native frame size is zero",
+		    file.path());
+	}
+
+	const auto frame_count = static_cast<std::size_t>(info.frames);
+	std::vector<std::uint8_t> native_pixel_bytes;
+	native_pixel_bytes.resize(decode_strides.frame * frame_count);
+
+	for (std::size_t frame_index = 0; frame_index < frame_count; ++frame_index) {
+		auto frame_span = std::span<std::uint8_t>(
+		    native_pixel_bytes.data() + frame_index * decode_strides.frame, decode_strides.frame);
+		file.decode_into(frame_index, frame_span, decode_strides, decode_options);
+	}
+
+	DataElement* native_pixel_data =
+	    dataset.add_dataelement("PixelData"_tag, native_pixel_vr_from_bits_allocated(info.bits_allocated));
+	if (!native_pixel_data) {
+		diag::error_and_throw(
+		    "DicomFile::apply_transfer_syntax file={} reason=failed to replace PixelData",
+		    file.path());
+	}
+	native_pixel_data->set_value_bytes(std::move(native_pixel_bytes));
+}
+
 struct lut_descriptor_values {
 	std::size_t entry_count{0};
 	std::int64_t first_mapped{0};
@@ -156,7 +211,7 @@ bool try_parse_lut_descriptor(const DataElement& descriptor_elem,
 }  // namespace
 
 DicomFile::DicomFile() : root_dataset_(std::make_unique<DataSet>(this)) {
-	set_transfer_syntax("ExplicitVRLittleEndian"_uid);
+	set_transfer_syntax_state_only("ExplicitVRLittleEndian"_uid);
 }
 
 DicomFile::~DicomFile() = default;
@@ -507,12 +562,51 @@ std::optional<pixel::ModalityLut> DicomFile::modality_lut() const {
 	return lut;
 }
 
-void DicomFile::set_transfer_syntax(uid::WellKnown transfer_syntax) {
+void DicomFile::set_transfer_syntax_state_only(uid::WellKnown transfer_syntax) {
 	invalidate_pixel_info_cache();
 	transfer_syntax_uid_ = transfer_syntax.valid() ? transfer_syntax : uid::WellKnown{};
 	if (root_dataset_) {
 		root_dataset_->explicit_vr_ = transfer_syntax_uses_explicit_vr(transfer_syntax_uid_);
 	}
+}
+
+void DicomFile::apply_transfer_syntax(uid::WellKnown transfer_syntax) {
+	const auto source_transfer_syntax = transfer_syntax_uid_;
+	if (root_dataset_) {
+		root_dataset_->ensure_loaded(Tag(0xFFFFu, 0xFFFFu));
+		const auto* pixel_data = root_dataset_->get_dataelement("PixelData"_tag);
+		const bool has_encapsulated_pixel_data =
+		    pixel_data && !pixel_data->is_missing() && pixel_data->vr().is_pixel_sequence();
+		const bool target_uses_encapsulated_pixel_data = transfer_syntax.is_encapsulated();
+
+		if (has_encapsulated_pixel_data && !target_uses_encapsulated_pixel_data) {
+			convert_encapsulated_pixel_data_to_native(*this);
+		} else if (!has_encapsulated_pixel_data && target_uses_encapsulated_pixel_data) {
+			diag::error_and_throw(
+			    "DicomFile::set_transfer_syntax file={} source_ts={} target_ts={} reason=encoding native PixelData to encapsulated transfer syntax is not supported",
+			    path(), source_transfer_syntax.value(), transfer_syntax.value());
+		} else if (has_encapsulated_pixel_data && target_uses_encapsulated_pixel_data &&
+		           source_transfer_syntax.valid() && source_transfer_syntax != transfer_syntax) {
+			diag::error_and_throw(
+			    "DicomFile::set_transfer_syntax file={} source_ts={} target_ts={} reason=transcoding between encapsulated transfer syntaxes is not supported",
+			    path(), source_transfer_syntax.value(), transfer_syntax.value());
+		}
+	}
+
+	set_transfer_syntax_state_only(transfer_syntax);
+	DataElement* transfer_syntax_element = add_dataelement("(0002,0010)"_tag, VR::UI);
+	if (!transfer_syntax_element || !transfer_syntax_element->from_transfer_syntax_uid(transfer_syntax)) {
+		diag::error_and_throw(
+		    "DicomFile::apply_transfer_syntax reason=failed to update (0002,0010) TransferSyntaxUID");
+	}
+}
+
+void DicomFile::set_transfer_syntax(uid::WellKnown transfer_syntax) {
+	if (!transfer_syntax.valid() || transfer_syntax.uid_type() != UidType::TransferSyntax) {
+		diag::error_and_throw(
+		    "DicomFile::set_transfer_syntax reason=uid must be a valid Transfer Syntax UID");
+	}
+	apply_transfer_syntax(transfer_syntax);
 }
 
 std::unique_ptr<DicomFile> read_file(const std::string& path, ReadOptions options) {

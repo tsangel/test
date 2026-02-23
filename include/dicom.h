@@ -215,6 +215,7 @@ struct WellKnown {
 	[[nodiscard]] constexpr bool is_jpegxl() const noexcept;
 	[[nodiscard]] constexpr bool is_rle() const noexcept;
 	[[nodiscard]] constexpr bool is_uncompressed() const noexcept;
+	[[nodiscard]] constexpr bool is_encapsulated() const noexcept;
 	[[nodiscard]] constexpr bool is_mpeg2() const noexcept;
 	[[nodiscard]] constexpr bool is_h264() const noexcept;
 	[[nodiscard]] constexpr bool is_hevc() const noexcept;
@@ -726,31 +727,33 @@ using namespace dicom::literals;
 // Order follows uid_registry transfer syntax listing (with uncompressed first).
 namespace detail {
 constexpr std::uint32_t kTSUncompressed = 1u << 0;
-constexpr std::uint32_t kTSJpegBaseline = 1u << 1;
-constexpr std::uint32_t kTSJpegLossless = 1u << 2;
-constexpr std::uint32_t kTSJpegLS = 1u << 3;
-constexpr std::uint32_t kTSJpeg2000 = 1u << 4;
-constexpr std::uint32_t kTSHTJ2K = 1u << 5;
-constexpr std::uint32_t kTSMpeg2 = 1u << 6;
-constexpr std::uint32_t kTSH264 = 1u << 7;
-constexpr std::uint32_t kTSHevc = 1u << 8;
-constexpr std::uint32_t kTSJpegXL = 1u << 9;
-constexpr std::uint32_t kTSRle = 1u << 10;
-constexpr std::uint32_t kTSFfd9 = 1u << 11;      // Codestream ends with FFD9 marker
-constexpr std::uint32_t kTSJpegFamily = 1u << 12;
+constexpr std::uint32_t kTSEncapsulated = 1u << 1;
+constexpr std::uint32_t kTSJpegBaseline = 1u << 2;
+constexpr std::uint32_t kTSJpegLossless = 1u << 3;
+constexpr std::uint32_t kTSJpegLS = 1u << 4;
+constexpr std::uint32_t kTSJpeg2000 = 1u << 5;
+constexpr std::uint32_t kTSHTJ2K = 1u << 6;
+constexpr std::uint32_t kTSMpeg2 = 1u << 7;
+constexpr std::uint32_t kTSH264 = 1u << 8;
+constexpr std::uint32_t kTSHevc = 1u << 9;
+constexpr std::uint32_t kTSJpegXL = 1u << 10;
+constexpr std::uint32_t kTSRle = 1u << 11;
+constexpr std::uint32_t kTSFfd9 = 1u << 12;      // Codestream ends with FFD9 marker
+constexpr std::uint32_t kTSJpegFamily = 1u << 13;
 
 inline constexpr std::uint32_t ts_mask(std::uint16_t idx) {
 	switch (idx) {
-		// Uncompressed image transfer syntaxes
+	// Uncompressed image transfer syntaxes
 	case "ImplicitVRLittleEndian"_uid.raw_index():
 	case "ExplicitVRLittleEndian"_uid.raw_index():
-	case "EncapsulatedUncompressedExplicitVRLittleEndian"_uid.raw_index():
 	case "DeflatedExplicitVRLittleEndian"_uid.raw_index():
 	case "ExplicitVRBigEndian"_uid.raw_index():
 	case "Papyrus3ImplicitVRLittleEndian"_uid.raw_index():
 		return kTSUncompressed;
+	case "EncapsulatedUncompressedExplicitVRLittleEndian"_uid.raw_index():
+		return kTSUncompressed | kTSEncapsulated;
 
-		// JPEG Baseline / Extended / Progressive
+	// JPEG Baseline / Extended / Progressive
 	case "JPEGBaseline8Bit"_uid.raw_index():
 	case "JPEGExtended12Bit"_uid.raw_index():
 	case "JPEGExtended35"_uid.raw_index():
@@ -764,38 +767,38 @@ inline constexpr std::uint32_t ts_mask(std::uint16_t idx) {
 	case "JPEGSpectralSelectionHierarchical2123"_uid.raw_index():
 	case "JPEGFullProgressionHierarchical2426"_uid.raw_index():
 	case "JPEGFullProgressionHierarchical2527"_uid.raw_index():
-		return kTSJpegBaseline | kTSJpegFamily | kTSFfd9;
+		return kTSJpegBaseline | kTSJpegFamily | kTSFfd9 | kTSEncapsulated;
 
-		// JPEG Lossless
+	// JPEG Lossless
 	case "JPEGLossless"_uid.raw_index():
 	case "JPEGLosslessNonHierarchical15"_uid.raw_index():
 	case "JPEGLosslessHierarchical28"_uid.raw_index():
 	case "JPEGLosslessHierarchical29"_uid.raw_index():
 	case "JPEGLosslessSV1"_uid.raw_index():
-		return kTSJpegLossless | kTSJpegFamily | kTSFfd9;
+		return kTSJpegLossless | kTSJpegFamily | kTSFfd9 | kTSEncapsulated;
 
-		// JPEG-LS
+	// JPEG-LS
 	case "JPEGLSLossless"_uid.raw_index():
 	case "JPEGLSNearLossless"_uid.raw_index():
-		return kTSJpegLS | kTSJpegFamily | kTSFfd9;
+		return kTSJpegLS | kTSJpegFamily | kTSFfd9 | kTSEncapsulated;
 
-		// JPEG 2000 / JPIP Referenced
+	// JPEG 2000 / JPIP Referenced
 	case "JPEG2000Lossless"_uid.raw_index():
 	case "JPEG2000"_uid.raw_index():
 	case "JPEG2000MCLossless"_uid.raw_index():
 	case "JPEG2000MC"_uid.raw_index():
 	case "JPIPReferenced"_uid.raw_index():
 	case "JPIPReferencedDeflate"_uid.raw_index():
-		return kTSJpeg2000 | kTSJpegFamily;
+		return kTSJpeg2000 | kTSJpegFamily | kTSEncapsulated;
 
-		// MPEG-2
+	// MPEG-2
 	case "MPEG2MPML"_uid.raw_index():
 	case "MPEG2MPMLF"_uid.raw_index():
 	case "MPEG2MPHL"_uid.raw_index():
 	case "MPEG2MPHLF"_uid.raw_index():
-		return kTSMpeg2;
+		return kTSMpeg2 | kTSEncapsulated;
 
-		// H.264 / MPEG-4 AVC
+	// H.264 / MPEG-4 AVC
 	case "MPEG4HP41"_uid.raw_index():
 	case "MPEG4HP41F"_uid.raw_index():
 	case "MPEG4HP41BD"_uid.raw_index():
@@ -806,33 +809,33 @@ inline constexpr std::uint32_t ts_mask(std::uint16_t idx) {
 	case "MPEG4HP423DF"_uid.raw_index():
 	case "MPEG4HP42STEREO"_uid.raw_index():
 	case "MPEG4HP42STEREOF"_uid.raw_index():
-		return kTSH264;
+		return kTSH264 | kTSEncapsulated;
 
-		// HEVC
+	// HEVC
 	case "HEVCMP51"_uid.raw_index():
 	case "HEVCM10P51"_uid.raw_index():
-		return kTSHevc;
+		return kTSHevc | kTSEncapsulated;
 
-		// JPEG XL
+	// JPEG XL
 	case "JPEGXLLossless"_uid.raw_index():
 	case "JPEGXLJPEGRecompression"_uid.raw_index():
 	case "JPEGXL"_uid.raw_index():
-		return kTSJpegXL | kTSJpegFamily | kTSFfd9;
+		return kTSJpegXL | kTSJpegFamily | kTSFfd9 | kTSEncapsulated;
 
-		// HTJ2K codestream transfer syntaxes
+	// HTJ2K codestream transfer syntaxes
 	case "HTJ2KLossless"_uid.raw_index():
 	case "HTJ2KLosslessRPCL"_uid.raw_index():
 	case "HTJ2K"_uid.raw_index():
-		return kTSJpeg2000 | kTSHTJ2K | kTSJpegFamily | kTSFfd9;
+		return kTSJpeg2000 | kTSHTJ2K | kTSJpegFamily | kTSFfd9 | kTSEncapsulated;
 
-		// JPIP HTJ2K referenced transfer syntaxes
+	// JPIP HTJ2K referenced transfer syntaxes
 	case "JPIPHTJ2KReferenced"_uid.raw_index():
 	case "JPIPHTJ2KReferencedDeflate"_uid.raw_index():
-		return kTSJpeg2000 | kTSHTJ2K | kTSJpegFamily;
+		return kTSJpeg2000 | kTSHTJ2K | kTSJpegFamily | kTSEncapsulated;
 
-		// RLE
+	// RLE
 	case "RLELossless"_uid.raw_index():
-		return kTSRle;
+		return kTSRle | kTSEncapsulated;
 
 	default:
 		return 0;
@@ -875,6 +878,10 @@ inline constexpr bool WellKnown::is_rle() const noexcept {
 
 inline constexpr bool WellKnown::is_uncompressed() const noexcept {
 	return detail::ts_mask(raw_index()) & detail::kTSUncompressed;
+}
+
+inline constexpr bool WellKnown::is_encapsulated() const noexcept {
+	return detail::ts_mask(raw_index()) & detail::kTSEncapsulated;
 }
 
 inline constexpr bool WellKnown::is_mpeg2() const noexcept {
@@ -996,6 +1003,7 @@ public:
 		stream,
 		inline_bytes,
 		heap,
+		owned_bytes,
 		sequence,
 		pixel_sequence
 	};
@@ -1070,6 +1078,12 @@ public:
 	/// Copy raw value bytes into inline/heap storage depending on length.
 	/// For odd-length values, one VR-specific padding byte is appended automatically.
 	void set_value_bytes(std::span<const std::uint8_t> bytes);
+	/// Move raw value bytes into element-owned storage.
+	/// For odd-length values, one VR-specific padding byte is appended automatically.
+	void set_value_bytes(std::vector<std::uint8_t>&& bytes);
+	/// Adopt caller-provided byte buffer without copying when possible.
+	/// For odd-length values, one VR-specific padding byte is appended automatically.
+	void adopt_value_bytes(std::vector<std::uint8_t>&& bytes);
 	/// Reserve value storage and set length_ for non-sequence elements.
 	/// The allocated storage can be observed via value_span().
 	void reserve_value_bytes(std::size_t length);
@@ -1225,6 +1239,7 @@ private:
 	std::size_t length_{0};
 	union Storage {
 		void* ptr;
+		std::vector<std::uint8_t>* vec;
 		Sequence* seq;
 		PixelSequence* pixseq;
 		std::size_t offset_;
@@ -1579,6 +1594,9 @@ public:
 	[[nodiscard]] bool has_error() const noexcept { return has_error_; }
 	[[nodiscard]] const std::string& error_message() const noexcept { return error_message_; }
 
+	/// Set transfer syntax for subsequent write operations and synchronize (0002,0010).
+	/// This updates both runtime parse/write state and file meta information.
+	void set_transfer_syntax(uid::WellKnown transfer_syntax);
 	[[nodiscard]] uid::WellKnown transfer_syntax_uid() const { return transfer_syntax_uid_; }
 	[[nodiscard]] const pixel_info_t& pixel_info(bool recalc = false) const;
 	[[nodiscard]] pixel::DecodeStrides calc_decode_strides(const pixel::DecodeOptions& opt = {}) const;
@@ -1609,7 +1627,8 @@ public:
 private:
 	friend class DataSet;
 	void invalidate_pixel_info_cache() const { pixel_info_cache_.reset(); }
-	void set_transfer_syntax(uid::WellKnown transfer_syntax);
+	void set_transfer_syntax_state_only(uid::WellKnown transfer_syntax);
+	void apply_transfer_syntax(uid::WellKnown transfer_syntax);
 	void clear_error_state() noexcept;
 	void set_error_state(std::string message);
 
@@ -1796,6 +1815,9 @@ inline void DataElement::release_storage() noexcept {
 			::operator delete(storage_base);
 		}
 		break;
+	case StorageKind::owned_bytes:
+		delete storage_.vec;
+		break;
 	case StorageKind::sequence:
 		delete storage_.seq;
 		break;
@@ -1851,6 +1873,8 @@ inline void* DataElement::data() const noexcept {
 		return const_cast<std::uint8_t*>(storage_.inline_bytes);
 	case StorageKind::heap:
 		return storage_.ptr;
+	case StorageKind::owned_bytes:
+		return storage_.vec ? storage_.vec->data() : nullptr;
 	default:
 		return nullptr;
 	}

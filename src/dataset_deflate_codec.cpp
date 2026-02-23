@@ -1,4 +1,4 @@
-#include "deflated_dataset_inflater.h"
+#include "dataset_deflate_codec.h"
 
 #include <diagnostics.h>
 
@@ -108,6 +108,43 @@ std::vector<std::uint8_t> inflate_deflated_dataset(std::span<const std::uint8_t>
 
 	libdeflate_free_decompressor(decompressor);
 	return output;
+}
+
+std::vector<std::uint8_t> deflate_dataset_body(std::span<const std::uint8_t> dataset_body,
+    const std::string& file_path) {
+	constexpr int kCompressionLevel = 6;
+
+	struct libdeflate_compressor* compressor = libdeflate_alloc_compressor(kCompressionLevel);
+	if (!compressor) {
+		diag::error_and_throw(
+		    fmt::format(
+		        "write_to_stream file={} reason=failed to allocate libdeflate compressor",
+		        file_path));
+	}
+
+	const auto bound = libdeflate_deflate_compress_bound(compressor, dataset_body.size());
+	if (bound == 0) {
+		libdeflate_free_compressor(compressor);
+		diag::error_and_throw(
+		    fmt::format(
+		        "write_to_stream file={} reason=invalid deflate bound for dataset body",
+		        file_path));
+	}
+
+	std::vector<std::uint8_t> compressed(bound);
+	const auto actual = libdeflate_deflate_compress(compressor, dataset_body.data(),
+	    dataset_body.size(), compressed.data(), compressed.size());
+	libdeflate_free_compressor(compressor);
+
+	if (actual == 0) {
+		diag::error_and_throw(
+		    fmt::format(
+		        "write_to_stream file={} reason=deflate compression failed",
+		        file_path));
+	}
+
+	compressed.resize(actual);
+	return compressed;
 }
 
 } // namespace dicom

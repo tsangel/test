@@ -11,4 +11,7 @@ namespace dicom {
 std::vector<std::uint8_t> inflate_deflated_dataset(std::span<const std::uint8_t> full_input,
     std::size_t deflated_start_offset, const std::string& file_path);
 
+std::vector<std::uint8_t> deflate_dataset_body(std::span<const std::uint8_t> dataset_body,
+    const std::string& file_path);
+
 } // namespace dicom
