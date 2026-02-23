@@ -21,8 +21,6 @@ void Sequence::read_from_stream(InStream* stream) {
 		diag::error_and_throw("Sequence::read_from_stream reason=no root dataset context");
 	}
 
-	bool little_endian = root_dataset_->is_little_endian();
-	
 	while (!stream->is_eof()) {
 		if (stream->read_8bytes(buf8) != 8) {
 			diag::error_and_throw(
@@ -30,8 +28,8 @@ void Sequence::read_from_stream(InStream* stream) {
 			    stream->identifier(), stream->tell());
 		}
 
-		const std::uint16_t gggg = endian::load_value<std::uint16_t>(buf8.data(), little_endian);
-		const std::uint16_t eeee = endian::load_value<std::uint16_t>(buf8.data() + 2, little_endian);
+		const std::uint16_t gggg = endian::load_le<std::uint16_t>(buf8.data());
+		const std::uint16_t eeee = endian::load_le<std::uint16_t>(buf8.data() + 2);
 		const Tag tag{gggg, eeee};
 
 		// Sequence Delimitation Item
@@ -48,7 +46,7 @@ void Sequence::read_from_stream(InStream* stream) {
 		// PS3.3 Table F.3-3. Directory Information Module Attributes
     	// This offset includes the File Preamble and the DICM Prefix.
     	size_t offset = stream->tell();
-		size_t length = endian::load_value<std::uint32_t>(buf8.data() + 4, little_endian);
+		size_t length = endian::load_le<std::uint32_t>(buf8.data() + 4);
 
 		if (length == 0xffffffff) length = stream->bytes_remaining();
 

@@ -16,6 +16,10 @@
 
 namespace dicom {
 namespace endian {
+
+static_assert(std::endian::native == std::endian::little,
+    "dicomsdl currently supports little-endian host architectures only");
+
 namespace detail {
 
 inline std::uint16_t bswap16(std::uint16_t value) noexcept {
@@ -107,24 +111,13 @@ constexpr T byteswap(T value) noexcept {
 	}
 }
 
-inline constexpr bool host_is_little_endian() noexcept {
-	return std::endian::native == std::endian::little;
-}
-
-inline constexpr bool host_is_big_endian() noexcept {
-	return std::endian::native == std::endian::big;
-}
-
 template <typename T>
 inline T load_le(const void* ptr) noexcept {
 	static_assert(std::is_trivially_copyable_v<T>, "load_le requires trivially copyable types");
 	static_assert(std::is_integral_v<T> || std::is_enum_v<T>, "load_le is intended for integral-like types");
 	T value{};
 	std::memcpy(&value, ptr, sizeof(T));
-	if constexpr (std::endian::native == std::endian::little) {
-		return value;
-	}
-	return byteswap(value);
+	return value;
 }
 
 template <typename T>
@@ -133,24 +126,13 @@ inline T load_be(const void* ptr) noexcept {
 	static_assert(std::is_integral_v<T> || std::is_enum_v<T>, "load_be is intended for integral-like types");
 	T value{};
 	std::memcpy(&value, ptr, sizeof(T));
-	if constexpr (std::endian::native == std::endian::big) {
-		return value;
-	}
 	return byteswap(value);
-}
-
-template <typename T>
-inline T load_value(const void* ptr, bool little_endian_source) noexcept {
-	return little_endian_source ? load_le<T>(ptr) : load_be<T>(ptr);
 }
 
 template <typename T>
 inline void store_le(void* ptr, T value) noexcept {
 	static_assert(std::is_trivially_copyable_v<T>, "store_le requires trivially copyable types");
 	static_assert(std::is_integral_v<T> || std::is_enum_v<T>, "store_le is intended for integral-like types");
-	if constexpr (std::endian::native != std::endian::little) {
-		value = byteswap(value);
-	}
 	std::memcpy(ptr, &value, sizeof(T));
 }
 
@@ -158,19 +140,8 @@ template <typename T>
 inline void store_be(void* ptr, T value) noexcept {
 	static_assert(std::is_trivially_copyable_v<T>, "store_be requires trivially copyable types");
 	static_assert(std::is_integral_v<T> || std::is_enum_v<T>, "store_be is intended for integral-like types");
-	if constexpr (std::endian::native != std::endian::big) {
-		value = byteswap(value);
-	}
+	value = byteswap(value);
 	std::memcpy(ptr, &value, sizeof(T));
-}
-
-template <typename T>
-inline void store_value(void* ptr, T value, bool little_endian_target) noexcept {
-	if (little_endian_target) {
-		store_le(ptr, value);
-	} else {
-		store_be(ptr, value);
-	}
 }
 
 }  // namespace endian

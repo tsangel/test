@@ -33,7 +33,7 @@ void decode_mono_scaled_into_f32(const DicomFile& df, const DicomFile::pixel_inf
     const DecodeStrides& dst_strides, std::size_t rows, std::size_t cols,
     std::size_t src_row_bytes);
 
-void run_planar_transform_copy(planar_transform transform, std::size_t bytes_per_sample, bool needs_swap,
+void run_planar_transform_copy(planar_transform transform, std::size_t bytes_per_sample,
     const std::uint8_t* src_frame, std::uint8_t* dst_base,
     std::size_t rows, std::size_t cols, std::size_t samples_per_pixel,
     std::size_t src_row_bytes, std::size_t dst_row_bytes);

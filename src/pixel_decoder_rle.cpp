@@ -307,8 +307,7 @@ void decode_rle_into(const DicomFile& df, const DicomFile::pixel_info_t& info,
 	}
 
 	const auto transform = select_planar_transform(Planar::planar, dst_planar);
-	const bool needs_swap = (src_bytes_per_sample > 1) && !endian::host_is_little_endian();
-	run_planar_transform_copy(transform, src_bytes_per_sample, needs_swap,
+	run_planar_transform_copy(transform, src_bytes_per_sample,
 	    decoded_planar.data(), dst.data(), rows, cols, samples_per_pixel,
 	    src_row_bytes, dst_strides.row);
 }

@@ -1,6 +1,7 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <exception>
 #include <iostream>
 #include <string>
 #include <string_view>
@@ -178,6 +179,13 @@ std::vector<std::uint8_t> build_big_endian_raw_pixel_body() {
 	return body;
 }
 
+std::vector<std::uint8_t> build_big_endian_malformed_ow_body() {
+	std::vector<std::uint8_t> body;
+	append_explicit_vr_be_32(
+	    body, dicom::Tag(0x7FE0u, 0x0010u), 'O', 'W', std::vector<std::uint8_t>{0x7F});
+	return body;
+}
+
 void require_transfer_syntax(const dicom::DataSet& ds, dicom::uid::WellKnown expected,
     const char* context) {
 	if (ds.transfer_syntax_uid() != expected) {
@@ -276,6 +284,20 @@ int main() {
 	if (decoded_from_file.size() != decoded.size() ||
 	    std::memcmp(decoded_from_file.data(), decoded.data(), decoded.size()) != 0) {
 		fail("be raw: DicomFile pixel_data forwarding mismatch");
+	}
+
+	// 4) Malformed big-endian payload should fail during normalization.
+	const auto be_malformed_file = build_part10(
+	    "1.2.840.10008.1.2.2", build_big_endian_malformed_ow_body());
+	bool malformed_failed = false;
+	try {
+		(void)dicom::read_bytes(
+		    "be-malformed", be_malformed_file.data(), be_malformed_file.size());
+	} catch (const std::exception&) {
+		malformed_failed = true;
+	}
+	if (!malformed_failed) {
+		fail("be malformed: expected read failure");
 	}
 
 	return 0;

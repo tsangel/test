@@ -297,12 +297,6 @@ nb::object dicomfile_to_array_view(const DicomFile& self, long frame) {
 		throw nb::value_error(
 		    "to_array_view requires PlanarConfiguration=interleaved when SamplesPerPixel > 1");
 	}
-	if (layout.spec.bytes_per_sample > 1 &&
-	    (dataset.is_little_endian() != dicom::endian::host_is_little_endian())) {
-		throw nb::value_error(
-		    "to_array_view requires source endianness to match host endianness");
-	}
-
 	const auto* source = raw_source_element(self, info.sv_dtype);
 	if (source->is_missing()) {
 		throw nb::value_error("to_array_view requires source pixel data to be present");
@@ -1203,8 +1197,7 @@ NB_MODULE(_dicomsdl, m) {
 		    "\n"
 		    "This requires:\n"
 		    "- uncompressed transfer syntax\n"
-		    "- frame layout compatible with interleaved output\n"
-		    "- source endianness matching host endianness for sample sizes > 1.")
+		    "- frame layout compatible with interleaved output.")
 		.def("decode_into",
 		    &dicomfile_decode_into_array,
 		    nb::arg("out"),

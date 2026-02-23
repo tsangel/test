@@ -109,6 +109,6 @@ Note: These attachment calls are intended for the root `DataSet` (the object ret
 
 :::{doxygenclass} dicom::DataSet
 :project: dicomsdl
-:members: DataSet, attach_to_file, attach_to_memory, path, add_dataelement, remove_dataelement, operator[], get_dataelement, dump_elements, read_attached_stream, ensure_loaded, is_little_endian, is_explicit_vr, transfer_syntax_uid, begin, end, cbegin
+:members: DataSet, attach_to_file, attach_to_memory, path, add_dataelement, remove_dataelement, operator[], get_dataelement, dump_elements, read_attached_stream, ensure_loaded, is_explicit_vr, transfer_syntax_uid, begin, end, cbegin
 :undoc-members:
 :::

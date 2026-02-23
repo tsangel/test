@@ -26,11 +26,6 @@ inline std::string_view trim(std::string_view s) {
 	return s;
 }
 
-inline bool element_value_is_little_endian(const DataElement& elem) noexcept {
-	const auto* parent = elem.parent();
-	return parent ? (parent->is_little_endian() || elem.tag().group() == 0x0002u) : true;
-}
-
 bool report_from_assignment_failure(
     std::string_view function_name, const DataElement& element, std::string_view reason) {
 	diag::error("{} tag={} vr={} reason={}",
@@ -45,7 +40,6 @@ std::optional<std::vector<T>> load_numeric_vector(const DataElement& elem) {
 	if (span.empty()) return std::nullopt;
 	if (span.size() % sizeof(T) != 0) return std::nullopt;
 
-	const bool little_endian = element_value_is_little_endian(elem);
 	const auto count = span.size() / sizeof(T);
 	std::vector<T> out;
 	out.reserve(count);
@@ -53,10 +47,10 @@ std::optional<std::vector<T>> load_numeric_vector(const DataElement& elem) {
 		const auto* ptr = span.data() + i * sizeof(T);
         if constexpr (std::is_floating_point_v<T>) {
             using Bits = std::conditional_t<sizeof(T)==4, std::uint32_t, std::uint64_t>;
-            const Bits bits = endian::load_value<Bits>(ptr, little_endian);
+            const Bits bits = endian::load_le<Bits>(ptr);
             out.push_back(std::bit_cast<T>(bits));
         } else {
-		    out.push_back(endian::load_value<T>(ptr, little_endian));
+		    out.push_back(endian::load_le<T>(ptr));
         }
 	}
 	return out;
@@ -87,7 +81,7 @@ std::optional<std::vector<typename Parser::result_type>> parse_string_numbers(co
 }
 
 template <typename T, typename Source>
-bool assign_integral_from_integer(DataElement& element, Source value, bool little_endian) {
+bool assign_integral_from_integer(DataElement& element, Source value) {
 	static_assert(std::is_integral_v<T>, "assign_integral_from_integer requires integral target type");
 	static_assert(
 	    std::is_integral_v<Source>,
@@ -123,7 +117,7 @@ bool assign_integral_from_integer(DataElement& element, Source value, bool littl
 
 	element.reserve_value_bytes(sizeof(T));
 	auto dst = element.value_span();
-	endian::store_value<T>(const_cast<std::uint8_t*>(dst.data()), encoded, little_endian);
+	endian::store_le<T>(const_cast<std::uint8_t*>(dst.data()), encoded);
 	return true;
 }
 
@@ -154,7 +148,7 @@ bool assign_integer_string_from_value(DataElement& element, Source value) {
 
 template <typename T, typename Source>
 bool assign_integral_vector_from_integer(
-    DataElement& element, std::span<const Source> values, bool little_endian) {
+    DataElement& element, std::span<const Source> values) {
 	static_assert(
 	    std::is_integral_v<T>,
 	    "assign_integral_vector_from_integer requires integral target type");
@@ -203,7 +197,7 @@ bool assign_integral_vector_from_integer(
 			}
 			encoded = static_cast<T>(unsigned_value);
 		}
-		endian::store_value<T>(writable + (i * sizeof(T)), encoded, little_endian);
+		endian::store_le<T>(writable + (i * sizeof(T)), encoded);
 	}
 	return true;
 }
@@ -233,7 +227,7 @@ bool assign_integer_string_from_values(DataElement& element, std::span<const Sou
 }
 
 template <typename T>
-bool assign_floating_from_double(DataElement& element, double value, bool little_endian) {
+bool assign_floating_from_double(DataElement& element, double value) {
 	static_assert(
 	    std::is_floating_point_v<T>,
 	    "assign_floating_from_double requires floating-point target type");
@@ -256,13 +250,13 @@ bool assign_floating_from_double(DataElement& element, double value, bool little
 	const Bits bits = std::bit_cast<Bits>(encoded);
 	element.reserve_value_bytes(sizeof(T));
 	auto dst = element.value_span();
-	endian::store_value<Bits>(const_cast<std::uint8_t*>(dst.data()), bits, little_endian);
+	endian::store_le<Bits>(const_cast<std::uint8_t*>(dst.data()), bits);
 	return true;
 }
 
 template <typename T>
 bool assign_floating_vector_from_double(
-    DataElement& element, std::span<const double> values, bool little_endian) {
+    DataElement& element, std::span<const double> values) {
 	static_assert(
 	    std::is_floating_point_v<T>,
 	    "assign_floating_vector_from_double requires floating-point target type");
@@ -291,13 +285,13 @@ bool assign_floating_vector_from_double(
 				return false;
 			}
 		}
-		const auto encoded = static_cast<T>(value);
-		if (!std::isfinite(encoded)) {
-			return false;
+			const auto encoded = static_cast<T>(value);
+			if (!std::isfinite(encoded)) {
+				return false;
+			}
+			const Bits bits = std::bit_cast<Bits>(encoded);
+			endian::store_le<Bits>(writable + (i * sizeof(T)), bits);
 		}
-		const Bits bits = std::bit_cast<Bits>(encoded);
-		endian::store_value<Bits>(writable + (i * sizeof(T)), bits, little_endian);
-	}
 	return true;
 }
 
@@ -589,26 +583,25 @@ bool DataElement::from_int(int value) {
 		    "DataElement::from_int", *this, "numeric assignment is not supported for SQ/PX");
 	}
 
-	const bool little_endian = element_value_is_little_endian(*this);
 	bool ok = false;
 	switch (static_cast<std::uint16_t>(vr_)) {
 	case VR::SS_val:
-		ok = assign_integral_from_integer<std::int16_t>(*this, value, little_endian);
+		ok = assign_integral_from_integer<std::int16_t>(*this, value);
 		break;
 	case VR::US_val:
-		ok = assign_integral_from_integer<std::uint16_t>(*this, value, little_endian);
+		ok = assign_integral_from_integer<std::uint16_t>(*this, value);
 		break;
 	case VR::SL_val:
-		ok = assign_integral_from_integer<std::int32_t>(*this, value, little_endian);
+		ok = assign_integral_from_integer<std::int32_t>(*this, value);
 		break;
 	case VR::UL_val:
-		ok = assign_integral_from_integer<std::uint32_t>(*this, value, little_endian);
+		ok = assign_integral_from_integer<std::uint32_t>(*this, value);
 		break;
 	case VR::SV_val:
-		ok = assign_integral_from_integer<std::int64_t>(*this, value, little_endian);
+		ok = assign_integral_from_integer<std::int64_t>(*this, value);
 		break;
 	case VR::UV_val:
-		ok = assign_integral_from_integer<std::uint64_t>(*this, value, little_endian);
+		ok = assign_integral_from_integer<std::uint64_t>(*this, value);
 		break;
 	case VR::IS_val:
 	case VR::DS_val:
@@ -632,26 +625,25 @@ bool DataElement::from_int_vector(std::span<const int> values) {
 		    "DataElement::from_int_vector", *this, "numeric assignment is not supported for SQ/PX");
 	}
 
-	const bool little_endian = element_value_is_little_endian(*this);
 	bool ok = false;
 	switch (static_cast<std::uint16_t>(vr_)) {
 	case VR::SS_val:
-		ok = assign_integral_vector_from_integer<std::int16_t>(*this, values, little_endian);
+		ok = assign_integral_vector_from_integer<std::int16_t>(*this, values);
 		break;
 	case VR::US_val:
-		ok = assign_integral_vector_from_integer<std::uint16_t>(*this, values, little_endian);
+		ok = assign_integral_vector_from_integer<std::uint16_t>(*this, values);
 		break;
 	case VR::SL_val:
-		ok = assign_integral_vector_from_integer<std::int32_t>(*this, values, little_endian);
+		ok = assign_integral_vector_from_integer<std::int32_t>(*this, values);
 		break;
 	case VR::UL_val:
-		ok = assign_integral_vector_from_integer<std::uint32_t>(*this, values, little_endian);
+		ok = assign_integral_vector_from_integer<std::uint32_t>(*this, values);
 		break;
 	case VR::SV_val:
-		ok = assign_integral_vector_from_integer<std::int64_t>(*this, values, little_endian);
+		ok = assign_integral_vector_from_integer<std::int64_t>(*this, values);
 		break;
 	case VR::UV_val:
-		ok = assign_integral_vector_from_integer<std::uint64_t>(*this, values, little_endian);
+		ok = assign_integral_vector_from_integer<std::uint64_t>(*this, values);
 		break;
 	case VR::IS_val:
 	case VR::DS_val:
@@ -675,26 +667,25 @@ bool DataElement::from_long(long value) {
 		    "DataElement::from_long", *this, "numeric assignment is not supported for SQ/PX");
 	}
 
-	const bool little_endian = element_value_is_little_endian(*this);
 	bool ok = false;
 	switch (static_cast<std::uint16_t>(vr_)) {
 	case VR::SS_val:
-		ok = assign_integral_from_integer<std::int16_t>(*this, value, little_endian);
+		ok = assign_integral_from_integer<std::int16_t>(*this, value);
 		break;
 	case VR::US_val:
-		ok = assign_integral_from_integer<std::uint16_t>(*this, value, little_endian);
+		ok = assign_integral_from_integer<std::uint16_t>(*this, value);
 		break;
 	case VR::SL_val:
-		ok = assign_integral_from_integer<std::int32_t>(*this, value, little_endian);
+		ok = assign_integral_from_integer<std::int32_t>(*this, value);
 		break;
 	case VR::UL_val:
-		ok = assign_integral_from_integer<std::uint32_t>(*this, value, little_endian);
+		ok = assign_integral_from_integer<std::uint32_t>(*this, value);
 		break;
 	case VR::SV_val:
-		ok = assign_integral_from_integer<std::int64_t>(*this, value, little_endian);
+		ok = assign_integral_from_integer<std::int64_t>(*this, value);
 		break;
 	case VR::UV_val:
-		ok = assign_integral_from_integer<std::uint64_t>(*this, value, little_endian);
+		ok = assign_integral_from_integer<std::uint64_t>(*this, value);
 		break;
 	case VR::IS_val:
 	case VR::DS_val:
@@ -718,26 +709,25 @@ bool DataElement::from_long_vector(std::span<const long> values) {
 		    "DataElement::from_long_vector", *this, "numeric assignment is not supported for SQ/PX");
 	}
 
-	const bool little_endian = element_value_is_little_endian(*this);
 	bool ok = false;
 	switch (static_cast<std::uint16_t>(vr_)) {
 	case VR::SS_val:
-		ok = assign_integral_vector_from_integer<std::int16_t>(*this, values, little_endian);
+		ok = assign_integral_vector_from_integer<std::int16_t>(*this, values);
 		break;
 	case VR::US_val:
-		ok = assign_integral_vector_from_integer<std::uint16_t>(*this, values, little_endian);
+		ok = assign_integral_vector_from_integer<std::uint16_t>(*this, values);
 		break;
 	case VR::SL_val:
-		ok = assign_integral_vector_from_integer<std::int32_t>(*this, values, little_endian);
+		ok = assign_integral_vector_from_integer<std::int32_t>(*this, values);
 		break;
 	case VR::UL_val:
-		ok = assign_integral_vector_from_integer<std::uint32_t>(*this, values, little_endian);
+		ok = assign_integral_vector_from_integer<std::uint32_t>(*this, values);
 		break;
 	case VR::SV_val:
-		ok = assign_integral_vector_from_integer<std::int64_t>(*this, values, little_endian);
+		ok = assign_integral_vector_from_integer<std::int64_t>(*this, values);
 		break;
 	case VR::UV_val:
-		ok = assign_integral_vector_from_integer<std::uint64_t>(*this, values, little_endian);
+		ok = assign_integral_vector_from_integer<std::uint64_t>(*this, values);
 		break;
 	case VR::IS_val:
 	case VR::DS_val:
@@ -761,26 +751,25 @@ bool DataElement::from_longlong(long long value) {
 		    "DataElement::from_longlong", *this, "numeric assignment is not supported for SQ/PX");
 	}
 
-	const bool little_endian = element_value_is_little_endian(*this);
 	bool ok = false;
 	switch (static_cast<std::uint16_t>(vr_)) {
 	case VR::SS_val:
-		ok = assign_integral_from_integer<std::int16_t>(*this, value, little_endian);
+		ok = assign_integral_from_integer<std::int16_t>(*this, value);
 		break;
 	case VR::US_val:
-		ok = assign_integral_from_integer<std::uint16_t>(*this, value, little_endian);
+		ok = assign_integral_from_integer<std::uint16_t>(*this, value);
 		break;
 	case VR::SL_val:
-		ok = assign_integral_from_integer<std::int32_t>(*this, value, little_endian);
+		ok = assign_integral_from_integer<std::int32_t>(*this, value);
 		break;
 	case VR::UL_val:
-		ok = assign_integral_from_integer<std::uint32_t>(*this, value, little_endian);
+		ok = assign_integral_from_integer<std::uint32_t>(*this, value);
 		break;
 	case VR::SV_val:
-		ok = assign_integral_from_integer<std::int64_t>(*this, value, little_endian);
+		ok = assign_integral_from_integer<std::int64_t>(*this, value);
 		break;
 	case VR::UV_val:
-		ok = assign_integral_from_integer<std::uint64_t>(*this, value, little_endian);
+		ok = assign_integral_from_integer<std::uint64_t>(*this, value);
 		break;
 	case VR::IS_val:
 	case VR::DS_val:
@@ -804,26 +793,25 @@ bool DataElement::from_longlong_vector(std::span<const long long> values) {
 		    "DataElement::from_longlong_vector", *this, "numeric assignment is not supported for SQ/PX");
 	}
 
-	const bool little_endian = element_value_is_little_endian(*this);
 	bool ok = false;
 	switch (static_cast<std::uint16_t>(vr_)) {
 	case VR::SS_val:
-		ok = assign_integral_vector_from_integer<std::int16_t>(*this, values, little_endian);
+		ok = assign_integral_vector_from_integer<std::int16_t>(*this, values);
 		break;
 	case VR::US_val:
-		ok = assign_integral_vector_from_integer<std::uint16_t>(*this, values, little_endian);
+		ok = assign_integral_vector_from_integer<std::uint16_t>(*this, values);
 		break;
 	case VR::SL_val:
-		ok = assign_integral_vector_from_integer<std::int32_t>(*this, values, little_endian);
+		ok = assign_integral_vector_from_integer<std::int32_t>(*this, values);
 		break;
 	case VR::UL_val:
-		ok = assign_integral_vector_from_integer<std::uint32_t>(*this, values, little_endian);
+		ok = assign_integral_vector_from_integer<std::uint32_t>(*this, values);
 		break;
 	case VR::SV_val:
-		ok = assign_integral_vector_from_integer<std::int64_t>(*this, values, little_endian);
+		ok = assign_integral_vector_from_integer<std::int64_t>(*this, values);
 		break;
 	case VR::UV_val:
-		ok = assign_integral_vector_from_integer<std::uint64_t>(*this, values, little_endian);
+		ok = assign_integral_vector_from_integer<std::uint64_t>(*this, values);
 		break;
 	case VR::IS_val:
 	case VR::DS_val:
@@ -847,14 +835,13 @@ bool DataElement::from_double(double value) {
 		    "DataElement::from_double", *this, "floating-point assignment is not supported for SQ/PX");
 	}
 
-	const bool little_endian = element_value_is_little_endian(*this);
 	bool ok = false;
 	switch (static_cast<std::uint16_t>(vr_)) {
 	case VR::FL_val:
-		ok = assign_floating_from_double<float>(*this, value, little_endian);
+		ok = assign_floating_from_double<float>(*this, value);
 		break;
 	case VR::FD_val:
-		ok = assign_floating_from_double<double>(*this, value, little_endian);
+		ok = assign_floating_from_double<double>(*this, value);
 		break;
 	case VR::DS_val:
 		ok = assign_decimal_string_from_double(*this, value);
@@ -878,14 +865,13 @@ bool DataElement::from_double_vector(std::span<const double> values) {
 		    "floating-point assignment is not supported for SQ/PX");
 	}
 
-	const bool little_endian = element_value_is_little_endian(*this);
 	bool ok = false;
 	switch (static_cast<std::uint16_t>(vr_)) {
 	case VR::FL_val:
-		ok = assign_floating_vector_from_double<float>(*this, values, little_endian);
+		ok = assign_floating_vector_from_double<float>(*this, values);
 		break;
 	case VR::FD_val:
-		ok = assign_floating_vector_from_double<double>(*this, values, little_endian);
+		ok = assign_floating_vector_from_double<double>(*this, values);
 		break;
 	case VR::DS_val:
 		ok = assign_decimal_string_vector_from_double(*this, values);
@@ -913,12 +899,11 @@ bool DataElement::from_tag(Tag value) {
 		    "DataElement::from_tag", *this, "AT VR required for from_tag");
 	}
 
-	const bool little_endian = element_value_is_little_endian(*this);
 	reserve_value_bytes(4);
 	auto dst = value_span();
 	auto* writable = const_cast<std::uint8_t*>(dst.data());
-	endian::store_value<std::uint16_t>(writable, value.group(), little_endian);
-	endian::store_value<std::uint16_t>(writable + 2, value.element(), little_endian);
+	endian::store_le<std::uint16_t>(writable, value.group());
+	endian::store_le<std::uint16_t>(writable + 2, value.element());
 	return true;
 }
 
@@ -940,7 +925,6 @@ bool DataElement::from_tag_vector(std::span<const Tag> values) {
 		    "DataElement::from_tag_vector", *this, "too many tag values for AT element");
 	}
 
-	const bool little_endian = element_value_is_little_endian(*this);
 	const std::size_t total_bytes = values.size() * 4;
 	reserve_value_bytes(total_bytes);
 	auto dst = value_span();
@@ -948,8 +932,8 @@ bool DataElement::from_tag_vector(std::span<const Tag> values) {
 	for (std::size_t i = 0; i < values.size(); ++i) {
 		const auto& tag = values[i];
 		const auto offset = i * 4;
-		endian::store_value<std::uint16_t>(writable + offset, tag.group(), little_endian);
-		endian::store_value<std::uint16_t>(writable + offset + 2, tag.element(), little_endian);
+		endian::store_le<std::uint16_t>(writable + offset, tag.group());
+		endian::store_le<std::uint16_t>(writable + offset + 2, tag.element());
 	}
 	return true;
 }
@@ -1392,14 +1376,13 @@ template <typename T>
 static std::optional<T> load_numeric_scalar(const DataElement& elem) {
 	const auto span = elem.value_span();
 	if (span.size() < sizeof(T)) return std::nullopt;
-	const bool little_endian = element_value_is_little_endian(elem);
 	const auto* ptr = span.data();
 	if constexpr (std::is_floating_point_v<T>) {
 		using Bits = std::conditional_t<sizeof(T)==4, std::uint32_t, std::uint64_t>;
-		const Bits bits = endian::load_value<Bits>(ptr, little_endian);
+		const Bits bits = endian::load_le<Bits>(ptr);
 		return std::bit_cast<T>(bits);
 	} else {
-		return endian::load_value<T>(ptr, little_endian);
+		return endian::load_le<T>(ptr);
 	}
 }
 
@@ -1700,14 +1683,13 @@ std::optional<std::vector<Tag>> DataElement::to_tag_vector() const {
 	if (vr_ != dicom::VR::AT) return std::nullopt;
 	const auto span = value_span();
 	if (span.empty() || span.size() % 4 != 0) return std::nullopt;
-	const bool little_endian = element_value_is_little_endian(*this);
 	const auto count = span.size() / 4;
 	std::vector<Tag> out;
 	out.reserve(count);
 	for (std::size_t i = 0; i < count; ++i) {
 		const auto* ptr = span.data() + i * 4;
-		const std::uint16_t g = endian::load_value<std::uint16_t>(ptr, little_endian);
-		const std::uint16_t e = endian::load_value<std::uint16_t>(ptr + 2, little_endian);
+		const std::uint16_t g = endian::load_le<std::uint16_t>(ptr);
+		const std::uint16_t e = endian::load_le<std::uint16_t>(ptr + 2);
 		out.emplace_back(g, e);
 	}
 	return out;
@@ -1717,9 +1699,8 @@ std::optional<Tag> DataElement::to_tag() const {
 	if (vr_ != dicom::VR::AT) return std::nullopt;
 	const auto span = value_span();
 	if (span.size() < 4) return std::nullopt;
-	const bool little_endian = element_value_is_little_endian(*this);
-	const std::uint16_t g = endian::load_value<std::uint16_t>(span.data(), little_endian);
-	const std::uint16_t e = endian::load_value<std::uint16_t>(span.data() + 2, little_endian);
+	const std::uint16_t g = endian::load_le<std::uint16_t>(span.data());
+	const std::uint16_t e = endian::load_le<std::uint16_t>(span.data() + 2);
 	return Tag(g, e);
 }
 

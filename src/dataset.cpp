@@ -1,6 +1,8 @@
 #include <dicom.h>
 #include <dicom_endian.h>
 #include <diagnostics.h>
+#include "deflated_dataset_inflater.h"
+#include "big_endian_dataset_normalizer.h"
 #include <instream.h>
 
 #include <algorithm>
@@ -18,8 +20,6 @@
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include <libdeflate.h>
 
 using namespace dicom::literals;
 namespace diag = dicom::diag;
@@ -46,116 +46,12 @@ void update_root_elements_reserve_hint(std::size_t parsed_elements) noexcept {
 
 } // namespace
 
-void apply_transfer_syntax_flags(uid::WellKnown transfer_syntax, bool& little_endian,
-    bool& explicit_vr) {
-	little_endian = true;
-	explicit_vr = true;
-
+[[nodiscard]] bool transfer_syntax_uses_explicit_vr(uid::WellKnown transfer_syntax) noexcept {
 	if (!transfer_syntax.valid()) {
-		return;
+		return true;
 	}
-	if (transfer_syntax == "ExplicitVRBigEndian"_uid) {
-		little_endian = false;
-		return;
-	}
-	if (transfer_syntax == "ImplicitVRLittleEndian"_uid ||
-	    transfer_syntax == "Papyrus3ImplicitVRLittleEndian"_uid) {
-		explicit_vr = false;
-	}
-}
-
-const char* libdeflate_result_name(enum libdeflate_result result) noexcept {
-	switch (result) {
-	case LIBDEFLATE_SUCCESS:
-		return "LIBDEFLATE_SUCCESS";
-	case LIBDEFLATE_BAD_DATA:
-		return "LIBDEFLATE_BAD_DATA";
-	case LIBDEFLATE_SHORT_OUTPUT:
-		return "LIBDEFLATE_SHORT_OUTPUT";
-	case LIBDEFLATE_INSUFFICIENT_SPACE:
-		return "LIBDEFLATE_INSUFFICIENT_SPACE";
-	default:
-		return "LIBDEFLATE_UNKNOWN";
-	}
-}
-
-std::vector<std::uint8_t> inflate_deflated_image(std::span<const std::uint8_t> full_input,
-    std::size_t deflated_start_offset, const std::string& file_path) {
-	if (deflated_start_offset > full_input.size()) {
-		diag::error_and_throw(
-		    fmt::format(
-		        "DataSet::read_attached_stream file={} offset=0x{:X} reason=invalid deflated data start offset",
-		        file_path, deflated_start_offset));
-	}
-
-	const auto compressed_input = full_input.subspan(deflated_start_offset);
-	if (compressed_input.empty()) {
-		return std::vector<std::uint8_t>(full_input.begin(),
-		    full_input.begin() + static_cast<std::ptrdiff_t>(deflated_start_offset));
-	}
-
-	struct libdeflate_decompressor* decompressor = libdeflate_alloc_decompressor();
-	if (!decompressor) {
-		diag::error_and_throw(
-		    fmt::format(
-		        "DataSet::read_attached_stream file={} offset=0x{:X} reason=failed to allocate libdeflate decompressor",
-		        file_path, deflated_start_offset));
-	}
-
-	std::size_t tail_capacity = std::max<std::size_t>(compressed_input.size() * 4, 1u << 20);
-	if (deflated_start_offset > std::numeric_limits<std::size_t>::max() - tail_capacity) {
-		libdeflate_free_decompressor(decompressor);
-		diag::error_and_throw(
-		    fmt::format(
-		        "DataSet::read_attached_stream file={} offset=0x{:X} reason=deflated output too large",
-		        file_path, deflated_start_offset));
-	}
-
-	std::vector<std::uint8_t> output(deflated_start_offset + tail_capacity);
-	if (deflated_start_offset > 0) {
-		std::memcpy(output.data(), full_input.data(), deflated_start_offset);
-	}
-
-	size_t actual_out = 0;
-	enum libdeflate_result result = LIBDEFLATE_INSUFFICIENT_SPACE;
-	while (true) {
-		result = libdeflate_deflate_decompress(decompressor, compressed_input.data(),
-		    compressed_input.size(), output.data() + deflated_start_offset,
-		    output.size() - deflated_start_offset, &actual_out);
-		if (result == LIBDEFLATE_SUCCESS) {
-			output.resize(deflated_start_offset + actual_out);
-			break;
-		}
-		if (result != LIBDEFLATE_INSUFFICIENT_SPACE) {
-			libdeflate_free_decompressor(decompressor);
-			diag::error_and_throw(
-			    fmt::format(
-			        "DataSet::read_attached_stream file={} offset=0x{:X} reason=deflate decompression failed result={}",
-			        file_path, deflated_start_offset, libdeflate_result_name(result)));
-		}
-
-		const auto current_tail_capacity = output.size() - deflated_start_offset;
-		if (current_tail_capacity > std::numeric_limits<std::size_t>::max() / 2) {
-			libdeflate_free_decompressor(decompressor);
-			diag::error_and_throw(
-			    fmt::format(
-			        "DataSet::read_attached_stream file={} offset=0x{:X} reason=deflated output too large",
-			        file_path, deflated_start_offset));
-		}
-
-		const auto next_tail_capacity = current_tail_capacity * 2;
-		if (deflated_start_offset > std::numeric_limits<std::size_t>::max() - next_tail_capacity) {
-			libdeflate_free_decompressor(decompressor);
-			diag::error_and_throw(
-			    fmt::format(
-			        "DataSet::read_attached_stream file={} offset=0x{:X} reason=deflated output too large",
-			        file_path, deflated_start_offset));
-		}
-		output.resize(deflated_start_offset + next_tail_capacity);
-	}
-
-	libdeflate_free_decompressor(decompressor);
-	return output;
+	return transfer_syntax != "ImplicitVRLittleEndian"_uid &&
+	    transfer_syntax != "Papyrus3ImplicitVRLittleEndian"_uid;
 }
 
 std::unique_ptr<InFileStream> make_file_stream(const std::string& path) {
@@ -290,21 +186,20 @@ std::optional<Tag> parse_private_creator_tag(DataSetPtr* dataset, std::string_vi
 	return std::nullopt;
 }
 DataSet::DataSet() : root_dataset_(this) {
-	apply_transfer_syntax_flags("ExplicitVRLittleEndian"_uid, little_endian_, explicit_vr_);
+	explicit_vr_ = transfer_syntax_uses_explicit_vr("ExplicitVRLittleEndian"_uid);
 }
 
 DataSet::DataSet(DataSet* root_dataset)
     : root_file_(root_dataset ? root_dataset->root_file_ : nullptr),
       root_dataset_(root_dataset ? root_dataset->root_dataset_ : this) {
-	apply_transfer_syntax_flags("ExplicitVRLittleEndian"_uid, little_endian_, explicit_vr_);
+	explicit_vr_ = transfer_syntax_uses_explicit_vr("ExplicitVRLittleEndian"_uid);
 	if (root_dataset_ && root_dataset_ != this) {
-		little_endian_ = root_dataset_->little_endian_;
 		explicit_vr_ = root_dataset_->explicit_vr_;
 	}
 }
 
 DataSet::DataSet(DicomFile* root_file) : root_file_(root_file), root_dataset_(this) {
-	apply_transfer_syntax_flags("ExplicitVRLittleEndian"_uid, little_endian_, explicit_vr_);
+	explicit_vr_ = transfer_syntax_uses_explicit_vr("ExplicitVRLittleEndian"_uid);
 }
 
 DataSet::~DataSet() = default;
@@ -674,7 +569,7 @@ void DataSet::read_attached_stream(const ReadOptions& options) {
 	if (root_file_) {
 		root_file_->set_transfer_syntax("ExplicitVRLittleEndian"_uid);
 	} else {
-		apply_transfer_syntax_flags("ExplicitVRLittleEndian"_uid, little_endian_, explicit_vr_);
+		explicit_vr_ = transfer_syntax_uses_explicit_vr("ExplicitVRLittleEndian"_uid);
 	}
 
 	// parse DICOM stream, starting with skipping the 128-byte preamble.
@@ -692,44 +587,54 @@ void DataSet::read_attached_stream(const ReadOptions& options) {
 
 	const auto* transfer_syntax = get_dataelement("(0002,0010)"_tag);
 	if (auto well_known = transfer_syntax->to_transfer_syntax_uid()) {
-		if (root_file_) {
-			root_file_->set_transfer_syntax(*well_known);
-		} else {
-			apply_transfer_syntax_flags(*well_known, little_endian_, explicit_vr_);
-		}
-	} else if (auto uid_value = transfer_syntax->to_uid_string()) {
+			if (root_file_) {
+				root_file_->set_transfer_syntax(*well_known);
+			} else {
+				explicit_vr_ = transfer_syntax_uses_explicit_vr(*well_known);
+			}
+		} else if (auto uid_value = transfer_syntax->to_uid_string()) {
 		diag::error(
 		    "DataSet::read_attached_stream file={} transfer_syntax_uid={} reason=unknown transfer syntax UID",
 		    path(), *uid_value);
 	}
 
-	if (transfer_syntax_uid() == "DeflatedExplicitVRLittleEndian"_uid) {
-		std::size_t deflated_start_offset = stream_->tell();
+	if (transfer_syntax_uid() == "DeflatedExplicitVRLittleEndian"_uid ||
+	    transfer_syntax_uid() == "ExplicitVRBigEndian"_uid) {
+		std::size_t dataset_start_offset = stream_->tell();
 		const auto* meta_group_length = get_dataelement("(0002,0000)"_tag);
 		if (auto group_length = meta_group_length->to_long(); group_length && *group_length >= 0) {
 			const auto offset_candidate =
 			    meta_group_length->offset() + meta_group_length->length() +
 			    static_cast<std::size_t>(*group_length);
 			if (offset_candidate <= stream_->end_offset()) {
-				deflated_start_offset = offset_candidate;
+				dataset_start_offset = offset_candidate;
 			}
 		}
 
 		const auto full_size = stream_->end_offset();
 		const auto full_span = stream_->get_span(0, full_size);
-		if (deflated_start_offset > full_span.size()) {
+		if (dataset_start_offset > full_span.size()) {
 			diag::error_and_throw(
 			    fmt::format(
-			        "DataSet::read_attached_stream file={} offset=0x{:X} reason=invalid deflated data start offset",
-			        path(), deflated_start_offset));
+			        "DataSet::read_attached_stream file={} offset=0x{:X} reason=invalid dataset body start offset",
+			        path(), dataset_start_offset));
 		}
 
-		auto inflated_image = inflate_deflated_image(full_span, deflated_start_offset, path());
+		std::vector<std::uint8_t> normalized_image;
+		if (transfer_syntax_uid() == "DeflatedExplicitVRLittleEndian"_uid) {
+			normalized_image = inflate_deflated_dataset(full_span, dataset_start_offset, path());
+		} else {
+			normalized_image = normalize_big_endian_dataset(
+			    full_span, dataset_start_offset, path());
+		}
 
 		const std::string stream_identifier = path();
-		attach_to_memory(stream_identifier, std::move(inflated_image));
-		stream_->seek(deflated_start_offset);
-	}
+		attach_to_memory(stream_identifier, std::move(normalized_image));
+		stream_->seek(dataset_start_offset);
+
+			// Keep the public transfer syntax UID as-is, but parse the normalized body as LE explicit VR.
+			explicit_vr_ = true;
+		}
 
 	read_elements_until(options.load_until, stream_.get());
 	update_root_elements_reserve_hint(elements_.size());
@@ -750,7 +655,6 @@ void DataSet::read_elements_until(Tag load_until, InStream* stream) {
 		}
 	}
 
-	const bool little_endian = is_little_endian();
 	const bool explicit_vr = is_explicit_vr();
 
 	while (!stream->is_eof()) {
@@ -768,8 +672,8 @@ void DataSet::read_elements_until(Tag load_until, InStream* stream) {
 			break;
 		}
 
-		const std::uint16_t gggg = endian::load_value<std::uint16_t>(buf8.data(), little_endian);
-		const std::uint16_t eeee = endian::load_value<std::uint16_t>(buf8.data() + 2, little_endian);
+		const std::uint16_t gggg = endian::load_le<std::uint16_t>(buf8.data());
+		const std::uint16_t eeee = endian::load_le<std::uint16_t>(buf8.data() + 2);
 
 		const Tag tag{gggg, eeee};
 
@@ -821,7 +725,7 @@ void DataSet::read_elements_until(Tag load_until, InStream* stream) {
 
 			if (vr.is_known()) {
 				if (vr.uses_explicit_16bit_vl()) {
-					length = endian::load_value<std::uint16_t>(buf8.data() + 6, little_endian);
+					length = endian::load_le<std::uint16_t>(buf8.data() + 6);
 				} else {
 					// PS3.5 Table 7.1-1. Data Element with Explicit VR other than
 					// as shown in Table 7.1-2
@@ -830,18 +734,18 @@ void DataSet::read_elements_until(Tag load_until, InStream* stream) {
 					    "DataSet::read_elements_until file={} offset=0x{:X} tag={} vr={} reason=failed to read 4-byte length",
 						    path(), stream->tell(), tag.to_string(), vr.str());
 					}
-					length = endian::load_value<std::uint32_t>(buf4.data(), little_endian);
-					
-					// Some non‑conforming writers store VR UT with a 2‑byte length; salvage it.
-					if (length != 0xffffffff && length > stream->bytes_remaining()) {
-						stream->unread(4);
-						length = endian::load_value<std::uint16_t>(buf8.data() + 6, little_endian);
-					}
-			}
-		} else {
-				if (vr == VR('P', 'X')) {
-					length = endian::load_value<std::uint16_t>(buf8.data() + 6, little_endian);
-				} else {
+						length = endian::load_le<std::uint32_t>(buf4.data());
+						
+						// Some non‑conforming writers store VR UT with a 2‑byte length; salvage it.
+						if (length != 0xffffffff && length > stream->bytes_remaining()) {
+							stream->unread(4);
+							length = endian::load_le<std::uint16_t>(buf8.data() + 6);
+						}
+				}
+			} else {
+					if (vr == VR('P', 'X')) {
+						length = endian::load_le<std::uint16_t>(buf8.data() + 6);
+					} else {
 					// assume this Data Element has implicit vr
 					// PS 3.5-2009, Table 7.1-3
 		            // DATA ELEMENT STRUCTURE WITH IMPLICIT VR

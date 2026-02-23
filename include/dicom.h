@@ -126,14 +126,6 @@ static_assert(std::is_trivially_copyable_v<Tag>, "Tag should be trivially copyab
 
 namespace endian {
 
-// Load a Tag from two consecutive uint16 fields, honoring the source endianness.
-inline Tag load_tag(const void* ptr, bool little_endian_source) noexcept {
-	const auto* byte_ptr = static_cast<const std::uint8_t*>(ptr);
-	const auto group = load_value<std::uint16_t>(byte_ptr, little_endian_source);
-	const auto element = load_value<std::uint16_t>(byte_ptr + 2, little_endian_source);
-	return Tag(group, element);
-}
-
 // Load a Tag assuming little-endian source bytes.
 inline Tag load_tag_le(const void* ptr) noexcept {
 	const auto* byte_ptr = static_cast<const std::uint8_t*>(ptr);
@@ -1476,9 +1468,6 @@ public:
 	/// Const version of ensure_loaded.
 	void ensure_loaded(Tag tag) const;
 
-	/// Transfer syntax endianness flag.
-	[[nodiscard]] inline bool is_little_endian() const { return little_endian_; }
-
 	/// Transfer syntax explicit VR flag.
 	[[nodiscard]] inline bool is_explicit_vr() const { return explicit_vr_; }
 
@@ -1517,7 +1506,6 @@ private:
 	DicomFile* root_file_{nullptr};
 	DataSet* root_dataset_{nullptr};
 	Tag last_tag_loaded_{Tag::from_value(0)};
-	bool little_endian_{true};
 	bool explicit_vr_{true};
 	std::size_t offset_{0};  // absolute offset within the root stream where this dataset starts
 	std::vector<DataElement> elements_;

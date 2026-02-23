@@ -69,6 +69,8 @@ include(ExternalProject)
 
 add_library(dicomsdl STATIC
 	src/dataset.cpp
+	src/deflated_dataset_inflater.cpp
+	src/big_endian_dataset_normalizer.cpp
 	src/dumpdataset.cpp
 	src/dicomfile.cpp
 	src/dicom_write.cpp

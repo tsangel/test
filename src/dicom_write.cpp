@@ -37,12 +37,7 @@ constexpr Tag kImplementationVersionNameTag{0x0002u, 0x0013u};
 constexpr Tag kSopClassUidTag{0x0008u, 0x0016u};
 constexpr Tag kSopInstanceUidTag{0x0008u, 0x0018u};
 
-struct Encoding {
-	bool little_endian{true};
-	bool explicit_vr{true};
-};
-
-constexpr Encoding kMetaEncoding{true, true};
+constexpr bool kMetaExplicitVr = true;
 
 struct StreamWriter {
 	explicit StreamWriter(std::ostream& out) : os(out) {}
@@ -105,23 +100,23 @@ struct CountingWriter {
 }
 
 template <typename Writer>
-void write_u16(Writer& writer, std::uint16_t value, bool little_endian) {
+void write_u16(Writer& writer, std::uint16_t value) {
 	std::array<std::uint8_t, 2> bytes{};
-	endian::store_value<std::uint16_t>(bytes.data(), value, little_endian);
+	endian::store_le<std::uint16_t>(bytes.data(), value);
 	writer.append(bytes.data(), bytes.size());
 }
 
 template <typename Writer>
-void write_u32(Writer& writer, std::uint32_t value, bool little_endian) {
+void write_u32(Writer& writer, std::uint32_t value) {
 	std::array<std::uint8_t, 4> bytes{};
-	endian::store_value<std::uint32_t>(bytes.data(), value, little_endian);
+	endian::store_le<std::uint32_t>(bytes.data(), value);
 	writer.append(bytes.data(), bytes.size());
 }
 
 template <typename Writer>
-void write_tag(Writer& writer, Tag tag, bool little_endian) {
-	write_u16(writer, tag.group(), little_endian);
-	write_u16(writer, tag.element(), little_endian);
+void write_tag(Writer& writer, Tag tag) {
+	write_u16(writer, tag.group());
+	write_u16(writer, tag.element());
 }
 
 [[nodiscard]] VR normalize_vr_for_write(Tag tag, VR vr) {
@@ -137,11 +132,11 @@ void write_tag(Writer& writer, Tag tag, bool little_endian) {
 
 template <typename Writer>
 void write_element_header(Writer& writer, Tag tag, VR vr, std::uint32_t value_length,
-    bool undefined_length, const Encoding& encoding) {
-	write_tag(writer, tag, encoding.little_endian);
+    bool undefined_length, bool explicit_vr) {
+	write_tag(writer, tag);
 
-	if (!encoding.explicit_vr) {
-		write_u32(writer, undefined_length ? 0xFFFFFFFFu : value_length, encoding.little_endian);
+	if (!explicit_vr) {
+		write_u32(writer, undefined_length ? 0xFFFFFFFFu : value_length);
 		return;
 	}
 
@@ -157,18 +152,18 @@ void write_element_header(Writer& writer, Tag tag, VR vr, std::uint32_t value_le
 			    "write_to_stream reason=16-bit VL overflow for tag={} vr={} length={}",
 			    tag.to_string(), vr.str(), value_length);
 		}
-		write_u16(writer, static_cast<std::uint16_t>(value_length), encoding.little_endian);
+		write_u16(writer, static_cast<std::uint16_t>(value_length));
 		return;
 	}
 
-	write_u16(writer, 0u, encoding.little_endian);
-	write_u32(writer, undefined_length ? 0xFFFFFFFFu : value_length, encoding.little_endian);
+	write_u16(writer, 0u);
+	write_u32(writer, undefined_length ? 0xFFFFFFFFu : value_length);
 }
 
 template <typename Writer>
-void write_item_header(Writer& writer, Tag tag, std::uint32_t value_length, bool little_endian) {
-	write_tag(writer, tag, little_endian);
-	write_u32(writer, value_length, little_endian);
+void write_item_header(Writer& writer, Tag tag, std::uint32_t value_length) {
+	write_tag(writer, tag);
+	write_u32(writer, value_length);
 }
 
 [[nodiscard]] std::size_t padded_length(std::size_t raw_length) {
@@ -177,12 +172,12 @@ void write_item_header(Writer& writer, Tag tag, std::uint32_t value_length, bool
 
 template <typename Writer>
 void write_non_sequence_element(Writer& writer, Tag tag, VR vr, std::span<const std::uint8_t> value,
-    const Encoding& encoding) {
+    bool explicit_vr) {
 	const auto normalized_vr = normalize_vr_for_write(tag, vr);
 	const auto raw_length = value.size();
 	const auto full_length = padded_length(raw_length);
 	write_element_header(
-	    writer, tag, normalized_vr, checked_u32(full_length, "element length"), false, encoding);
+	    writer, tag, normalized_vr, checked_u32(full_length, "element length"), false, explicit_vr);
 	if (!value.empty()) {
 		writer.append(value.data(), value.size());
 	}
@@ -192,46 +187,46 @@ void write_non_sequence_element(Writer& writer, Tag tag, VR vr, std::span<const 
 }
 
 template <typename Writer>
-void write_dataset(const DataSet& dataset, Writer& writer, const Encoding& encoding,
+void write_dataset(const DataSet& dataset, Writer& writer, bool explicit_vr,
     bool skip_group_0002);
 
 template <typename Writer>
-void write_sequence_element(const DataElement& element, Writer& writer, const Encoding& encoding) {
+void write_sequence_element(const DataElement& element, Writer& writer, bool explicit_vr) {
 	const Sequence* sequence = element.as_sequence();
 	if (!sequence) {
 		diag::error_and_throw("write_to_stream reason=SQ element has null sequence pointer");
 	}
 
-	write_element_header(writer, element.tag(), VR::SQ, 0xFFFFFFFFu, true, encoding);
+	write_element_header(writer, element.tag(), VR::SQ, 0xFFFFFFFFu, true, explicit_vr);
 	for (const auto& item_dataset_ptr : *sequence) {
 		if (!item_dataset_ptr) {
 			continue;
 		}
-		write_item_header(writer, kItemTag, 0xFFFFFFFFu, encoding.little_endian);
-		write_dataset(*item_dataset_ptr, writer, encoding, false);
-		write_item_header(writer, kItemDelimitationTag, 0u, encoding.little_endian);
+		write_item_header(writer, kItemTag, 0xFFFFFFFFu);
+		write_dataset(*item_dataset_ptr, writer, explicit_vr, false);
+		write_item_header(writer, kItemDelimitationTag, 0u);
 	}
-	write_item_header(writer, kSequenceDelimitationTag, 0u, encoding.little_endian);
+	write_item_header(writer, kSequenceDelimitationTag, 0u);
 }
 
 template <typename Writer>
-void write_pixel_sequence_element(const DataElement& element, Writer& writer, const Encoding& encoding) {
+void write_pixel_sequence_element(const DataElement& element, Writer& writer, bool explicit_vr) {
 	const PixelSequence* pixel_sequence = element.as_pixel_sequence();
 	if (!pixel_sequence) {
 		diag::error_and_throw("write_to_stream reason=PX element has null pixel sequence pointer");
 	}
 
-	const VR pixel_vr = encoding.explicit_vr ? VR::OB : VR::None;
-	write_element_header(writer, element.tag(), pixel_vr, 0xFFFFFFFFu, true, encoding);
+	const VR pixel_vr = explicit_vr ? VR::OB : VR::None;
+	write_element_header(writer, element.tag(), pixel_vr, 0xFFFFFFFFu, true, explicit_vr);
 
 	// Keep BOT empty in Minimum Viable Product for fast write path.
-	write_item_header(writer, kItemTag, 0u, encoding.little_endian);
+	write_item_header(writer, kItemTag, 0u);
 
 	const InStream* seq_stream = pixel_sequence->stream();
 	const auto write_fragment = [&](std::span<const std::uint8_t> fragment) {
 		const auto full_length = padded_length(fragment.size());
 		write_item_header(
-		    writer, kItemTag, checked_u32(full_length, "pixel fragment length"), encoding.little_endian);
+		    writer, kItemTag, checked_u32(full_length, "pixel fragment length"));
 		if (!fragment.empty()) {
 			writer.append(fragment.data(), fragment.size());
 		}
@@ -268,42 +263,32 @@ void write_pixel_sequence_element(const DataElement& element, Writer& writer, co
 		}
 	}
 
-	write_item_header(writer, kSequenceDelimitationTag, 0u, encoding.little_endian);
+	write_item_header(writer, kSequenceDelimitationTag, 0u);
 }
 
 template <typename Writer>
-void write_data_element(const DataElement& element, Writer& writer, const Encoding& encoding) {
+void write_data_element(const DataElement& element, Writer& writer, bool explicit_vr) {
 	if (element.vr().is_sequence()) {
-		write_sequence_element(element, writer, encoding);
+		write_sequence_element(element, writer, explicit_vr);
 		return;
 	}
 	if (element.vr().is_pixel_sequence()) {
-		write_pixel_sequence_element(element, writer, encoding);
+		write_pixel_sequence_element(element, writer, explicit_vr);
 		return;
 	}
 
-	write_non_sequence_element(writer, element.tag(), element.vr(), element.value_span(), encoding);
+	write_non_sequence_element(writer, element.tag(), element.vr(), element.value_span(), explicit_vr);
 }
 
 template <typename Writer>
-void write_dataset(const DataSet& dataset, Writer& writer, const Encoding& encoding,
+void write_dataset(const DataSet& dataset, Writer& writer, bool explicit_vr,
     bool skip_group_0002) {
 	for (const auto& element : dataset) {
 		if (skip_group_0002 && element.tag().group() == 0x0002u) {
 			continue;
 		}
-		write_data_element(element, writer, encoding);
+		write_data_element(element, writer, explicit_vr);
 	}
-}
-
-[[nodiscard]] std::string_view transfer_syntax_uid_from_flags(const DataSet& dataset) {
-	if (!dataset.is_little_endian()) {
-		return "ExplicitVRBigEndian"_uid.value();
-	}
-	if (!dataset.is_explicit_vr()) {
-		return "ImplicitVRLittleEndian"_uid.value();
-	}
-	return "ExplicitVRLittleEndian"_uid.value();
 }
 
 [[nodiscard]] std::string infer_transfer_syntax_uid(const DicomFile& file, const DataSet& dataset) {
@@ -319,7 +304,9 @@ void write_dataset(const DataSet& dataset, Writer& writer, const Encoding& encod
 		return *from_meta;
 	}
 
-	const auto fallback = transfer_syntax_uid_from_flags(dataset);
+	const auto fallback = dataset.is_explicit_vr()
+	    ? "ExplicitVRLittleEndian"_uid.value()
+	    : "ImplicitVRLittleEndian"_uid.value();
 	return std::string(fallback.data(), fallback.size());
 }
 
@@ -349,7 +336,7 @@ void for_each_file_meta_element(const DataSet& dataset, Fn&& fn) {
 			return;
 		}
 		write_non_sequence_element(measuring_writer, element.tag(), element.vr(),
-		    element.value_span(), kMetaEncoding);
+		    element.value_span(), kMetaExplicitVr);
 	});
 	return checked_u32(measuring_writer.written, "file meta group length");
 }
@@ -400,14 +387,14 @@ void write_file_meta_group(Writer& writer, const DataSet& dataset) {
 	std::array<std::uint8_t, 4> meta_group_length_bytes{};
 	endian::store_le<std::uint32_t>(meta_group_length_bytes.data(), meta_group_length);
 	write_non_sequence_element(
-	    writer, kFileMetaGroupLengthTag, VR::UL, meta_group_length_bytes, kMetaEncoding);
+	    writer, kFileMetaGroupLengthTag, VR::UL, meta_group_length_bytes, kMetaExplicitVr);
 
 	for_each_file_meta_element(dataset, [&](const DataElement& element) {
 		if (element.tag() == kFileMetaGroupLengthTag) {
 			return;
 		}
 		write_non_sequence_element(
-		    writer, element.tag(), element.vr(), element.value_span(), kMetaEncoding);
+		    writer, element.tag(), element.vr(), element.value_span(), kMetaExplicitVr);
 	});
 }
 
@@ -431,6 +418,19 @@ void write_impl(DicomFile& file, Writer& writer, const WriteOptions& options) {
 
 	const DataSet& dataset = file.dataset();
 	dataset.ensure_loaded(Tag(0xFFFFu, 0xFFFFu));
+	if (options.keep_existing_meta && options.write_file_meta) {
+		if (auto ts_uid = dataset[kTransferSyntaxUidTag].to_uid_string();
+		    ts_uid && !ts_uid->empty()) {
+			const auto normalized = uid::normalize_uid_text(*ts_uid);
+			if (normalized == "ExplicitVRBigEndian"_uid.value() ||
+			    normalized == "DeflatedExplicitVRLittleEndian"_uid.value()) {
+				diag::error_and_throw(
+				    "write_to_stream reason=keep_existing_meta is incompatible with transfer syntax {} "
+				    "because writer emits little-endian payloads only",
+				    normalized);
+			}
+		}
+	}
 
 	if (options.include_preamble) {
 		write_preamble(writer);
@@ -440,8 +440,8 @@ void write_impl(DicomFile& file, Writer& writer, const WriteOptions& options) {
 		write_file_meta_group(writer, dataset);
 	}
 
-	const Encoding dataset_encoding{dataset.is_little_endian(), dataset.is_explicit_vr()};
-	write_dataset(dataset, writer, dataset_encoding, true);
+	const bool dataset_explicit_vr = dataset.is_explicit_vr();
+	write_dataset(dataset, writer, dataset_explicit_vr, true);
 }
 
 }  // namespace
@@ -482,8 +482,9 @@ void DicomFile::rebuild_file_meta() {
 
 	std::string transfer_syntax_uid =
 	    determine_transfer_syntax_uid_for_rebuild(*this, dataset);
-	if (transfer_syntax_uid == "DeflatedExplicitVRLittleEndian"_uid.value()) {
-		// Writer does not emit deflated payloads; rebuild to uncompressed LE.
+	if (transfer_syntax_uid == "DeflatedExplicitVRLittleEndian"_uid.value() ||
+	    transfer_syntax_uid == "ExplicitVRBigEndian"_uid.value()) {
+		// Writer emits little-endian payloads only; rebuild meta to uncompressed LE syntax.
 		transfer_syntax_uid = std::string("ExplicitVRLittleEndian"_uid.value());
 	}
 

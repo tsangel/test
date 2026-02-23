@@ -2,7 +2,6 @@
 
 #include <cstring>
 
-#include "dicom_endian.h"
 #include "diagnostics.h"
 
 using namespace dicom::literals;
@@ -35,7 +34,6 @@ raw_source select_raw_source(const DicomFile& df, DataType sv_dtype) {
 void decode_raw_into(const DicomFile& df, const DicomFile::pixel_info_t& info,
     std::size_t frame_index, std::span<std::uint8_t> dst,
     const DecodeStrides& dst_strides, const DecodeOptions& opt) {
-	const auto& ds = df.dataset();
 	if (!info.has_pixel_data) {
 		diag::error_and_throw(
 		    "pixel::decode_frame_into file={} reason=sv_dtype is unknown", df.path());
@@ -133,10 +131,6 @@ void decode_raw_into(const DicomFile& df, const DicomFile::pixel_info_t& info,
 		    df.path(), source.name, frame_index);
 	}
 
-	const bool source_little_endian = ds.is_little_endian();
-	const bool needs_swap =
-	    (src_bytes_per_sample > 1) && (source_little_endian != endian::host_is_little_endian());
-
 	const auto* src_frame = src.data() + src_frame_offset;
 	if (opt.scaled) {
 		decode_mono_scaled_into_f32(
@@ -144,17 +138,17 @@ void decode_raw_into(const DicomFile& df, const DicomFile::pixel_info_t& info,
 		return;
 	}
 
-	// Fast path for raw copies when no byte swap or Planar transform work is needed.
+	// Fast path for raw copies when no Planar transform work is needed.
 	const bool equivalent_single_channel_layout = samples_per_pixel == 1;
 	const bool interleaved_no_transform =
 	    transform == planar_transform::interleaved_to_interleaved;
-	if (!needs_swap && dst_strides.row == src_row_bytes &&
+	if (dst_strides.row == src_row_bytes &&
 	    (equivalent_single_channel_layout || interleaved_no_transform)) {
 		std::memcpy(dst.data(), src_frame, src_row_bytes * rows);
 		return;
 	}
 
-	run_planar_transform_copy(transform, src_bytes_per_sample, needs_swap,
+	run_planar_transform_copy(transform, src_bytes_per_sample,
 	    src_frame, dst.data(), rows, cols, samples_per_pixel,
 	    src_row_bytes, dst_strides.row);
 }

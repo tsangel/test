@@ -319,7 +319,7 @@ void decode_jpegls_into(const DicomFile& df, const DicomFile::pixel_info_t& info
 	}
 
 	const auto transform = select_planar_transform(src_planar, opt.planar_out);
-	run_planar_transform_copy(transform, src_bytes_per_sample, false,
+	run_planar_transform_copy(transform, src_bytes_per_sample,
 	    decoded.data(), dst.data(), rows, cols, samples_per_pixel,
 	    src_row_bytes, dst_strides.row);
 }

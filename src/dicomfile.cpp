@@ -14,22 +14,12 @@ using namespace dicom::literals;
 
 namespace {
 
-void apply_transfer_syntax_flags_for_file(uid::WellKnown transfer_syntax, bool& little_endian,
-    bool& explicit_vr) {
-	little_endian = true;
-	explicit_vr = true;
-
+[[nodiscard]] bool transfer_syntax_uses_explicit_vr(uid::WellKnown transfer_syntax) noexcept {
 	if (!transfer_syntax.valid()) {
-		return;
+		return true;
 	}
-	if (transfer_syntax == "ExplicitVRBigEndian"_uid) {
-		little_endian = false;
-		return;
-	}
-	if (transfer_syntax == "ImplicitVRLittleEndian"_uid ||
-	    transfer_syntax == "Papyrus3ImplicitVRLittleEndian"_uid) {
-		explicit_vr = false;
-	}
+	return transfer_syntax != "ImplicitVRLittleEndian"_uid &&
+	    transfer_syntax != "Papyrus3ImplicitVRLittleEndian"_uid;
 }
 
 class LastErrorCapturingReporter final : public diag::Reporter {
@@ -131,21 +121,18 @@ bool try_parse_lut_descriptor(const DataElement& descriptor_elem,
 		return false;
 	}
 
-	const bool little_endian =
-	    descriptor_elem.parent() ? descriptor_elem.parent()->is_little_endian() : true;
-
 	long raw_entries = 0;
 	long raw_first_mapped = 0;
 	long raw_bits = 0;
 	const auto descriptor_vr = descriptor_elem.vr();
 	if (descriptor_vr == VR::US) {
-		raw_entries = static_cast<long>(endian::load_value<std::uint16_t>(span.data(), little_endian));
-		raw_first_mapped = static_cast<long>(endian::load_value<std::uint16_t>(span.data() + 2, little_endian));
-		raw_bits = static_cast<long>(endian::load_value<std::uint16_t>(span.data() + 4, little_endian));
+		raw_entries = static_cast<long>(endian::load_le<std::uint16_t>(span.data()));
+		raw_first_mapped = static_cast<long>(endian::load_le<std::uint16_t>(span.data() + 2));
+		raw_bits = static_cast<long>(endian::load_le<std::uint16_t>(span.data() + 4));
 	} else if (descriptor_vr == VR::SS) {
-		raw_entries = static_cast<long>(endian::load_value<std::int16_t>(span.data(), little_endian));
-		raw_first_mapped = static_cast<long>(endian::load_value<std::int16_t>(span.data() + 2, little_endian));
-		raw_bits = static_cast<long>(endian::load_value<std::int16_t>(span.data() + 4, little_endian));
+		raw_entries = static_cast<long>(endian::load_le<std::int16_t>(span.data()));
+		raw_first_mapped = static_cast<long>(endian::load_le<std::int16_t>(span.data() + 2));
+		raw_bits = static_cast<long>(endian::load_le<std::int16_t>(span.data() + 4));
 	} else {
 		const auto descriptor = descriptor_elem.to_long_vector();
 		if (!descriptor || descriptor->size() < 3) {
@@ -486,16 +473,15 @@ std::optional<pixel::ModalityLut> DicomFile::modality_lut() const {
 	    (descriptor.bits_per_entry == 16)
 	        ? 0xFFFFu
 	        : ((1u << descriptor.bits_per_entry) - 1u);
-	const bool source_little_endian = item->is_little_endian();
 	const std::size_t entry_count = descriptor.entry_count;
 
 	if (descriptor.bits_per_entry <= 8 && lut_data.size() >= entry_count * sizeof(std::uint16_t)) {
 		// Some datasets store 8-bit LUT values in 16-bit containers.
-		for (std::size_t i = 0; i < entry_count; ++i) {
-			const auto v = endian::load_value<std::uint16_t>(
-			    lut_data.data() + i * sizeof(std::uint16_t), source_little_endian);
-			lut.values[i] = static_cast<float>(v & value_mask);
-		}
+			for (std::size_t i = 0; i < entry_count; ++i) {
+				const auto v = endian::load_le<std::uint16_t>(
+				    lut_data.data() + i * sizeof(std::uint16_t));
+				lut.values[i] = static_cast<float>(v & value_mask);
+			}
 		return lut;
 	}
 
@@ -514,8 +500,8 @@ std::optional<pixel::ModalityLut> DicomFile::modality_lut() const {
 		    path());
 	}
 	for (std::size_t i = 0; i < entry_count; ++i) {
-		const auto v = endian::load_value<std::uint16_t>(
-		    lut_data.data() + i * sizeof(std::uint16_t), source_little_endian);
+		const auto v = endian::load_le<std::uint16_t>(
+		    lut_data.data() + i * sizeof(std::uint16_t));
 		lut.values[i] = static_cast<float>(v & value_mask);
 	}
 	return lut;
@@ -525,8 +511,7 @@ void DicomFile::set_transfer_syntax(uid::WellKnown transfer_syntax) {
 	invalidate_pixel_info_cache();
 	transfer_syntax_uid_ = transfer_syntax.valid() ? transfer_syntax : uid::WellKnown{};
 	if (root_dataset_) {
-		apply_transfer_syntax_flags_for_file(transfer_syntax_uid_, root_dataset_->little_endian_,
-		    root_dataset_->explicit_vr_);
+		root_dataset_->explicit_vr_ = transfer_syntax_uses_explicit_vr(transfer_syntax_uid_);
 	}
 }
 

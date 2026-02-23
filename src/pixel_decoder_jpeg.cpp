@@ -512,7 +512,7 @@ void decode_jpeg_into(const DicomFile& df, const DicomFile::pixel_info_t& info,
 		}
 
 		const auto transform = select_planar_transform(Planar::interleaved, opt.planar_out);
-		run_planar_transform_copy(transform, src_bytes_per_sample, false,
+		run_planar_transform_copy(transform, src_bytes_per_sample,
 		    decoded.data(), dst.data(), rows, cols, samples_per_pixel,
 		    src_row_bytes, dst_strides.row);
 		return;
@@ -531,7 +531,7 @@ void decode_jpeg_into(const DicomFile& df, const DicomFile::pixel_info_t& info,
 	}
 
 	const auto transform = select_planar_transform(Planar::interleaved, opt.planar_out);
-	run_planar_transform_copy(transform, src_bytes_per_sample, false,
+	run_planar_transform_copy(transform, src_bytes_per_sample,
 	    decoded_bytes, dst.data(), rows, cols, samples_per_pixel,
 	    src_row_bytes, dst_strides.row);
 }
