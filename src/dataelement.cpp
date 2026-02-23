@@ -31,6 +31,13 @@ inline bool element_value_is_little_endian(const DataElement& elem) noexcept {
 	return parent ? (parent->is_little_endian() || elem.tag().group() == 0x0002u) : true;
 }
 
+bool report_from_assignment_failure(
+    std::string_view function_name, const DataElement& element, std::string_view reason) {
+	diag::error("{} tag={} vr={} reason={}",
+	    function_name, element.tag().to_string(), element.vr().str(), reason);
+	return false;
+}
+
 template <typename T>
 std::optional<std::vector<T>> load_numeric_vector(const DataElement& elem) {
     static_assert(std::is_integral_v<T> || std::is_floating_point_v<T>, "numeric load requires arithmetic type");
@@ -79,40 +86,149 @@ std::optional<std::vector<typename Parser::result_type>> parse_string_numbers(co
 	return out;
 }
 
-template <typename T>
-bool assign_integral_from_long(DataElement& element, long value, bool little_endian) {
-	static_assert(std::is_integral_v<T>, "assign_integral_from_long requires integral target type");
+template <typename T, typename Source>
+bool assign_integral_from_integer(DataElement& element, Source value, bool little_endian) {
+	static_assert(std::is_integral_v<T>, "assign_integral_from_integer requires integral target type");
+	static_assert(
+	    std::is_integral_v<Source>,
+	    "assign_integral_from_integer requires integral source type");
+
+	T encoded{};
 	if constexpr (std::is_signed_v<T>) {
-		const auto signed_value = static_cast<std::intmax_t>(value);
-		if (signed_value < static_cast<std::intmax_t>(std::numeric_limits<T>::min()) ||
-		    signed_value > static_cast<std::intmax_t>(std::numeric_limits<T>::max())) {
-			return false;
+		if constexpr (std::is_signed_v<Source>) {
+			const auto signed_value = static_cast<std::intmax_t>(value);
+			if (signed_value < static_cast<std::intmax_t>(std::numeric_limits<T>::min()) ||
+			    signed_value > static_cast<std::intmax_t>(std::numeric_limits<T>::max())) {
+				return false;
+			}
+		} else {
+			const auto unsigned_value = static_cast<std::uintmax_t>(value);
+			if (unsigned_value > static_cast<std::uintmax_t>(std::numeric_limits<T>::max())) {
+				return false;
+			}
 		}
-		const T encoded = static_cast<T>(value);
-		std::array<std::uint8_t, sizeof(T)> bytes{};
-		endian::store_value<T>(bytes.data(), encoded, little_endian);
-		element.set_value_bytes(bytes);
-		return true;
+		encoded = static_cast<T>(value);
 	} else {
-		if (value < 0) {
-			return false;
+		if constexpr (std::is_signed_v<Source>) {
+			if (value < 0) {
+				return false;
+			}
 		}
 		const auto unsigned_value = static_cast<std::uintmax_t>(value);
 		if (unsigned_value > static_cast<std::uintmax_t>(std::numeric_limits<T>::max())) {
 			return false;
 		}
-		const T encoded = static_cast<T>(unsigned_value);
-		std::array<std::uint8_t, sizeof(T)> bytes{};
-		endian::store_value<T>(bytes.data(), encoded, little_endian);
-		element.set_value_bytes(bytes);
-		return true;
+		encoded = static_cast<T>(unsigned_value);
+	}
+
+	element.reserve_value_bytes(sizeof(T));
+	auto dst = element.value_span();
+	endian::store_value<T>(const_cast<std::uint8_t*>(dst.data()), encoded, little_endian);
+	return true;
+}
+
+void store_padded_value_bytes(DataElement& element, std::span<const std::uint8_t> bytes) {
+	const bool needs_padding = VR::pad_to_even() && ((bytes.size() & 1u) != 0u);
+	const std::size_t stored_length = bytes.size() + (needs_padding ? 1u : 0u);
+	element.reserve_value_bytes(stored_length);
+	auto dst = element.value_span();
+	auto* writable = const_cast<std::uint8_t*>(dst.data());
+	if (!bytes.empty()) {
+		std::memcpy(writable, bytes.data(), bytes.size());
+	}
+	if (needs_padding) {
+		writable[bytes.size()] = element.vr().padding_byte();
 	}
 }
 
-bool assign_integer_string_from_long(DataElement& element, long value) {
+template <typename Source>
+bool assign_integer_string_from_value(DataElement& element, Source value) {
+	static_assert(
+	    std::is_integral_v<Source>,
+	    "assign_integer_string_from_value requires integral source type");
 	const std::string text = std::to_string(value);
 	const auto* ptr = reinterpret_cast<const std::uint8_t*>(text.data());
-	element.set_value_bytes(std::span<const std::uint8_t>(ptr, text.size()));
+	store_padded_value_bytes(element, std::span<const std::uint8_t>(ptr, text.size()));
+	return true;
+}
+
+template <typename T, typename Source>
+bool assign_integral_vector_from_integer(
+    DataElement& element, std::span<const Source> values, bool little_endian) {
+	static_assert(
+	    std::is_integral_v<T>,
+	    "assign_integral_vector_from_integer requires integral target type");
+	static_assert(
+	    std::is_integral_v<Source>,
+	    "assign_integral_vector_from_integer requires integral source type");
+
+	if (values.empty()) {
+		element.reserve_value_bytes(0);
+		return true;
+	}
+	if (values.size() > std::numeric_limits<std::size_t>::max() / sizeof(T)) {
+		return false;
+	}
+
+	const std::size_t total_bytes = values.size() * sizeof(T);
+	element.reserve_value_bytes(total_bytes);
+	auto dst = element.value_span();
+	auto* writable = const_cast<std::uint8_t*>(dst.data());
+	for (std::size_t i = 0; i < values.size(); ++i) {
+		T encoded{};
+		const Source value = values[i];
+		if constexpr (std::is_signed_v<T>) {
+			if constexpr (std::is_signed_v<Source>) {
+				const auto signed_value = static_cast<std::intmax_t>(value);
+				if (signed_value < static_cast<std::intmax_t>(std::numeric_limits<T>::min()) ||
+				    signed_value > static_cast<std::intmax_t>(std::numeric_limits<T>::max())) {
+					return false;
+				}
+			} else {
+				const auto unsigned_value = static_cast<std::uintmax_t>(value);
+				if (unsigned_value > static_cast<std::uintmax_t>(std::numeric_limits<T>::max())) {
+					return false;
+				}
+			}
+			encoded = static_cast<T>(value);
+		} else {
+			if constexpr (std::is_signed_v<Source>) {
+				if (value < 0) {
+					return false;
+				}
+			}
+			const auto unsigned_value = static_cast<std::uintmax_t>(value);
+			if (unsigned_value > static_cast<std::uintmax_t>(std::numeric_limits<T>::max())) {
+				return false;
+			}
+			encoded = static_cast<T>(unsigned_value);
+		}
+		endian::store_value<T>(writable + (i * sizeof(T)), encoded, little_endian);
+	}
+	return true;
+}
+
+template <typename Source>
+bool assign_integer_string_from_values(DataElement& element, std::span<const Source> values) {
+	static_assert(
+	    std::is_integral_v<Source>,
+	    "assign_integer_string_from_values requires integral source type");
+
+	if (values.empty()) {
+		element.reserve_value_bytes(0);
+		return true;
+	}
+
+	std::string text;
+	text.reserve(values.size() * 21);
+	for (std::size_t i = 0; i < values.size(); ++i) {
+		if (i != 0) {
+			text.push_back('\\');
+		}
+		text += std::to_string(values[i]);
+	}
+	const auto* ptr = reinterpret_cast<const std::uint8_t*>(text.data());
+	store_padded_value_bytes(element, std::span<const std::uint8_t>(ptr, text.size()));
 	return true;
 }
 
@@ -127,7 +243,8 @@ bool assign_uid_string(DataElement& element, std::string_view uid_text) {
 	}
 
 	const auto* ptr = reinterpret_cast<const std::uint8_t*>(normalized.data());
-	element.set_value_bytes(std::span<const std::uint8_t>(ptr, normalized.size()));
+	store_padded_value_bytes(
+	    element, std::span<const std::uint8_t>(ptr, normalized.size()));
 	return true;
 }
 
@@ -306,88 +423,257 @@ void* DataElement::value_ptr() const {
 	return nullptr;
 }
 
+void DataElement::reserve_value_bytes(std::size_t length) {
+	if (vr_.is_sequence() || vr_.is_pixel_sequence()) {
+		diag::error_and_throw(
+		    "DataElement::reserve_value_bytes reason=cannot reserve raw value bytes for sequence storage vr={}",
+		    vr_.str());
+	}
+
+	if (length == 0) {
+		release_storage();
+		length_ = 0;
+		return;
+	}
+
+	if (length <= kInlineStorageBytes) {
+		if (storage_kind_ != StorageKind::inline_bytes) {
+			release_storage();
+		}
+		length_ = length;
+		std::memset(storage_.inline_bytes, 0, kInlineStorageBytes);
+		storage_kind_ = StorageKind::inline_bytes;
+		return;
+	}
+
+	if (storage_kind_ == StorageKind::heap && storage_.ptr) {
+		std::size_t capacity = 0;
+		const auto* storage_base =
+		    static_cast<const std::uint8_t*>(storage_.ptr) - sizeof(std::size_t);
+		std::memcpy(&capacity, storage_base, sizeof(capacity));
+		if (length <= capacity) {
+			length_ = length;
+			return;
+		}
+	}
+
+	release_storage();
+	length_ = length;
+	if (length_ > std::numeric_limits<std::size_t>::max() - sizeof(std::size_t)) {
+		diag::error_and_throw(
+		    "DataElement::reserve_value_bytes reason=length overflow length={}",
+		    length_);
+	}
+	const auto allocation_size = sizeof(std::size_t) + length_;
+	auto* storage_base = static_cast<std::uint8_t*>(::operator new(allocation_size));
+	std::memcpy(storage_base, &length_, sizeof(length_));
+	storage_.ptr = storage_base + sizeof(std::size_t);
+	storage_kind_ = StorageKind::heap;
+}
+
 void DataElement::set_value_bytes(std::span<const std::uint8_t> bytes) {
 	if (vr_.is_sequence() || vr_.is_pixel_sequence()) {
 		diag::error_and_throw(
 		    "DataElement::set_value_bytes reason=cannot assign raw bytes to sequence storage vr={}",
 		    vr_.str());
 	}
-	release_storage();
-	const bool needs_padding = VR::pad_to_even() && ((bytes.size() & 1u) != 0u);
-	const std::uint8_t padding_byte = vr_.padding_byte();
-	const std::size_t stored_length = bytes.size() + (needs_padding ? 1u : 0u);
-	length_ = stored_length;
-	if (stored_length == 0) {
-		return;
-	}
-	if (stored_length <= kInlineStorageBytes) {
-		std::memset(storage_.inline_bytes, 0, kInlineStorageBytes);
-		if (!bytes.empty()) {
-			std::memcpy(storage_.inline_bytes, bytes.data(), bytes.size());
-		}
-		if (needs_padding) {
-			storage_.inline_bytes[bytes.size()] = padding_byte;
-		}
-		storage_kind_ = StorageKind::inline_bytes;
-		return;
-	}
-	void* storage = ::operator new(stored_length);
-	if (!bytes.empty()) {
-		std::memcpy(storage, bytes.data(), bytes.size());
-	}
-	if (needs_padding) {
-		static_cast<std::uint8_t*>(storage)[bytes.size()] = padding_byte;
-	}
-	storage_.ptr = storage;
-	storage_kind_ = StorageKind::heap;
+	store_padded_value_bytes(*this, bytes);
 }
 
 bool DataElement::from_long(long value) {
 	if (vr_.is_sequence() || vr_.is_pixel_sequence()) {
-		return false;
+		return report_from_assignment_failure(
+		    "DataElement::from_long", *this, "numeric assignment is not supported for SQ/PX");
 	}
 
 	const bool little_endian = element_value_is_little_endian(*this);
+	bool ok = false;
 	switch (static_cast<std::uint16_t>(vr_)) {
 	case VR::SS_val:
-		return assign_integral_from_long<std::int16_t>(*this, value, little_endian);
+		ok = assign_integral_from_integer<std::int16_t>(*this, value, little_endian);
+		break;
 	case VR::US_val:
-		return assign_integral_from_long<std::uint16_t>(*this, value, little_endian);
+		ok = assign_integral_from_integer<std::uint16_t>(*this, value, little_endian);
+		break;
 	case VR::SL_val:
-		return assign_integral_from_long<std::int32_t>(*this, value, little_endian);
+		ok = assign_integral_from_integer<std::int32_t>(*this, value, little_endian);
+		break;
 	case VR::UL_val:
-		return assign_integral_from_long<std::uint32_t>(*this, value, little_endian);
+		ok = assign_integral_from_integer<std::uint32_t>(*this, value, little_endian);
+		break;
 	case VR::SV_val:
-		return assign_integral_from_long<std::int64_t>(*this, value, little_endian);
+		ok = assign_integral_from_integer<std::int64_t>(*this, value, little_endian);
+		break;
 	case VR::UV_val:
-		return assign_integral_from_long<std::uint64_t>(*this, value, little_endian);
+		ok = assign_integral_from_integer<std::uint64_t>(*this, value, little_endian);
+		break;
 	case VR::IS_val:
 	case VR::DS_val:
-		return assign_integer_string_from_long(*this, value);
+		ok = assign_integer_string_from_value(*this, value);
+		break;
 	default:
-		return false;
+		return report_from_assignment_failure(
+		    "DataElement::from_long", *this, "unsupported VR for from_long");
 	}
+
+	if (!ok) {
+		return report_from_assignment_failure(
+		    "DataElement::from_long", *this, "value out of range for VR");
+	}
+	return true;
+}
+
+bool DataElement::from_long_vector(std::span<const long> values) {
+	if (vr_.is_sequence() || vr_.is_pixel_sequence()) {
+		return report_from_assignment_failure(
+		    "DataElement::from_long_vector", *this, "numeric assignment is not supported for SQ/PX");
+	}
+
+	const bool little_endian = element_value_is_little_endian(*this);
+	bool ok = false;
+	switch (static_cast<std::uint16_t>(vr_)) {
+	case VR::SS_val:
+		ok = assign_integral_vector_from_integer<std::int16_t>(*this, values, little_endian);
+		break;
+	case VR::US_val:
+		ok = assign_integral_vector_from_integer<std::uint16_t>(*this, values, little_endian);
+		break;
+	case VR::SL_val:
+		ok = assign_integral_vector_from_integer<std::int32_t>(*this, values, little_endian);
+		break;
+	case VR::UL_val:
+		ok = assign_integral_vector_from_integer<std::uint32_t>(*this, values, little_endian);
+		break;
+	case VR::SV_val:
+		ok = assign_integral_vector_from_integer<std::int64_t>(*this, values, little_endian);
+		break;
+	case VR::UV_val:
+		ok = assign_integral_vector_from_integer<std::uint64_t>(*this, values, little_endian);
+		break;
+	case VR::IS_val:
+	case VR::DS_val:
+		ok = assign_integer_string_from_values(*this, values);
+		break;
+	default:
+		return report_from_assignment_failure(
+		    "DataElement::from_long_vector", *this, "unsupported VR for from_long_vector");
+	}
+
+	if (!ok) {
+		return report_from_assignment_failure(
+		    "DataElement::from_long_vector", *this, "one or more values are out of range for VR");
+	}
+	return true;
+}
+
+bool DataElement::from_longlong(long long value) {
+	if (vr_.is_sequence() || vr_.is_pixel_sequence()) {
+		return report_from_assignment_failure(
+		    "DataElement::from_longlong", *this, "numeric assignment is not supported for SQ/PX");
+	}
+
+	const bool little_endian = element_value_is_little_endian(*this);
+	bool ok = false;
+	switch (static_cast<std::uint16_t>(vr_)) {
+	case VR::SS_val:
+		ok = assign_integral_from_integer<std::int16_t>(*this, value, little_endian);
+		break;
+	case VR::US_val:
+		ok = assign_integral_from_integer<std::uint16_t>(*this, value, little_endian);
+		break;
+	case VR::SL_val:
+		ok = assign_integral_from_integer<std::int32_t>(*this, value, little_endian);
+		break;
+	case VR::UL_val:
+		ok = assign_integral_from_integer<std::uint32_t>(*this, value, little_endian);
+		break;
+	case VR::SV_val:
+		ok = assign_integral_from_integer<std::int64_t>(*this, value, little_endian);
+		break;
+	case VR::UV_val:
+		ok = assign_integral_from_integer<std::uint64_t>(*this, value, little_endian);
+		break;
+	case VR::IS_val:
+	case VR::DS_val:
+		ok = assign_integer_string_from_value(*this, value);
+		break;
+	default:
+		return report_from_assignment_failure(
+		    "DataElement::from_longlong", *this, "unsupported VR for from_longlong");
+	}
+
+	if (!ok) {
+		return report_from_assignment_failure(
+		    "DataElement::from_longlong", *this, "value out of range for VR");
+	}
+	return true;
+}
+
+bool DataElement::from_longlong_vector(std::span<const long long> values) {
+	if (vr_.is_sequence() || vr_.is_pixel_sequence()) {
+		return report_from_assignment_failure(
+		    "DataElement::from_longlong_vector", *this, "numeric assignment is not supported for SQ/PX");
+	}
+
+	const bool little_endian = element_value_is_little_endian(*this);
+	bool ok = false;
+	switch (static_cast<std::uint16_t>(vr_)) {
+	case VR::SS_val:
+		ok = assign_integral_vector_from_integer<std::int16_t>(*this, values, little_endian);
+		break;
+	case VR::US_val:
+		ok = assign_integral_vector_from_integer<std::uint16_t>(*this, values, little_endian);
+		break;
+	case VR::SL_val:
+		ok = assign_integral_vector_from_integer<std::int32_t>(*this, values, little_endian);
+		break;
+	case VR::UL_val:
+		ok = assign_integral_vector_from_integer<std::uint32_t>(*this, values, little_endian);
+		break;
+	case VR::SV_val:
+		ok = assign_integral_vector_from_integer<std::int64_t>(*this, values, little_endian);
+		break;
+	case VR::UV_val:
+		ok = assign_integral_vector_from_integer<std::uint64_t>(*this, values, little_endian);
+		break;
+	case VR::IS_val:
+	case VR::DS_val:
+		ok = assign_integer_string_from_values(*this, values);
+		break;
+	default:
+		return report_from_assignment_failure(
+		    "DataElement::from_longlong_vector", *this, "unsupported VR for from_longlong_vector");
+	}
+
+	if (!ok) {
+		return report_from_assignment_failure(
+		    "DataElement::from_longlong_vector", *this, "one or more values are out of range for VR");
+	}
+	return true;
 }
 
 bool DataElement::from_string_view(std::string_view value) {
 	if (vr_.is_sequence() || vr_.is_pixel_sequence()) {
-		return false;
+		return report_from_assignment_failure(
+		    "DataElement::from_string_view", *this, "string assignment is not supported for SQ/PX");
 	}
 	if (vr_ == dicom::VR::UI) {
 		return from_uid_string(value);
 	}
 	if (!vr_.is_string()) {
-		return false;
+		return report_from_assignment_failure(
+		    "DataElement::from_string_view", *this, "unsupported VR for from_string_view");
 	}
 
 	const auto* ptr = reinterpret_cast<const std::uint8_t*>(value.data());
-	set_value_bytes(std::span<const std::uint8_t>(ptr, value.size()));
+	store_padded_value_bytes(*this, std::span<const std::uint8_t>(ptr, value.size()));
 	return true;
 }
 
 bool DataElement::from_uid(uid::WellKnown uid) {
 	if (!uid.valid()) {
-		return false;
+		return report_from_assignment_failure(
+		    "DataElement::from_uid", *this, "invalid uid::WellKnown value");
 	}
 	return from_uid_string(uid.value());
 }
@@ -397,23 +683,36 @@ bool DataElement::from_uid(const uid::Generated& uid) {
 }
 
 bool DataElement::from_uid_string(std::string_view uid_value) {
-	return assign_uid_string(*this, uid_value);
+	if (!assign_uid_string(*this, uid_value)) {
+		if (vr_ != dicom::VR::UI) {
+			return report_from_assignment_failure(
+			    "DataElement::from_uid_string", *this, "UI VR required");
+		}
+		return report_from_assignment_failure(
+		    "DataElement::from_uid_string", *this, "invalid UID text");
+	}
+	return true;
 }
 
 bool DataElement::from_transfer_syntax_uid(uid::WellKnown uid) {
 	if (!uid.valid() || uid.uid_type() != UidType::TransferSyntax) {
-		return false;
+		return report_from_assignment_failure(
+		    "DataElement::from_transfer_syntax_uid", *this,
+		    "uid must be a valid Transfer Syntax UID");
 	}
 	return from_uid(uid);
 }
 
 bool DataElement::from_sop_class_uid(uid::WellKnown uid) {
 	if (!uid.valid()) {
-		return false;
+		return report_from_assignment_failure(
+		    "DataElement::from_sop_class_uid", *this, "uid must be valid");
 	}
 	const auto type = uid.uid_type();
 	if (type != UidType::SopClass && type != UidType::MetaSopClass) {
-		return false;
+		return report_from_assignment_failure(
+		    "DataElement::from_sop_class_uid", *this,
+		    "uid must be SOP Class or Meta SOP Class");
 	}
 	return from_uid(uid);
 }

@@ -143,6 +143,30 @@ int main() {
 		}
 	}
 	{
+		dicom::DataElement inline_elem("Rows"_tag, dicom::VR::OB, 0, 0, nullptr);
+		inline_elem.reserve_value_bytes(3);
+		if (inline_elem.length() != 3) {
+			fail("DataElement::reserve_value_bytes should update length");
+		}
+		if (inline_elem.storage_kind() != dicom::DataElement::StorageKind::inline_bytes) {
+			fail("DataElement::reserve_value_bytes should use inline storage for small values");
+		}
+		if (inline_elem.value_span().size() != 3) {
+			fail("DataElement::reserve_value_bytes should expose reserved span size");
+		}
+
+		dicom::DataElement heap_elem("Rows"_tag, dicom::VR::OB, 0, 0, nullptr);
+		heap_elem.reserve_value_bytes(dicom::DataElement::kInlineStorageBytes + 1);
+		if (heap_elem.storage_kind() != dicom::DataElement::StorageKind::heap) {
+			fail("DataElement::reserve_value_bytes should use heap storage for large values");
+		}
+		auto first_heap_ptr = heap_elem.value_span().data();
+		heap_elem.reserve_value_bytes(dicom::DataElement::kInlineStorageBytes + 1);
+		if (heap_elem.value_span().data() != first_heap_ptr) {
+			fail("DataElement::reserve_value_bytes should reuse heap when capacity is sufficient");
+		}
+	}
+	{
 		dicom::DataElement unsigned_short_elem("Rows"_tag, dicom::VR::US, 0, 0, nullptr);
 		if (unsigned_short_elem.from_long(-1)) {
 			fail("DataElement::from_long should reject negative value for US");
@@ -156,6 +180,50 @@ int main() {
 		const auto text = integer_string_elem.to_string_view();
 		if (!text || *text != "42") {
 			fail("DataElement::from_long IS string mismatch");
+		}
+	}
+	{
+		dicom::DataElement vector_elem("Rows"_tag, dicom::VR::US, 0, 0, nullptr);
+		const std::array<long, 3> values{1, 2, 3};
+		if (!vector_elem.from_long_vector(values)) {
+			fail("DataElement::from_long_vector should encode US");
+		}
+		auto decoded = vector_elem.to_long_vector();
+		if (!decoded || *decoded != std::vector<long>{1, 2, 3}) {
+			fail("DataElement::from_long_vector US roundtrip mismatch");
+		}
+		const std::array<long, 2> invalid_values{-1, 2};
+		if (vector_elem.from_long_vector(invalid_values)) {
+			fail("DataElement::from_long_vector should reject out-of-range value for US");
+		}
+	}
+	{
+		dicom::DataElement signed_very_long_elem("Rows"_tag, dicom::VR::SV, 0, 0, nullptr);
+		constexpr long long kValue = 4294967296LL;
+		if (!signed_very_long_elem.from_longlong(kValue)) {
+			fail("DataElement::from_longlong should encode SV");
+		}
+		if (signed_very_long_elem.to_longlong().value_or(0) != kValue) {
+			fail("DataElement::from_longlong SV roundtrip mismatch");
+		}
+		dicom::DataElement signed_long_elem("Rows"_tag, dicom::VR::SL, 0, 0, nullptr);
+		if (signed_long_elem.from_longlong(kValue)) {
+			fail("DataElement::from_longlong should reject out-of-range value for SL");
+		}
+	}
+	{
+		dicom::DataElement vector_elem("Rows"_tag, dicom::VR::SV, 0, 0, nullptr);
+		const std::array<long long, 2> values{4294967296LL, 7LL};
+		if (!vector_elem.from_longlong_vector(values)) {
+			fail("DataElement::from_longlong_vector should encode SV");
+		}
+		auto decoded = vector_elem.to_longlong_vector();
+		if (!decoded || *decoded != std::vector<long long>{4294967296LL, 7LL}) {
+			fail("DataElement::from_longlong_vector SV roundtrip mismatch");
+		}
+		dicom::DataElement narrow_elem("Rows"_tag, dicom::VR::SL, 0, 0, nullptr);
+		if (narrow_elem.from_longlong_vector(values)) {
+			fail("DataElement::from_longlong_vector should reject out-of-range value for SL");
 		}
 	}
 	{

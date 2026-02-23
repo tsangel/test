@@ -48,6 +48,8 @@ cmake --build build
 2. Usage snippet
 ```cpp
 #include <dicom.h>
+#include <diagnostics.h>
+#include <memory>
 using namespace dicom::literals;
 
 int main() {
@@ -61,6 +63,36 @@ int main() {
   // if (auto& e = ds["Rows"_tag]; e) { ... }
 }
 ```
+
+3. Batch set with `ok &= ...` and error check
+```cpp
+#include <dicom.h>
+#include <diagnostics.h>
+#include <memory>
+#include <iostream>
+using namespace dicom::literals;
+
+int main() {
+  dicom::DataSet ds;
+  auto reporter = std::make_shared<dicom::diag::BufferingReporter>(256);
+  dicom::diag::set_thread_reporter(reporter);
+
+  bool ok = true;
+  ok &= ds.add_dataelement("Rows"_tag, dicom::VR::US)->from_long(512);
+  ok &= ds.add_dataelement("Columns"_tag, dicom::VR::US)->from_long(-1); // failure example
+  ok &= ds.add_dataelement("SOPInstanceUID"_tag, dicom::VR::UI)
+            ->from_uid_string("1.2.840.10008.5.1.4.1.1.2");
+
+  if (!ok) {
+    for (const auto& msg : reporter->take_messages()) {
+      std::cerr << msg << '\n';
+    }
+  }
+  dicom::diag::set_thread_reporter(nullptr);
+}
+```
+
+- Full runnable example: `examples/batch_assign_with_error_check.cpp`
 
 ## Quick build/test commands
 - Python tests: `pytest -q tests/python`

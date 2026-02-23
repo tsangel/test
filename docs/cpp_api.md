@@ -28,6 +28,36 @@ long rows = ds["Rows"_tag].to_long().value_or(0);
 double slope = ds["RescaleSlope"_tag].to_double().value_or(1.0);
 ```
 
+## Batch assignment + error collection
+
+When writing many elements, you can keep a single status flag and collect detailed
+failure reasons through a thread-local `BufferingReporter`.
+
+```cpp
+#include <dicom.h>
+#include <diagnostics.h>
+#include <memory>
+using namespace dicom::literals;
+
+dicom::DataSet ds;
+auto reporter = std::make_shared<dicom::diag::BufferingReporter>(256);
+dicom::diag::set_thread_reporter(reporter);
+
+bool ok = true;
+ok &= ds.add_dataelement("Rows"_tag, dicom::VR::US)->from_long(512);
+ok &= ds.add_dataelement("Columns"_tag, dicom::VR::US)->from_long(-1);
+ok &= ds.add_dataelement("BitsAllocated"_tag, dicom::VR::US)->from_long(16);
+
+if (!ok) {
+  auto messages = reporter->take_messages();
+  // inspect or surface messages
+}
+
+dicom::diag::set_thread_reporter(nullptr);
+```
+
+Note: `add_dataelement(...)` itself can throw on validation/allocation errors.
+
 ## DataSet attachment methods
 
 - `attach_to_file(const std::string& path)`: Opens `path` via `InFileStream`, sets the stream identifier to the path, and prepares the dataset for lazy reading. Metadata is parsed later (e.g., on the first `ensure_loaded`, iteration, or `operator[]`/`get_dataelement` call).

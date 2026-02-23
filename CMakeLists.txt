@@ -392,6 +392,11 @@ if(DICOM_BUILD_EXAMPLES)
 		examples/dicomdump.cpp
 	)
 	target_link_libraries(dicomdump PRIVATE dicomsdl)
+
+	add_executable(batch_assign_with_error_check
+		examples/batch_assign_with_error_check.cpp
+	)
+	target_link_libraries(batch_assign_with_error_check PRIVATE dicomsdl)
 endif()
 
 option(DICOM_BUILD_PYTHON "Build Python bindings with nanobind" ON)

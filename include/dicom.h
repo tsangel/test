@@ -1078,9 +1078,21 @@ public:
 	/// Copy raw value bytes into inline/heap storage depending on length.
 	/// For odd-length values, one VR-specific padding byte is appended automatically.
 	void set_value_bytes(std::span<const std::uint8_t> bytes);
+	/// Reserve value storage and set length_ for non-sequence elements.
+	/// The allocated storage can be observed via value_span().
+	void reserve_value_bytes(std::size_t length);
 	/// Encode and store a single integer value according to this element VR.
 	/// Returns false when VR is unsupported for integer assignment or value is out of range.
 	bool from_long(long value);
+	/// Encode and store multiple integer values according to this element VR.
+	/// Returns false when VR is unsupported for integer assignment or any value is out of range.
+	bool from_long_vector(std::span<const long> values);
+	/// Encode and store a single integer value according to this element VR.
+	/// Returns false when VR is unsupported for integer assignment or value is out of range.
+	bool from_longlong(long long value);
+	/// Encode and store multiple integer values according to this element VR.
+	/// Returns false when VR is unsupported for integer assignment or any value is out of range.
+	bool from_longlong_vector(std::span<const long long> values);
 	/// Encode and store textual bytes for string VRs.
 	/// For UI VR this validates normalized UID text and applies UI padding rules.
 	bool from_string_view(std::string_view value);
@@ -1399,11 +1411,15 @@ public:
 	[[nodiscard]] std::size_t offset() const { return offset_; }
 
 	/// Add or replace a data element with no stream binding (offset/length = 0).
-	/// @return Pointer to the inserted element.
+	/// @return Pointer to the inserted/replaced element. Never nullptr on success.
+	/// @throws Exception on validation errors (for example: VR::None with unknown tag)
+	///         or allocation failures.
 	DataElement* add_dataelement(Tag tag, VR vr = VR::None);
 
 	/// Add or replace a data element with explicit stream binding metadata.
-	/// @return Pointer to the inserted element.
+	/// @return Pointer to the inserted/replaced element. Never nullptr on success.
+	/// @throws Exception on validation errors (for example: VR::None with unknown tag)
+	///         or allocation failures.
 	DataElement* add_dataelement(Tag tag, VR vr, std::size_t offset, std::size_t length);
 
 	/// Remove a data element by tag (no-op if missing).
@@ -1537,7 +1553,13 @@ public:
 	void write_to_stream(std::ostream& os, const WriteOptions& options = {});
 	[[nodiscard]] std::vector<std::uint8_t> write_bytes(const WriteOptions& options = {});
 	void write_file(const std::string& path, const WriteOptions& options = {});
+	/// Forwarding helper to the root DataSet::add_dataelement.
+	/// @return Pointer to the inserted/replaced element. Never nullptr on success.
+	/// @throws Exception under the same conditions as DataSet::add_dataelement.
 	DataElement* add_dataelement(Tag tag, VR vr = VR::None);
+	/// Forwarding helper to the root DataSet::add_dataelement with stream metadata.
+	/// @return Pointer to the inserted/replaced element. Never nullptr on success.
+	/// @throws Exception under the same conditions as DataSet::add_dataelement.
 	DataElement* add_dataelement(Tag tag, VR vr, std::size_t offset, std::size_t length);
 	void remove_dataelement(Tag tag);
 	DataElement* get_dataelement(Tag tag);
@@ -1773,7 +1795,11 @@ inline DataElement::DataElement(Tag tag, VR vr, std::size_t length, std::size_t 
 inline void DataElement::release_storage() noexcept {
 	switch (storage_kind_) {
 	case StorageKind::heap:
-		::operator delete(storage_.ptr);
+		if (storage_.ptr) {
+			auto* storage_base =
+			    static_cast<std::uint8_t*>(storage_.ptr) - sizeof(std::size_t);
+			::operator delete(storage_base);
+		}
 		break;
 	case StorageKind::sequence:
 		delete storage_.seq;
