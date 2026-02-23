@@ -92,6 +92,8 @@ python examples/python/keyword_lookup_example.py PatientName Rows
 python examples/python/tag_lookup_example.py 00100010 (0008,0016)
 python examples/python/uid_lookup_example.py ExplicitVRLittleEndian 1.2.840.10008.1.2.1
 python examples/python/dump_dataset_example.py path/to/file.dcm
+python examples/python/dump_dataset_example.py path/to/file.dcm --raw-preview 16
+python examples/python/raw_value_span_example.py path/to/file.dcm PixelData
 python examples/python/pixel_decode_safe_example.py path/to/file.dcm --frame 0
 ```
 

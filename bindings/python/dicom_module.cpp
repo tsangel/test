@@ -838,28 +838,6 @@ NB_MODULE(_dicomsdl, m) {
 	            element.to_int_vector().value_or(nb::cast<std::vector<int>>(default_value)));
 	    },
 	    nb::arg("default") = nb::none())
-	.def("as_uint16_vector",
-	    [](const DataElement& element, nb::object default_value) -> nb::object {
-	        if (default_value.is_none()) {
-	            auto v = element.as_uint16_vector();
-	            return v ? nb::cast(*v) : nb::none();
-	        }
-	        return nb::cast(element.as_uint16_vector().value_or(
-	            nb::cast<std::vector<std::uint16_t>>(default_value)));
-	    },
-	    nb::arg("default") = nb::none(),
-	    "Interpret raw value bytes as uint16 list (honors dataset endianness)")
-	.def("as_uint8_vector",
-	    [](const DataElement& element, nb::object default_value) -> nb::object {
-	        if (default_value.is_none()) {
-	            auto v = element.as_uint8_vector();
-	            return v ? nb::cast(*v) : nb::none();
-	        }
-	        return nb::cast(element.as_uint8_vector().value_or(
-	            nb::cast<std::vector<std::uint8_t>>(default_value)));
-	    },
-	    nb::arg("default") = nb::none(),
-	    "Interpret raw value bytes as uint8 list")
 	.def("to_long_vector",
 	    [](const DataElement& element, nb::object default_value) -> nb::object {
 	        if (default_value.is_none()) {

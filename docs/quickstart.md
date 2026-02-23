@@ -30,6 +30,15 @@ for elem in df.dataset:
     print(elem.tag, elem.vr)
 ```
 
+4.1 Raw value bytes without copy
+
+```python
+elem = df.dataset.get_dataelement("PixelData")
+if elem:
+    raw = elem.value_span()  # memoryview
+    print(raw.nbytes, list(raw[:8]))
+```
+
 5. Pixel decode safety note
 
 - If you change pixel-related tags or transfer syntax, treat previously derived

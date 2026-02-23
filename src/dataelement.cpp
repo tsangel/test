@@ -480,6 +480,92 @@ void DataElement::set_value_bytes(std::span<const std::uint8_t> bytes) {
 	store_padded_value_bytes(*this, bytes);
 }
 
+bool DataElement::from_int(int value) {
+	if (vr_.is_sequence() || vr_.is_pixel_sequence()) {
+		return report_from_assignment_failure(
+		    "DataElement::from_int", *this, "numeric assignment is not supported for SQ/PX");
+	}
+
+	const bool little_endian = element_value_is_little_endian(*this);
+	bool ok = false;
+	switch (static_cast<std::uint16_t>(vr_)) {
+	case VR::SS_val:
+		ok = assign_integral_from_integer<std::int16_t>(*this, value, little_endian);
+		break;
+	case VR::US_val:
+		ok = assign_integral_from_integer<std::uint16_t>(*this, value, little_endian);
+		break;
+	case VR::SL_val:
+		ok = assign_integral_from_integer<std::int32_t>(*this, value, little_endian);
+		break;
+	case VR::UL_val:
+		ok = assign_integral_from_integer<std::uint32_t>(*this, value, little_endian);
+		break;
+	case VR::SV_val:
+		ok = assign_integral_from_integer<std::int64_t>(*this, value, little_endian);
+		break;
+	case VR::UV_val:
+		ok = assign_integral_from_integer<std::uint64_t>(*this, value, little_endian);
+		break;
+	case VR::IS_val:
+	case VR::DS_val:
+		ok = assign_integer_string_from_value(*this, value);
+		break;
+	default:
+		return report_from_assignment_failure(
+		    "DataElement::from_int", *this, "unsupported VR for from_int");
+	}
+
+	if (!ok) {
+		return report_from_assignment_failure(
+		    "DataElement::from_int", *this, "value out of range for VR");
+	}
+	return true;
+}
+
+bool DataElement::from_int_vector(std::span<const int> values) {
+	if (vr_.is_sequence() || vr_.is_pixel_sequence()) {
+		return report_from_assignment_failure(
+		    "DataElement::from_int_vector", *this, "numeric assignment is not supported for SQ/PX");
+	}
+
+	const bool little_endian = element_value_is_little_endian(*this);
+	bool ok = false;
+	switch (static_cast<std::uint16_t>(vr_)) {
+	case VR::SS_val:
+		ok = assign_integral_vector_from_integer<std::int16_t>(*this, values, little_endian);
+		break;
+	case VR::US_val:
+		ok = assign_integral_vector_from_integer<std::uint16_t>(*this, values, little_endian);
+		break;
+	case VR::SL_val:
+		ok = assign_integral_vector_from_integer<std::int32_t>(*this, values, little_endian);
+		break;
+	case VR::UL_val:
+		ok = assign_integral_vector_from_integer<std::uint32_t>(*this, values, little_endian);
+		break;
+	case VR::SV_val:
+		ok = assign_integral_vector_from_integer<std::int64_t>(*this, values, little_endian);
+		break;
+	case VR::UV_val:
+		ok = assign_integral_vector_from_integer<std::uint64_t>(*this, values, little_endian);
+		break;
+	case VR::IS_val:
+	case VR::DS_val:
+		ok = assign_integer_string_from_values(*this, values);
+		break;
+	default:
+		return report_from_assignment_failure(
+		    "DataElement::from_int_vector", *this, "unsupported VR for from_int_vector");
+	}
+
+	if (!ok) {
+		return report_from_assignment_failure(
+		    "DataElement::from_int_vector", *this, "one or more values are out of range for VR");
+	}
+	return true;
+}
+
 bool DataElement::from_long(long value) {
 	if (vr_.is_sequence() || vr_.is_pixel_sequence()) {
 		return report_from_assignment_failure(
@@ -830,21 +916,6 @@ std::optional<std::vector<long long>> DataElement::to_longlong_vector() const {
 	default:
 		return std::nullopt;
 	}
-}
-
-std::optional<std::vector<std::uint16_t>> DataElement::as_uint16_vector() const {
-	if (vr_ == VR::None) return std::nullopt;
-	const auto vec = load_numeric_vector<std::uint16_t>(*this);
-	return vec;
-}
-
-std::optional<std::vector<std::uint8_t>> DataElement::as_uint8_vector() const {
-	if (vr_ == VR::None) return std::nullopt;
-	const auto span = value_span();
-	std::vector<std::uint8_t> out;
-	out.reserve(span.size());
-	for (auto b : span) out.push_back(static_cast<std::uint8_t>(b));
-	return out;
 }
 
 std::optional<std::vector<int>> DataElement::to_int_vector() const {

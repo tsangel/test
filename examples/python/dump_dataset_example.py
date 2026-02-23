@@ -70,7 +70,18 @@ def try_numeric(elem: dicom.DataElement) -> str | None:
     return None
 
 
-def describe_element(elem: dicom.DataElement, indent: int = 0) -> str:
+def try_raw_preview(elem: dicom.DataElement, max_bytes: int) -> str | None:
+    if max_bytes <= 0:
+        return None
+    raw = elem.value_span()
+    total = raw.nbytes
+    count = min(max_bytes, total)
+    head = " ".join(f"{int(b):02X}" for b in raw[:count])
+    suffix = " ..." if count < total else ""
+    return f"raw[{total}]={head}{suffix}"
+
+
+def describe_element(elem: dicom.DataElement, indent: int = 0, raw_preview: int = 0) -> str:
     tag = elem.tag
     vr = elem.vr
     keyword = dicom.tag_to_keyword(tag) or "-"
@@ -83,21 +94,21 @@ def describe_element(elem: dicom.DataElement, indent: int = 0) -> str:
     if elem.is_pixel_sequence:
         value = "PixelSequence (encapsulated pixel data)"
     else:
-        value = try_numeric(elem) or "[TODO]"
+        value = try_numeric(elem) or try_raw_preview(elem, raw_preview) or "[TODO]"
     full = f"{indent_str}{line} value={value}"
     return full if len(full) <= MAX_LINE else full[: MAX_LINE - 3] + "..."
 
 
-def dump_dataset(dataset: dicom.DataSet, indent: int = 0) -> None:
+def dump_dataset(dataset: dicom.DataSet, indent: int = 0, raw_preview: int = 0) -> None:
     for elem in dataset:
-        print(describe_element(elem, indent))
+        print(describe_element(elem, indent, raw_preview))
         if elem.is_sequence:
             seq = elem.sequence
             if seq is None:
                 continue
             for idx, item in enumerate(seq):
                 print(" " * (indent + 2) + f"Item[{idx}] {{")
-                dump_dataset(item, indent + 4)
+                dump_dataset(item, indent + 4, raw_preview)
                 print(" " * (indent + 2) + "}")
         elif elem.is_pixel_sequence:
             pixseq = elem.pixel_sequence
@@ -120,10 +131,17 @@ def dump_dataset(dataset: dicom.DataSet, indent: int = 0) -> None:
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Dump numeric values from a DICOM file")
     parser.add_argument("path", help="Path to a DICOM file")
+    parser.add_argument(
+        "--raw-preview",
+        type=int,
+        default=0,
+        help="Print up to N raw bytes for non-numeric elements (default: 0, disabled)",
+    )
     args = parser.parse_args(argv)
+    raw_preview = max(0, args.raw_preview)
 
     dicom_file = dicom.read_file(args.path)
-    dump_dataset(dicom_file.dataset)
+    dump_dataset(dicom_file.dataset, raw_preview=raw_preview)
     return 0
 
 

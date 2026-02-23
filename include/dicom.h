@@ -1083,6 +1083,12 @@ public:
 	void reserve_value_bytes(std::size_t length);
 	/// Encode and store a single integer value according to this element VR.
 	/// Returns false when VR is unsupported for integer assignment or value is out of range.
+	bool from_int(int value);
+	/// Encode and store multiple integer values according to this element VR.
+	/// Returns false when VR is unsupported for integer assignment or any value is out of range.
+	bool from_int_vector(std::span<const int> values);
+	/// Encode and store a single integer value according to this element VR.
+	/// Returns false when VR is unsupported for integer assignment or value is out of range.
 	bool from_long(long value);
 	/// Encode and store multiple integer values according to this element VR.
 	/// Returns false when VR is unsupported for integer assignment or any value is out of range.
@@ -1116,10 +1122,6 @@ public:
 	[[nodiscard]] std::optional<long long> to_longlong() const;
 	/// Parse value as vector of signed int; empty on failure.
 	[[nodiscard]] std::optional<std::vector<int>> to_int_vector() const;
-	/// Treat underlying value bytes as little/endian-aware uint16 vector; empty on failure.
-	[[nodiscard]] std::optional<std::vector<std::uint16_t>> as_uint16_vector() const;
-	/// Treat underlying value bytes as uint8 vector; empty on failure.
-	[[nodiscard]] std::optional<std::vector<std::uint8_t>> as_uint8_vector() const;
 	/// Parse value as vector of signed long; empty on failure.
 	[[nodiscard]] std::optional<std::vector<long>> to_long_vector() const;
 	/// Parse value as vector of signed long long; empty on failure.
@@ -1184,14 +1186,6 @@ public:
 	[[nodiscard]] inline std::vector<int> to_int_vector(
 	    std::vector<int> default_value) const {
 		return to_int_vector().value_or(std::move(default_value));
-	}
-	[[nodiscard]] inline std::vector<std::uint16_t> as_uint16_vector(
-	    std::vector<std::uint16_t> default_value) const {
-		return as_uint16_vector().value_or(std::move(default_value));
-	}
-	[[nodiscard]] inline std::vector<std::uint8_t> as_uint8_vector(
-	    std::vector<std::uint8_t> default_value) const {
-		return as_uint8_vector().value_or(std::move(default_value));
 	}
 	[[nodiscard]] inline std::vector<long> to_long_vector(
 	    std::vector<long> default_value) const {

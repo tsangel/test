@@ -30,6 +30,7 @@ Warning: when `copy=False`, the source buffer must remain alive for as long as t
 
 ### DataElement
 - Provides `tag`, `vr`, `length`, `offset`, and helpers to coerce values (`to_long`, `to_double`, `to_string_view`, `to_utf8_view`, etc.).
+- Raw-byte helper: `value_span()` returns a read-only `memoryview` (no copy).
 - Truthiness: `bool(elem)` is `False` for missing lookups (`VR.None`), otherwise `True`.
 - Presence helpers: `elem.is_present()` / `elem.is_missing()` use the same rule as `bool(elem)`.
 - Sequence helpers: `sequence`, `as_sequence`, `pixel_sequence`, `as_pixel_sequence`.

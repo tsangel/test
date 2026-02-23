@@ -130,21 +130,30 @@ int main() {
 		fail("Generated::append chain should remain strict-valid");
 	}
 
-	{
-		dicom::DataElement signed_long_elem("Rows"_tag, dicom::VR::SL, 0, 0, nullptr);
-		if (!signed_long_elem.from_long(123456789L)) {
-			fail("DataElement::from_long should encode SL");
-		}
+		{
+			dicom::DataElement signed_long_elem("Rows"_tag, dicom::VR::SL, 0, 0, nullptr);
+			if (!signed_long_elem.from_long(123456789L)) {
+				fail("DataElement::from_long should encode SL");
+			}
 		if (signed_long_elem.length() != 4) {
 			fail("DataElement::from_long SL length should be 4");
 		}
-		if (signed_long_elem.to_long().value_or(0) != 123456789L) {
-			fail("DataElement::from_long SL roundtrip mismatch");
+			if (signed_long_elem.to_long().value_or(0) != 123456789L) {
+				fail("DataElement::from_long SL roundtrip mismatch");
+			}
 		}
-	}
-	{
-		dicom::DataElement inline_elem("Rows"_tag, dicom::VR::OB, 0, 0, nullptr);
-		inline_elem.reserve_value_bytes(3);
+		{
+			dicom::DataElement signed_int_elem("Rows"_tag, dicom::VR::SL, 0, 0, nullptr);
+			if (!signed_int_elem.from_int(12345)) {
+				fail("DataElement::from_int should encode SL");
+			}
+			if (signed_int_elem.to_int().value_or(0) != 12345) {
+				fail("DataElement::from_int SL roundtrip mismatch");
+			}
+		}
+		{
+			dicom::DataElement inline_elem("Rows"_tag, dicom::VR::OB, 0, 0, nullptr);
+			inline_elem.reserve_value_bytes(3);
 		if (inline_elem.length() != 3) {
 			fail("DataElement::reserve_value_bytes should update length");
 		}
@@ -162,14 +171,29 @@ int main() {
 		}
 		auto first_heap_ptr = heap_elem.value_span().data();
 		heap_elem.reserve_value_bytes(dicom::DataElement::kInlineStorageBytes + 1);
-		if (heap_elem.value_span().data() != first_heap_ptr) {
-			fail("DataElement::reserve_value_bytes should reuse heap when capacity is sufficient");
+			if (heap_elem.value_span().data() != first_heap_ptr) {
+				fail("DataElement::reserve_value_bytes should reuse heap when capacity is sufficient");
+			}
 		}
-	}
-	{
-		dicom::DataElement unsigned_short_elem("Rows"_tag, dicom::VR::US, 0, 0, nullptr);
-		if (unsigned_short_elem.from_long(-1)) {
-			fail("DataElement::from_long should reject negative value for US");
+		{
+			dicom::DataElement bytes_elem("Rows"_tag, dicom::VR::OB, 0, 0, nullptr);
+			const std::array<std::uint8_t, 8> raw{
+			    0x01u, 0x00u, 0xFFu, 0x7Fu, 0x78u, 0x56u, 0x34u, 0x12u};
+			bytes_elem.set_value_bytes(raw);
+			auto bytes = bytes_elem.value_span();
+			if (bytes.size() != raw.size()) {
+				fail("DataElement::value_span should expose raw bytes");
+			}
+			for (std::size_t i = 0; i < raw.size(); ++i) {
+				if (bytes[i] != raw[i]) {
+					fail("DataElement::value_span value mismatch");
+				}
+			}
+		}
+		{
+			dicom::DataElement unsigned_short_elem("Rows"_tag, dicom::VR::US, 0, 0, nullptr);
+			if (unsigned_short_elem.from_long(-1)) {
+				fail("DataElement::from_long should reject negative value for US");
 		}
 	}
 	{
@@ -182,21 +206,36 @@ int main() {
 			fail("DataElement::from_long IS string mismatch");
 		}
 	}
-	{
-		dicom::DataElement vector_elem("Rows"_tag, dicom::VR::US, 0, 0, nullptr);
-		const std::array<long, 3> values{1, 2, 3};
-		if (!vector_elem.from_long_vector(values)) {
-			fail("DataElement::from_long_vector should encode US");
+		{
+			dicom::DataElement vector_elem("Rows"_tag, dicom::VR::US, 0, 0, nullptr);
+			const std::array<long, 3> values{1, 2, 3};
+			if (!vector_elem.from_long_vector(values)) {
+				fail("DataElement::from_long_vector should encode US");
 		}
 		auto decoded = vector_elem.to_long_vector();
 		if (!decoded || *decoded != std::vector<long>{1, 2, 3}) {
 			fail("DataElement::from_long_vector US roundtrip mismatch");
 		}
 		const std::array<long, 2> invalid_values{-1, 2};
-		if (vector_elem.from_long_vector(invalid_values)) {
-			fail("DataElement::from_long_vector should reject out-of-range value for US");
+			if (vector_elem.from_long_vector(invalid_values)) {
+				fail("DataElement::from_long_vector should reject out-of-range value for US");
+			}
 		}
-	}
+		{
+			dicom::DataElement vector_elem("Rows"_tag, dicom::VR::US, 0, 0, nullptr);
+			const std::array<int, 3> values{1, 2, 3};
+			if (!vector_elem.from_int_vector(values)) {
+				fail("DataElement::from_int_vector should encode US");
+			}
+			auto decoded = vector_elem.to_int_vector();
+			if (!decoded || *decoded != std::vector<int>{1, 2, 3}) {
+				fail("DataElement::from_int_vector US roundtrip mismatch");
+			}
+			const std::array<int, 2> invalid_values{-1, 2};
+			if (vector_elem.from_int_vector(invalid_values)) {
+				fail("DataElement::from_int_vector should reject out-of-range value for US");
+			}
+		}
 	{
 		dicom::DataElement signed_very_long_elem("Rows"_tag, dicom::VR::SV, 0, 0, nullptr);
 		constexpr long long kValue = 4294967296LL;

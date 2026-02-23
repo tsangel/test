@@ -37,6 +37,18 @@ print(df.dump(include_offset=False))
 ds = df.dataset
 ```
 
+## Raw value bytes (no copy)
+
+`DataElement.value_span()` returns a read-only `memoryview` over raw value bytes.
+
+```python
+ds = dicom.read_file("sample.dcm").dataset
+elem = ds.get_dataelement("PixelData")
+if elem:
+    raw = elem.value_span()
+    print(raw.nbytes, list(raw[:8]))
+```
+
 ## Error handling
 - Invalid keyword/tag strings raise `ValueError`.
 - Parse errors are surfaced as `RuntimeError`.

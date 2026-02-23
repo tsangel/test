@@ -28,6 +28,19 @@ long rows = ds["Rows"_tag].to_long().value_or(0);
 double slope = ds["RescaleSlope"_tag].to_double().value_or(1.0);
 ```
 
+## Raw value bytes (no copy)
+
+For raw byte access, use `value_span()` on a `DataElement`.
+It returns `std::span<const std::uint8_t>` and does not allocate.
+
+```cpp
+using namespace dicom::literals;
+
+auto& pixel_data = ds["PixelData"_tag];
+auto bytes = pixel_data.value_span();
+// bytes.data(), bytes.size()
+```
+
 ## Batch assignment + error collection
 
 When writing many elements, you can keep a single status flag and collect detailed
