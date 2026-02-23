@@ -101,6 +101,7 @@ setup(
         "console_scripts": [
             "dicomdump=dicomsdl.dicomdump:main",
             "dicomconv=dicomsdl.dicomconv:main",
+            "dicomshow=dicomsdl.dicomshow:main",
         ],
     },
     include_package_data=True,

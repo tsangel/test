@@ -83,6 +83,9 @@ add_library(dicomsdl STATIC
 	src/pixel_decoder_raw.cpp
 	src/pixel_decoder_encapsulated.cpp
 	src/pixel_decoder_rle.cpp
+	src/pixel_encoder.cpp
+	src/pixel_encoder_rle.cpp
+	src/pixel_encoder_jpeg2k.cpp
 	src/pixel_decoder_jpeg2k.cpp
 	src/pixel_decoder_htj2k.cpp
 	src/pixel_decoder_jpegls.cpp

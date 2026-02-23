@@ -445,7 +445,150 @@ int main() {
 		fail("be raw write: endian swap/interpretation mismatch");
 	}
 
-	// 4) Encapsulated-uncompressed transfer syntax can be normalized to native uncompressed.
+	// 4) Native pixel data can be converted to RLE and back to native.
+	auto be_raw_to_rle = dicom::read_bytes(
+	    "be-raw-to-rle", be_raw_file.data(), be_raw_file.size());
+	if (!be_raw_to_rle) {
+		fail("be raw to rle read_bytes returned null");
+	}
+	be_raw_to_rle->set_transfer_syntax("RLELossless"_uid);
+	require_transfer_syntax(be_raw_to_rle->dataset(), "RLELossless"_uid, "be raw to rle");
+	const auto* be_raw_to_rle_pixel = be_raw_to_rle->get_dataelement("PixelData"_tag);
+	if (be_raw_to_rle_pixel->is_missing() || !be_raw_to_rle_pixel->vr().is_pixel_sequence()) {
+		fail("be raw to rle: expected encapsulated PixelData");
+	}
+	const auto be_raw_to_rle_decoded = be_raw_to_rle->pixel_data(0);
+	if (be_raw_to_rle_decoded.size() != sizeof(std::uint16_t)) {
+		fail("be raw to rle: decoded byte length mismatch");
+	}
+	std::uint16_t be_raw_to_rle_value = 0;
+	std::memcpy(&be_raw_to_rle_value, be_raw_to_rle_decoded.data(), sizeof(be_raw_to_rle_value));
+	if (be_raw_to_rle_value != 0x1234u) {
+		fail("be raw to rle: decoded value mismatch");
+	}
+
+	const auto be_raw_to_rle_bytes = be_raw_to_rle->write_bytes();
+	auto be_raw_to_rle_roundtrip = dicom::read_bytes(
+	    "be-raw-to-rle-roundtrip", be_raw_to_rle_bytes.data(), be_raw_to_rle_bytes.size());
+	if (!be_raw_to_rle_roundtrip) {
+		fail("be raw to rle roundtrip read_bytes returned null");
+	}
+	require_transfer_syntax(
+	    be_raw_to_rle_roundtrip->dataset(), "RLELossless"_uid, "be raw to rle roundtrip");
+	const auto be_raw_to_rle_roundtrip_decoded = be_raw_to_rle_roundtrip->pixel_data(0);
+	if (be_raw_to_rle_roundtrip_decoded.size() != sizeof(std::uint16_t)) {
+		fail("be raw to rle roundtrip: decoded byte length mismatch");
+	}
+	std::uint16_t be_raw_to_rle_roundtrip_value = 0;
+	std::memcpy(
+	    &be_raw_to_rle_roundtrip_value, be_raw_to_rle_roundtrip_decoded.data(),
+	    sizeof(be_raw_to_rle_roundtrip_value));
+	if (be_raw_to_rle_roundtrip_value != 0x1234u) {
+		fail("be raw to rle roundtrip: decoded value mismatch");
+	}
+
+	be_raw_to_rle->set_transfer_syntax("ExplicitVRLittleEndian"_uid);
+	require_transfer_syntax(
+	    be_raw_to_rle->dataset(), "ExplicitVRLittleEndian"_uid, "be raw rle to native");
+	const auto* be_raw_to_native_pixel = be_raw_to_rle->get_dataelement("PixelData"_tag);
+	if (be_raw_to_native_pixel->is_missing() || be_raw_to_native_pixel->vr().is_pixel_sequence()) {
+		fail("be raw rle to native: expected native PixelData");
+	}
+	const auto be_raw_to_native_bytes = be_raw_to_native_pixel->value_span();
+	if (be_raw_to_native_bytes.size() != 2 ||
+	    be_raw_to_native_bytes[0] != 0x34u ||
+	    be_raw_to_native_bytes[1] != 0x12u) {
+		fail("be raw rle to native: native PixelData bytes mismatch");
+	}
+
+	// 5) Native pixel data can be converted to JPEG2000 Lossless and back to native.
+	auto be_raw_to_j2k = dicom::read_bytes(
+	    "be-raw-to-j2k", be_raw_file.data(), be_raw_file.size());
+	if (!be_raw_to_j2k) {
+		fail("be raw to j2k read_bytes returned null");
+	}
+	be_raw_to_j2k->set_transfer_syntax("JPEG2000Lossless"_uid);
+	require_transfer_syntax(
+	    be_raw_to_j2k->dataset(), "JPEG2000Lossless"_uid, "be raw to j2k");
+	const auto* be_raw_to_j2k_pixel = be_raw_to_j2k->get_dataelement("PixelData"_tag);
+	if (be_raw_to_j2k_pixel->is_missing() || !be_raw_to_j2k_pixel->vr().is_pixel_sequence()) {
+		fail("be raw to j2k: expected encapsulated PixelData");
+	}
+	const auto be_raw_to_j2k_decoded = be_raw_to_j2k->pixel_data(0);
+	if (be_raw_to_j2k_decoded.size() != sizeof(std::uint16_t)) {
+		fail("be raw to j2k: decoded byte length mismatch");
+	}
+	std::uint16_t be_raw_to_j2k_value = 0;
+	std::memcpy(&be_raw_to_j2k_value, be_raw_to_j2k_decoded.data(), sizeof(be_raw_to_j2k_value));
+	if (be_raw_to_j2k_value != 0x1234u) {
+		fail("be raw to j2k: decoded value mismatch");
+	}
+
+	const auto be_raw_to_j2k_bytes = be_raw_to_j2k->write_bytes();
+	auto be_raw_to_j2k_roundtrip = dicom::read_bytes(
+	    "be-raw-to-j2k-roundtrip", be_raw_to_j2k_bytes.data(), be_raw_to_j2k_bytes.size());
+	if (!be_raw_to_j2k_roundtrip) {
+		fail("be raw to j2k roundtrip read_bytes returned null");
+	}
+	require_transfer_syntax(
+	    be_raw_to_j2k_roundtrip->dataset(), "JPEG2000Lossless"_uid, "be raw to j2k roundtrip");
+	const auto be_raw_to_j2k_roundtrip_decoded = be_raw_to_j2k_roundtrip->pixel_data(0);
+	if (be_raw_to_j2k_roundtrip_decoded.size() != sizeof(std::uint16_t)) {
+		fail("be raw to j2k roundtrip: decoded byte length mismatch");
+	}
+	std::uint16_t be_raw_to_j2k_roundtrip_value = 0;
+	std::memcpy(
+	    &be_raw_to_j2k_roundtrip_value, be_raw_to_j2k_roundtrip_decoded.data(),
+	    sizeof(be_raw_to_j2k_roundtrip_value));
+	if (be_raw_to_j2k_roundtrip_value != 0x1234u) {
+		fail("be raw to j2k roundtrip: decoded value mismatch");
+	}
+
+	be_raw_to_j2k->set_transfer_syntax("ExplicitVRLittleEndian"_uid);
+	require_transfer_syntax(
+	    be_raw_to_j2k->dataset(), "ExplicitVRLittleEndian"_uid, "be raw j2k to native");
+	const auto* be_raw_j2k_to_native_pixel = be_raw_to_j2k->get_dataelement("PixelData"_tag);
+	if (be_raw_j2k_to_native_pixel->is_missing() ||
+	    be_raw_j2k_to_native_pixel->vr().is_pixel_sequence()) {
+		fail("be raw j2k to native: expected native PixelData");
+	}
+	const auto be_raw_j2k_to_native_bytes = be_raw_j2k_to_native_pixel->value_span();
+	if (be_raw_j2k_to_native_bytes.size() != 2 ||
+	    be_raw_j2k_to_native_bytes[0] != 0x34u ||
+	    be_raw_j2k_to_native_bytes[1] != 0x12u) {
+		fail("be raw j2k to native: native PixelData bytes mismatch");
+	}
+
+	// 5b) Native pixel data can be converted to lossy JPEG2000 with default options.
+	auto be_raw_to_j2k_lossy = dicom::read_bytes(
+	    "be-raw-to-j2k-lossy", be_raw_file.data(), be_raw_file.size());
+	if (!be_raw_to_j2k_lossy) {
+		fail("be raw to lossy j2k read_bytes returned null");
+	}
+	be_raw_to_j2k_lossy->set_transfer_syntax("JPEG2000"_uid);
+	require_transfer_syntax(
+	    be_raw_to_j2k_lossy->dataset(), "JPEG2000"_uid, "be raw to lossy j2k");
+	const auto* be_raw_to_j2k_lossy_pixel = be_raw_to_j2k_lossy->get_dataelement("PixelData"_tag);
+	if (be_raw_to_j2k_lossy_pixel->is_missing() || !be_raw_to_j2k_lossy_pixel->vr().is_pixel_sequence()) {
+		fail("be raw to lossy j2k: expected encapsulated PixelData");
+	}
+	const auto be_raw_to_j2k_lossy_decoded = be_raw_to_j2k_lossy->pixel_data(0);
+	if (be_raw_to_j2k_lossy_decoded.size() != sizeof(std::uint16_t)) {
+		fail("be raw to lossy j2k: decoded byte length mismatch");
+	}
+	be_raw_to_j2k_lossy->set_transfer_syntax("ExplicitVRLittleEndian"_uid);
+	require_transfer_syntax(
+	    be_raw_to_j2k_lossy->dataset(), "ExplicitVRLittleEndian"_uid, "be raw lossy j2k to native");
+	const auto* be_raw_lossy_j2k_to_native_pixel = be_raw_to_j2k_lossy->get_dataelement("PixelData"_tag);
+	if (be_raw_lossy_j2k_to_native_pixel->is_missing() ||
+	    be_raw_lossy_j2k_to_native_pixel->vr().is_pixel_sequence()) {
+		fail("be raw lossy j2k to native: expected native PixelData");
+	}
+	if (be_raw_lossy_j2k_to_native_pixel->value_span().size() != sizeof(std::uint16_t)) {
+		fail("be raw lossy j2k to native: native PixelData byte length mismatch");
+	}
+
+	// 6) Encapsulated-uncompressed transfer syntax can be normalized to native uncompressed.
 	const auto encapsulated_uncompressed_file = build_part10(
 	    "1.2.840.10008.1.2.1.98", build_encapsulated_uncompressed_pixel_body());
 	auto encapsulated_uncompressed = dicom::read_bytes(
@@ -490,7 +633,7 @@ int main() {
 	require_transfer_syntax(
 	    encap_to_native_roundtrip->dataset(), "ExplicitVRLittleEndian"_uid, "encap-uncompressed write");
 
-	// 5) Malformed big-endian payload should fail during normalization.
+	// 7) Malformed big-endian payload should fail during normalization.
 	const auto be_malformed_file = build_part10(
 	    "1.2.840.10008.1.2.2", build_big_endian_malformed_ow_body());
 	bool malformed_failed = false;
@@ -504,7 +647,7 @@ int main() {
 		fail("be malformed: expected read failure");
 	}
 
-	// 6) Multi-step transfer syntax write/read cycles.
+	// 8) Multi-step transfer syntax write/read cycles.
 	auto roundtrip_with_target_ts = [&](auto file, dicom::uid::WellKnown target_ts,
 	                                   const char* context) {
 		if (!file) {

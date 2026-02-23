@@ -18,6 +18,7 @@
 #include <optional>
 #include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "instream.h"
@@ -216,6 +217,10 @@ struct WellKnown {
 	[[nodiscard]] constexpr bool is_rle() const noexcept;
 	[[nodiscard]] constexpr bool is_uncompressed() const noexcept;
 	[[nodiscard]] constexpr bool is_encapsulated() const noexcept;
+	[[nodiscard]] constexpr bool is_lossless() const noexcept;
+	[[nodiscard]] constexpr bool is_lossy() const noexcept;
+	[[nodiscard]] constexpr bool supports_pixel_encode() const noexcept;
+	[[nodiscard]] constexpr bool supports_pixel_decode() const noexcept;
 	[[nodiscard]] constexpr bool is_mpeg2() const noexcept;
 	[[nodiscard]] constexpr bool is_h264() const noexcept;
 	[[nodiscard]] constexpr bool is_hevc() const noexcept;
@@ -740,6 +745,10 @@ constexpr std::uint32_t kTSJpegXL = 1u << 10;
 constexpr std::uint32_t kTSRle = 1u << 11;
 constexpr std::uint32_t kTSFfd9 = 1u << 12;      // Codestream ends with FFD9 marker
 constexpr std::uint32_t kTSJpegFamily = 1u << 13;
+constexpr std::uint32_t kTSLossless = 1u << 14;
+constexpr std::uint32_t kTSLossy = 1u << 15;
+constexpr std::uint32_t kTSPixelEncodeSupported = 1u << 16;
+constexpr std::uint32_t kTSPixelDecodeSupported = 1u << 17;
 
 inline constexpr std::uint32_t ts_mask(std::uint16_t idx) {
 	switch (idx) {
@@ -749,9 +758,11 @@ inline constexpr std::uint32_t ts_mask(std::uint16_t idx) {
 	case "DeflatedExplicitVRLittleEndian"_uid.raw_index():
 	case "ExplicitVRBigEndian"_uid.raw_index():
 	case "Papyrus3ImplicitVRLittleEndian"_uid.raw_index():
-		return kTSUncompressed;
+		return kTSUncompressed | kTSLossless | kTSPixelEncodeSupported |
+		    kTSPixelDecodeSupported;
 	case "EncapsulatedUncompressedExplicitVRLittleEndian"_uid.raw_index():
-		return kTSUncompressed | kTSEncapsulated;
+		return kTSUncompressed | kTSEncapsulated | kTSLossless |
+		    kTSPixelDecodeSupported;
 
 	// JPEG Baseline / Extended / Progressive
 	case "JPEGBaseline8Bit"_uid.raw_index():
@@ -767,7 +778,8 @@ inline constexpr std::uint32_t ts_mask(std::uint16_t idx) {
 	case "JPEGSpectralSelectionHierarchical2123"_uid.raw_index():
 	case "JPEGFullProgressionHierarchical2426"_uid.raw_index():
 	case "JPEGFullProgressionHierarchical2527"_uid.raw_index():
-		return kTSJpegBaseline | kTSJpegFamily | kTSFfd9 | kTSEncapsulated;
+		return kTSJpegBaseline | kTSJpegFamily | kTSFfd9 | kTSEncapsulated |
+		    kTSLossy | kTSPixelDecodeSupported;
 
 	// JPEG Lossless
 	case "JPEGLossless"_uid.raw_index():
@@ -775,18 +787,26 @@ inline constexpr std::uint32_t ts_mask(std::uint16_t idx) {
 	case "JPEGLosslessHierarchical28"_uid.raw_index():
 	case "JPEGLosslessHierarchical29"_uid.raw_index():
 	case "JPEGLosslessSV1"_uid.raw_index():
-		return kTSJpegLossless | kTSJpegFamily | kTSFfd9 | kTSEncapsulated;
+		return kTSJpegLossless | kTSJpegFamily | kTSFfd9 | kTSEncapsulated |
+		    kTSLossless | kTSPixelDecodeSupported;
 
 	// JPEG-LS
 	case "JPEGLSLossless"_uid.raw_index():
+		return kTSJpegLS | kTSJpegFamily | kTSFfd9 | kTSEncapsulated |
+		    kTSLossless | kTSPixelDecodeSupported;
 	case "JPEGLSNearLossless"_uid.raw_index():
-		return kTSJpegLS | kTSJpegFamily | kTSFfd9 | kTSEncapsulated;
+		return kTSJpegLS | kTSJpegFamily | kTSFfd9 | kTSEncapsulated |
+		    kTSLossy | kTSPixelDecodeSupported;
 
 	// JPEG 2000 / JPIP Referenced
 	case "JPEG2000Lossless"_uid.raw_index():
-	case "JPEG2000"_uid.raw_index():
 	case "JPEG2000MCLossless"_uid.raw_index():
+		return kTSJpeg2000 | kTSJpegFamily | kTSEncapsulated | kTSLossless |
+		    kTSPixelEncodeSupported | kTSPixelDecodeSupported;
+	case "JPEG2000"_uid.raw_index():
 	case "JPEG2000MC"_uid.raw_index():
+		return kTSJpeg2000 | kTSJpegFamily | kTSEncapsulated | kTSLossy |
+		    kTSPixelEncodeSupported | kTSPixelDecodeSupported;
 	case "JPIPReferenced"_uid.raw_index():
 	case "JPIPReferencedDeflate"_uid.raw_index():
 		return kTSJpeg2000 | kTSJpegFamily | kTSEncapsulated;
@@ -796,7 +816,7 @@ inline constexpr std::uint32_t ts_mask(std::uint16_t idx) {
 	case "MPEG2MPMLF"_uid.raw_index():
 	case "MPEG2MPHL"_uid.raw_index():
 	case "MPEG2MPHLF"_uid.raw_index():
-		return kTSMpeg2 | kTSEncapsulated;
+		return kTSMpeg2 | kTSEncapsulated | kTSLossy;
 
 	// H.264 / MPEG-4 AVC
 	case "MPEG4HP41"_uid.raw_index():
@@ -809,24 +829,30 @@ inline constexpr std::uint32_t ts_mask(std::uint16_t idx) {
 	case "MPEG4HP423DF"_uid.raw_index():
 	case "MPEG4HP42STEREO"_uid.raw_index():
 	case "MPEG4HP42STEREOF"_uid.raw_index():
-		return kTSH264 | kTSEncapsulated;
+		return kTSH264 | kTSEncapsulated | kTSLossy;
 
 	// HEVC
 	case "HEVCMP51"_uid.raw_index():
 	case "HEVCM10P51"_uid.raw_index():
-		return kTSHevc | kTSEncapsulated;
+		return kTSHevc | kTSEncapsulated | kTSLossy;
 
 	// JPEG XL
 	case "JPEGXLLossless"_uid.raw_index():
+		return kTSJpegXL | kTSJpegFamily | kTSFfd9 | kTSEncapsulated |
+		    kTSLossless;
 	case "JPEGXLJPEGRecompression"_uid.raw_index():
 	case "JPEGXL"_uid.raw_index():
-		return kTSJpegXL | kTSJpegFamily | kTSFfd9 | kTSEncapsulated;
+		return kTSJpegXL | kTSJpegFamily | kTSFfd9 | kTSEncapsulated |
+		    kTSLossy;
 
 	// HTJ2K codestream transfer syntaxes
 	case "HTJ2KLossless"_uid.raw_index():
 	case "HTJ2KLosslessRPCL"_uid.raw_index():
+		return kTSJpeg2000 | kTSHTJ2K | kTSJpegFamily | kTSFfd9 |
+		    kTSEncapsulated | kTSLossless | kTSPixelDecodeSupported;
 	case "HTJ2K"_uid.raw_index():
-		return kTSJpeg2000 | kTSHTJ2K | kTSJpegFamily | kTSFfd9 | kTSEncapsulated;
+		return kTSJpeg2000 | kTSHTJ2K | kTSJpegFamily | kTSFfd9 |
+		    kTSEncapsulated | kTSLossy | kTSPixelDecodeSupported;
 
 	// JPIP HTJ2K referenced transfer syntaxes
 	case "JPIPHTJ2KReferenced"_uid.raw_index():
@@ -835,7 +861,8 @@ inline constexpr std::uint32_t ts_mask(std::uint16_t idx) {
 
 	// RLE
 	case "RLELossless"_uid.raw_index():
-		return kTSRle | kTSEncapsulated;
+		return kTSRle | kTSEncapsulated | kTSLossless |
+		    kTSPixelEncodeSupported | kTSPixelDecodeSupported;
 
 	default:
 		return 0;
@@ -884,6 +911,22 @@ inline constexpr bool WellKnown::is_encapsulated() const noexcept {
 	return detail::ts_mask(raw_index()) & detail::kTSEncapsulated;
 }
 
+inline constexpr bool WellKnown::is_lossless() const noexcept {
+	return detail::ts_mask(raw_index()) & detail::kTSLossless;
+}
+
+inline constexpr bool WellKnown::is_lossy() const noexcept {
+	return detail::ts_mask(raw_index()) & detail::kTSLossy;
+}
+
+inline constexpr bool WellKnown::supports_pixel_encode() const noexcept {
+	return detail::ts_mask(raw_index()) & detail::kTSPixelEncodeSupported;
+}
+
+inline constexpr bool WellKnown::supports_pixel_decode() const noexcept {
+	return detail::ts_mask(raw_index()) & detail::kTSPixelDecodeSupported;
+}
+
 inline constexpr bool WellKnown::is_mpeg2() const noexcept {
 	return detail::ts_mask(raw_index()) & detail::kTSMpeg2;
 }
@@ -903,6 +946,7 @@ inline constexpr bool WellKnown::ends_with_ffd9_marker() const noexcept {
 } // namespace uid
 
 class Sequence;
+class PixelFrame;
 class PixelSequence;
 class DicomFile;
 class DataSet;
@@ -938,6 +982,54 @@ enum class DataType : std::uint8_t {
 	f32,
 	f64,
 };
+
+enum class Photometric : std::uint8_t {
+	monochrome1 = 0,
+	monochrome2,
+	rgb,
+	ybr_full,
+	ybr_full_422,
+};
+
+struct PixelSource {
+	std::span<const std::uint8_t> bytes{};
+	DataType data_type{DataType::unknown};
+	int rows{0};
+	int cols{0};
+	int frames{1};
+	int samples_per_pixel{1};
+	Planar planar{Planar::interleaved};
+	std::size_t row_stride{0};
+	std::size_t frame_stride{0};
+	Photometric photometric{Photometric::monochrome2};
+
+	// Optional DICOM bitfield overrides.
+	std::optional<int> bits_allocated{};
+	std::optional<int> bits_stored{};
+	std::optional<int> high_bit{};
+	std::optional<int> pixel_representation{}; // 0 unsigned, 1 signed
+};
+
+struct AutoCodecOptions {};
+struct NoCompression {};
+struct RleOptions {};
+struct JpegOptions { int quality{90}; };
+struct JpegLsOptions { int near_lossless_error{0}; };
+struct J2kOptions {
+	double target_bpp{0.0};
+	double target_psnr{0.0};
+	int threads{0};
+};
+struct Htj2kOptions {
+	double target_bpp{0.0};
+	double target_psnr{0.0};
+	int threads{0};
+};
+struct DeflateOptions { int level{6}; };
+
+using CodecOptions = std::variant<
+    AutoCodecOptions, NoCompression, RleOptions, JpegOptions, JpegLsOptions, J2kOptions, Htj2kOptions,
+    DeflateOptions>;
 
 enum class Htj2kDecoder : std::uint8_t {
 	auto_select = 0,
@@ -1596,11 +1688,31 @@ public:
 
 	/// Set transfer syntax for subsequent write operations and synchronize (0002,0010).
 	/// This updates both runtime parse/write state and file meta information.
-	void set_transfer_syntax(uid::WellKnown transfer_syntax);
+	/// When `codec_opt` is AutoCodecOptions, apply_transfer_syntax chooses a default codec policy
+	/// from the target transfer syntax.
+	void set_transfer_syntax(uid::WellKnown transfer_syntax,
+	    pixel::CodecOptions codec_opt = pixel::AutoCodecOptions{});
 	[[nodiscard]] uid::WellKnown transfer_syntax_uid() const { return transfer_syntax_uid_; }
 	[[nodiscard]] const pixel_info_t& pixel_info(bool recalc = false) const;
 	[[nodiscard]] pixel::DecodeStrides calc_decode_strides(const pixel::DecodeOptions& opt = {}) const;
 	[[nodiscard]] std::optional<pixel::ModalityLut> modality_lut() const;
+	/// When `codec_opt` is AutoCodecOptions, a default codec is selected from transfer syntax.
+	void set_pixel_data(uid::WellKnown transfer_syntax, const pixel::PixelSource& source,
+	    pixel::CodecOptions codec_opt = pixel::AutoCodecOptions{});
+	/// Replace PixelData with native bytes (OB/OW) by moving ownership from `native_pixel_data`.
+	/// If `vr` is None, OB/OW is inferred from BitsAllocated (<=8 -> OB, otherwise OW).
+	void set_native_pixel_data(std::vector<std::uint8_t>&& native_pixel_data, VR vr = VR::None);
+	/// Replace PixelData with an encapsulated pixel sequence (VR::PX).
+	/// If `frame_count` is non-zero, preallocate that many frame slots and set NumberOfFrames.
+	/// This also clears FloatPixelData/DoubleFloatPixelData and invalidates pixel cache.
+	void reset_encapsulated_pixel_data(std::size_t frame_count = 0);
+	/// Move one encoded frame payload into a preallocated encapsulated frame slot.
+	/// Intended for deterministic frame-index writes (e.g. multi-threaded encoders).
+	void set_encoded_pixel_frame(std::size_t frame_index, std::vector<std::uint8_t>&& encoded_frame);
+	/// Append one encoded frame payload into encapsulated PixelData (VR::PX).
+	/// Ownership of `encoded_frame` is moved without byte copy.
+	/// NumberOfFrames is updated to match the appended frame count.
+	[[nodiscard]] PixelFrame* add_encoded_pixel_frame(std::vector<std::uint8_t>&& encoded_frame);
 	void decode_into(std::size_t frame_index, std::span<std::uint8_t> dst,
 	    const pixel::DecodeOptions& opt = {}) const {
 		pixel::decode_frame_into(*this, frame_index, dst, opt);
@@ -1628,7 +1740,8 @@ private:
 	friend class DataSet;
 	void invalidate_pixel_info_cache() const { pixel_info_cache_.reset(); }
 	void set_transfer_syntax_state_only(uid::WellKnown transfer_syntax);
-	void apply_transfer_syntax(uid::WellKnown transfer_syntax);
+	void apply_transfer_syntax(uid::WellKnown transfer_syntax,
+	    const pixel::CodecOptions& codec_opt_override);
 	void clear_error_state() noexcept;
 	void set_error_state(std::string message);
 

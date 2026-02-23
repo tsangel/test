@@ -113,23 +113,71 @@ std::size_t bytes_per_sample_of(pixel::DataType dtype) noexcept {
 	return bits_allocated > 8 ? VR::OW : VR::OB;
 }
 
-void convert_encapsulated_pixel_data_to_native(DicomFile& file) {
-	DataSet& dataset = file.dataset();
-	const auto& pixel_data = dataset["PixelData"_tag];
-	if (!pixel_data || !pixel_data.vr().is_pixel_sequence()) {
-		return;
-	}
+[[nodiscard]] char ascii_upper(char value) noexcept {
+	return (value >= 'a' && value <= 'z')
+	           ? static_cast<char>(value - ('a' - 'A'))
+	           : value;
+}
 
-	const auto& info = file.pixel_info(true);
+[[nodiscard]] bool ascii_iequals(std::string_view lhs, std::string_view rhs) noexcept {
+	if (lhs.size() != rhs.size()) {
+		return false;
+	}
+	for (std::size_t index = 0; index < lhs.size(); ++index) {
+		if (ascii_upper(lhs[index]) != ascii_upper(rhs[index])) {
+			return false;
+		}
+	}
+	return true;
+}
+
+[[nodiscard]] std::optional<pixel::Photometric> parse_photometric_from_text(
+    std::string_view text) noexcept {
+	if (ascii_iequals(text, "MONOCHROME1")) {
+		return pixel::Photometric::monochrome1;
+	}
+	if (ascii_iequals(text, "MONOCHROME2")) {
+		return pixel::Photometric::monochrome2;
+	}
+	if (ascii_iequals(text, "RGB")) {
+		return pixel::Photometric::rgb;
+	}
+	if (ascii_iequals(text, "YBR_FULL")) {
+		return pixel::Photometric::ybr_full;
+	}
+	if (ascii_iequals(text, "YBR_FULL_422")) {
+		return pixel::Photometric::ybr_full_422;
+	}
+	return std::nullopt;
+}
+
+struct decoded_native_pixel_buffer {
+	std::vector<std::uint8_t> bytes;
+	pixel::DecodeStrides strides{};
+	std::size_t frame_count{0};
+};
+
+[[nodiscard]] std::size_t checked_mul_for_transfer_syntax(std::size_t a, std::size_t b,
+    std::string_view label, const DicomFile& file, uid::WellKnown target_ts) {
+	if (a != 0 && b > std::numeric_limits<std::size_t>::max() / a) {
+		diag::error_and_throw(
+		    "DicomFile::apply_transfer_syntax file={} target_ts={} reason={} overflows size_t",
+		    file.path(), target_ts.value(), label);
+	}
+	return a * b;
+}
+
+[[nodiscard]] decoded_native_pixel_buffer decode_all_frames_to_native(DicomFile& file,
+    const DicomFile::pixel_info_t& info, std::string_view context) {
 	if (!info.has_pixel_data) {
 		diag::error_and_throw(
-		    "DicomFile::apply_transfer_syntax file={} reason=PixelData exists but pixel metadata is not decodable",
-		    file.path());
+		    "{} file={} reason=PixelData exists but pixel metadata is not decodable",
+		    context, file.path());
 	}
 	if (info.frames <= 0) {
 		diag::error_and_throw(
-		    "DicomFile::apply_transfer_syntax file={} reason=invalid NumberOfFrames for encapsulated-to-native conversion",
-		    file.path());
+		    "{} file={} reason=invalid NumberOfFrames for pixel conversion",
+		    context, file.path());
 	}
 
 	pixel::DecodeOptions decode_options{};
@@ -139,28 +187,149 @@ void convert_encapsulated_pixel_data_to_native(DicomFile& file) {
 	const auto decode_strides = file.calc_decode_strides(decode_options);
 	if (decode_strides.frame == 0) {
 		diag::error_and_throw(
-		    "DicomFile::apply_transfer_syntax file={} reason=calculated native frame size is zero",
-		    file.path());
+		    "{} file={} reason=calculated native frame size is zero",
+		    context, file.path());
 	}
 
-	const auto frame_count = static_cast<std::size_t>(info.frames);
-	std::vector<std::uint8_t> native_pixel_bytes;
-	native_pixel_bytes.resize(decode_strides.frame * frame_count);
+	decoded_native_pixel_buffer decoded{};
+	decoded.frame_count = static_cast<std::size_t>(info.frames);
+	decoded.strides = decode_strides;
+	if (decoded.frame_count != 0 &&
+	    decode_strides.frame > std::numeric_limits<std::size_t>::max() / decoded.frame_count) {
+		diag::error_and_throw(
+		    "{} file={} reason=decoded native buffer size overflows size_t",
+		    context, file.path());
+	}
+	decoded.bytes.resize(decode_strides.frame * decoded.frame_count);
 
-	for (std::size_t frame_index = 0; frame_index < frame_count; ++frame_index) {
+	for (std::size_t frame_index = 0; frame_index < decoded.frame_count; ++frame_index) {
 		auto frame_span = std::span<std::uint8_t>(
-		    native_pixel_bytes.data() + frame_index * decode_strides.frame, decode_strides.frame);
+		    decoded.bytes.data() + frame_index * decode_strides.frame, decode_strides.frame);
 		file.decode_into(frame_index, frame_span, decode_strides, decode_options);
 	}
+	return decoded;
+}
 
-	DataElement* native_pixel_data =
-	    dataset.add_dataelement("PixelData"_tag, native_pixel_vr_from_bits_allocated(info.bits_allocated));
-	if (!native_pixel_data) {
+[[nodiscard]] pixel::PixelSource build_set_pixel_source_from_native_pixel_data(
+    DicomFile& file, uid::WellKnown target_ts) {
+	DataSet& dataset = file.dataset();
+	const auto& pixel_data = dataset["PixelData"_tag];
+	if (!pixel_data || pixel_data.vr().is_pixel_sequence() || !pixel_data.vr().is_binary()) {
 		diag::error_and_throw(
-		    "DicomFile::apply_transfer_syntax file={} reason=failed to replace PixelData",
-		    file.path());
+		    "DicomFile::apply_transfer_syntax file={} target_ts={} reason=PixelData must be native binary for encoding path",
+		    file.path(), target_ts.value());
 	}
-	native_pixel_data->set_value_bytes(std::move(native_pixel_bytes));
+
+	const auto& info = file.pixel_info(true);
+	if (!info.has_pixel_data || info.rows <= 0 || info.cols <= 0 ||
+	    info.frames <= 0 || info.samples_per_pixel <= 0) {
+		diag::error_and_throw(
+		    "DicomFile::apply_transfer_syntax file={} target_ts={} reason=invalid native pixel metadata rows={} cols={} frames={} samples_per_pixel={}",
+		    file.path(), target_ts.value(), info.rows, info.cols,
+		    info.frames, info.samples_per_pixel);
+	}
+
+	const auto bytes_per_sample = bytes_per_sample_of(info.sv_dtype);
+	if (bytes_per_sample == 0) {
+		diag::error_and_throw(
+		    "DicomFile::apply_transfer_syntax file={} target_ts={} reason=failed to resolve bytes per sample for dtype={}",
+		    file.path(), target_ts.value(), static_cast<int>(info.sv_dtype));
+	}
+
+	const auto rows = static_cast<std::size_t>(info.rows);
+	const auto cols = static_cast<std::size_t>(info.cols);
+	const auto frames = static_cast<std::size_t>(info.frames);
+	const auto samples_per_pixel = static_cast<std::size_t>(info.samples_per_pixel);
+	const bool source_is_planar =
+	    info.planar_configuration == pixel::Planar::planar &&
+	    samples_per_pixel > std::size_t{1};
+
+	const auto row_stride = source_is_planar
+	                            ? checked_mul_for_transfer_syntax(
+	                                  cols, bytes_per_sample,
+	                                  "native source row stride", file, target_ts)
+	                            : checked_mul_for_transfer_syntax(
+	                                  checked_mul_for_transfer_syntax(
+	                                      cols, samples_per_pixel,
+	                                      "native source row components", file, target_ts),
+	                                  bytes_per_sample,
+	                                  "native source row stride", file, target_ts);
+	const auto plane_stride = checked_mul_for_transfer_syntax(
+	    row_stride, rows, "native source plane stride", file, target_ts);
+	const auto frame_stride = source_is_planar
+	                              ? checked_mul_for_transfer_syntax(
+	                                    plane_stride, samples_per_pixel,
+	                                    "native source frame stride", file, target_ts)
+	                              : plane_stride;
+	const auto required_bytes = checked_mul_for_transfer_syntax(
+	    frame_stride, frames, "native source total bytes", file, target_ts);
+
+	const auto source_bytes = pixel_data.value_span();
+	if (source_bytes.size() < required_bytes) {
+		diag::error_and_throw(
+		    "DicomFile::apply_transfer_syntax file={} target_ts={} reason=PixelData bytes({}) are shorter than required native frame payload({})",
+		    file.path(), target_ts.value(), source_bytes.size(), required_bytes);
+	}
+
+	const auto photometric_text = dataset["PhotometricInterpretation"_tag].to_string_view();
+	if (!photometric_text) {
+		diag::error_and_throw(
+		    "DicomFile::apply_transfer_syntax file={} target_ts={} reason=missing or invalid PhotometricInterpretation",
+		    file.path(), target_ts.value());
+	}
+	const auto photometric = parse_photometric_from_text(*photometric_text);
+	if (!photometric) {
+		diag::error_and_throw(
+		    "DicomFile::apply_transfer_syntax file={} target_ts={} reason=unsupported PhotometricInterpretation='{}' for set_pixel_data path",
+		    file.path(), target_ts.value(), *photometric_text);
+	}
+
+	const auto parse_optional_int_tag = [&](Tag tag, std::string_view name) -> std::optional<int> {
+		const auto value = dataset[tag].to_long();
+		if (!value) {
+			return std::nullopt;
+		}
+		if (*value < static_cast<long>(std::numeric_limits<int>::min()) ||
+		    *value > static_cast<long>(std::numeric_limits<int>::max())) {
+			diag::error_and_throw(
+			    "DicomFile::apply_transfer_syntax file={} target_ts={} reason={} value({}) is outside int range",
+			    file.path(), target_ts.value(), name, *value);
+		}
+		return static_cast<int>(*value);
+	};
+
+	pixel::PixelSource source{};
+	source.bytes = source_bytes.subspan(0, required_bytes);
+	source.data_type = info.sv_dtype;
+	source.rows = info.rows;
+	source.cols = info.cols;
+	source.frames = info.frames;
+	source.samples_per_pixel = info.samples_per_pixel;
+	source.planar = info.planar_configuration;
+	source.row_stride = row_stride;
+	source.frame_stride = frame_stride;
+	source.photometric = *photometric;
+	source.bits_allocated = info.bits_allocated;
+	source.bits_stored = parse_optional_int_tag("BitsStored"_tag, "BitsStored");
+	source.high_bit = parse_optional_int_tag("HighBit"_tag, "HighBit");
+	source.pixel_representation =
+	    parse_optional_int_tag("PixelRepresentation"_tag, "PixelRepresentation");
+	return source;
+}
+
+void convert_encapsulated_pixel_data_to_native(DicomFile& file) {
+	DataSet& dataset = file.dataset();
+	const auto& pixel_data = dataset["PixelData"_tag];
+	if (!pixel_data || !pixel_data.vr().is_pixel_sequence()) {
+		return;
+	}
+
+	const auto& info = file.pixel_info(true);
+	auto decoded =
+	    decode_all_frames_to_native(file, info, "DicomFile::apply_transfer_syntax");
+	file.set_native_pixel_data(
+	    std::move(decoded.bytes),
+	    native_pixel_vr_from_bits_allocated(info.bits_allocated));
 }
 
 struct lut_descriptor_values {
@@ -562,6 +731,144 @@ std::optional<pixel::ModalityLut> DicomFile::modality_lut() const {
 	return lut;
 }
 
+void DicomFile::set_native_pixel_data(std::vector<std::uint8_t>&& native_pixel_data, VR vr) {
+	root_dataset_->remove_dataelement("FloatPixelData"_tag);
+	root_dataset_->remove_dataelement("DoubleFloatPixelData"_tag);
+
+	VR native_vr = vr;
+	if (native_vr == VR::None) {
+		const auto bits_allocated =
+		    static_cast<int>((*root_dataset_)["BitsAllocated"_tag].to_long().value_or(0));
+		native_vr = native_pixel_vr_from_bits_allocated(bits_allocated);
+	}
+	if (native_vr != VR::OB && native_vr != VR::OW) {
+		diag::error_and_throw(
+		    "DicomFile::set_native_pixel_data file={} reason=PixelData VR must be OB or OW",
+		    path());
+	}
+
+	DataElement* pixel_data = root_dataset_->add_dataelement("PixelData"_tag, native_vr);
+	if (!pixel_data) {
+		diag::error_and_throw(
+		    "DicomFile::set_native_pixel_data file={} reason=failed to replace PixelData",
+		    path());
+	}
+	pixel_data->set_value_bytes(std::move(native_pixel_data));
+	invalidate_pixel_info_cache();
+}
+
+void DicomFile::reset_encapsulated_pixel_data(std::size_t frame_count) {
+	root_dataset_->remove_dataelement("FloatPixelData"_tag);
+	root_dataset_->remove_dataelement("DoubleFloatPixelData"_tag);
+
+	DataElement* pixel_data = root_dataset_->add_dataelement("PixelData"_tag, VR::PX);
+	if (!pixel_data) {
+		diag::error_and_throw(
+		    "DicomFile::reset_encapsulated_pixel_data file={} reason=failed to replace PixelData with pixel sequence",
+		    path());
+	}
+	auto* pixel_sequence = pixel_data->as_pixel_sequence();
+	if (!pixel_sequence) {
+		diag::error_and_throw(
+		    "DicomFile::reset_encapsulated_pixel_data file={} reason=PixelData is not an encapsulated sequence",
+		    path());
+	}
+
+	if (frame_count > 0) {
+		for (std::size_t frame_index = 0; frame_index < frame_count; ++frame_index) {
+			PixelFrame* frame = pixel_sequence->add_frame();
+			if (!frame) {
+				diag::error_and_throw(
+				    "DicomFile::reset_encapsulated_pixel_data file={} reason=failed to preallocate encapsulated frame index={}",
+				    path(), frame_index);
+			}
+		}
+		if (frame_count > static_cast<std::size_t>(std::numeric_limits<long>::max())) {
+			diag::error_and_throw(
+			    "DicomFile::reset_encapsulated_pixel_data file={} reason=frame count exceeds long range",
+			    path());
+		}
+		DataElement* frame_count_element = root_dataset_->add_dataelement("NumberOfFrames"_tag, VR::IS);
+		if (!frame_count_element ||
+		    !frame_count_element->from_long(static_cast<long>(frame_count))) {
+			diag::error_and_throw(
+			    "DicomFile::reset_encapsulated_pixel_data file={} reason=failed to set NumberOfFrames",
+			    path());
+		}
+	} else {
+		root_dataset_->remove_dataelement("NumberOfFrames"_tag);
+	}
+	invalidate_pixel_info_cache();
+}
+
+void DicomFile::set_encoded_pixel_frame(std::size_t frame_index,
+    std::vector<std::uint8_t>&& encoded_frame) {
+	DataElement* pixel_data = root_dataset_->get_dataelement("PixelData"_tag);
+	if (!pixel_data || pixel_data->is_missing() || !pixel_data->vr().is_pixel_sequence()) {
+		diag::error_and_throw(
+		    "DicomFile::set_encoded_pixel_frame file={} frame_index={} reason=PixelData is not an encapsulated sequence; call reset_encapsulated_pixel_data(frame_count) first",
+		    path(), frame_index);
+	}
+	auto* pixel_sequence = pixel_data->as_pixel_sequence();
+	if (!pixel_sequence) {
+		diag::error_and_throw(
+		    "DicomFile::set_encoded_pixel_frame file={} frame_index={} reason=PixelData is not an encapsulated sequence",
+		    path(), frame_index);
+	}
+	PixelFrame* frame = pixel_sequence->frame(frame_index);
+	if (!frame) {
+		diag::error_and_throw(
+		    "DicomFile::set_encoded_pixel_frame file={} frame_index={} frame_count={} reason=frame index out of range; call reset_encapsulated_pixel_data(frame_count) with enough slots",
+		    path(), frame_index, pixel_sequence->number_of_frames());
+	}
+
+	frame->set_fragments({});
+	frame->set_encoded_data(std::move(encoded_frame));
+}
+
+PixelFrame* DicomFile::add_encoded_pixel_frame(std::vector<std::uint8_t>&& encoded_frame) {
+	DataElement* pixel_data = root_dataset_->get_dataelement("PixelData"_tag);
+	if (!pixel_data || pixel_data->is_missing() || !pixel_data->vr().is_pixel_sequence()) {
+		reset_encapsulated_pixel_data(0);
+		pixel_data = root_dataset_->get_dataelement("PixelData"_tag);
+	}
+	if (!pixel_data || pixel_data->is_missing()) {
+		diag::error_and_throw(
+		    "DicomFile::add_encoded_pixel_frame file={} reason=PixelData is missing after reset",
+		    path());
+	}
+	auto* pixel_sequence = pixel_data->as_pixel_sequence();
+	if (!pixel_sequence) {
+		diag::error_and_throw(
+		    "DicomFile::add_encoded_pixel_frame file={} reason=PixelData is not an encapsulated sequence",
+		    path());
+	}
+
+	PixelFrame* frame = pixel_sequence->add_frame();
+	if (!frame) {
+		diag::error_and_throw(
+		    "DicomFile::add_encoded_pixel_frame file={} reason=failed to append pixel frame",
+		    path());
+	}
+	frame->set_fragments({});
+	frame->set_encoded_data(std::move(encoded_frame));
+
+	const auto frame_count = pixel_sequence->number_of_frames();
+	if (frame_count > static_cast<std::size_t>(std::numeric_limits<long>::max())) {
+		diag::error_and_throw(
+		    "DicomFile::add_encoded_pixel_frame file={} reason=frame count exceeds long range",
+		    path());
+	}
+	DataElement* frame_count_element = root_dataset_->add_dataelement("NumberOfFrames"_tag, VR::IS);
+	if (!frame_count_element || !frame_count_element->from_long(static_cast<long>(frame_count))) {
+		diag::error_and_throw(
+		    "DicomFile::add_encoded_pixel_frame file={} reason=failed to update NumberOfFrames",
+		    path());
+	}
+	invalidate_pixel_info_cache();
+	return frame;
+}
+
 void DicomFile::set_transfer_syntax_state_only(uid::WellKnown transfer_syntax) {
 	invalidate_pixel_info_cache();
 	transfer_syntax_uid_ = transfer_syntax.valid() ? transfer_syntax : uid::WellKnown{};
@@ -570,26 +877,37 @@ void DicomFile::set_transfer_syntax_state_only(uid::WellKnown transfer_syntax) {
 	}
 }
 
-void DicomFile::apply_transfer_syntax(uid::WellKnown transfer_syntax) {
+void DicomFile::apply_transfer_syntax(uid::WellKnown transfer_syntax,
+    const pixel::CodecOptions& codec_opt_override) {
 	const auto source_transfer_syntax = transfer_syntax_uid_;
 	if (root_dataset_) {
 		root_dataset_->ensure_loaded(Tag(0xFFFFu, 0xFFFFu));
 		const auto* pixel_data = root_dataset_->get_dataelement("PixelData"_tag);
-		const bool has_encapsulated_pixel_data =
-		    pixel_data && !pixel_data->is_missing() && pixel_data->vr().is_pixel_sequence();
+		const bool has_pixel_data_element = !pixel_data->is_missing();
+		const bool has_encapsulated_pixel_data = pixel_data->vr().is_pixel_sequence();
 		const bool target_uses_encapsulated_pixel_data = transfer_syntax.is_encapsulated();
 
-		if (has_encapsulated_pixel_data && !target_uses_encapsulated_pixel_data) {
+		if (target_uses_encapsulated_pixel_data && has_pixel_data_element) {
+			const bool already_target_transfer_syntax = has_encapsulated_pixel_data &&
+			    source_transfer_syntax.valid() && source_transfer_syntax == transfer_syntax;
+			if (already_target_transfer_syntax) {
+				// Keep existing encoded PixelData as-is.
+			} else if (!has_encapsulated_pixel_data && transfer_syntax.supports_pixel_encode()) {
+				auto source =
+				    build_set_pixel_source_from_native_pixel_data(*this, transfer_syntax);
+				set_pixel_data(transfer_syntax, source, codec_opt_override);
+				return;
+			} else if (!has_encapsulated_pixel_data) {
+				diag::error_and_throw(
+				    "DicomFile::set_transfer_syntax file={} source_ts={} target_ts={} reason=encoding native PixelData to encapsulated transfer syntax is not supported yet (supported targets: RLELossless, JPEG2000Lossless, JPEG2000, JPEG2000MCLossless, JPEG2000MC)",
+				    path(), source_transfer_syntax.value(), transfer_syntax.value());
+			} else {
+				diag::error_and_throw(
+				    "DicomFile::set_transfer_syntax file={} source_ts={} target_ts={} reason=transcoding between encapsulated transfer syntaxes is not supported yet (supported targets for native->encapsulated: RLELossless, JPEG2000Lossless, JPEG2000, JPEG2000MCLossless, JPEG2000MC)",
+				    path(), source_transfer_syntax.value(), transfer_syntax.value());
+			}
+		} else if (has_encapsulated_pixel_data && !target_uses_encapsulated_pixel_data) {
 			convert_encapsulated_pixel_data_to_native(*this);
-		} else if (!has_encapsulated_pixel_data && target_uses_encapsulated_pixel_data) {
-			diag::error_and_throw(
-			    "DicomFile::set_transfer_syntax file={} source_ts={} target_ts={} reason=encoding native PixelData to encapsulated transfer syntax is not supported",
-			    path(), source_transfer_syntax.value(), transfer_syntax.value());
-		} else if (has_encapsulated_pixel_data && target_uses_encapsulated_pixel_data &&
-		           source_transfer_syntax.valid() && source_transfer_syntax != transfer_syntax) {
-			diag::error_and_throw(
-			    "DicomFile::set_transfer_syntax file={} source_ts={} target_ts={} reason=transcoding between encapsulated transfer syntaxes is not supported",
-			    path(), source_transfer_syntax.value(), transfer_syntax.value());
 		}
 	}
 
@@ -601,12 +919,13 @@ void DicomFile::apply_transfer_syntax(uid::WellKnown transfer_syntax) {
 	}
 }
 
-void DicomFile::set_transfer_syntax(uid::WellKnown transfer_syntax) {
+void DicomFile::set_transfer_syntax(uid::WellKnown transfer_syntax,
+    pixel::CodecOptions codec_opt) {
 	if (!transfer_syntax.valid() || transfer_syntax.uid_type() != UidType::TransferSyntax) {
 		diag::error_and_throw(
 		    "DicomFile::set_transfer_syntax reason=uid must be a valid Transfer Syntax UID");
 	}
-	apply_transfer_syntax(transfer_syntax);
+	apply_transfer_syntax(transfer_syntax, codec_opt);
 }
 
 std::unique_ptr<DicomFile> read_file(const std::string& path, ReadOptions options) {

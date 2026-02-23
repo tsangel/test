@@ -134,6 +134,141 @@ std::string normalize_htj2k_decoder_name(std::string decoder) {
 	return normalized;
 }
 
+std::string normalize_codec_option_name(std::string option) {
+	std::string normalized{};
+	normalized.reserve(option.size());
+	for (const unsigned char ch : option) {
+		if (ch == '_' || ch == '-' || ch == ' ' || ch == '\t') {
+			continue;
+		}
+		normalized.push_back(static_cast<char>(std::tolower(ch)));
+	}
+	return normalized;
+}
+
+dicom::pixel::CodecOptions parse_codec_options(nb::handle codec_opt_obj) {
+	using dicom::pixel::AutoCodecOptions;
+	using dicom::pixel::CodecOptions;
+	using dicom::pixel::J2kOptions;
+	using dicom::pixel::NoCompression;
+	using dicom::pixel::RleOptions;
+
+	if (!codec_opt_obj || codec_opt_obj.is_none()) {
+		return CodecOptions{AutoCodecOptions{}};
+	}
+
+	const auto parse_from_name = [&](std::string option_name, bool allow_j2k_fields,
+	                                 double target_bpp, double target_psnr, int threads,
+	                                 bool has_target_bpp, bool has_target_psnr, bool has_threads)
+	    -> CodecOptions {
+		const auto normalized = normalize_codec_option_name(std::move(option_name));
+		if (normalized.empty() || normalized == "auto") {
+			if (has_target_bpp || has_target_psnr || has_threads) {
+				throw nb::value_error(
+				    "codec_opt='auto' does not accept target_bpp/target_psnr/threads");
+			}
+			return CodecOptions{AutoCodecOptions{}};
+		}
+		if (normalized == "none" || normalized == "nocompression" ||
+		    normalized == "native" || normalized == "uncompressed") {
+			if (has_target_bpp || has_target_psnr || has_threads) {
+				throw nb::value_error(
+				    "NoCompression codec_opt does not accept target_bpp/target_psnr/threads");
+			}
+			return CodecOptions{NoCompression{}};
+		}
+		if (normalized == "rle" || normalized == "rlelossless") {
+			if (has_target_bpp || has_target_psnr || has_threads) {
+				throw nb::value_error(
+				    "RleOptions codec_opt does not accept target_bpp/target_psnr/threads");
+			}
+			return CodecOptions{RleOptions{}};
+		}
+		if (normalized == "j2k" || normalized == "jpeg2000" || normalized == "j2koptions") {
+			if (!allow_j2k_fields) {
+				throw nb::value_error(
+				    "codec_opt J2kOptions requires dict input when setting target_bpp/target_psnr/threads");
+			}
+			if (target_bpp < 0.0 || target_psnr < 0.0) {
+				throw nb::value_error(
+				    "codec_opt target_bpp/target_psnr must be >= 0");
+			}
+			if (threads < 0) {
+				throw nb::value_error(
+				    "codec_opt threads must be >= 0");
+			}
+			J2kOptions options{};
+			options.target_bpp = target_bpp;
+			options.target_psnr = target_psnr;
+			options.threads = threads;
+			return CodecOptions{options};
+		}
+		throw nb::value_error(
+		    "codec_opt must be one of: auto, none, rle, j2k");
+	};
+
+	if (nb::isinstance<nb::str>(codec_opt_obj)) {
+		return parse_from_name(
+		    nb::cast<std::string>(codec_opt_obj), false, 0.0, 0.0, 0, false, false, false);
+	}
+
+	if (!PyDict_Check(codec_opt_obj.ptr())) {
+		throw nb::type_error(
+		    "codec_opt must be None, str, or dict");
+	}
+
+	nb::dict codec_dict = nb::borrow<nb::dict>(codec_opt_obj);
+	static const std::unordered_set<std::string> allowed_keys{
+	    "type", "target_bpp", "target_psnr", "threads"};
+	PyObject* key_obj = nullptr;
+	PyObject* value_obj = nullptr;
+	Py_ssize_t pos = 0;
+	while (PyDict_Next(codec_dict.ptr(), &pos, &key_obj, &value_obj)) {
+		if (!PyUnicode_Check(key_obj)) {
+			throw nb::type_error("codec_opt dict keys must be str");
+		}
+		const auto key = nb::cast<std::string>(nb::handle(key_obj));
+		if (allowed_keys.find(key) == allowed_keys.end()) {
+			throw nb::value_error(
+			    ("codec_opt has unknown key: " + key).c_str());
+		}
+	}
+
+	bool has_target_bpp = false;
+	bool has_target_psnr = false;
+	bool has_threads = false;
+	double target_bpp = 0.0;
+	double target_psnr = 0.0;
+	int threads = 0;
+	bool has_type = false;
+	std::string type_name = "auto";
+
+	if (PyObject* type_obj = PyDict_GetItemString(codec_dict.ptr(), "type")) {
+		has_type = true;
+		type_name = nb::cast<std::string>(nb::handle(type_obj));
+	}
+	if (PyObject* value = PyDict_GetItemString(codec_dict.ptr(), "target_bpp")) {
+		has_target_bpp = true;
+		target_bpp = nb::cast<double>(nb::handle(value));
+	}
+	if (PyObject* value = PyDict_GetItemString(codec_dict.ptr(), "target_psnr")) {
+		has_target_psnr = true;
+		target_psnr = nb::cast<double>(nb::handle(value));
+	}
+	if (PyObject* value = PyDict_GetItemString(codec_dict.ptr(), "threads")) {
+		has_threads = true;
+		threads = nb::cast<int>(nb::handle(value));
+	}
+
+	if (!has_type && (has_target_bpp || has_target_psnr || has_threads)) {
+		type_name = "j2k";
+	}
+
+	return parse_from_name(
+	    type_name, true, target_bpp, target_psnr, threads,
+	    has_target_bpp, has_target_psnr, has_threads);
+}
+
 dicom::pixel::Htj2kDecoder parse_htj2k_decoder(std::string decoder) {
 	const auto normalized = normalize_htj2k_decoder_name(std::move(decoder));
 	if (normalized.empty() || normalized == "auto" || normalized == "autoselect") {
@@ -1137,13 +1272,18 @@ NB_MODULE(_dicomsdl, m) {
 		    [](DicomFile& self) { self.rebuild_file_meta(); },
 		    "Rebuild file meta group (0002,eeee) with standard minimum fields.")
 		.def("set_transfer_syntax",
-		    [](DicomFile& self, const Uid& transfer_syntax) {
-			    self.set_transfer_syntax(transfer_syntax);
+		    [](DicomFile& self, const Uid& transfer_syntax, nb::handle codec_opt) {
+			    self.set_transfer_syntax(
+			        transfer_syntax, parse_codec_options(codec_opt));
 		    },
 		    nb::arg("transfer_syntax"),
-		    "Set transfer syntax using a Uid object and update file meta TransferSyntaxUID.")
+		    nb::kw_only(),
+		    nb::arg("codec_opt") = nb::none(),
+		    "Set transfer syntax using a Uid object and update file meta TransferSyntaxUID.\n"
+		    "`codec_opt` accepts None/'auto', 'none', 'rle', 'j2k', or dict form:\n"
+		    "{'type': 'j2k', 'target_psnr': 45.0, 'target_bpp': 0.0, 'threads': 0}.")
 		.def("set_transfer_syntax",
-		    [](DicomFile& self, const std::string& transfer_syntax_text) {
+		    [](DicomFile& self, const std::string& transfer_syntax_text, nb::handle codec_opt) {
 			    const auto uid = dicom::uid::lookup(transfer_syntax_text);
 			    if (!uid) {
 				    throw nb::value_error(
@@ -1153,10 +1293,14 @@ NB_MODULE(_dicomsdl, m) {
 				    throw nb::value_error(
 				        ("UID is not a Transfer Syntax UID: " + transfer_syntax_text).c_str());
 			    }
-			    self.set_transfer_syntax(*uid);
+			    self.set_transfer_syntax(*uid, parse_codec_options(codec_opt));
 		    },
 		    nb::arg("transfer_syntax"),
-		    "Set transfer syntax using a UID keyword or dotted UID string.")
+		    nb::kw_only(),
+		    nb::arg("codec_opt") = nb::none(),
+		    "Set transfer syntax using a UID keyword or dotted UID string.\n"
+		    "`codec_opt` accepts None/'auto', 'none', 'rle', 'j2k', or dict form:\n"
+		    "{'type': 'j2k', 'target_psnr': 45.0, 'target_bpp': 0.0, 'threads': 0}.")
 		.def("write_file",
 		    [](DicomFile& self, const std::string& path, bool include_preamble,
 		        bool write_file_meta, bool keep_existing_meta) {
