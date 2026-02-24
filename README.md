@@ -57,6 +57,9 @@ cmake --build build
 # Change Transfer Syntax UID and write to a new file
 ./build/dicomconv input.dcm output.dcm ExplicitVRLittleEndian
 ./build/dicomconv input.dcm output.dcm 1.2.840.10008.1.2
+./build/dicomconv input.dcm output.dcm jpeg --quality 92
+./build/dicomconv input.dcm output.dcm jpeg2k --target-psnr 45 --threads -1
+./build/dicomconv input.dcm output.dcm htj2k-lossless --no-color-transform
 ```
 
 ### Preferred C++ DataSet access pattern
@@ -100,6 +103,7 @@ python examples/python/dump_dataset_example.py path/to/file.dcm --raw-preview 16
 python examples/python/raw_value_span_example.py path/to/file.dcm PixelData
 python examples/python/pixel_decode_safe_example.py path/to/file.dcm --frame 0
 python examples/python/dicomconv_example.py input.dcm output.dcm ExplicitVRLittleEndian
+python examples/python/dicomconv_example.py input.dcm output.dcm jpeg --quality 92
 ```
 
 ### Run `dicomdump` CLI
@@ -131,6 +135,14 @@ dicomconv input.dcm output.dcm ExplicitVRLittleEndian
 
 # Change transfer syntax by dotted UID value
 dicomconv input.dcm output.dcm 1.2.840.10008.1.2
+
+# JPEG (baseline), JPEG2000, HTJ2K shortcuts
+dicomconv input.dcm output.dcm jpeg --quality 92
+dicomconv input.dcm output.dcm jpeg2k --target-psnr 45 --threads -1
+dicomconv input.dcm output.dcm htj2k-lossless --no-color-transform
+
+# Show full help (all options + examples)
+dicomconv -h
 ```
 
 Python 코드에서는 일관되게 `import dicomsdl as dicom` 형식의 alias를 사용합니다.
