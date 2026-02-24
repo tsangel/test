@@ -162,6 +162,14 @@ The encode path rewrites or updates:
 - `PhotometricInterpretation`
 - `PlanarConfiguration` (removed when `SamplesPerPixel == 1`)
 - `NumberOfFrames` (removed when `frames == 1`)
+- `LossyImageCompression (0028,2110)`
+  - set to `01` for lossy encodes
+  - set to `00` for non-lossy encodes when no prior lossy history exists
+  - once already `01`, non-lossy re-encode keeps `01` (no reset)
+- `LossyImageCompressionRatio (0028,2112)` and `LossyImageCompressionMethod (0028,2114)`
+  - written for lossy encodes
+  - appended for repeated lossy re-encodes (stage history)
+  - removed when a non-lossy encode has no prior lossy history
 - File meta `(0002,0010) TransferSyntaxUID`
 
 For RLE targets, written `PlanarConfiguration` is forced to `1`.

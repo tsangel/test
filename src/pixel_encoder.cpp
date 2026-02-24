@@ -3,14 +3,17 @@
 #include "diagnostics.h"
 #include "pixel_encoder_detail.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <limits>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace dicom {
 using namespace dicom::literals;
@@ -380,6 +383,182 @@ void validate_target_source_constraints(const pixel_encode_target& target,
 	return pixel::Photometric::ybr_ict;
 }
 
+[[nodiscard]] bool target_uses_lossy_compression(
+    const pixel_encode_target& target) noexcept {
+	return target.is_j2k_lossy || target.is_htj2k_lossy ||
+	    target.is_jpegls_lossy || target.is_jpeg_lossy ||
+	    target.is_jpegxl_lossy;
+}
+
+[[nodiscard]] std::optional<std::string_view> lossy_method_for_target(
+    const pixel_encode_target& target) noexcept {
+	if (target.is_j2k_lossy) {
+		return std::string_view("ISO_15444_1");
+	}
+	if (target.is_htj2k_lossy) {
+		return std::string_view("ISO_15444_15");
+	}
+	if (target.is_jpegls_lossy) {
+		return std::string_view("ISO_14495_1");
+	}
+	if (target.is_jpeg_lossy) {
+		return std::string_view("ISO_10918_1");
+	}
+	if (target.is_jpegxl_lossy) {
+		return std::string_view("ISO_18181_1");
+	}
+	return std::nullopt;
+}
+
+[[nodiscard]] bool has_prior_lossy_history(const DataSet& dataset) {
+	const auto& lossy = dataset["LossyImageCompression"_tag];
+	const auto lossy_value = lossy.to_string_view();
+	return lossy_value && *lossy_value == "01";
+}
+
+[[nodiscard]] std::vector<std::string> read_lossy_method_values(
+    const DataSet& dataset) {
+	std::vector<std::string> methods;
+	const auto& method_elem = dataset["LossyImageCompressionMethod"_tag];
+	const auto parsed = method_elem.to_string_views();
+	if (!parsed) {
+		return methods;
+	}
+	methods.reserve(parsed->size());
+	for (const auto value : *parsed) {
+		methods.emplace_back(value);
+	}
+	return methods;
+}
+
+[[nodiscard]] std::vector<double> read_lossy_ratio_values(const DataSet& dataset) {
+	const auto& ratio_elem = dataset["LossyImageCompressionRatio"_tag];
+	const auto parsed = ratio_elem.to_double_vector();
+	if (!parsed) {
+		return {};
+	}
+	return *parsed;
+}
+
+[[nodiscard]] std::size_t encoded_payload_size_from_pixel_sequence(
+    const DataSet& dataset, std::string_view file_path, uid::WellKnown transfer_syntax) {
+	const auto& pixel_data = dataset["PixelData"_tag];
+	if (!pixel_data || !pixel_data.vr().is_pixel_sequence()) {
+		diag::error_and_throw(
+		    "DicomFile::set_pixel_data file={} ts={} reason=lossy metadata update requires encapsulated PixelData sequence",
+		    file_path, transfer_syntax.value());
+	}
+	const auto* pixel_sequence = pixel_data.as_pixel_sequence();
+	if (!pixel_sequence) {
+		diag::error_and_throw(
+		    "DicomFile::set_pixel_data file={} ts={} reason=lossy metadata update requires encapsulated PixelData sequence",
+		    file_path, transfer_syntax.value());
+	}
+
+	std::size_t encoded_payload_bytes = 0;
+	constexpr std::size_t kSizeMax = std::numeric_limits<std::size_t>::max();
+	for (std::size_t frame_index = 0; frame_index < pixel_sequence->number_of_frames();
+	     ++frame_index) {
+		const auto* frame = pixel_sequence->frame(frame_index);
+		if (!frame) {
+			diag::error_and_throw(
+			    "DicomFile::set_pixel_data file={} ts={} reason=encoded frame {} missing while updating lossy metadata",
+			    file_path, transfer_syntax.value(), frame_index);
+		}
+		const auto frame_bytes = frame->encoded_data_size();
+		if (encoded_payload_bytes > kSizeMax - frame_bytes) {
+			diag::error_and_throw(
+			    "DicomFile::set_pixel_data file={} ts={} reason=encoded payload size overflows size_t while updating lossy metadata",
+			    file_path, transfer_syntax.value());
+		}
+		encoded_payload_bytes += frame_bytes;
+	}
+	return encoded_payload_bytes;
+}
+
+void update_lossy_compression_metadata_for_set_pixel_data(DataSet& dataset,
+    std::string_view file_path, uid::WellKnown transfer_syntax,
+    const pixel_encode_target& target, std::size_t uncompressed_payload_bytes,
+    std::size_t encoded_payload_bytes) {
+	const bool current_encode_is_lossy = target_uses_lossy_compression(target);
+	const bool had_prior_lossy = has_prior_lossy_history(dataset);
+
+	bool ok = true;
+	if (!current_encode_is_lossy) {
+		auto* lossy_elem = dataset.add_dataelement("LossyImageCompression"_tag, VR::CS);
+		ok &= lossy_elem &&
+		    lossy_elem->from_string_view(had_prior_lossy ? "01" : "00");
+		if (!had_prior_lossy) {
+			dataset.remove_dataelement("LossyImageCompressionRatio"_tag);
+			dataset.remove_dataelement("LossyImageCompressionMethod"_tag);
+		}
+		if (!ok) {
+			diag::error_and_throw(
+			    "DicomFile::set_pixel_data file={} ts={} reason=failed to update LossyImageCompression metadata for non-lossy encode",
+			    file_path, transfer_syntax.value());
+		}
+		return;
+	}
+
+	if (encoded_payload_bytes == 0 || uncompressed_payload_bytes == 0) {
+		diag::error_and_throw(
+		    "DicomFile::set_pixel_data file={} ts={} reason=cannot compute lossy compression ratio from zero payload size (uncompressed={} encoded={})",
+		    file_path, transfer_syntax.value(), uncompressed_payload_bytes,
+		    encoded_payload_bytes);
+	}
+	const auto method = lossy_method_for_target(target);
+	if (!method) {
+		diag::error_and_throw(
+		    "DicomFile::set_pixel_data file={} ts={} reason=missing lossy compression method mapping for transfer syntax",
+		    file_path, transfer_syntax.value());
+	}
+
+	const double ratio = static_cast<double>(uncompressed_payload_bytes) /
+	    static_cast<double>(encoded_payload_bytes);
+	if (!std::isfinite(ratio) || ratio <= 0.0) {
+		diag::error_and_throw(
+		    "DicomFile::set_pixel_data file={} ts={} reason=invalid lossy compression ratio computed from uncompressed={} encoded={}",
+		    file_path, transfer_syntax.value(), uncompressed_payload_bytes,
+		    encoded_payload_bytes);
+	}
+
+	std::vector<std::string> methods;
+	std::vector<double> ratios;
+	if (had_prior_lossy) {
+		methods = read_lossy_method_values(dataset);
+		ratios = read_lossy_ratio_values(dataset);
+		const auto paired_count = std::min(methods.size(), ratios.size());
+		methods.resize(paired_count);
+		ratios.resize(paired_count);
+	}
+	methods.emplace_back(*method);
+	ratios.push_back(ratio);
+
+	std::vector<std::string_view> method_views;
+	method_views.reserve(methods.size());
+	for (const auto& value : methods) {
+		method_views.emplace_back(value);
+	}
+
+	auto* lossy_elem = dataset.add_dataelement("LossyImageCompression"_tag, VR::CS);
+	ok &= lossy_elem && lossy_elem->from_string_view("01");
+
+	auto* ratio_elem = dataset.add_dataelement("LossyImageCompressionRatio"_tag, VR::DS);
+	ok &= ratio_elem &&
+	    ratio_elem->from_double_vector(std::span<const double>(ratios.data(), ratios.size()));
+
+	auto* method_elem = dataset.add_dataelement("LossyImageCompressionMethod"_tag, VR::CS);
+	ok &= method_elem &&
+	    method_elem->from_string_views(std::span<const std::string_view>(
+	        method_views.data(), method_views.size()));
+
+	if (!ok) {
+		diag::error_and_throw(
+		    "DicomFile::set_pixel_data file={} ts={} reason=failed to update lossy compression metadata ratio={} method={} history_vm={}",
+		    file_path, transfer_syntax.value(), ratio, *method, methods.size());
+	}
+}
+
 void update_pixel_metadata_for_set_pixel_data(DataSet& dataset, std::string_view file_path,
     uid::WellKnown transfer_syntax, const pixel::PixelSource& source, bool target_is_rle,
     pixel::Photometric output_photometric, int bits_allocated, int bits_stored,
@@ -712,6 +891,14 @@ void DicomFile::set_pixel_data(uid::WellKnown transfer_syntax, const pixel::Pixe
 		};
 		pixel::detail::encode_encapsulated_pixel_data(dispatch_input);
 	}
+
+	const auto encoded_payload_bytes = target_uses_lossy_compression(target)
+	    ? encoded_payload_size_from_pixel_sequence(
+	          *root_dataset_, path(), transfer_syntax)
+	    : std::size_t{0};
+	update_lossy_compression_metadata_for_set_pixel_data(
+	    *root_dataset_, path(), transfer_syntax, target,
+	    destination_total_bytes, encoded_payload_bytes);
 
 	set_transfer_syntax_state_only(transfer_syntax);
 	DataElement* transfer_syntax_element = add_dataelement("(0002,0010)"_tag, VR::UI);

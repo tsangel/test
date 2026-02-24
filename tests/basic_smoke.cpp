@@ -523,7 +523,7 @@ int main() {
 				fail("HTJ2KLossless capability mismatch");
 			}
 			if (!jpegxl->is_jpegxl() || jpegxl->is_lossless() || !jpegxl->is_lossy() ||
-			    jpegxl->supports_pixel_encode() || jpegxl->supports_pixel_decode()) {
+			    !jpegxl->supports_pixel_encode() || !jpegxl->supports_pixel_decode()) {
 				fail("JPEGXL capability mismatch");
 			}
 			if (!rle_lossless->is_rle() || !rle_lossless->is_encapsulated()) {
@@ -848,28 +848,38 @@ int main() {
 		if (set_pixel_data_file["PlanarConfiguration"_tag].is_present()) {
 			fail("set_pixel_data should remove PlanarConfiguration for single-sample data");
 		}
-		if (!set_pixel_data_file.transfer_syntax_uid().valid() ||
-		    set_pixel_data_file.transfer_syntax_uid().value() !=
-		        "ExplicitVRLittleEndian"_uid.value()) {
-			fail("set_pixel_data should update runtime transfer syntax");
-		}
-		const auto* transfer_syntax_elem =
-		    set_pixel_data_file.get_dataelement("TransferSyntaxUID"_tag);
-		const auto ts_uid = transfer_syntax_elem->to_transfer_syntax_uid();
-		if (!ts_uid || ts_uid->value() != "ExplicitVRLittleEndian"_uid.value()) {
-			fail("set_pixel_data should synchronize TransferSyntaxUID in file meta");
-		}
+			if (!set_pixel_data_file.transfer_syntax_uid().valid() ||
+			    set_pixel_data_file.transfer_syntax_uid().value() !=
+			        "ExplicitVRLittleEndian"_uid.value()) {
+				fail("set_pixel_data should update runtime transfer syntax");
+			}
+			const auto* transfer_syntax_elem =
+			    set_pixel_data_file.get_dataelement("TransferSyntaxUID"_tag);
+			const auto ts_uid = transfer_syntax_elem->to_transfer_syntax_uid();
+			if (!ts_uid || ts_uid->value() != "ExplicitVRLittleEndian"_uid.value()) {
+				fail("set_pixel_data should synchronize TransferSyntaxUID in file meta");
+			}
+			if (set_pixel_data_file["LossyImageCompression"_tag].to_string_view().value_or("") !=
+			    std::string_view("00")) {
+				fail("set_pixel_data native uncompressed should set LossyImageCompression to 00");
+			}
+			if (set_pixel_data_file["LossyImageCompressionRatio"_tag].is_present()) {
+				fail("set_pixel_data native uncompressed should remove LossyImageCompressionRatio");
+			}
+			if (set_pixel_data_file["LossyImageCompressionMethod"_tag].is_present()) {
+				fail("set_pixel_data native uncompressed should remove LossyImageCompressionMethod");
+			}
 
-		bool unsupported_codec_threw = false;
-		try {
-			set_pixel_data_file.set_pixel_data(
-			    "ExplicitVRLittleEndian"_uid, source, dicom::pixel::RleOptions{});
-		} catch (const std::exception&) {
-			unsupported_codec_threw = true;
-		}
-		if (!unsupported_codec_threw) {
-			fail("set_pixel_data should reject unsupported codec options for now");
-		}
+			bool unsupported_codec_threw = false;
+			try {
+				set_pixel_data_file.set_pixel_data(
+				    "ExplicitVRLittleEndian"_uid, source, dicom::pixel::RleOptions{});
+			} catch (const std::exception&) {
+				unsupported_codec_threw = true;
+			}
+			if (!unsupported_codec_threw) {
+				fail("set_pixel_data should reject unsupported codec options for now");
+			}
 	}
 	dicom::DicomFile set_pixel_data_rle_file;
 	{
@@ -1199,14 +1209,50 @@ int main() {
 			fail("JPEG2000MCLossless should reject use_color_transform=false");
 		}
 
-		dicom::pixel::J2kOptions j2k_lossy_options{};
-		j2k_lossy_options.target_psnr = 45.0;
-		dicom::DicomFile j2k_lossy_mct;
-		j2k_lossy_mct.set_pixel_data("JPEG2000"_uid, color_source, j2k_lossy_options);
-		if (j2k_lossy_mct["PhotometricInterpretation"_tag].to_string_view().value_or("") !=
-		    std::string_view("YBR_ICT")) {
-			fail("J2K lossy color transform should update PhotometricInterpretation to YBR_ICT");
-		}
+			dicom::pixel::J2kOptions j2k_lossy_options{};
+			j2k_lossy_options.target_psnr = 45.0;
+			dicom::DicomFile j2k_lossy_mct;
+			j2k_lossy_mct.set_pixel_data("JPEG2000"_uid, color_source, j2k_lossy_options);
+			if (j2k_lossy_mct["PhotometricInterpretation"_tag].to_string_view().value_or("") !=
+			    std::string_view("YBR_ICT")) {
+				fail("J2K lossy color transform should update PhotometricInterpretation to YBR_ICT");
+			}
+			if (j2k_lossy_mct["LossyImageCompression"_tag].to_string_view().value_or("") !=
+			    std::string_view("01")) {
+				fail("J2K lossy set_pixel_data should set LossyImageCompression to 01");
+			}
+			const auto j2k_lossy_methods =
+			    j2k_lossy_mct["LossyImageCompressionMethod"_tag].to_string_views();
+			if (!j2k_lossy_methods || j2k_lossy_methods->size() != 1 ||
+			    (*j2k_lossy_methods)[0] != std::string_view("ISO_15444_1")) {
+				fail("J2K lossy set_pixel_data should set LossyImageCompressionMethod=ISO_15444_1");
+			}
+			const auto j2k_lossy_ratios =
+			    j2k_lossy_mct["LossyImageCompressionRatio"_tag].to_double_vector();
+			if (!j2k_lossy_ratios || j2k_lossy_ratios->size() != 1 ||
+			    !((*j2k_lossy_ratios)[0] > 0.0)) {
+				fail("J2K lossy set_pixel_data should set a positive LossyImageCompressionRatio");
+			}
+			j2k_lossy_mct.set_transfer_syntax("ExplicitVRLittleEndian"_uid);
+			if (j2k_lossy_mct["LossyImageCompression"_tag].to_string_view().value_or("") !=
+			    std::string_view("01")) {
+				fail("LossyImageCompression should remain 01 after lossy-to-native conversion");
+			}
+			j2k_lossy_mct.set_transfer_syntax("JPEG2000"_uid);
+			const auto j2k_lossy_methods_twice =
+			    j2k_lossy_mct["LossyImageCompressionMethod"_tag].to_string_views();
+			if (!j2k_lossy_methods_twice || j2k_lossy_methods_twice->size() != 2 ||
+			    (*j2k_lossy_methods_twice)[0] != std::string_view("ISO_15444_1") ||
+			    (*j2k_lossy_methods_twice)[1] != std::string_view("ISO_15444_1")) {
+				fail("Repeated J2K lossy encode should append LossyImageCompressionMethod");
+			}
+			const auto j2k_lossy_ratios_twice =
+			    j2k_lossy_mct["LossyImageCompressionRatio"_tag].to_double_vector();
+			if (!j2k_lossy_ratios_twice || j2k_lossy_ratios_twice->size() != 2 ||
+			    !((*j2k_lossy_ratios_twice)[0] > 0.0) ||
+			    !((*j2k_lossy_ratios_twice)[1] > 0.0)) {
+				fail("Repeated J2K lossy encode should append positive LossyImageCompressionRatio values");
+			}
 
 		dicom::DicomFile htj2k_default_mct;
 		htj2k_default_mct.set_pixel_data(
@@ -1225,16 +1271,32 @@ int main() {
 			fail("HTJ2K disabled color transform should keep PhotometricInterpretation as RGB");
 		}
 
-		dicom::pixel::Htj2kOptions htj2k_lossy_options{};
-		htj2k_lossy_options.target_psnr = 45.0;
-		dicom::DicomFile htj2k_lossy_mct;
-		htj2k_lossy_mct.set_pixel_data("HTJ2K"_uid, color_source, htj2k_lossy_options);
-		if (htj2k_lossy_mct["PhotometricInterpretation"_tag].to_string_view().value_or("") !=
-		    std::string_view("YBR_ICT")) {
-			fail("HTJ2K lossy color transform should update PhotometricInterpretation to YBR_ICT");
+			dicom::pixel::Htj2kOptions htj2k_lossy_options{};
+			htj2k_lossy_options.target_psnr = 45.0;
+			dicom::DicomFile htj2k_lossy_mct;
+			htj2k_lossy_mct.set_pixel_data("HTJ2K"_uid, color_source, htj2k_lossy_options);
+			if (htj2k_lossy_mct["PhotometricInterpretation"_tag].to_string_view().value_or("") !=
+			    std::string_view("YBR_ICT")) {
+				fail("HTJ2K lossy color transform should update PhotometricInterpretation to YBR_ICT");
+			}
+			if (htj2k_lossy_mct["LossyImageCompression"_tag].to_string_view().value_or("") !=
+			    std::string_view("01")) {
+				fail("HTJ2K lossy set_pixel_data should set LossyImageCompression to 01");
+			}
+			const auto htj2k_lossy_methods =
+			    htj2k_lossy_mct["LossyImageCompressionMethod"_tag].to_string_views();
+			if (!htj2k_lossy_methods || htj2k_lossy_methods->size() != 1 ||
+			    (*htj2k_lossy_methods)[0] != std::string_view("ISO_15444_15")) {
+				fail("HTJ2K lossy set_pixel_data should set LossyImageCompressionMethod=ISO_15444_15");
+			}
+			const auto htj2k_lossy_ratios =
+			    htj2k_lossy_mct["LossyImageCompressionRatio"_tag].to_double_vector();
+			if (!htj2k_lossy_ratios || htj2k_lossy_ratios->size() != 1 ||
+			    !((*htj2k_lossy_ratios)[0] > 0.0)) {
+				fail("HTJ2K lossy set_pixel_data should set a positive LossyImageCompressionRatio");
+			}
 		}
-	}
-	dicom::DicomFile set_pixel_data_jpegls_file;
+		dicom::DicomFile set_pixel_data_jpegls_file;
 	{
 		std::vector<std::uint8_t> source_bytes(40, 0xEEu);
 		const auto write_row = [&](std::size_t frame, std::size_t row,
@@ -1361,17 +1423,85 @@ int main() {
 		const std::vector<std::uint8_t> expected_frame1{
 		    0x11u, 0x00u, 0x12u, 0x00u, 0x13u, 0x00u,
 		    0x14u, 0x00u, 0x15u, 0x00u, 0x16u, 0x00u};
-		const auto decoded_frame0 = set_pixel_data_jpeg_file.pixel_data(0);
-		const auto decoded_frame1 = set_pixel_data_jpeg_file.pixel_data(1);
-		if (decoded_frame0 != expected_frame0) {
-			fail("JPEG set_pixel_data frame #0 roundtrip mismatch");
+			const auto decoded_frame0 = set_pixel_data_jpeg_file.pixel_data(0);
+			const auto decoded_frame1 = set_pixel_data_jpeg_file.pixel_data(1);
+			if (decoded_frame0 != expected_frame0) {
+				fail("JPEG set_pixel_data frame #0 roundtrip mismatch");
+			}
+			if (decoded_frame1 != expected_frame1) {
+				fail("JPEG set_pixel_data frame #1 roundtrip mismatch");
+			}
 		}
-		if (decoded_frame1 != expected_frame1) {
-			fail("JPEG set_pixel_data frame #1 roundtrip mismatch");
+		dicom::DicomFile set_pixel_data_jpegls_near_lossless_file;
+		{
+			const std::vector<std::uint8_t> source_bytes{
+			    0x10u, 0x20u, 0x30u, 0x40u, 0x50u, 0x60u};
+			dicom::pixel::PixelSource source{};
+			source.bytes = std::span<const std::uint8_t>(source_bytes.data(), source_bytes.size());
+			source.data_type = dicom::pixel::DataType::u8;
+			source.rows = 2;
+			source.cols = 3;
+			source.frames = 1;
+			source.samples_per_pixel = 1;
+			source.photometric = dicom::pixel::Photometric::monochrome2;
+			dicom::pixel::JpegLsOptions options{};
+			options.near_lossless_error = 2;
+			set_pixel_data_jpegls_near_lossless_file.set_pixel_data(
+			    "JPEGLSNearLossless"_uid, source, options);
+			if (set_pixel_data_jpegls_near_lossless_file["LossyImageCompression"_tag]
+			        .to_string_view()
+			        .value_or("") != std::string_view("01")) {
+				fail("JPEG-LS near-lossless should set LossyImageCompression to 01");
+			}
+			const auto methods = set_pixel_data_jpegls_near_lossless_file
+			                         ["LossyImageCompressionMethod"_tag]
+			                             .to_string_views();
+			if (!methods || methods->size() != 1 ||
+			    (*methods)[0] != std::string_view("ISO_14495_1")) {
+				fail("JPEG-LS near-lossless should set LossyImageCompressionMethod=ISO_14495_1");
+			}
+			const auto ratios = set_pixel_data_jpegls_near_lossless_file
+			                        ["LossyImageCompressionRatio"_tag]
+			                            .to_double_vector();
+			if (!ratios || ratios->size() != 1 || !((*ratios)[0] > 0.0)) {
+				fail("JPEG-LS near-lossless should set a positive LossyImageCompressionRatio");
+			}
 		}
-	}
+		dicom::DicomFile set_pixel_data_jpeg_lossy_file;
+		{
+			const std::vector<std::uint8_t> source_bytes{
+			    0x12u, 0x34u, 0x56u, 0x78u, 0x9Au, 0xBCu};
+			dicom::pixel::PixelSource source{};
+			source.bytes = std::span<const std::uint8_t>(source_bytes.data(), source_bytes.size());
+			source.data_type = dicom::pixel::DataType::u8;
+			source.rows = 2;
+			source.cols = 3;
+			source.frames = 1;
+			source.samples_per_pixel = 1;
+			source.photometric = dicom::pixel::Photometric::monochrome2;
+			dicom::pixel::JpegOptions options{};
+			options.quality = 90;
+			set_pixel_data_jpeg_lossy_file.set_pixel_data(
+			    "JPEGBaseline8Bit"_uid, source, options);
+			if (set_pixel_data_jpeg_lossy_file["LossyImageCompression"_tag]
+			        .to_string_view()
+			        .value_or("") != std::string_view("01")) {
+				fail("JPEG lossy should set LossyImageCompression to 01");
+			}
+			const auto methods =
+			    set_pixel_data_jpeg_lossy_file["LossyImageCompressionMethod"_tag].to_string_views();
+			if (!methods || methods->size() != 1 ||
+			    (*methods)[0] != std::string_view("ISO_10918_1")) {
+				fail("JPEG lossy should set LossyImageCompressionMethod=ISO_10918_1");
+			}
+			const auto ratios =
+			    set_pixel_data_jpeg_lossy_file["LossyImageCompressionRatio"_tag].to_double_vector();
+			if (!ratios || ratios->size() != 1 || !((*ratios)[0] > 0.0)) {
+				fail("JPEG lossy should set a positive LossyImageCompressionRatio");
+			}
+		}
 
-	dicom::DicomFile generated;
+		dicom::DicomFile generated;
 	auto add_text_element = [&](dicom::Tag tag, dicom::VR vr, std::string_view value) {
 		auto* element = generated.add_dataelement(tag, vr, 0, value.size());
 		if (!element) {
