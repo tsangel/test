@@ -31,7 +31,7 @@ jobs:
           git submodule set-url extern/openjph https://github.com/aous72/OpenJPH.git
           git submodule sync --recursive
           for attempt in 1 2 3; do
-            if git -c protocol.version=2 submodule update --init --force --depth=1 \
+            if git -c protocol.version=2 submodule update --init --force --depth=1 --recursive \
               extern/charls extern/fmt extern/libjpeg-turbo extern/libdeflate extern/nanobind extern/openjpeg extern/openjph; then
               exit 0
             fi
