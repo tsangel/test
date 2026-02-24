@@ -134,7 +134,7 @@ jpegls_frame_buffer load_jpegls_frame_buffer(const DicomFile& df, std::size_t fr
 }
 
 void validate_decoded_header(const DicomFile& df, std::size_t frame_index,
-    const DicomFile::pixel_info_t& info, const charls::frame_info& frame_info,
+    const pixel::PixelDataInfo& info, const charls::frame_info& frame_info,
     std::size_t rows, std::size_t cols, std::size_t samples_per_pixel,
     std::size_t src_bytes_per_sample) {
 	if (frame_info.height != rows || frame_info.width != cols) {
@@ -161,10 +161,10 @@ void validate_decoded_header(const DicomFile& df, std::size_t frame_index,
 		    df.path(), frame_index, frame_info.bits_per_sample, max_output_bits);
 	}
 
-	if (info.bits_allocated > 0 && frame_info.bits_per_sample > info.bits_allocated) {
+	if (info.bits_stored > 0 && frame_info.bits_per_sample > info.bits_stored) {
 		diag::error_and_throw(
-		    "pixel::decode_frame_into file={} frame={} reason=JPEG-LS decoded precision {} exceeds BitsAllocated {}",
-		    df.path(), frame_index, frame_info.bits_per_sample, info.bits_allocated);
+		    "pixel::decode_frame_into file={} frame={} reason=JPEG-LS decoded precision {} exceeds BitsStored {}",
+		    df.path(), frame_index, frame_info.bits_per_sample, info.bits_stored);
 	}
 }
 
@@ -179,7 +179,7 @@ std::uint32_t checked_u32_stride(const DicomFile& df, const char* path_name, std
 
 } // namespace
 
-void decode_jpegls_into(const DicomFile& df, const DicomFile::pixel_info_t& info,
+void decode_jpegls_into(const DicomFile& df, const pixel::PixelDataInfo& info,
     std::size_t frame_index, std::span<std::uint8_t> dst,
     const DecodeStrides& dst_strides, const DecodeOptions& opt) {
 	if (!info.has_pixel_data) {

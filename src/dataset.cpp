@@ -563,7 +563,7 @@ void DataSet::read_attached_stream(const ReadOptions& options) {
 	element_map_.clear();
 	elements_.reserve(load_root_elements_reserve_hint());
 	if (root_file_) {
-		root_file_->invalidate_pixel_info_cache();
+		root_file_->invalidate_pixeldata_info_cache();
 	}
 	last_tag_loaded_ = Tag::from_value(0);
 	if (root_file_) {

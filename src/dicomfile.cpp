@@ -148,6 +148,12 @@ std::size_t bytes_per_sample_of(pixel::DataType dtype) noexcept {
 	if (ascii_iequals(text, "YBR_FULL_422")) {
 		return pixel::Photometric::ybr_full_422;
 	}
+	if (ascii_iequals(text, "YBR_RCT")) {
+		return pixel::Photometric::ybr_rct;
+	}
+	if (ascii_iequals(text, "YBR_ICT")) {
+		return pixel::Photometric::ybr_ict;
+	}
 	return std::nullopt;
 }
 
@@ -157,18 +163,8 @@ struct decoded_native_pixel_buffer {
 	std::size_t frame_count{0};
 };
 
-[[nodiscard]] std::size_t checked_mul_for_transfer_syntax(std::size_t a, std::size_t b,
-    std::string_view label, const DicomFile& file, uid::WellKnown target_ts) {
-	if (a != 0 && b > std::numeric_limits<std::size_t>::max() / a) {
-		diag::error_and_throw(
-		    "DicomFile::apply_transfer_syntax file={} target_ts={} reason={} overflows size_t",
-		    file.path(), target_ts.value(), label);
-	}
-	return a * b;
-}
-
 [[nodiscard]] decoded_native_pixel_buffer decode_all_frames_to_native(DicomFile& file,
-    const DicomFile::pixel_info_t& info, std::string_view context) {
+    const pixel::PixelDataInfo& info, std::string_view context) {
 	if (!info.has_pixel_data) {
 		diag::error_and_throw(
 		    "{} file={} reason=PixelData exists but pixel metadata is not decodable",
@@ -220,7 +216,7 @@ struct decoded_native_pixel_buffer {
 		    file.path(), target_ts.value());
 	}
 
-	const auto& info = file.pixel_info(true);
+	const auto& info = file.pixeldata_info(true);
 	if (!info.has_pixel_data || info.rows <= 0 || info.cols <= 0 ||
 	    info.frames <= 0 || info.samples_per_pixel <= 0) {
 		diag::error_and_throw(
@@ -243,26 +239,54 @@ struct decoded_native_pixel_buffer {
 	const bool source_is_planar =
 	    info.planar_configuration == pixel::Planar::planar &&
 	    samples_per_pixel > std::size_t{1};
+	constexpr std::size_t kMaxRowsOrColumns = 65535;
+	constexpr std::size_t kMaxSamplesPerPixel = 4;
+	if (rows > kMaxRowsOrColumns || cols > kMaxRowsOrColumns) {
+		diag::error_and_throw(
+		    "DicomFile::apply_transfer_syntax file={} target_ts={} reason=Rows/Columns must be <= 65535 for native source path",
+		    file.path(), target_ts.value());
+	}
+	if (samples_per_pixel > kMaxSamplesPerPixel) {
+		diag::error_and_throw(
+		    "DicomFile::apply_transfer_syntax file={} target_ts={} reason=SamplesPerPixel must be <= 4 for native source path",
+		    file.path(), target_ts.value());
+	}
 
-	const auto row_stride = source_is_planar
-	                            ? checked_mul_for_transfer_syntax(
-	                                  cols, bytes_per_sample,
-	                                  "native source row stride", file, target_ts)
-	                            : checked_mul_for_transfer_syntax(
-	                                  checked_mul_for_transfer_syntax(
-	                                      cols, samples_per_pixel,
-	                                      "native source row components", file, target_ts),
-	                                  bytes_per_sample,
-	                                  "native source row stride", file, target_ts);
-	const auto plane_stride = checked_mul_for_transfer_syntax(
-	    row_stride, rows, "native source plane stride", file, target_ts);
-	const auto frame_stride = source_is_planar
-	                              ? checked_mul_for_transfer_syntax(
-	                                    plane_stride, samples_per_pixel,
-	                                    "native source frame stride", file, target_ts)
-	                              : plane_stride;
-	const auto required_bytes = checked_mul_for_transfer_syntax(
-	    frame_stride, frames, "native source total bytes", file, target_ts);
+	const std::uint64_t row_components_u64 =
+	    source_is_planar ? static_cast<std::uint64_t>(cols)
+	                     : static_cast<std::uint64_t>(cols) *
+	                           static_cast<std::uint64_t>(samples_per_pixel);
+	const std::uint64_t row_stride_u64 =
+	    row_components_u64 * static_cast<std::uint64_t>(bytes_per_sample);
+	const std::uint64_t plane_stride_u64 =
+	    row_stride_u64 * static_cast<std::uint64_t>(rows);
+	const std::uint64_t frame_stride_u64 = source_is_planar
+	                                           ? plane_stride_u64 *
+	                                                 static_cast<std::uint64_t>(samples_per_pixel)
+	                                           : plane_stride_u64;
+
+	const auto to_size_checked = [&](std::uint64_t value, std::string_view label) -> std::size_t {
+		if (value > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) {
+			diag::error_and_throw(
+			    "DicomFile::apply_transfer_syntax file={} target_ts={} reason={} overflows size_t",
+			    file.path(), target_ts.value(), label);
+		}
+		return static_cast<std::size_t>(value);
+	};
+	const auto row_stride = to_size_checked(row_stride_u64, "native source row stride");
+	const auto plane_stride = to_size_checked(plane_stride_u64, "native source plane stride");
+	const auto frame_stride = to_size_checked(frame_stride_u64, "native source frame stride");
+	if (frame_stride == 0) {
+		diag::error_and_throw(
+		    "DicomFile::apply_transfer_syntax file={} target_ts={} reason=native source frame stride is zero",
+		    file.path(), target_ts.value());
+	}
+	if (frames > std::numeric_limits<std::size_t>::max() / frame_stride) {
+		diag::error_and_throw(
+		    "DicomFile::apply_transfer_syntax file={} target_ts={} reason=native source total bytes overflow (frames={}, frame_stride={})",
+		    file.path(), target_ts.value(), frames, frame_stride);
+	}
+	const auto required_bytes = frame_stride * frames;
 
 	const auto source_bytes = pixel_data.value_span();
 	if (source_bytes.size() < required_bytes) {
@@ -309,11 +333,7 @@ struct decoded_native_pixel_buffer {
 	source.row_stride = row_stride;
 	source.frame_stride = frame_stride;
 	source.photometric = *photometric;
-	source.bits_allocated = info.bits_allocated;
-	source.bits_stored = parse_optional_int_tag("BitsStored"_tag, "BitsStored");
-	source.high_bit = parse_optional_int_tag("HighBit"_tag, "HighBit");
-	source.pixel_representation =
-	    parse_optional_int_tag("PixelRepresentation"_tag, "PixelRepresentation");
+	source.bits_stored = parse_optional_int_tag("BitsStored"_tag, "BitsStored").value_or(info.bits_stored);
 	return source;
 }
 
@@ -324,12 +344,19 @@ void convert_encapsulated_pixel_data_to_native(DicomFile& file) {
 		return;
 	}
 
-	const auto& info = file.pixel_info(true);
+	const auto& info = file.pixeldata_info(true);
 	auto decoded =
 	    decode_all_frames_to_native(file, info, "DicomFile::apply_transfer_syntax");
+	const auto storage_bits =
+	    static_cast<int>(bytes_per_sample_of(info.sv_dtype) * std::size_t{8});
+	if (storage_bits <= 0) {
+		diag::error_and_throw(
+		    "DicomFile::apply_transfer_syntax file={} reason=failed to resolve storage bits from sv_dtype={}",
+		    file.path(), static_cast<int>(info.sv_dtype));
+	}
 	file.set_native_pixel_data(
 	    std::move(decoded.bytes),
-	    native_pixel_vr_from_bits_allocated(info.bits_allocated));
+	    native_pixel_vr_from_bits_allocated(storage_bits));
 }
 
 struct lut_descriptor_values {
@@ -538,18 +565,29 @@ void DicomFile::read_attached_stream(const ReadOptions& options) {
 	}
 }
 
-const DicomFile::pixel_info_t& DicomFile::pixel_info(bool recalc) const {
-	const auto build_pixel_info = [&]() {
+const pixel::PixelDataInfo& DicomFile::pixeldata_info(bool recalc) const {
+	const auto build_pixeldata_info = [&]() {
 		root_dataset_->ensure_loaded("PixelData"_tag);
 
-		DicomFile::pixel_info_t info{};
+		pixel::PixelDataInfo info{};
 		info.ts = transfer_syntax_uid();
 		info.rows = static_cast<int>((*root_dataset_)["Rows"_tag].to_long().value_or(0));
 		info.cols = static_cast<int>((*root_dataset_)["Columns"_tag].to_long().value_or(0));
 		info.samples_per_pixel =
 		    static_cast<int>((*root_dataset_)["SamplesPerPixel"_tag].to_long().value_or(1));
-		info.bits_allocated =
+		const auto bits_allocated =
 		    static_cast<int>((*root_dataset_)["BitsAllocated"_tag].to_long().value_or(0));
+		int bits_stored = 0;
+		if (const auto bits_stored_value = (*root_dataset_)["BitsStored"_tag].to_long();
+		    bits_stored_value.has_value()) {
+			if (*bits_stored_value < static_cast<long>(std::numeric_limits<int>::min()) ||
+			    *bits_stored_value > static_cast<long>(std::numeric_limits<int>::max())) {
+				diag::error_and_throw(
+				    "DicomFile::pixeldata_info file={} reason=BitsStored value({}) is outside int range",
+				    path(), *bits_stored_value);
+			}
+			bits_stored = static_cast<int>(*bits_stored_value);
+		}
 		const auto pixel_representation =
 		    (*root_dataset_)["PixelRepresentation"_tag].to_long().value_or(0);
 		info.frames = static_cast<int>((*root_dataset_)["NumberOfFrames"_tag].to_long().value_or(1));
@@ -557,23 +595,35 @@ const DicomFile::pixel_info_t& DicomFile::pixel_info(bool recalc) const {
 		    ((*root_dataset_)["PlanarConfiguration"_tag].to_long().value_or(0) == 1)
 		        ? pixel::Planar::planar
 		        : pixel::Planar::interleaved;
+		if (const auto photometric_text =
+		        (*root_dataset_)["PhotometricInterpretation"_tag].to_string_view();
+		    photometric_text.has_value()) {
+			info.photometric = parse_photometric_from_text(*photometric_text);
+		}
 		if (const auto& double_float_pixel = (*root_dataset_)["DoubleFloatPixelData"_tag];
 		    double_float_pixel) {
 			info.sv_dtype = pixel::DataType::f64;
+			info.bits_stored = 64;
 		} else if (const auto& float_pixel = (*root_dataset_)["FloatPixelData"_tag]; float_pixel) {
 			info.sv_dtype = pixel::DataType::f32;
+			info.bits_stored = 32;
 		} else {
 			info.sv_dtype = dtype_from_bits_and_representation(
-			    static_cast<long>(info.bits_allocated), pixel_representation);
+			    static_cast<long>(bits_allocated), pixel_representation);
+			const auto storage_bits =
+			    static_cast<int>(bytes_per_sample_of(info.sv_dtype) * std::size_t{8});
+			info.bits_stored = bits_stored > 0
+			                       ? bits_stored
+			                       : (bits_allocated > 0 ? bits_allocated : storage_bits);
 		}
 		info.has_pixel_data = (info.sv_dtype != pixel::DataType::unknown);
 		return info;
 	};
 
-	if (recalc || !pixel_info_cache_.has_value()) {
-		pixel_info_cache_ = build_pixel_info();
+	if (recalc || !pixeldata_info_cache_.has_value()) {
+		pixeldata_info_cache_ = build_pixeldata_info();
 	}
-	return *pixel_info_cache_;
+	return *pixeldata_info_cache_;
 }
 
 pixel::DecodeStrides DicomFile::calc_decode_strides(const pixel::DecodeOptions& opt) const {
@@ -583,7 +633,7 @@ pixel::DecodeStrides DicomFile::calc_decode_strides(const pixel::DecodeOptions& 
 		    path());
 	}
 
-	const auto& info = pixel_info();
+	const auto& info = pixeldata_info();
 	const auto rows_value = info.rows;
 	const auto cols_value = info.cols;
 	const auto spp_value = info.samples_per_pixel;
@@ -754,7 +804,7 @@ void DicomFile::set_native_pixel_data(std::vector<std::uint8_t>&& native_pixel_d
 		    path());
 	}
 	pixel_data->set_value_bytes(std::move(native_pixel_data));
-	invalidate_pixel_info_cache();
+	invalidate_pixeldata_info_cache();
 }
 
 void DicomFile::reset_encapsulated_pixel_data(std::size_t frame_count) {
@@ -798,7 +848,7 @@ void DicomFile::reset_encapsulated_pixel_data(std::size_t frame_count) {
 	} else {
 		root_dataset_->remove_dataelement("NumberOfFrames"_tag);
 	}
-	invalidate_pixel_info_cache();
+	invalidate_pixeldata_info_cache();
 }
 
 void DicomFile::set_encoded_pixel_frame(std::size_t frame_index,
@@ -865,12 +915,12 @@ PixelFrame* DicomFile::add_encoded_pixel_frame(std::vector<std::uint8_t>&& encod
 		    "DicomFile::add_encoded_pixel_frame file={} reason=failed to update NumberOfFrames",
 		    path());
 	}
-	invalidate_pixel_info_cache();
+	invalidate_pixeldata_info_cache();
 	return frame;
 }
 
 void DicomFile::set_transfer_syntax_state_only(uid::WellKnown transfer_syntax) {
-	invalidate_pixel_info_cache();
+	invalidate_pixeldata_info_cache();
 	transfer_syntax_uid_ = transfer_syntax.valid() ? transfer_syntax : uid::WellKnown{};
 	if (root_dataset_) {
 		root_dataset_->explicit_vr_ = transfer_syntax_uses_explicit_vr(transfer_syntax_uid_);
@@ -899,11 +949,11 @@ void DicomFile::apply_transfer_syntax(uid::WellKnown transfer_syntax,
 				return;
 			} else if (!has_encapsulated_pixel_data) {
 				diag::error_and_throw(
-				    "DicomFile::set_transfer_syntax file={} source_ts={} target_ts={} reason=encoding native PixelData to encapsulated transfer syntax is not supported yet (supported targets: RLELossless, JPEG2000Lossless, JPEG2000, JPEG2000MCLossless, JPEG2000MC)",
+				    "DicomFile::set_transfer_syntax file={} source_ts={} target_ts={} reason=encoding native PixelData to encapsulated transfer syntax is not supported yet (supported targets include: EncapsulatedUncompressedExplicitVRLittleEndian, RLELossless, JPEG2000*, HTJ2K*, JPEG-LS, JPEG Baseline/Extended/Lossless)",
 				    path(), source_transfer_syntax.value(), transfer_syntax.value());
 			} else {
 				diag::error_and_throw(
-				    "DicomFile::set_transfer_syntax file={} source_ts={} target_ts={} reason=transcoding between encapsulated transfer syntaxes is not supported yet (supported targets for native->encapsulated: RLELossless, JPEG2000Lossless, JPEG2000, JPEG2000MCLossless, JPEG2000MC)",
+				    "DicomFile::set_transfer_syntax file={} source_ts={} target_ts={} reason=transcoding between encapsulated transfer syntaxes is not supported yet (supported targets for native->encapsulated include: EncapsulatedUncompressedExplicitVRLittleEndian, RLELossless, JPEG2000*, HTJ2K*, JPEG-LS, JPEG Baseline/Extended/Lossless)",
 				    path(), source_transfer_syntax.value(), transfer_syntax.value());
 			}
 		} else if (has_encapsulated_pixel_data && !target_uses_encapsulated_pixel_data) {

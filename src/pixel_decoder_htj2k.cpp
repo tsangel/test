@@ -231,7 +231,7 @@ std::span<const std::uint8_t> materialize_frame_codestream_for_openjph(const Dic
 }
 
 void validate_openjph_decoded_metadata(const DicomFile& df, std::size_t frame_index,
-    const DicomFile::pixel_info_t& info, const ojph::param_siz& siz, std::size_t rows,
+    const pixel::PixelDataInfo& info, const ojph::param_siz& siz, std::size_t rows,
     std::size_t cols, std::size_t samples_per_pixel) {
 	const auto decoded_components = static_cast<std::size_t>(siz.get_num_components());
 	if (decoded_components != samples_per_pixel) {
@@ -327,7 +327,7 @@ void copy_openjph_line_to_interleaved(const DicomFile& df, std::size_t frame_ind
 }
 
 std::vector<std::int32_t> decode_openjph_to_interleaved(const DicomFile& df, std::size_t frame_index,
-    const DicomFile::pixel_info_t& info, const htj2k_frame_source& source,
+    const pixel::PixelDataInfo& info, const htj2k_frame_source& source,
     std::size_t rows, std::size_t cols, std::size_t samples_per_pixel) {
 	std::vector<std::uint8_t> contiguous_storage{};
 	const auto codestream_bytes = materialize_frame_codestream_for_openjph(
@@ -425,7 +425,7 @@ void write_openjph_line_unscaled_to_dst(const std::int32_t* samples,
 
 template <typename DstT>
 void decode_openjph_unscaled_into(const DicomFile& df, std::size_t frame_index,
-    const DicomFile::pixel_info_t& info, const htj2k_frame_source& source,
+    const pixel::PixelDataInfo& info, const htj2k_frame_source& source,
     std::span<std::uint8_t> dst, const DecodeStrides& dst_strides, Planar dst_planar,
     std::size_t rows, std::size_t cols, std::size_t samples_per_pixel) {
 	std::vector<std::uint8_t> contiguous_storage{};
@@ -528,7 +528,7 @@ void write_openjph_scaled_mono_to_dst(const DicomFile& df,
 	}
 }
 
-bool try_decode_openjph_into(const DicomFile& df, const DicomFile::pixel_info_t& info,
+bool try_decode_openjph_into(const DicomFile& df, const pixel::PixelDataInfo& info,
     std::size_t frame_index, const htj2k_frame_source& source, std::span<std::uint8_t> dst,
     const DecodeStrides& dst_strides, const DecodeOptions& opt, std::size_t rows, std::size_t cols,
     std::size_t samples_per_pixel, std::string& failure) {
@@ -619,7 +619,7 @@ bool try_decode_openjph_into(const DicomFile& df, const DicomFile::pixel_info_t&
 
 } // namespace
 
-void decode_htj2k_into(const DicomFile& df, const DicomFile::pixel_info_t& info,
+void decode_htj2k_into(const DicomFile& df, const pixel::PixelDataInfo& info,
     std::size_t frame_index, std::span<std::uint8_t> dst,
     const DecodeStrides& dst_strides, const DecodeOptions& opt) {
 	if (!info.has_pixel_data) {
@@ -707,23 +707,26 @@ void decode_htj2k_into(const DicomFile& df, const DicomFile::pixel_info_t& info,
 		    failure_reason.empty() ? "OpenJPH decode failed" : failure_reason);
 	}
 
+	std::string openjpeg_failure{};
+	try {
+		decode_jpeg2k_into(df, info, frame_index, dst, dst_strides, opt);
+		return;
+	} catch (const std::exception& e) {
+		openjpeg_failure = trimmed_message(e.what());
+	}
+
 	std::string openjph_failure{};
 	if (try_decode_openjph_into(df, info, frame_index, frame_source, dst, dst_strides, opt,
 	        rows, cols, samples_per_pixel, openjph_failure)) {
 		return;
 	}
-	try {
-		decode_jpeg2k_into(df, info, frame_index, dst, dst_strides, opt);
-		return;
-	} catch (const std::exception& e) {
-		if (!openjph_failure.empty()) {
-			diag::error_and_throw(
-			    "pixel::decode_frame_into file={} frame={} reason=HTJ2K decode failed "
-			    "(OpenJPH: {}; OpenJPEG: {})",
-			    df.path(), frame_index, trimmed_message(openjph_failure), trimmed_message(e.what()));
-		}
-		throw;
-	}
+	const auto openjph_reason = trimmed_message(openjph_failure);
+	diag::error_and_throw(
+	    "pixel::decode_frame_into file={} frame={} reason=HTJ2K decode failed "
+	    "(OpenJPEG: {}; OpenJPH: {})",
+	    df.path(), frame_index,
+	    openjpeg_failure.empty() ? "OpenJPEG decode failed" : openjpeg_failure,
+	    openjph_reason.empty() ? "OpenJPH decode failed" : openjph_reason);
 }
 
 } // namespace pixel::detail

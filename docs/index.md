@@ -20,7 +20,9 @@ cpp_api
 dev_notes
 LOGGING
 python_dataset_access_benchmarks
+jpeg2000_htj2k_mct_benchmarks
 pydicom_pixel_decoding_wg04
+pixel_encode_constraints
 tag_path_lookup
 ```
 

@@ -84,8 +84,12 @@ add_library(dicomsdl STATIC
 	src/pixel_decoder_encapsulated.cpp
 	src/pixel_decoder_rle.cpp
 	src/pixel_encoder.cpp
+	src/pixel_encoder_encapsulated.cpp
 	src/pixel_encoder_rle.cpp
 	src/pixel_encoder_jpeg2k.cpp
+	src/pixel_encoder_htj2k.cpp
+	src/pixel_encoder_jpegls.cpp
+	src/pixel_encoder_jpeg.cpp
 	src/pixel_decoder_jpeg2k.cpp
 	src/pixel_decoder_htj2k.cpp
 	src/pixel_decoder_jpegls.cpp
@@ -479,4 +483,16 @@ if(BUILD_TESTING)
 	target_link_libraries(dicomsdl_dataset_ordering_regression PRIVATE dicomsdl)
 	add_test(NAME dataset_ordering_regression COMMAND dicomsdl_dataset_ordering_regression)
 	set_tests_properties(dataset_ordering_regression PROPERTIES LABELS "dicomsdl")
+
+	add_executable(dicomsdl_codec_cycle_roundtrip
+		tests/codec_cycle_roundtrip.cpp
+	)
+	target_link_libraries(dicomsdl_codec_cycle_roundtrip PRIVATE dicomsdl)
+	add_test(NAME codec_cycle_roundtrip COMMAND dicomsdl_codec_cycle_roundtrip)
+	set_tests_properties(codec_cycle_roundtrip PROPERTIES LABELS "dicomsdl")
+
+	add_executable(dicomsdl_codec_cycle_realdata
+		tests/codec_cycle_realdata.cpp
+	)
+	target_link_libraries(dicomsdl_codec_cycle_realdata PRIVATE dicomsdl)
 endif()

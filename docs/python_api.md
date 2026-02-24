@@ -68,3 +68,4 @@ if elem:
 
 ## Related docs
 - UID generation and append details: [Generating UID](generating_uid.md)
+- Pixel encode constraints and codec-specific limits: [Pixel Encode Constraints](pixel_encode_constraints.md)

@@ -432,6 +432,18 @@ opj_image_ptr decode_openjpeg_image_with_format(const DicomFile& df,
 		failure = fmt::format("{} read_header returned null image", openjpeg_format_name(format));
 		return {};
 	}
+	if (!opt.decode_mct && image->numcomps > 0) {
+		std::vector<OPJ_UINT32> decoded_component_indices(
+		    static_cast<std::size_t>(image->numcomps));
+		for (OPJ_UINT32 comp = 0; comp < image->numcomps; ++comp) {
+			decoded_component_indices[static_cast<std::size_t>(comp)] = comp;
+		}
+		if (!opj_set_decoded_components(codec.get(), image->numcomps,
+		        decoded_component_indices.data(), OPJ_FALSE)) {
+			failure = decode_failure_message(format, sink, "set_decoded_components");
+			return {};
+		}
+	}
 	if (!opj_decode(codec.get(), stream.get(), image.get())) {
 		failure = decode_failure_message(format, sink, "decode");
 		return {};
@@ -497,7 +509,7 @@ void validate_destination(const DicomFile& df, std::span<std::uint8_t> dst,
 	}
 }
 
-void validate_decoded_image(const DicomFile& df, std::size_t frame_index, const DicomFile::pixel_info_t& info,
+void validate_decoded_image(const DicomFile& df, std::size_t frame_index, const pixel::PixelDataInfo& info,
     const opj_image_t& image, std::size_t rows, std::size_t cols, std::size_t samples_per_pixel) {
 	const auto decoded_rows = (image.y1 >= image.y0)
 	                              ? static_cast<std::size_t>(image.y1 - image.y0)
@@ -650,7 +662,7 @@ void write_scaled_mono_to_dst(const DicomFile& df, const opj_image_t& image, std
 
 } // namespace
 
-void decode_jpeg2k_into(const DicomFile& df, const DicomFile::pixel_info_t& info,
+void decode_jpeg2k_into(const DicomFile& df, const pixel::PixelDataInfo& info,
     std::size_t frame_index, std::span<std::uint8_t> dst,
     const DecodeStrides& dst_strides, const DecodeOptions& opt) {
 	if (!info.has_pixel_data) {

@@ -307,7 +307,7 @@ void decode_with_turbojpeg(const DicomFile& df, std::size_t frame_index, tjhandl
 }
 
 void validate_decoded_header(const DicomFile& df, std::size_t frame_index,
-    const DicomFile::pixel_info_t& info, std::size_t rows, std::size_t cols,
+    const pixel::PixelDataInfo& info, std::size_t rows, std::size_t cols,
     std::size_t samples_per_pixel, std::size_t src_bytes_per_sample,
     int decoded_width, int decoded_height, int decoded_precision, int decoded_lossless,
     int decoded_colorspace) {
@@ -353,10 +353,10 @@ void validate_decoded_header(const DicomFile& df, std::size_t frame_index,
 		    "pixel::decode_frame_into file={} frame={} reason=JPEG decoded precision {} exceeds output {} bits",
 		    df.path(), frame_index, decoded_precision, max_output_bits);
 	}
-	if (info.bits_allocated > 0 && decoded_precision > info.bits_allocated) {
+	if (info.bits_stored > 0 && decoded_precision > info.bits_stored) {
 		diag::error_and_throw(
-		    "pixel::decode_frame_into file={} frame={} reason=JPEG decoded precision {} exceeds BitsAllocated {}",
-		    df.path(), frame_index, decoded_precision, info.bits_allocated);
+		    "pixel::decode_frame_into file={} frame={} reason=JPEG decoded precision {} exceeds BitsStored {}",
+		    df.path(), frame_index, decoded_precision, info.bits_stored);
 	}
 
 	if (decoded_precision <= 8 && src_bytes_per_sample != 1) {
@@ -373,7 +373,7 @@ void validate_decoded_header(const DicomFile& df, std::size_t frame_index,
 
 } // namespace
 
-void decode_jpeg_into(const DicomFile& df, const DicomFile::pixel_info_t& info,
+void decode_jpeg_into(const DicomFile& df, const pixel::PixelDataInfo& info,
     std::size_t frame_index, std::span<std::uint8_t> dst,
     const DecodeStrides& dst_strides, const DecodeOptions& opt) {
 	if (!info.has_pixel_data) {

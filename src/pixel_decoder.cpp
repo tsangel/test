@@ -483,7 +483,7 @@ void dispatch_planar_transform_copy_by_bytes(planar_transform transform, std::si
 
 } // namespace
 
-void decode_mono_scaled_into_f32(const DicomFile& df, const DicomFile::pixel_info_t& info,
+void decode_mono_scaled_into_f32(const DicomFile& df, const pixel::PixelDataInfo& info,
     const std::uint8_t* src_frame, std::span<std::uint8_t> dst,
     const DecodeStrides& dst_strides, std::size_t rows, std::size_t cols,
     std::size_t src_row_bytes) {
@@ -665,7 +665,7 @@ bool has_rescale_transform_metadata(const DicomFile& df) {
 }
 
 bool should_use_scaled_output_impl(
-    const DicomFile& df, const DicomFile::pixel_info_t& info, const DecodeOptions& opt) {
+    const DicomFile& df, const pixel::PixelDataInfo& info, const DecodeOptions& opt) {
 	if (!opt.scaled) {
 		return false;
 	}
@@ -690,13 +690,13 @@ bool should_use_scaled_output_impl(
 } // namespace
 
 bool should_use_scaled_output(const DicomFile& df, const DecodeOptions& opt) {
-	const auto& info = df.pixel_info();
+	const auto& info = df.pixeldata_info();
 	return should_use_scaled_output_impl(df, info, opt);
 }
 
 void decode_frame_into(const DicomFile& df, std::size_t frame_index,
     std::span<std::uint8_t> dst, const DecodeOptions& opt) {
-	const auto& info = df.pixel_info();
+	const auto& info = df.pixeldata_info();
 	auto effective_opt = opt;
 	effective_opt.scaled = should_use_scaled_output_impl(df, info, opt);
 
@@ -706,7 +706,7 @@ void decode_frame_into(const DicomFile& df, std::size_t frame_index,
 
 void decode_frame_into(const DicomFile& df, std::size_t frame_index,
     std::span<std::uint8_t> dst, const DecodeStrides& dst_strides, const DecodeOptions& opt) {
-	const auto& info = df.pixel_info();
+	const auto& info = df.pixeldata_info();
 	auto effective_opt = opt;
 	effective_opt.scaled = should_use_scaled_output_impl(df, info, opt);
 

@@ -1,0 +1,162 @@
+# Pixel Encode Constraints
+
+This document summarizes the current constraints for the pixel encode path:
+
+- `DicomFile::set_pixel_data(...)`
+- `DicomFile::set_transfer_syntax(...)` when it triggers native -> encapsulated encoding
+
+## Encode-capable Transfer Syntax UIDs
+
+`uid::WellKnown::supports_pixel_encode()` is currently true for:
+
+- Uncompressed (native): `ImplicitVRLittleEndian`, `ExplicitVRLittleEndian`, `DeflatedExplicitVRLittleEndian`, `ExplicitVRBigEndian`, `Papyrus3ImplicitVRLittleEndian`
+- Uncompressed (encapsulated): `EncapsulatedUncompressedExplicitVRLittleEndian`
+- RLE: `RLELossless`
+- JPEG: `JPEGBaseline8Bit`, `JPEGExtended12Bit`, `JPEGLossless`, `JPEGLosslessNonHierarchical15`, `JPEGLosslessSV1`
+- JPEG-LS: `JPEGLSLossless`, `JPEGLSNearLossless`
+- JPEG 2000: `JPEG2000Lossless`, `JPEG2000MCLossless`, `JPEG2000`, `JPEG2000MC`
+- HTJ2K: `HTJ2KLossless`, `HTJ2KLosslessRPCL`, `HTJ2K`
+
+Anything else is rejected by `set_pixel_data`.
+
+## Input Contract (`pixel::PixelSource`)
+
+- `data_type` must be one of: `u8`, `s8`, `u16`, `s16`, `u32`, `s32`
+- `rows`, `cols`, `frames`, `samples_per_pixel` must be positive
+- `rows` and `cols` must be `<= 65535`
+- `row_stride` and `frame_stride`:
+  - `0` means "use tightly packed default"
+  - if explicitly provided, each must be large enough for the payload it describes
+- `bytes` length must be large enough for all addressed frames/planes/rows
+- `bits_stored`:
+  - if `0`, it defaults to full storage width of `data_type`
+  - otherwise must satisfy `1 <= bits_stored <= bits_allocated`
+
+## Codec Option Mapping
+
+`codec_opt` must match the selected transfer syntax family:
+
+- Native uncompressed -> `NoCompression`
+- Encapsulated uncompressed -> `NoCompression`
+- RLE -> `RleOptions`
+- JPEG -> `JpegOptions`
+- JPEG-LS -> `JpegLsOptions`
+- JPEG 2000 -> `J2kOptions`
+- HTJ2K -> `Htj2kOptions`
+
+`AutoCodecOptions` resolves as:
+
+- JPEG 2000 lossy / HTJ2K lossy: `target_psnr = 45.0`
+- JPEG-LS near-lossless: `near_lossless_error = 2`
+- Otherwise: codec-family defaults
+
+Thread hints are validated for JPEG 2000 / HTJ2K options:
+
+- `threads` must be `-1`, `0`, or a positive integer
+
+## Common Bit-Depth Rules
+
+For JPEG/JPEG-LS/JPEG2000/HTJ2K encoder paths:
+
+- `bits_allocated <= 16`
+
+Additional JPEG lossy rule:
+
+- `bits_stored <= 12`
+
+## Per-codec Constraints
+
+### Encapsulated Uncompressed
+
+- Each frame is written as one encapsulated item payload.
+- Frame payload is tightly packed native little-endian bytes (row/frame padding from input strides is stripped).
+- Layout follows metadata:
+  - `PlanarConfiguration=0`: interleaved frame bytes
+  - `PlanarConfiguration=1`: planar frame bytes
+
+### RLE
+
+- Segment layout must fit DICOM RLE limits:
+  - `bytes_per_sample` in `[1, 15]`
+  - `samples_per_pixel <= 15 / bytes_per_sample`
+- Encoded frame size and segment offsets must fit 32-bit unsigned range.
+
+### JPEG (libjpeg-turbo)
+
+- `samples_per_pixel` must be `1`, `3`, or `4`
+- `bits_allocated` must be `8` or `16`
+- `bytes_per_sample` must match precision:
+  - `bits_stored <= 8` -> 1 byte
+  - `bits_stored > 8` -> 2 bytes
+- Lossy quality is clamped to `[1, 100]`.
+
+### JPEG-LS (CharLS)
+
+- `samples_per_pixel` must be `1`, `3`, or `4`
+- `bits_allocated` must be `8` or `16`
+- `near_lossless_error` must be in `[0, 255]`
+- Transfer syntax specific:
+  - `JPEGLSLossless` requires `near_lossless_error = 0`
+  - `JPEGLSNearLossless` requires `near_lossless_error > 0`
+
+### JPEG 2000 (OpenJPEG)
+
+- `samples_per_pixel` must be `1`, `3`, or `4`
+- Multicomponent transform (MCT) requires `samples_per_pixel = 3`
+- `bits_allocated <= 16`
+- `pixel_representation` must be `0` or `1`
+- Lossy mode requires either `target_psnr > 0` or `target_bpp > 0`
+- Encoder threads:
+  - `threads = -1` -> auto (all CPUs)
+  - `threads = 0` -> library default
+  - `threads > 0` -> explicit
+
+### HTJ2K (OpenJPH encoder path)
+
+- `samples_per_pixel` must be `1`, `3`, or `4`
+- Multicomponent transform (MCT) requires `samples_per_pixel = 3`
+- `bits_allocated` must be `8` or `16`
+- `pixel_representation` must be `0` or `1`
+- `target_psnr` / `target_bpp` must be `>= 0`
+- Lossy qstep is derived from options (or default path)
+- `threads` is validated at API level; current OpenJPH encode path does not consume it yet
+
+## MCT/Color Transform Rules and Photometric Update
+
+- `J2kOptions.use_color_transform` and `Htj2kOptions.use_color_transform` default to `true`.
+- JPEG2000 MC transfer syntaxes (`JPEG2000MCLossless`, `JPEG2000MC`) enforce:
+  - color transform must be enabled
+  - `samples_per_pixel = 3`
+- For non-MC JPEG2000/HTJ2K syntaxes, MCT is applied only when:
+  - `use_color_transform == true`
+  - `samples_per_pixel == 3`
+
+When MCT is used, `PhotometricInterpretation` is updated to:
+
+- lossless JPEG2000/HTJ2K -> `YBR_RCT`
+- lossy JPEG2000/HTJ2K -> `YBR_ICT`
+
+When MCT is not used, source photometric is preserved.
+
+## Metadata Side Effects of `set_pixel_data`
+
+The encode path rewrites or updates:
+
+- `Rows`, `Columns`, `SamplesPerPixel`
+- `BitsAllocated`, `BitsStored`, `HighBit`, `PixelRepresentation`
+- `PhotometricInterpretation`
+- `PlanarConfiguration` (removed when `SamplesPerPixel == 1`)
+- `NumberOfFrames` (removed when `frames == 1`)
+- File meta `(0002,0010) TransferSyntaxUID`
+
+For RLE targets, written `PlanarConfiguration` is forced to `1`.
+
+## `set_transfer_syntax` Transcode Limits
+
+Current behavior:
+
+- native -> encapsulated: supported only when target transfer syntax is encode-capable
+- encapsulated -> native: supported (decode to native)
+- encapsulated -> encapsulated: not supported yet
+
+So re-encoding between encapsulated syntaxes requires explicit decode + `set_pixel_data` flow.

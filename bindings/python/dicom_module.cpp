@@ -75,7 +75,7 @@ struct DecodedArrayLayout {
 	bool decode_all_frames{false};
 };
 
-DecodedArraySpec decoded_array_spec(const DicomFile::pixel_info_t& info, bool scaled) {
+DecodedArraySpec decoded_array_spec(const dicom::pixel::PixelDataInfo& info, bool scaled) {
 	if (scaled) {
 		return DecodedArraySpec{nb::dtype<float>(), sizeof(float)};
 	}
@@ -149,7 +149,10 @@ std::string normalize_codec_option_name(std::string option) {
 dicom::pixel::CodecOptions parse_codec_options(nb::handle codec_opt_obj) {
 	using dicom::pixel::AutoCodecOptions;
 	using dicom::pixel::CodecOptions;
+	using dicom::pixel::Htj2kOptions;
 	using dicom::pixel::J2kOptions;
+	using dicom::pixel::JpegLsOptions;
+	using dicom::pixel::JpegOptions;
 	using dicom::pixel::NoCompression;
 	using dicom::pixel::RleOptions;
 
@@ -157,69 +160,134 @@ dicom::pixel::CodecOptions parse_codec_options(nb::handle codec_opt_obj) {
 		return CodecOptions{AutoCodecOptions{}};
 	}
 
-	const auto parse_from_name = [&](std::string option_name, bool allow_j2k_fields,
-	                                 double target_bpp, double target_psnr, int threads,
-	                                 bool has_target_bpp, bool has_target_psnr, bool has_threads)
+	struct codec_option_fields {
+		bool has_type{false};
+		std::string type_name{"auto"};
+		bool has_target_bpp{false};
+		bool has_target_psnr{false};
+		bool has_threads{false};
+		bool has_color_transform{false};
+		bool has_quality{false};
+		bool has_near_lossless_error{false};
+		double target_bpp{0.0};
+		double target_psnr{0.0};
+		int threads{-1};
+		bool color_transform{true};
+		int quality{90};
+		int near_lossless_error{0};
+	};
+
+	const auto parse_from_name = [&](std::string option_name, const codec_option_fields& fields)
 	    -> CodecOptions {
 		const auto normalized = normalize_codec_option_name(std::move(option_name));
-		if (normalized.empty() || normalized == "auto") {
-			if (has_target_bpp || has_target_psnr || has_threads) {
+		const bool has_j2k_fields =
+		    fields.has_target_bpp || fields.has_target_psnr || fields.has_threads ||
+		    fields.has_color_transform;
+		const bool has_jpeg_fields = fields.has_quality;
+		const bool has_jpegls_fields = fields.has_near_lossless_error;
+
+		const auto ensure_no_fields = [&](std::string_view codec_name) {
+			if (has_j2k_fields || has_jpeg_fields || has_jpegls_fields) {
 				throw nb::value_error(
-				    "codec_opt='auto' does not accept target_bpp/target_psnr/threads");
+				    (std::string(codec_name) +
+				        " codec_opt does not accept extra option fields").c_str());
 			}
+		};
+
+		if (normalized.empty() || normalized == "auto") {
+			ensure_no_fields("AutoCodecOptions");
 			return CodecOptions{AutoCodecOptions{}};
 		}
 		if (normalized == "none" || normalized == "nocompression" ||
 		    normalized == "native" || normalized == "uncompressed") {
-			if (has_target_bpp || has_target_psnr || has_threads) {
-				throw nb::value_error(
-				    "NoCompression codec_opt does not accept target_bpp/target_psnr/threads");
-			}
+			ensure_no_fields("NoCompression");
 			return CodecOptions{NoCompression{}};
 		}
 		if (normalized == "rle" || normalized == "rlelossless") {
-			if (has_target_bpp || has_target_psnr || has_threads) {
-				throw nb::value_error(
-				    "RleOptions codec_opt does not accept target_bpp/target_psnr/threads");
-			}
+			ensure_no_fields("RleOptions");
 			return CodecOptions{RleOptions{}};
 		}
 		if (normalized == "j2k" || normalized == "jpeg2000" || normalized == "j2koptions") {
-			if (!allow_j2k_fields) {
+			if (has_jpeg_fields || has_jpegls_fields) {
 				throw nb::value_error(
-				    "codec_opt J2kOptions requires dict input when setting target_bpp/target_psnr/threads");
+				    "J2kOptions codec_opt does not accept quality/near_lossless_error");
 			}
-			if (target_bpp < 0.0 || target_psnr < 0.0) {
-				throw nb::value_error(
-				    "codec_opt target_bpp/target_psnr must be >= 0");
+			if (fields.target_bpp < 0.0 || fields.target_psnr < 0.0) {
+				throw nb::value_error("codec_opt target_bpp/target_psnr must be >= 0");
 			}
-			if (threads < 0) {
-				throw nb::value_error(
-				    "codec_opt threads must be >= 0");
+			if (fields.threads < -1) {
+				throw nb::value_error("codec_opt threads must be -1, 0, or positive");
 			}
 			J2kOptions options{};
-			options.target_bpp = target_bpp;
-			options.target_psnr = target_psnr;
-			options.threads = threads;
+			options.target_bpp = fields.target_bpp;
+			options.target_psnr = fields.target_psnr;
+			options.threads = fields.threads;
+			options.use_color_transform = fields.color_transform;
 			return CodecOptions{options};
 		}
+		if (normalized == "htj2k" || normalized == "htj2koptions") {
+			if (has_jpeg_fields || has_jpegls_fields) {
+				throw nb::value_error(
+				    "Htj2kOptions codec_opt does not accept quality/near_lossless_error");
+			}
+			if (fields.target_bpp < 0.0 || fields.target_psnr < 0.0) {
+				throw nb::value_error("codec_opt target_bpp/target_psnr must be >= 0");
+			}
+			if (fields.threads < -1) {
+				throw nb::value_error("codec_opt threads must be -1, 0, or positive");
+			}
+			Htj2kOptions options{};
+			options.target_bpp = fields.target_bpp;
+			options.target_psnr = fields.target_psnr;
+			options.threads = fields.threads;
+			options.use_color_transform = fields.color_transform;
+			return CodecOptions{options};
+		}
+		if (normalized == "jpegls" || normalized == "jls" ||
+		    normalized == "jpeglsoptions") {
+			if (has_j2k_fields || has_jpeg_fields) {
+				throw nb::value_error(
+				    "JpegLsOptions codec_opt does not accept target_bpp/target_psnr/threads/color_transform/quality");
+			}
+			if (fields.near_lossless_error < 0 || fields.near_lossless_error > 255) {
+				throw nb::value_error(
+				    "codec_opt near_lossless_error must be in [0, 255]");
+			}
+			JpegLsOptions options{};
+			options.near_lossless_error = fields.near_lossless_error;
+			return CodecOptions{options};
+		}
+		if (normalized == "jpeg" || normalized == "jpegbaseline" ||
+		    normalized == "jpeglossless" || normalized == "jpegoptions") {
+			if (has_j2k_fields || has_jpegls_fields) {
+				throw nb::value_error(
+				    "JpegOptions codec_opt does not accept target_bpp/target_psnr/threads/color_transform/near_lossless_error");
+			}
+			if (fields.quality < 1 || fields.quality > 100) {
+				throw nb::value_error("codec_opt quality must be in [1, 100]");
+			}
+			JpegOptions options{};
+			options.quality = fields.quality;
+			return CodecOptions{options};
+		}
+
 		throw nb::value_error(
-		    "codec_opt must be one of: auto, none, rle, j2k");
+		    "codec_opt must be one of: auto, none, rle, j2k, htj2k, jpegls, jpeg");
 	};
 
 	if (nb::isinstance<nb::str>(codec_opt_obj)) {
-		return parse_from_name(
-		    nb::cast<std::string>(codec_opt_obj), false, 0.0, 0.0, 0, false, false, false);
+		const codec_option_fields fields{};
+		return parse_from_name(nb::cast<std::string>(codec_opt_obj), fields);
 	}
 
 	if (!PyDict_Check(codec_opt_obj.ptr())) {
-		throw nb::type_error(
-		    "codec_opt must be None, str, or dict");
+		throw nb::type_error("codec_opt must be None, str, or dict");
 	}
 
 	nb::dict codec_dict = nb::borrow<nb::dict>(codec_opt_obj);
 	static const std::unordered_set<std::string> allowed_keys{
-	    "type", "target_bpp", "target_psnr", "threads"};
+	    "type", "target_bpp", "target_psnr", "threads", "color_transform", "use_mct",
+	    "mct", "quality", "near_lossless_error"};
 	PyObject* key_obj = nullptr;
 	PyObject* value_obj = nullptr;
 	Py_ssize_t pos = 0;
@@ -229,44 +297,72 @@ dicom::pixel::CodecOptions parse_codec_options(nb::handle codec_opt_obj) {
 		}
 		const auto key = nb::cast<std::string>(nb::handle(key_obj));
 		if (allowed_keys.find(key) == allowed_keys.end()) {
-			throw nb::value_error(
-			    ("codec_opt has unknown key: " + key).c_str());
+			throw nb::value_error(("codec_opt has unknown key: " + key).c_str());
 		}
 	}
 
-	bool has_target_bpp = false;
-	bool has_target_psnr = false;
-	bool has_threads = false;
-	double target_bpp = 0.0;
-	double target_psnr = 0.0;
-	int threads = 0;
-	bool has_type = false;
-	std::string type_name = "auto";
-
+	codec_option_fields fields{};
 	if (PyObject* type_obj = PyDict_GetItemString(codec_dict.ptr(), "type")) {
-		has_type = true;
-		type_name = nb::cast<std::string>(nb::handle(type_obj));
+		fields.has_type = true;
+		fields.type_name = nb::cast<std::string>(nb::handle(type_obj));
 	}
 	if (PyObject* value = PyDict_GetItemString(codec_dict.ptr(), "target_bpp")) {
-		has_target_bpp = true;
-		target_bpp = nb::cast<double>(nb::handle(value));
+		fields.has_target_bpp = true;
+		fields.target_bpp = nb::cast<double>(nb::handle(value));
 	}
 	if (PyObject* value = PyDict_GetItemString(codec_dict.ptr(), "target_psnr")) {
-		has_target_psnr = true;
-		target_psnr = nb::cast<double>(nb::handle(value));
+		fields.has_target_psnr = true;
+		fields.target_psnr = nb::cast<double>(nb::handle(value));
 	}
 	if (PyObject* value = PyDict_GetItemString(codec_dict.ptr(), "threads")) {
-		has_threads = true;
-		threads = nb::cast<int>(nb::handle(value));
+		fields.has_threads = true;
+		fields.threads = nb::cast<int>(nb::handle(value));
+	}
+	if (PyObject* value = PyDict_GetItemString(codec_dict.ptr(), "color_transform")) {
+		fields.has_color_transform = true;
+		fields.color_transform = nb::cast<bool>(nb::handle(value));
+	}
+	if (PyObject* value = PyDict_GetItemString(codec_dict.ptr(), "use_mct")) {
+		const bool parsed = nb::cast<bool>(nb::handle(value));
+		if (fields.has_color_transform && fields.color_transform != parsed) {
+			throw nb::value_error(
+			    "codec_opt color_transform and use_mct must match when both are provided");
+		}
+		fields.has_color_transform = true;
+		fields.color_transform = parsed;
+	}
+	if (PyObject* value = PyDict_GetItemString(codec_dict.ptr(), "mct")) {
+		const bool parsed = nb::cast<bool>(nb::handle(value));
+		if (fields.has_color_transform && fields.color_transform != parsed) {
+			throw nb::value_error(
+			    "codec_opt color_transform and mct must match when both are provided");
+		}
+		fields.has_color_transform = true;
+		fields.color_transform = parsed;
+	}
+	if (PyObject* value = PyDict_GetItemString(codec_dict.ptr(), "quality")) {
+		fields.has_quality = true;
+		fields.quality = nb::cast<int>(nb::handle(value));
+	}
+	if (PyObject* value = PyDict_GetItemString(codec_dict.ptr(), "near_lossless_error")) {
+		fields.has_near_lossless_error = true;
+		fields.near_lossless_error = nb::cast<int>(nb::handle(value));
 	}
 
-	if (!has_type && (has_target_bpp || has_target_psnr || has_threads)) {
-		type_name = "j2k";
+	if (!fields.has_type) {
+		if (fields.has_target_bpp || fields.has_target_psnr || fields.has_threads) {
+			fields.type_name = "j2k";
+		} else if (fields.has_quality) {
+			fields.type_name = "jpeg";
+		} else if (fields.has_near_lossless_error) {
+			fields.type_name = "jpegls";
+		} else if (fields.has_color_transform) {
+			throw nb::value_error(
+			    "codec_opt with color_transform/use_mct requires explicit type ('j2k' or 'htj2k')");
+		}
 	}
 
-	return parse_from_name(
-	    type_name, true, target_bpp, target_psnr, threads,
-	    has_target_bpp, has_target_psnr, has_threads);
+	return parse_from_name(fields.type_name, fields);
 }
 
 dicom::pixel::Htj2kDecoder parse_htj2k_decoder(std::string decoder) {
@@ -285,7 +381,8 @@ dicom::pixel::Htj2kDecoder parse_htj2k_decoder(std::string decoder) {
 
 DecodedArrayLayout build_decode_layout(
     const DicomFile& self, long frame, bool scaled, int decoder_threads = -1,
-    dicom::pixel::Htj2kDecoder htj2k_decoder_backend = dicom::pixel::Htj2kDecoder::auto_select) {
+    dicom::pixel::Htj2kDecoder htj2k_decoder_backend = dicom::pixel::Htj2kDecoder::auto_select,
+    bool decode_mct = true) {
 	if (frame < -1) {
 		throw nb::value_error("frame must be >= -1");
 	}
@@ -293,7 +390,7 @@ DecodedArrayLayout build_decode_layout(
 		throw nb::value_error("threads must be -1, 0, or positive");
 	}
 
-	const auto& info = self.pixel_info();
+	const auto& info = self.pixeldata_info();
 	if (!info.has_pixel_data) {
 		throw nb::value_error(
 		    "to_array/decode_into requires PixelData, FloatPixelData, or DoubleFloatPixelData");
@@ -315,6 +412,7 @@ DecodedArrayLayout build_decode_layout(
 	layout.opt.planar_out = dicom::pixel::Planar::interleaved;
 	layout.opt.alignment = 1;
 	layout.opt.scaled = scaled;
+	layout.opt.decode_mct = decode_mct;
 	layout.opt.decoder_threads = decoder_threads;
 	layout.opt.htj2k_decoder_backend = htj2k_decoder_backend;
 	const bool effective_scaled = dicom::pixel::should_use_scaled_output(self, layout.opt);
@@ -421,7 +519,7 @@ const DataElement* raw_source_element(const DicomFile& self, dicom::pixel::DataT
 
 nb::object dicomfile_to_array_view(const DicomFile& self, long frame) {
 	const auto layout = build_decode_layout(self, frame, false, 0);
-	const auto& info = self.pixel_info();
+	const auto& info = self.pixeldata_info();
 	const auto& dataset = self.dataset();
 
 	if (!info.ts.is_uncompressed()) {
@@ -478,9 +576,10 @@ nb::object dicomfile_to_array_view(const DicomFile& self, long frame) {
 }
 
 nb::object dicomfile_to_array(
-    const DicomFile& self, long frame, bool scaled, const std::string& htj2k_decoder) {
+    const DicomFile& self, long frame, bool scaled, const std::string& htj2k_decoder,
+    bool decode_mct) {
 	const auto layout = build_decode_layout(
-	    self, frame, scaled, -1, parse_htj2k_decoder(htj2k_decoder));
+	    self, frame, scaled, -1, parse_htj2k_decoder(htj2k_decoder), decode_mct);
 	auto out = make_writable_numpy_array(
 	    layout.ndim, layout.shape, layout.strides, layout.spec.dtype, layout.required_bytes);
 	decode_layout_into(self, layout, out.bytes);
@@ -509,9 +608,10 @@ private:
 };
 
 nb::object dicomfile_decode_into_array(const DicomFile& self, nb::handle out,
-    long frame, bool scaled, int threads, const std::string& htj2k_decoder) {
+    long frame, bool scaled, int threads, const std::string& htj2k_decoder,
+    bool decode_mct) {
 	const auto layout = build_decode_layout(
-	    self, frame, scaled, threads, parse_htj2k_decoder(htj2k_decoder));
+	    self, frame, scaled, threads, parse_htj2k_decoder(htj2k_decoder), decode_mct);
 
 	PyWritableBufferView writable(out);
 	const auto& view = writable.view();
@@ -1280,8 +1380,12 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::kw_only(),
 		    nb::arg("codec_opt") = nb::none(),
 		    "Set transfer syntax using a Uid object and update file meta TransferSyntaxUID.\n"
-		    "`codec_opt` accepts None/'auto', 'none', 'rle', 'j2k', or dict form:\n"
-		    "{'type': 'j2k', 'target_psnr': 45.0, 'target_bpp': 0.0, 'threads': 0}.")
+		    "`codec_opt` accepts None/'auto', 'none', 'rle', 'j2k', 'htj2k', 'jpegls', 'jpeg',\n"
+		    "or dict form such as:\n"
+		    "{'type': 'j2k', 'target_psnr': 45.0, 'target_bpp': 0.0, 'threads': -1, 'color_transform': True},\n"
+		    "{'type': 'htj2k', 'target_psnr': 45.0, 'color_transform': False},\n"
+		    "{'type': 'jpegls', 'near_lossless_error': 2},\n"
+		    "{'type': 'jpeg', 'quality': 90}.")
 		.def("set_transfer_syntax",
 		    [](DicomFile& self, const std::string& transfer_syntax_text, nb::handle codec_opt) {
 			    const auto uid = dicom::uid::lookup(transfer_syntax_text);
@@ -1299,8 +1403,12 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::kw_only(),
 		    nb::arg("codec_opt") = nb::none(),
 		    "Set transfer syntax using a UID keyword or dotted UID string.\n"
-		    "`codec_opt` accepts None/'auto', 'none', 'rle', 'j2k', or dict form:\n"
-		    "{'type': 'j2k', 'target_psnr': 45.0, 'target_bpp': 0.0, 'threads': 0}.")
+		    "`codec_opt` accepts None/'auto', 'none', 'rle', 'j2k', 'htj2k', 'jpegls', 'jpeg',\n"
+		    "or dict form such as:\n"
+		    "{'type': 'j2k', 'target_psnr': 45.0, 'target_bpp': 0.0, 'threads': -1, 'color_transform': True},\n"
+		    "{'type': 'htj2k', 'target_psnr': 45.0, 'color_transform': False},\n"
+		    "{'type': 'jpegls', 'near_lossless_error': 2},\n"
+		    "{'type': 'jpeg', 'quality': 90}.")
 		.def("write_file",
 		    [](DicomFile& self, const std::string& path, bool include_preamble,
 		        bool write_file_meta, bool keep_existing_meta) {
@@ -1346,6 +1454,7 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::arg("frame") = -1,
 		    nb::arg("scaled") = false,
 		    nb::arg("htj2k_decoder") = "auto",
+		    nb::arg("decode_mct") = true,
 		    "Decode pixel samples and return a NumPy array.\n"
 		    "\n"
 		    "Parameters\n"
@@ -1357,7 +1466,11 @@ NB_MODULE(_dicomsdl, m) {
 		    "    Scaled output is ignored when SamplesPerPixel != 1, or when both\n"
 		    "    Modality LUT Sequence and Rescale Slope/Intercept are absent.\n"
 		    "htj2k_decoder : {'auto', 'openjph', 'openjpeg'}, optional\n"
-		    "    HTJ2K backend selection. 'auto' prefers OpenJPH then falls back to OpenJPEG.\n"
+		    "    HTJ2K backend selection. 'auto' prefers OpenJPEG then falls back to OpenJPH.\n"
+		    "decode_mct : bool, optional\n"
+		    "    Whether to apply codestream-level MCT/color inverse transform when supported.\n"
+		    "    True by default. Currently honored by OpenJPEG-based decode paths.\n"
+		    "    OpenJPH backend ignores this flag.\n"
 		    "\n"
 		    "Returns\n"
 		    "-------\n"
@@ -1379,6 +1492,7 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::arg("scaled") = false,
 		    nb::arg("threads") = -1,
 		    nb::arg("htj2k_decoder") = "auto",
+		    nb::arg("decode_mct") = true,
 		    "Decode pixel samples into an existing writable C-contiguous buffer.\n"
 		    "\n"
 		    "Parameters\n"
@@ -1396,7 +1510,11 @@ NB_MODULE(_dicomsdl, m) {
 		    "    0 uses library default, -1 uses all CPUs, >0 sets explicit thread count.\n"
 		    "    Currently applied to JPEG 2000; unsupported decoders may ignore it.\n"
 		    "htj2k_decoder : {'auto', 'openjph', 'openjpeg'}, optional\n"
-		    "    HTJ2K backend selection. 'auto' prefers OpenJPH then falls back to OpenJPEG.\n"
+		    "    HTJ2K backend selection. 'auto' prefers OpenJPEG then falls back to OpenJPH.\n"
+		    "decode_mct : bool, optional\n"
+		    "    Whether to apply codestream-level MCT/color inverse transform when supported.\n"
+		    "    True by default. Currently honored by OpenJPEG-based decode paths.\n"
+		    "    OpenJPH backend ignores this flag.\n"
 		    "\n"
 		    "Returns\n"
 		    "-------\n"
@@ -1406,7 +1524,8 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::arg("frame") = -1,
 		    nb::arg("scaled") = false,
 		    nb::arg("htj2k_decoder") = "auto",
-		    "Alias of to_array(frame=-1, scaled=False, htj2k_decoder='auto').")
+		    nb::arg("decode_mct") = true,
+		    "Alias of to_array(frame=-1, scaled=False, htj2k_decoder='auto', decode_mct=True).")
 		.def("__getitem__",
 		    [](DicomFile& self, nb::object key) -> nb::object {
 			    DataSet& dataset = self.dataset();

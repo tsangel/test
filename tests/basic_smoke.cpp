@@ -455,12 +455,16 @@ int main() {
 			const auto encapsulated_uncompressed =
 			    dicom::uid::from_keyword("EncapsulatedUncompressedExplicitVRLittleEndian");
 			const auto jpeg_baseline = dicom::uid::from_keyword("JPEGBaseline8Bit");
+			const auto jpeg_lossless_sv1 = dicom::uid::from_keyword("JPEGLosslessSV1");
+			const auto jpegls_lossless = dicom::uid::from_keyword("JPEGLSLossless");
 			const auto jpeg2000_lossless = dicom::uid::from_keyword("JPEG2000Lossless");
 			const auto jpeg2000_lossy = dicom::uid::from_keyword("JPEG2000");
+			const auto htj2k_lossless = dicom::uid::from_keyword("HTJ2KLossless");
 			const auto jpegxl = dicom::uid::from_keyword("JPEGXL");
 			const auto rle_lossless = dicom::uid::from_keyword("RLELossless");
 			if (!implicit_le || !deflated_le || !encapsulated_uncompressed || !jpeg_baseline ||
-			    !jpeg2000_lossless || !jpeg2000_lossy || !jpegxl || !rle_lossless) {
+			    !jpeg_lossless_sv1 || !jpegls_lossless || !jpeg2000_lossless ||
+			    !jpeg2000_lossy || !htj2k_lossless || !jpegxl || !rle_lossless) {
 				fail("uid::from_keyword should resolve transfer syntax classification fixtures");
 			}
 
@@ -479,7 +483,7 @@ int main() {
 				fail("EncapsulatedUncompressedExplicitVRLittleEndian classification mismatch");
 			}
 			if (!encapsulated_uncompressed->is_lossless() || encapsulated_uncompressed->is_lossy() ||
-			    encapsulated_uncompressed->supports_pixel_encode() ||
+			    !encapsulated_uncompressed->supports_pixel_encode() ||
 			    !encapsulated_uncompressed->supports_pixel_decode()) {
 				fail("EncapsulatedUncompressedExplicitVRLittleEndian capability mismatch");
 			}
@@ -487,9 +491,19 @@ int main() {
 				fail("JPEGBaseline8Bit classification mismatch");
 			}
 			if (jpeg_baseline->is_lossless() || !jpeg_baseline->is_lossy() ||
-			    jpeg_baseline->supports_pixel_encode() ||
+			    !jpeg_baseline->supports_pixel_encode() ||
 			    !jpeg_baseline->supports_pixel_decode()) {
 				fail("JPEGBaseline8Bit capability mismatch");
+			}
+			if (!jpeg_lossless_sv1->is_jpeg_lossless() || !jpeg_lossless_sv1->is_lossless() ||
+			    jpeg_lossless_sv1->is_lossy() || !jpeg_lossless_sv1->supports_pixel_encode() ||
+			    !jpeg_lossless_sv1->supports_pixel_decode()) {
+				fail("JPEGLosslessSV1 capability mismatch");
+			}
+			if (!jpegls_lossless->is_jpegls() || !jpegls_lossless->is_lossless() ||
+			    jpegls_lossless->is_lossy() || !jpegls_lossless->supports_pixel_encode() ||
+			    !jpegls_lossless->supports_pixel_decode()) {
+				fail("JPEGLSLossless capability mismatch");
 			}
 			if (!jpeg2000_lossless->is_jpeg2000() || jpeg2000_lossless->is_htj2k() ||
 			    !jpeg2000_lossless->is_lossless() || jpeg2000_lossless->is_lossy() ||
@@ -502,6 +516,11 @@ int main() {
 			    !jpeg2000_lossy->supports_pixel_encode() ||
 			    !jpeg2000_lossy->supports_pixel_decode()) {
 				fail("JPEG2000 capability mismatch");
+			}
+			if (!htj2k_lossless->is_htj2k() || !htj2k_lossless->is_lossless() ||
+			    htj2k_lossless->is_lossy() || !htj2k_lossless->supports_pixel_encode() ||
+			    !htj2k_lossless->supports_pixel_decode()) {
+				fail("HTJ2KLossless capability mismatch");
 			}
 			if (!jpegxl->is_jpegxl() || jpegxl->is_lossless() || !jpegxl->is_lossy() ||
 			    jpegxl->supports_pixel_encode() || jpegxl->supports_pixel_decode()) {
@@ -920,6 +939,86 @@ int main() {
 			fail("RLE set_pixel_data frame #1 roundtrip mismatch");
 		}
 	}
+	dicom::DicomFile set_pixel_data_encap_uncompressed_file;
+	{
+		std::vector<std::uint8_t> source_bytes(40, 0xEEu);
+		const auto write_row = [&](std::size_t frame, std::size_t row,
+		                       std::array<std::uint8_t, 6> payload) {
+			const std::size_t frame_stride = 20;
+			const std::size_t row_stride = 8;
+			const std::size_t base = frame * frame_stride + row * row_stride;
+			for (std::size_t i = 0; i < payload.size(); ++i) {
+				source_bytes[base + i] = payload[i];
+			}
+		};
+		write_row(0, 0, {0x01u, 0x00u, 0x02u, 0x00u, 0x03u, 0x00u});
+		write_row(0, 1, {0x04u, 0x00u, 0x05u, 0x00u, 0x06u, 0x00u});
+		write_row(1, 0, {0x11u, 0x00u, 0x12u, 0x00u, 0x13u, 0x00u});
+		write_row(1, 1, {0x14u, 0x00u, 0x15u, 0x00u, 0x16u, 0x00u});
+
+		dicom::pixel::PixelSource source{};
+		source.bytes = std::span<const std::uint8_t>(source_bytes.data(), source_bytes.size());
+		source.data_type = dicom::pixel::DataType::u16;
+		source.rows = 2;
+		source.cols = 3;
+		source.frames = 2;
+		source.samples_per_pixel = 1;
+		source.row_stride = 8;
+		source.frame_stride = 20;
+		source.photometric = dicom::pixel::Photometric::monochrome2;
+		set_pixel_data_encap_uncompressed_file.set_pixel_data(
+		    "EncapsulatedUncompressedExplicitVRLittleEndian"_uid, source,
+		    dicom::pixel::NoCompression{});
+
+		auto* pixel_data = set_pixel_data_encap_uncompressed_file.get_dataelement("PixelData"_tag);
+		if (!pixel_data || pixel_data->is_missing()) {
+			fail("EncapsulatedUncompressed set_pixel_data should create PixelData");
+		}
+		if (!pixel_data->vr().is_pixel_sequence()) {
+			fail("EncapsulatedUncompressed set_pixel_data should create encapsulated PixelData");
+		}
+		auto* pixel_sequence = pixel_data->as_pixel_sequence();
+		if (!pixel_sequence || pixel_sequence->number_of_frames() != 2) {
+			fail("EncapsulatedUncompressed set_pixel_data should create expected frame count");
+		}
+		const std::vector<std::uint8_t> expected_frame0{
+		    0x01u, 0x00u, 0x02u, 0x00u, 0x03u, 0x00u,
+		    0x04u, 0x00u, 0x05u, 0x00u, 0x06u, 0x00u};
+		const std::vector<std::uint8_t> expected_frame1{
+		    0x11u, 0x00u, 0x12u, 0x00u, 0x13u, 0x00u,
+		    0x14u, 0x00u, 0x15u, 0x00u, 0x16u, 0x00u};
+		const auto frame0_encoded = pixel_sequence->frame_encoded_span(0);
+		const auto frame1_encoded = pixel_sequence->frame_encoded_span(1);
+		if (frame0_encoded.size() != expected_frame0.size() ||
+		    !std::equal(frame0_encoded.begin(), frame0_encoded.end(), expected_frame0.begin())) {
+			fail("EncapsulatedUncompressed set_pixel_data frame #0 payload mismatch");
+		}
+		if (frame1_encoded.size() != expected_frame1.size() ||
+		    !std::equal(frame1_encoded.begin(), frame1_encoded.end(), expected_frame1.begin())) {
+			fail("EncapsulatedUncompressed set_pixel_data frame #1 payload mismatch");
+		}
+		if (!set_pixel_data_encap_uncompressed_file.transfer_syntax_uid().valid() ||
+		    set_pixel_data_encap_uncompressed_file.transfer_syntax_uid().value() !=
+		        "EncapsulatedUncompressedExplicitVRLittleEndian"_uid.value()) {
+			fail("EncapsulatedUncompressed set_pixel_data should update runtime transfer syntax");
+		}
+		const auto* transfer_syntax_elem =
+		    set_pixel_data_encap_uncompressed_file.get_dataelement("TransferSyntaxUID"_tag);
+		const auto ts_uid = transfer_syntax_elem->to_transfer_syntax_uid();
+		if (!ts_uid ||
+		    ts_uid->value() != "EncapsulatedUncompressedExplicitVRLittleEndian"_uid.value()) {
+			fail("EncapsulatedUncompressed set_pixel_data should synchronize TransferSyntaxUID in file meta");
+		}
+
+		const auto decoded_frame0 = set_pixel_data_encap_uncompressed_file.pixel_data(0);
+		const auto decoded_frame1 = set_pixel_data_encap_uncompressed_file.pixel_data(1);
+		if (decoded_frame0 != expected_frame0) {
+			fail("EncapsulatedUncompressed set_pixel_data frame #0 roundtrip mismatch");
+		}
+		if (decoded_frame1 != expected_frame1) {
+			fail("EncapsulatedUncompressed set_pixel_data frame #1 roundtrip mismatch");
+		}
+	}
 	dicom::DicomFile set_pixel_data_j2k_file;
 	{
 		std::vector<std::uint8_t> source_bytes(40, 0xEEu);
@@ -986,6 +1085,289 @@ int main() {
 		}
 		if (decoded_frame1 != expected_frame1) {
 			fail("J2K set_pixel_data frame #1 roundtrip mismatch");
+		}
+	}
+	dicom::DicomFile set_pixel_data_htj2k_file;
+	{
+		std::vector<std::uint8_t> source_bytes(40, 0xEEu);
+		const auto write_row = [&](std::size_t frame, std::size_t row,
+		                       std::array<std::uint8_t, 6> payload) {
+			const std::size_t frame_stride = 20;
+			const std::size_t row_stride = 8;
+			const std::size_t base = frame * frame_stride + row * row_stride;
+			for (std::size_t i = 0; i < payload.size(); ++i) {
+				source_bytes[base + i] = payload[i];
+			}
+		};
+		write_row(0, 0, {0x01u, 0x00u, 0x02u, 0x00u, 0x03u, 0x00u});
+		write_row(0, 1, {0x04u, 0x00u, 0x05u, 0x00u, 0x06u, 0x00u});
+		write_row(1, 0, {0x11u, 0x00u, 0x12u, 0x00u, 0x13u, 0x00u});
+		write_row(1, 1, {0x14u, 0x00u, 0x15u, 0x00u, 0x16u, 0x00u});
+
+		dicom::pixel::PixelSource source{};
+		source.bytes = std::span<const std::uint8_t>(source_bytes.data(), source_bytes.size());
+		source.data_type = dicom::pixel::DataType::u16;
+		source.rows = 2;
+		source.cols = 3;
+		source.frames = 2;
+		source.samples_per_pixel = 1;
+		source.row_stride = 8;
+		source.frame_stride = 20;
+		source.photometric = dicom::pixel::Photometric::monochrome2;
+		set_pixel_data_htj2k_file.set_pixel_data(
+		    "HTJ2KLossless"_uid, source, dicom::pixel::Htj2kOptions{});
+
+		const auto* pixel_data = set_pixel_data_htj2k_file.get_dataelement("PixelData"_tag);
+		if (!pixel_data || pixel_data->is_missing()) {
+			fail("HTJ2K set_pixel_data should create PixelData");
+		}
+		if (!pixel_data->vr().is_pixel_sequence()) {
+			fail("HTJ2K set_pixel_data should create encapsulated PixelData");
+		}
+		const auto* pixel_sequence = pixel_data->as_pixel_sequence();
+		if (!pixel_sequence || pixel_sequence->number_of_frames() != 2) {
+			fail("HTJ2K set_pixel_data should create expected frame count");
+		}
+		if (!set_pixel_data_htj2k_file.transfer_syntax_uid().valid() ||
+		    set_pixel_data_htj2k_file.transfer_syntax_uid().value() !=
+		        "HTJ2KLossless"_uid.value()) {
+			fail("HTJ2K set_pixel_data should update runtime transfer syntax");
+		}
+		const auto* transfer_syntax_elem =
+		    set_pixel_data_htj2k_file.get_dataelement("TransferSyntaxUID"_tag);
+		const auto ts_uid = transfer_syntax_elem->to_transfer_syntax_uid();
+		if (!ts_uid || ts_uid->value() != "HTJ2KLossless"_uid.value()) {
+			fail("HTJ2K set_pixel_data should synchronize TransferSyntaxUID in file meta");
+		}
+
+		const std::vector<std::uint8_t> expected_frame0{
+		    0x01u, 0x00u, 0x02u, 0x00u, 0x03u, 0x00u,
+		    0x04u, 0x00u, 0x05u, 0x00u, 0x06u, 0x00u};
+		const std::vector<std::uint8_t> expected_frame1{
+		    0x11u, 0x00u, 0x12u, 0x00u, 0x13u, 0x00u,
+		    0x14u, 0x00u, 0x15u, 0x00u, 0x16u, 0x00u};
+		const auto decoded_frame0 = set_pixel_data_htj2k_file.pixel_data(0);
+		const auto decoded_frame1 = set_pixel_data_htj2k_file.pixel_data(1);
+		if (decoded_frame0 != expected_frame0) {
+			fail("HTJ2K set_pixel_data frame #0 roundtrip mismatch");
+		}
+		if (decoded_frame1 != expected_frame1) {
+			fail("HTJ2K set_pixel_data frame #1 roundtrip mismatch");
+		}
+	}
+	{
+		const std::vector<std::uint8_t> rgb_source{
+		    0x10u, 0x20u, 0x30u, 0x40u, 0x50u, 0x60u,
+		    0x70u, 0x80u, 0x90u, 0xA0u, 0xB0u, 0xC0u};
+		dicom::pixel::PixelSource color_source{};
+		color_source.bytes =
+		    std::span<const std::uint8_t>(rgb_source.data(), rgb_source.size());
+		color_source.data_type = dicom::pixel::DataType::u8;
+		color_source.rows = 2;
+		color_source.cols = 2;
+		color_source.frames = 1;
+		color_source.samples_per_pixel = 3;
+		color_source.planar = dicom::pixel::Planar::interleaved;
+		color_source.photometric = dicom::pixel::Photometric::rgb;
+
+		dicom::DicomFile j2k_default_mct;
+		j2k_default_mct.set_pixel_data(
+		    "JPEG2000Lossless"_uid, color_source, dicom::pixel::J2kOptions{});
+		if (j2k_default_mct["PhotometricInterpretation"_tag].to_string_view().value_or("") !=
+		    std::string_view("YBR_RCT")) {
+			fail("J2K default color transform should update PhotometricInterpretation to YBR_RCT");
+		}
+
+		dicom::pixel::J2kOptions j2k_without_mct{};
+		j2k_without_mct.use_color_transform = false;
+		dicom::DicomFile j2k_no_mct;
+		j2k_no_mct.set_pixel_data("JPEG2000Lossless"_uid, color_source, j2k_without_mct);
+		if (j2k_no_mct["PhotometricInterpretation"_tag].to_string_view().value_or("") !=
+		    std::string_view("RGB")) {
+			fail("J2K disabled color transform should keep PhotometricInterpretation as RGB");
+		}
+
+		bool rejected_j2k_mc_without_mct = false;
+		try {
+			dicom::DicomFile j2k_mc_no_mct;
+			j2k_mc_no_mct.set_pixel_data(
+			    "JPEG2000MCLossless"_uid, color_source, j2k_without_mct);
+		} catch (const std::exception&) {
+			rejected_j2k_mc_without_mct = true;
+		}
+		if (!rejected_j2k_mc_without_mct) {
+			fail("JPEG2000MCLossless should reject use_color_transform=false");
+		}
+
+		dicom::pixel::J2kOptions j2k_lossy_options{};
+		j2k_lossy_options.target_psnr = 45.0;
+		dicom::DicomFile j2k_lossy_mct;
+		j2k_lossy_mct.set_pixel_data("JPEG2000"_uid, color_source, j2k_lossy_options);
+		if (j2k_lossy_mct["PhotometricInterpretation"_tag].to_string_view().value_or("") !=
+		    std::string_view("YBR_ICT")) {
+			fail("J2K lossy color transform should update PhotometricInterpretation to YBR_ICT");
+		}
+
+		dicom::DicomFile htj2k_default_mct;
+		htj2k_default_mct.set_pixel_data(
+		    "HTJ2KLossless"_uid, color_source, dicom::pixel::Htj2kOptions{});
+		if (htj2k_default_mct["PhotometricInterpretation"_tag].to_string_view().value_or("") !=
+		    std::string_view("YBR_RCT")) {
+			fail("HTJ2K default color transform should update PhotometricInterpretation to YBR_RCT");
+		}
+
+		dicom::pixel::Htj2kOptions htj2k_without_mct{};
+		htj2k_without_mct.use_color_transform = false;
+		dicom::DicomFile htj2k_no_mct;
+		htj2k_no_mct.set_pixel_data("HTJ2KLossless"_uid, color_source, htj2k_without_mct);
+		if (htj2k_no_mct["PhotometricInterpretation"_tag].to_string_view().value_or("") !=
+		    std::string_view("RGB")) {
+			fail("HTJ2K disabled color transform should keep PhotometricInterpretation as RGB");
+		}
+
+		dicom::pixel::Htj2kOptions htj2k_lossy_options{};
+		htj2k_lossy_options.target_psnr = 45.0;
+		dicom::DicomFile htj2k_lossy_mct;
+		htj2k_lossy_mct.set_pixel_data("HTJ2K"_uid, color_source, htj2k_lossy_options);
+		if (htj2k_lossy_mct["PhotometricInterpretation"_tag].to_string_view().value_or("") !=
+		    std::string_view("YBR_ICT")) {
+			fail("HTJ2K lossy color transform should update PhotometricInterpretation to YBR_ICT");
+		}
+	}
+	dicom::DicomFile set_pixel_data_jpegls_file;
+	{
+		std::vector<std::uint8_t> source_bytes(40, 0xEEu);
+		const auto write_row = [&](std::size_t frame, std::size_t row,
+		                       std::array<std::uint8_t, 6> payload) {
+			const std::size_t frame_stride = 20;
+			const std::size_t row_stride = 8;
+			const std::size_t base = frame * frame_stride + row * row_stride;
+			for (std::size_t i = 0; i < payload.size(); ++i) {
+				source_bytes[base + i] = payload[i];
+			}
+		};
+		write_row(0, 0, {0x01u, 0x00u, 0x02u, 0x00u, 0x03u, 0x00u});
+		write_row(0, 1, {0x04u, 0x00u, 0x05u, 0x00u, 0x06u, 0x00u});
+		write_row(1, 0, {0x11u, 0x00u, 0x12u, 0x00u, 0x13u, 0x00u});
+		write_row(1, 1, {0x14u, 0x00u, 0x15u, 0x00u, 0x16u, 0x00u});
+
+		dicom::pixel::PixelSource source{};
+		source.bytes = std::span<const std::uint8_t>(source_bytes.data(), source_bytes.size());
+		source.data_type = dicom::pixel::DataType::u16;
+		source.rows = 2;
+		source.cols = 3;
+		source.frames = 2;
+		source.samples_per_pixel = 1;
+		source.row_stride = 8;
+		source.frame_stride = 20;
+		source.photometric = dicom::pixel::Photometric::monochrome2;
+		set_pixel_data_jpegls_file.set_pixel_data(
+		    "JPEGLSLossless"_uid, source, dicom::pixel::JpegLsOptions{});
+
+		const auto* pixel_data = set_pixel_data_jpegls_file.get_dataelement("PixelData"_tag);
+		if (!pixel_data || pixel_data->is_missing()) {
+			fail("JPEG-LS set_pixel_data should create PixelData");
+		}
+		if (!pixel_data->vr().is_pixel_sequence()) {
+			fail("JPEG-LS set_pixel_data should create encapsulated PixelData");
+		}
+		const auto* pixel_sequence = pixel_data->as_pixel_sequence();
+		if (!pixel_sequence || pixel_sequence->number_of_frames() != 2) {
+			fail("JPEG-LS set_pixel_data should create expected frame count");
+		}
+		if (!set_pixel_data_jpegls_file.transfer_syntax_uid().valid() ||
+		    set_pixel_data_jpegls_file.transfer_syntax_uid().value() !=
+		        "JPEGLSLossless"_uid.value()) {
+			fail("JPEG-LS set_pixel_data should update runtime transfer syntax");
+		}
+		const auto* transfer_syntax_elem =
+		    set_pixel_data_jpegls_file.get_dataelement("TransferSyntaxUID"_tag);
+		const auto ts_uid = transfer_syntax_elem->to_transfer_syntax_uid();
+		if (!ts_uid || ts_uid->value() != "JPEGLSLossless"_uid.value()) {
+			fail("JPEG-LS set_pixel_data should synchronize TransferSyntaxUID in file meta");
+		}
+
+		const std::vector<std::uint8_t> expected_frame0{
+		    0x01u, 0x00u, 0x02u, 0x00u, 0x03u, 0x00u,
+		    0x04u, 0x00u, 0x05u, 0x00u, 0x06u, 0x00u};
+		const std::vector<std::uint8_t> expected_frame1{
+		    0x11u, 0x00u, 0x12u, 0x00u, 0x13u, 0x00u,
+		    0x14u, 0x00u, 0x15u, 0x00u, 0x16u, 0x00u};
+		const auto decoded_frame0 = set_pixel_data_jpegls_file.pixel_data(0);
+		const auto decoded_frame1 = set_pixel_data_jpegls_file.pixel_data(1);
+		if (decoded_frame0 != expected_frame0) {
+			fail("JPEG-LS set_pixel_data frame #0 roundtrip mismatch");
+		}
+		if (decoded_frame1 != expected_frame1) {
+			fail("JPEG-LS set_pixel_data frame #1 roundtrip mismatch");
+		}
+	}
+	dicom::DicomFile set_pixel_data_jpeg_file;
+	{
+		std::vector<std::uint8_t> source_bytes(40, 0xEEu);
+		const auto write_row = [&](std::size_t frame, std::size_t row,
+		                       std::array<std::uint8_t, 6> payload) {
+			const std::size_t frame_stride = 20;
+			const std::size_t row_stride = 8;
+			const std::size_t base = frame * frame_stride + row * row_stride;
+			for (std::size_t i = 0; i < payload.size(); ++i) {
+				source_bytes[base + i] = payload[i];
+			}
+		};
+		write_row(0, 0, {0x01u, 0x00u, 0x02u, 0x00u, 0x03u, 0x00u});
+		write_row(0, 1, {0x04u, 0x00u, 0x05u, 0x00u, 0x06u, 0x00u});
+		write_row(1, 0, {0x11u, 0x00u, 0x12u, 0x00u, 0x13u, 0x00u});
+		write_row(1, 1, {0x14u, 0x00u, 0x15u, 0x00u, 0x16u, 0x00u});
+
+		dicom::pixel::PixelSource source{};
+		source.bytes = std::span<const std::uint8_t>(source_bytes.data(), source_bytes.size());
+		source.data_type = dicom::pixel::DataType::u16;
+		source.rows = 2;
+		source.cols = 3;
+		source.frames = 2;
+		source.samples_per_pixel = 1;
+		source.row_stride = 8;
+		source.frame_stride = 20;
+		source.photometric = dicom::pixel::Photometric::monochrome2;
+		set_pixel_data_jpeg_file.set_pixel_data(
+		    "JPEGLosslessSV1"_uid, source, dicom::pixel::JpegOptions{});
+
+		const auto* pixel_data = set_pixel_data_jpeg_file.get_dataelement("PixelData"_tag);
+		if (!pixel_data || pixel_data->is_missing()) {
+			fail("JPEG set_pixel_data should create PixelData");
+		}
+		if (!pixel_data->vr().is_pixel_sequence()) {
+			fail("JPEG set_pixel_data should create encapsulated PixelData");
+		}
+		const auto* pixel_sequence = pixel_data->as_pixel_sequence();
+		if (!pixel_sequence || pixel_sequence->number_of_frames() != 2) {
+			fail("JPEG set_pixel_data should create expected frame count");
+		}
+		if (!set_pixel_data_jpeg_file.transfer_syntax_uid().valid() ||
+		    set_pixel_data_jpeg_file.transfer_syntax_uid().value() !=
+		        "JPEGLosslessSV1"_uid.value()) {
+			fail("JPEG set_pixel_data should update runtime transfer syntax");
+		}
+		const auto* transfer_syntax_elem =
+		    set_pixel_data_jpeg_file.get_dataelement("TransferSyntaxUID"_tag);
+		const auto ts_uid = transfer_syntax_elem->to_transfer_syntax_uid();
+		if (!ts_uid || ts_uid->value() != "JPEGLosslessSV1"_uid.value()) {
+			fail("JPEG set_pixel_data should synchronize TransferSyntaxUID in file meta");
+		}
+
+		const std::vector<std::uint8_t> expected_frame0{
+		    0x01u, 0x00u, 0x02u, 0x00u, 0x03u, 0x00u,
+		    0x04u, 0x00u, 0x05u, 0x00u, 0x06u, 0x00u};
+		const std::vector<std::uint8_t> expected_frame1{
+		    0x11u, 0x00u, 0x12u, 0x00u, 0x13u, 0x00u,
+		    0x14u, 0x00u, 0x15u, 0x00u, 0x16u, 0x00u};
+		const auto decoded_frame0 = set_pixel_data_jpeg_file.pixel_data(0);
+		const auto decoded_frame1 = set_pixel_data_jpeg_file.pixel_data(1);
+		if (decoded_frame0 != expected_frame0) {
+			fail("JPEG set_pixel_data frame #0 roundtrip mismatch");
+		}
+		if (decoded_frame1 != expected_frame1) {
+			fail("JPEG set_pixel_data frame #1 roundtrip mismatch");
 		}
 	}
 

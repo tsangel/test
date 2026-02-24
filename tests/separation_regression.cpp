@@ -270,7 +270,7 @@ void require_patient_name_rows_cols(const dicom::DicomFile& file, std::string_vi
 	if (!name_sv || *name_sv != expected_name) {
 		fail(std::string(context) + ": PatientName mismatch");
 	}
-	const auto& info = file.pixel_info();
+	const auto& info = file.pixeldata_info();
 	if (info.rows != expected_rows || info.cols != expected_cols) {
 		fail(std::string(context) + ": rows/cols mismatch");
 	}
@@ -279,7 +279,7 @@ void require_patient_name_rows_cols(const dicom::DicomFile& file, std::string_vi
 } // namespace
 
 int main() {
-	// 1) Deflated stream parse + transfer syntax + pixel_info cache lifecycle regression.
+	// 1) Deflated stream parse + transfer syntax + pixeldata_info cache lifecycle regression.
 	const auto deflated_rows3_cols5 = build_part10(
 	    "1.2.840.10008.1.2.1.99", build_deflated_dataset_body(3, 5));
 	const auto deflated_rows7_cols9 = build_part10(
@@ -302,13 +302,13 @@ int main() {
 		fail("deflated: PatientName mismatch");
 	}
 
-	const auto& info_before = deflated_file->pixel_info();
+	const auto& info_before = deflated_file->pixeldata_info();
 	if (info_before.rows != 3 || info_before.cols != 5) {
-		fail("deflated: unexpected initial pixel_info rows/cols");
+		fail("deflated: unexpected initial pixeldata_info rows/cols");
 	}
-	const auto& file_info_before = deflated_file->pixel_info();
+	const auto& file_info_before = deflated_file->pixeldata_info();
 	if (file_info_before.rows != 3 || file_info_before.cols != 5) {
-		fail("deflated: DicomFile pixel_info forwarding mismatch");
+		fail("deflated: DicomFile pixeldata_info forwarding mismatch");
 	}
 
 	deflated_file->attach_to_memory(
@@ -316,13 +316,13 @@ int main() {
 	deflated_file->read_attached_stream();
 	require_transfer_syntax(deflated_ds, "DeflatedExplicitVRLittleEndian"_uid, "deflated reread");
 
-	const auto& info_after = deflated_file->pixel_info();
+	const auto& info_after = deflated_file->pixeldata_info();
 	if (info_after.rows != 7 || info_after.cols != 9) {
-		fail("deflated reread: pixel_info cache was not refreshed");
+		fail("deflated reread: pixeldata_info cache was not refreshed");
 	}
-	const auto& file_info_after = deflated_file->pixel_info();
+	const auto& file_info_after = deflated_file->pixeldata_info();
 	if (file_info_after.rows != 7 || file_info_after.cols != 9) {
-		fail("deflated reread: DicomFile pixel_info cache was not refreshed");
+		fail("deflated reread: DicomFile pixeldata_info cache was not refreshed");
 	}
 
 	const auto deflated_roundtrip_bytes = deflated_file->write_bytes();
@@ -342,7 +342,7 @@ int main() {
 	if (!deflated_roundtrip_name_sv || *deflated_roundtrip_name_sv != "DOE^JOHN") {
 		fail("deflated write: PatientName mismatch");
 	}
-	const auto& deflated_roundtrip_info = deflated_roundtrip->pixel_info();
+	const auto& deflated_roundtrip_info = deflated_roundtrip->pixeldata_info();
 	if (deflated_roundtrip_info.rows != 7 || deflated_roundtrip_info.cols != 9) {
 		fail("deflated write: rows/cols mismatch");
 	}

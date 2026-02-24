@@ -762,11 +762,13 @@ inline constexpr std::uint32_t ts_mask(std::uint16_t idx) {
 		    kTSPixelDecodeSupported;
 	case "EncapsulatedUncompressedExplicitVRLittleEndian"_uid.raw_index():
 		return kTSUncompressed | kTSEncapsulated | kTSLossless |
-		    kTSPixelDecodeSupported;
+		    kTSPixelEncodeSupported | kTSPixelDecodeSupported;
 
 	// JPEG Baseline / Extended / Progressive
 	case "JPEGBaseline8Bit"_uid.raw_index():
 	case "JPEGExtended12Bit"_uid.raw_index():
+		return kTSJpegBaseline | kTSJpegFamily | kTSFfd9 | kTSEncapsulated |
+		    kTSLossy | kTSPixelEncodeSupported | kTSPixelDecodeSupported;
 	case "JPEGExtended35"_uid.raw_index():
 	case "JPEGSpectralSelectionNonHierarchical68"_uid.raw_index():
 	case "JPEGSpectralSelectionNonHierarchical79"_uid.raw_index():
@@ -784,19 +786,21 @@ inline constexpr std::uint32_t ts_mask(std::uint16_t idx) {
 	// JPEG Lossless
 	case "JPEGLossless"_uid.raw_index():
 	case "JPEGLosslessNonHierarchical15"_uid.raw_index():
+	case "JPEGLosslessSV1"_uid.raw_index():
+		return kTSJpegLossless | kTSJpegFamily | kTSFfd9 | kTSEncapsulated |
+		    kTSLossless | kTSPixelEncodeSupported | kTSPixelDecodeSupported;
 	case "JPEGLosslessHierarchical28"_uid.raw_index():
 	case "JPEGLosslessHierarchical29"_uid.raw_index():
-	case "JPEGLosslessSV1"_uid.raw_index():
 		return kTSJpegLossless | kTSJpegFamily | kTSFfd9 | kTSEncapsulated |
 		    kTSLossless | kTSPixelDecodeSupported;
 
 	// JPEG-LS
 	case "JPEGLSLossless"_uid.raw_index():
 		return kTSJpegLS | kTSJpegFamily | kTSFfd9 | kTSEncapsulated |
-		    kTSLossless | kTSPixelDecodeSupported;
+		    kTSLossless | kTSPixelEncodeSupported | kTSPixelDecodeSupported;
 	case "JPEGLSNearLossless"_uid.raw_index():
 		return kTSJpegLS | kTSJpegFamily | kTSFfd9 | kTSEncapsulated |
-		    kTSLossy | kTSPixelDecodeSupported;
+		    kTSLossy | kTSPixelEncodeSupported | kTSPixelDecodeSupported;
 
 	// JPEG 2000 / JPIP Referenced
 	case "JPEG2000Lossless"_uid.raw_index():
@@ -849,10 +853,12 @@ inline constexpr std::uint32_t ts_mask(std::uint16_t idx) {
 	case "HTJ2KLossless"_uid.raw_index():
 	case "HTJ2KLosslessRPCL"_uid.raw_index():
 		return kTSJpeg2000 | kTSHTJ2K | kTSJpegFamily | kTSFfd9 |
-		    kTSEncapsulated | kTSLossless | kTSPixelDecodeSupported;
+		    kTSEncapsulated | kTSLossless | kTSPixelEncodeSupported |
+		    kTSPixelDecodeSupported;
 	case "HTJ2K"_uid.raw_index():
 		return kTSJpeg2000 | kTSHTJ2K | kTSJpegFamily | kTSFfd9 |
-		    kTSEncapsulated | kTSLossy | kTSPixelDecodeSupported;
+		    kTSEncapsulated | kTSLossy | kTSPixelEncodeSupported |
+		    kTSPixelDecodeSupported;
 
 	// JPIP HTJ2K referenced transfer syntaxes
 	case "JPIPHTJ2KReferenced"_uid.raw_index():
@@ -989,6 +995,8 @@ enum class Photometric : std::uint8_t {
 	rgb,
 	ybr_full,
 	ybr_full_422,
+	ybr_rct,
+	ybr_ict,
 };
 
 struct PixelSource {
@@ -996,18 +1004,29 @@ struct PixelSource {
 	DataType data_type{DataType::unknown};
 	int rows{0};
 	int cols{0};
+	std::size_t row_stride{0};
 	int frames{1};
+	std::size_t frame_stride{0};
 	int samples_per_pixel{1};
 	Planar planar{Planar::interleaved};
-	std::size_t row_stride{0};
-	std::size_t frame_stride{0};
 	Photometric photometric{Photometric::monochrome2};
+	// Effective precision in bits. 0 means "use full storage width of data_type".
+	int bits_stored{0};
+};
 
-	// Optional DICOM bitfield overrides.
-	std::optional<int> bits_allocated{};
-	std::optional<int> bits_stored{};
-	std::optional<int> high_bit{};
-	std::optional<int> pixel_representation{}; // 0 unsigned, 1 signed
+struct PixelDataInfo {
+	uid::WellKnown ts{};
+	DataType sv_dtype{DataType::unknown};
+	int rows{0};
+	int cols{0};
+	int frames{1};
+	int samples_per_pixel{1};
+	Planar planar_configuration{Planar::interleaved};
+	std::optional<Photometric> photometric{};
+	// Normalized effective precision in bits.
+	// For FloatPixelData/DoubleFloatPixelData, this is 32/64.
+	int bits_stored{0};
+	bool has_pixel_data{false};
 };
 
 struct AutoCodecOptions {};
@@ -1018,12 +1037,18 @@ struct JpegLsOptions { int near_lossless_error{0}; };
 struct J2kOptions {
 	double target_bpp{0.0};
 	double target_psnr{0.0};
-	int threads{0};
+	// Encoder thread hint:
+	//  -1: auto(all CPUs) [default], 0: library default, >0: explicit thread count.
+	int threads{-1};
+	bool use_color_transform{true};
 };
 struct Htj2kOptions {
 	double target_bpp{0.0};
 	double target_psnr{0.0};
-	int threads{0};
+	// Encoder thread hint:
+	//  -1: auto(all CPUs) [default], 0: library default, >0: explicit thread count.
+	int threads{-1};
+	bool use_color_transform{true};
 };
 struct DeflateOptions { int level{6}; };
 
@@ -1043,12 +1068,16 @@ struct DecodeOptions {
 	// true: output float32 after Modality LUT (if present) or Rescale
 	// applies only when SamplesPerPixel=1 and modality transform metadata exists.
 	bool scaled{false};
+	// true: apply codestream-level MCT/color transform inverse when decoder supports it.
+	// false: keep codestream component domain (for example, YBR_* domain for JPEG2000 MCT streams).
+	// Note: currently honored by OpenJPEG-based decode paths; other backends may ignore it.
+	bool decode_mct{true};
 	// Decoder thread count hint:
 	//  -1: auto(all CPUs) [default], 0: library default, >0: explicit thread count.
 	// Backends may ignore this option when unsupported.
 	int decoder_threads{-1};
 	// HTJ2K decoder backend selection:
-	//  auto_select: prefer OpenJPH when available, then fallback to OpenJPEG.
+	//  auto_select: prefer OpenJPEG, then fallback to OpenJPH.
 	//  openjph: use OpenJPH only.
 	//  openjpeg: use OpenJPEG only.
 	Htj2kDecoder htj2k_decoder_backend{Htj2kDecoder::auto_select};
@@ -1624,17 +1653,6 @@ class DicomFile {
 public:
 	using iterator = DataSet::iterator;
 	using const_iterator = DataSet::const_iterator;
-	struct pixel_info_t {
-		uid::WellKnown ts{};
-		int rows{0};
-		int cols{0};
-		int samples_per_pixel{1};
-		int bits_allocated{0};
-		pixel::DataType sv_dtype{pixel::DataType::unknown};
-		int frames{1};
-		pixel::Planar planar_configuration{pixel::Planar::interleaved};
-		bool has_pixel_data{false};
-	};
 
 	DicomFile();
 	~DicomFile();
@@ -1693,7 +1711,7 @@ public:
 	void set_transfer_syntax(uid::WellKnown transfer_syntax,
 	    pixel::CodecOptions codec_opt = pixel::AutoCodecOptions{});
 	[[nodiscard]] uid::WellKnown transfer_syntax_uid() const { return transfer_syntax_uid_; }
-	[[nodiscard]] const pixel_info_t& pixel_info(bool recalc = false) const;
+	[[nodiscard]] const pixel::PixelDataInfo& pixeldata_info(bool recalc = false) const;
 	[[nodiscard]] pixel::DecodeStrides calc_decode_strides(const pixel::DecodeOptions& opt = {}) const;
 	[[nodiscard]] std::optional<pixel::ModalityLut> modality_lut() const;
 	/// When `codec_opt` is AutoCodecOptions, a default codec is selected from transfer syntax.
@@ -1738,7 +1756,7 @@ public:
 
 private:
 	friend class DataSet;
-	void invalidate_pixel_info_cache() const { pixel_info_cache_.reset(); }
+	void invalidate_pixeldata_info_cache() const { pixeldata_info_cache_.reset(); }
 	void set_transfer_syntax_state_only(uid::WellKnown transfer_syntax);
 	void apply_transfer_syntax(uid::WellKnown transfer_syntax,
 	    const pixel::CodecOptions& codec_opt_override);
@@ -1747,7 +1765,7 @@ private:
 
 	std::unique_ptr<DataSet> root_dataset_;
 	uid::WellKnown transfer_syntax_uid_{};
-	mutable std::optional<pixel_info_t> pixel_info_cache_{};
+	mutable std::optional<pixel::PixelDataInfo> pixeldata_info_cache_{};
 	bool has_error_{false};
 	std::string error_message_{};
 };

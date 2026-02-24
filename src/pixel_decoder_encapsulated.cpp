@@ -10,7 +10,7 @@ namespace diag = dicom::diag;
 namespace dicom {
 namespace pixel::detail {
 
-void decode_encapsulated_uncompressed_into(const DicomFile& df, const DicomFile::pixel_info_t& info,
+void decode_encapsulated_uncompressed_into(const DicomFile& df, const pixel::PixelDataInfo& info,
     std::size_t frame_index, std::span<std::uint8_t> dst,
     const DecodeStrides& dst_strides, const DecodeOptions& opt) {
 	if (!info.has_pixel_data) {

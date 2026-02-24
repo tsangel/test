@@ -223,7 +223,7 @@ std::vector<std::uint8_t> decode_rle_frame_to_planar(const DicomFile& df, std::s
 
 } // namespace
 
-void decode_rle_into(const DicomFile& df, const DicomFile::pixel_info_t& info,
+void decode_rle_into(const DicomFile& df, const pixel::PixelDataInfo& info,
     std::size_t frame_index, std::span<std::uint8_t> dst,
     const DecodeStrides& dst_strides, const DecodeOptions& opt) {
 	if (!info.has_pixel_data) {
