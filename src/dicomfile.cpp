@@ -795,6 +795,8 @@ std::optional<pixel::ModalityLut> DicomFile::modality_lut() const {
 void DicomFile::set_native_pixel_data(std::vector<std::uint8_t>&& native_pixel_data, VR vr) {
 	root_dataset_->remove_dataelement("FloatPixelData"_tag);
 	root_dataset_->remove_dataelement("DoubleFloatPixelData"_tag);
+	root_dataset_->remove_dataelement("ExtendedOffsetTable"_tag);
+	root_dataset_->remove_dataelement("ExtendedOffsetTableLengths"_tag);
 
 	VR native_vr = vr;
 	if (native_vr == VR::None) {
@@ -821,6 +823,8 @@ void DicomFile::set_native_pixel_data(std::vector<std::uint8_t>&& native_pixel_d
 void DicomFile::reset_encapsulated_pixel_data(std::size_t frame_count) {
 	root_dataset_->remove_dataelement("FloatPixelData"_tag);
 	root_dataset_->remove_dataelement("DoubleFloatPixelData"_tag);
+	root_dataset_->remove_dataelement("ExtendedOffsetTable"_tag);
+	root_dataset_->remove_dataelement("ExtendedOffsetTableLengths"_tag);
 
 	DataElement* pixel_data = root_dataset_->add_dataelement("PixelData"_tag, VR::PX);
 	if (!pixel_data) {

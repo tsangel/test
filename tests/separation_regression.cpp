@@ -30,6 +30,17 @@ void append_u32_le(std::vector<std::uint8_t>& out, std::uint32_t v) {
 	out.push_back(static_cast<std::uint8_t>((v >> 24) & 0xFFu));
 }
 
+void append_u64_le(std::vector<std::uint8_t>& out, std::uint64_t v) {
+	out.push_back(static_cast<std::uint8_t>(v & 0xFFu));
+	out.push_back(static_cast<std::uint8_t>((v >> 8) & 0xFFu));
+	out.push_back(static_cast<std::uint8_t>((v >> 16) & 0xFFu));
+	out.push_back(static_cast<std::uint8_t>((v >> 24) & 0xFFu));
+	out.push_back(static_cast<std::uint8_t>((v >> 32) & 0xFFu));
+	out.push_back(static_cast<std::uint8_t>((v >> 40) & 0xFFu));
+	out.push_back(static_cast<std::uint8_t>((v >> 48) & 0xFFu));
+	out.push_back(static_cast<std::uint8_t>((v >> 56) & 0xFFu));
+}
+
 void append_u16_be(std::vector<std::uint8_t>& out, std::uint16_t v) {
 	out.push_back(static_cast<std::uint8_t>((v >> 8) & 0xFFu));
 	out.push_back(static_cast<std::uint8_t>(v & 0xFFu));
@@ -231,6 +242,67 @@ std::vector<std::uint8_t> build_encapsulated_uncompressed_pixel_body() {
 	append_u32_le(encapsulated_pixel_value, 2u);
 	encapsulated_pixel_value.push_back(0x34u);
 	encapsulated_pixel_value.push_back(0x12u);
+
+	append_u16_le(encapsulated_pixel_value, 0xFFFEu);
+	append_u16_le(encapsulated_pixel_value, 0xE0DDu);
+	append_u32_le(encapsulated_pixel_value, 0u);
+
+	append_explicit_vr_le_32(
+	    body, dicom::Tag(0x7FE0u, 0x0010u), 'O', 'B', encapsulated_pixel_value, true);
+	return body;
+}
+
+std::vector<std::uint8_t> build_encapsulated_uncompressed_pixel_body_with_eot() {
+	std::vector<std::uint8_t> body;
+
+	append_explicit_vr_le_16(
+	    body, dicom::Tag(0x0028u, 0x0002u), 'U', 'S', std::vector<std::uint8_t>{0x01, 0x00});
+	append_explicit_vr_le_16(
+	    body, dicom::Tag(0x0028u, 0x0004u), 'C', 'S',
+	    std::vector<std::uint8_t>{'M', 'O', 'N', 'O', 'C', 'H', 'R', 'O', 'M', 'E', '2', ' '});
+	append_explicit_vr_le_16(
+	    body, dicom::Tag(0x0028u, 0x0010u), 'U', 'S', std::vector<std::uint8_t>{0x01, 0x00});
+	append_explicit_vr_le_16(
+	    body, dicom::Tag(0x0028u, 0x0011u), 'U', 'S', std::vector<std::uint8_t>{0x01, 0x00});
+	append_explicit_vr_le_16(
+	    body, dicom::Tag(0x0028u, 0x0100u), 'U', 'S', std::vector<std::uint8_t>{0x08, 0x00});
+	append_explicit_vr_le_16(
+	    body, dicom::Tag(0x0028u, 0x0101u), 'U', 'S', std::vector<std::uint8_t>{0x08, 0x00});
+	append_explicit_vr_le_16(
+	    body, dicom::Tag(0x0028u, 0x0102u), 'U', 'S', std::vector<std::uint8_t>{0x07, 0x00});
+	append_explicit_vr_le_16(
+	    body, dicom::Tag(0x0028u, 0x0103u), 'U', 'S', std::vector<std::uint8_t>{0x00, 0x00});
+	append_explicit_vr_le_16(
+	    body, dicom::Tag(0x0028u, 0x0008u), 'I', 'S', std::vector<std::uint8_t>{'2', ' '});
+
+	std::vector<std::uint8_t> eot_offsets;
+	append_u64_le(eot_offsets, 0u);
+	append_u64_le(eot_offsets, 10u);
+	append_explicit_vr_le_32(
+	    body, dicom::Tag(0x7FE0u, 0x0001u), 'O', 'V', eot_offsets);
+
+	std::vector<std::uint8_t> eot_lengths;
+	append_u64_le(eot_lengths, 2u);
+	append_u64_le(eot_lengths, 2u);
+	append_explicit_vr_le_32(
+	    body, dicom::Tag(0x7FE0u, 0x0002u), 'O', 'V', eot_lengths);
+
+	std::vector<std::uint8_t> encapsulated_pixel_value;
+	append_u16_le(encapsulated_pixel_value, 0xFFFEu);
+	append_u16_le(encapsulated_pixel_value, 0xE000u);
+	append_u32_le(encapsulated_pixel_value, 0u);
+
+	append_u16_le(encapsulated_pixel_value, 0xFFFEu);
+	append_u16_le(encapsulated_pixel_value, 0xE000u);
+	append_u32_le(encapsulated_pixel_value, 2u);
+	encapsulated_pixel_value.push_back(0x11u);
+	encapsulated_pixel_value.push_back(0x12u);
+
+	append_u16_le(encapsulated_pixel_value, 0xFFFEu);
+	append_u16_le(encapsulated_pixel_value, 0xE000u);
+	append_u32_le(encapsulated_pixel_value, 2u);
+	encapsulated_pixel_value.push_back(0x21u);
+	encapsulated_pixel_value.push_back(0x22u);
 
 	append_u16_le(encapsulated_pixel_value, 0xFFFEu);
 	append_u16_le(encapsulated_pixel_value, 0xE0DDu);
@@ -678,6 +750,40 @@ int main() {
 	}
 	require_transfer_syntax(
 	    encap_to_native_roundtrip->dataset(), "ExplicitVRLittleEndian"_uid, "encap-uncompressed write");
+
+	// 6a) Encapsulated PixelData with EOT should load frame boundaries from EOT.
+	const auto encapsulated_eot_file = build_part10(
+	    "1.2.840.10008.1.2.1.98", build_encapsulated_uncompressed_pixel_body_with_eot());
+	auto encapsulated_eot = dicom::read_bytes(
+	    "encap-uncompressed-eot", encapsulated_eot_file.data(), encapsulated_eot_file.size());
+	if (!encapsulated_eot) {
+		fail("encap-uncompressed-eot read_bytes returned null");
+	}
+	auto* eot_pixel_data = encapsulated_eot->get_dataelement("PixelData"_tag);
+	if (eot_pixel_data->is_missing() || !eot_pixel_data->vr().is_pixel_sequence()) {
+		fail("encap-uncompressed-eot: expected encapsulated PixelData");
+	}
+	auto* eot_pixel_sequence = eot_pixel_data->as_pixel_sequence();
+	if (!eot_pixel_sequence) {
+		fail("encap-uncompressed-eot: expected pixel sequence");
+	}
+	if (eot_pixel_sequence->basic_offset_table_count() != 0) {
+		fail("encap-uncompressed-eot: BOT must be empty when EOT is present");
+	}
+	if (eot_pixel_sequence->extended_offset_table_count() != 2) {
+		fail("encap-uncompressed-eot: expected two EOT entries");
+	}
+	if (eot_pixel_sequence->number_of_frames() != 2) {
+		fail("encap-uncompressed-eot: expected two frames");
+	}
+	const auto eot_frame0 = eot_pixel_sequence->frame_encoded_span(0);
+	const auto eot_frame1 = eot_pixel_sequence->frame_encoded_span(1);
+	if (eot_frame0.size() != 2 || eot_frame0[0] != 0x11u || eot_frame0[1] != 0x12u) {
+		fail("encap-uncompressed-eot: frame 0 payload mismatch");
+	}
+	if (eot_frame1.size() != 2 || eot_frame1[0] != 0x21u || eot_frame1[1] != 0x22u) {
+		fail("encap-uncompressed-eot: frame 1 payload mismatch");
+	}
 
 	// 7) Malformed big-endian payload should fail during normalization.
 	const auto be_malformed_file = build_part10(

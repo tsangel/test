@@ -27,6 +27,8 @@ constexpr Tag kItemTag{0xFFFEu, 0xE000u};
 constexpr Tag kItemDelimitationTag{0xFFFEu, 0xE00Du};
 constexpr Tag kSequenceDelimitationTag{0xFFFEu, 0xE0DDu};
 constexpr Tag kPixelDataTag{0x7FE0u, 0x0010u};
+constexpr Tag kExtendedOffsetTableTag{0x7FE0u, 0x0001u};
+constexpr Tag kExtendedOffsetTableLengthsTag{0x7FE0u, 0x0002u};
 
 constexpr Tag kFileMetaGroupLengthTag{0x0002u, 0x0000u};
 constexpr Tag kFileMetaInformationVersionTag{0x0002u, 0x0001u};
@@ -176,6 +178,119 @@ void write_item_header(Writer& writer, Tag tag, std::uint32_t value_length) {
 	return raw_length + (raw_length & 1u);
 }
 
+struct pixel_sequence_offset_tables {
+	std::vector<std::uint32_t> basic_offsets{};
+	std::vector<std::uint64_t> extended_offsets{};
+	std::vector<std::uint64_t> extended_lengths{};
+	bool use_extended{false};
+};
+
+[[nodiscard]] std::vector<std::uint8_t> pack_u64_values(
+    const std::vector<std::uint64_t>& values) {
+	std::vector<std::uint8_t> bytes{};
+	if (values.empty()) {
+		return bytes;
+	}
+	const auto total_bytes = values.size() * sizeof(std::uint64_t);
+	bytes.reserve(total_bytes);
+	for (const auto value : values) {
+		const auto start = bytes.size();
+		bytes.resize(start + sizeof(std::uint64_t));
+		endian::store_le<std::uint64_t>(bytes.data() + start, value);
+	}
+	return bytes;
+}
+
+[[nodiscard]] pixel_sequence_offset_tables compute_pixel_sequence_offset_tables(
+    const PixelSequence& pixel_sequence, const InStream* seq_stream) {
+	constexpr std::size_t kItemHeaderBytes = 8u;
+	pixel_sequence_offset_tables tables{};
+	std::size_t next_frame_offset = 0u;
+	bool basic_offset_table_overflow = false;
+	bool eot_eligible = true;
+
+	for (std::size_t frame_index = 0; frame_index < pixel_sequence.number_of_frames(); ++frame_index) {
+		const PixelFrame* frame = pixel_sequence.frame(frame_index);
+		if (!frame) {
+			continue;
+		}
+
+		std::size_t frame_fragment_count = 0;
+		std::uint64_t frame_offset = 0;
+		std::uint64_t frame_length = 0;
+
+		const auto append_fragment = [&](std::size_t fragment_length) {
+			if (frame_fragment_count == 0) {
+				frame_offset = static_cast<std::uint64_t>(next_frame_offset);
+				if (!basic_offset_table_overflow) {
+					if (next_frame_offset > std::numeric_limits<std::uint32_t>::max()) {
+						basic_offset_table_overflow = true;
+						tables.basic_offsets.clear();
+					} else {
+						tables.basic_offsets.push_back(static_cast<std::uint32_t>(next_frame_offset));
+					}
+				}
+			}
+			++frame_fragment_count;
+			if (frame_fragment_count > 1) {
+				eot_eligible = false;
+			}
+			if (fragment_length >
+			    std::numeric_limits<std::uint64_t>::max() - frame_length) {
+				diag::error_and_throw(
+				    "write_to_stream reason=encapsulated frame length exceeds uint64 range");
+			}
+			frame_length += static_cast<std::uint64_t>(fragment_length);
+
+			const auto full_fragment_length = padded_length(fragment_length);
+			if (next_frame_offset > std::numeric_limits<std::size_t>::max() - kItemHeaderBytes ||
+			    full_fragment_length >
+			        std::numeric_limits<std::size_t>::max() - next_frame_offset - kItemHeaderBytes) {
+				diag::error_and_throw(
+				    "write_to_stream reason=encapsulated pixel frame size exceeds size_t range");
+			}
+			next_frame_offset += kItemHeaderBytes + full_fragment_length;
+		};
+
+		const auto encoded_data = frame->encoded_data_view();
+		if (!encoded_data.empty()) {
+			append_fragment(encoded_data.size());
+		} else {
+			const auto& fragments = frame->fragments();
+			for (const auto& fragment : fragments) {
+				if (!seq_stream) {
+					diag::error_and_throw(
+					    "write_to_stream reason=pixel fragment references stream but stream is null");
+				}
+				if (fragment.offset > seq_stream->end_offset() ||
+				    fragment.length > seq_stream->end_offset() - fragment.offset) {
+					diag::error_and_throw(
+					    "write_to_stream reason=pixel fragment out of bounds offset=0x{:X} length={}",
+					    fragment.offset, fragment.length);
+				}
+				append_fragment(fragment.length);
+			}
+		}
+
+		if (frame_fragment_count == 0) {
+			eot_eligible = false;
+			continue;
+		}
+		tables.extended_offsets.push_back(frame_offset);
+		tables.extended_lengths.push_back(frame_length);
+	}
+
+	if (basic_offset_table_overflow && eot_eligible && !tables.extended_offsets.empty() &&
+	    tables.extended_offsets.size() == tables.extended_lengths.size()) {
+		tables.use_extended = true;
+		tables.basic_offsets.clear();
+	} else {
+		tables.extended_offsets.clear();
+		tables.extended_lengths.clear();
+	}
+	return tables;
+}
+
 template <typename Writer>
 void write_non_sequence_element(Writer& writer, Tag tag, VR vr, std::span<const std::uint8_t> value,
     bool explicit_vr) {
@@ -226,14 +341,28 @@ void write_pixel_sequence_element(const DataElement& element, Writer& writer,
 		diag::error_and_throw("write_to_stream reason=PX element has null pixel sequence pointer");
 	}
 
+	const InStream* seq_stream = pixel_sequence->stream();
+	const auto offset_tables = compute_pixel_sequence_offset_tables(*pixel_sequence, seq_stream);
+	if (offset_tables.use_extended) {
+		const auto extended_offsets_bytes = pack_u64_values(offset_tables.extended_offsets);
+		const auto extended_lengths_bytes = pack_u64_values(offset_tables.extended_lengths);
+		write_non_sequence_element(
+		    writer, kExtendedOffsetTableTag, VR::OV, extended_offsets_bytes, explicit_vr);
+		write_non_sequence_element(
+		    writer, kExtendedOffsetTableLengthsTag, VR::OV, extended_lengths_bytes, explicit_vr);
+	}
+
 	const VR pixel_vr = explicit_vr ? VR::OB : VR::None;
 	write_element_header(
 	    writer, element.tag(), pixel_vr, 0xFFFFFFFFu, true, explicit_vr);
 
-	// Keep BOT empty in Minimum Viable Product for fast write path.
-	write_item_header(writer, kItemTag, 0u);
+	const auto basic_offset_table_length = checked_u32(
+	    offset_tables.basic_offsets.size() * sizeof(std::uint32_t), "basic offset table length");
+	write_item_header(writer, kItemTag, basic_offset_table_length);
+	for (const auto offset : offset_tables.basic_offsets) {
+		write_u32(writer, offset);
+	}
 
-	const InStream* seq_stream = pixel_sequence->stream();
 	const auto write_fragment = [&](std::span<const std::uint8_t> fragment) {
 		const auto full_length = padded_length(fragment.size());
 		write_item_header(
@@ -296,8 +425,16 @@ void write_data_element(const DataElement& element, Writer& writer,
 template <typename Writer>
 void write_dataset(const DataSet& dataset, Writer& writer, bool explicit_vr,
     bool skip_group_0002) {
+	const DataElement* pixel_data_element = dataset.get_dataelement(kPixelDataTag);
+	const bool has_encapsulated_pixel_data = pixel_data_element &&
+	    !pixel_data_element->is_missing() && pixel_data_element->vr().is_pixel_sequence();
 	for (const auto& element : dataset) {
 		if (skip_group_0002 && element.tag().group() == 0x0002u) {
+			continue;
+		}
+		if (has_encapsulated_pixel_data &&
+		    (element.tag() == kExtendedOffsetTableTag ||
+		        element.tag() == kExtendedOffsetTableLengthsTag)) {
 			continue;
 		}
 		write_data_element(element, writer, explicit_vr);

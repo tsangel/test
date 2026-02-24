@@ -1557,6 +1557,15 @@ int main() {
 	if (!pix_roundtrip->vr().is_pixel_sequence()) fail("roundtrip pixel data should be pixel sequence");
 	auto* pix_value = pix_roundtrip->as_pixel_sequence();
 	if (!pix_value || pix_value->number_of_frames() != 1) fail("roundtrip pixel frame count mismatch");
+	if (pix_value->basic_offset_table_count() != 1) {
+		fail("roundtrip pixel sequence should include basic offset table entry");
+	}
+	if (!generated_roundtrip->get_dataelement("ExtendedOffsetTable"_tag)->is_missing()) {
+		fail("roundtrip should not emit ExtendedOffsetTable for small encapsulated payload");
+	}
+	if (!generated_roundtrip->get_dataelement("ExtendedOffsetTableLengths"_tag)->is_missing()) {
+		fail("roundtrip should not emit ExtendedOffsetTableLengths for small encapsulated payload");
+	}
 	const auto encoded_span = pix_value->frame_encoded_span(0);
 	if (encoded_span.size() != 4 ||
 	    encoded_span[0] != 0x01 || encoded_span[1] != 0x02 ||

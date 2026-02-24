@@ -2,6 +2,7 @@
 #include "diagnostics.h"
 #include "dicom_endian.h"
 
+#include <limits>
 #include <utility>
 
 using namespace dicom::literals;
@@ -14,6 +15,10 @@ inline bool ends_with_ffd9(std::span<const std::uint8_t> s) {
 		--tail;
 	}
 	return tail >= 2 && s[tail - 2] == 0xFF && s[tail - 1] == 0xD9;
+}
+
+[[nodiscard]] inline std::size_t padded_fragment_length(std::size_t length) {
+	return length + (length & 1u);
 }
 
 // Detects whether the given fragment likely starts a new frame for transfer
@@ -309,6 +314,11 @@ void PixelSequence::read_attached_stream() {
 	if (!stream_) {
 		diag::error_and_throw("PixelSequence::read_attached_stream reason=null stream");
 	}
+	basic_offset_table_offset_ = 0;
+	basic_offset_table_count_ = 0;
+	extended_offset_table_offset_ = 0;
+	extended_offset_table_count_ = 0;
+	frames_.clear();
 
 	std::array<std::uint8_t, 8> buf8{};
 	
@@ -416,23 +426,170 @@ void PixelSequence::read_attached_stream() {
     	// ; frame->load already ate that item.
     	stream->seek(last_frame_end);
 	} else {
-		// Basic Offset Table with NO Item Value
-		// Table A.4-1. Example for Elements of an Encoded Single-frame Image
-		// Defined as a Sequence of Three Fragments Without Basic Offset Table Item Value
+		const DataElement* extended_offset_table =
+		    root_dataset_ ? root_dataset_->get_dataelement("ExtendedOffsetTable"_tag) : nullptr;
+		const DataElement* extended_offset_table_lengths =
+		    root_dataset_ ? root_dataset_->get_dataelement("ExtendedOffsetTableLengths"_tag) : nullptr;
+		const bool has_extended_offset_table =
+		    extended_offset_table && !extended_offset_table->is_missing();
+		const bool has_extended_offset_table_lengths =
+		    extended_offset_table_lengths && !extended_offset_table_lengths->is_missing();
+		if (has_extended_offset_table != has_extended_offset_table_lengths) {
+			diag::error_and_throw(
+			    "PixelSequence::read_attached_stream stream={} reason=ExtendedOffsetTable and ExtendedOffsetTableLengths must both be present",
+			    stream->identifier());
+		}
 
-		// First frame starts immediately after the Basic Offset Table.
-		base_offset_ = stream->tell();
+		if (has_extended_offset_table && has_extended_offset_table_lengths) {
+			const auto offset_bytes = extended_offset_table->value_span();
+			const auto length_bytes = extended_offset_table_lengths->value_span();
+			if (offset_bytes.empty() || length_bytes.empty()) {
+				diag::error_and_throw(
+				    "PixelSequence::read_attached_stream stream={} reason=ExtendedOffsetTable attributes must not be empty",
+				    stream->identifier());
+			}
+			if ((offset_bytes.size() % sizeof(std::uint64_t)) != 0 ||
+			    (length_bytes.size() % sizeof(std::uint64_t)) != 0 ||
+			    offset_bytes.size() != length_bytes.size()) {
+				diag::error_and_throw(
+				    "PixelSequence::read_attached_stream stream={} reason=ExtendedOffsetTable and ExtendedOffsetTableLengths must be same-size 64-bit arrays",
+				    stream->identifier());
+			}
 
-		PixelFrame* frame = add_frame();
+			extended_offset_table_offset_ = extended_offset_table->offset();
+			extended_offset_table_count_ =
+			    offset_bytes.size() / sizeof(std::uint64_t);
+			base_offset_ = stream->tell();
 
-		while (true) {
-			auto last_tag = frame->read_from_stream(stream, stream->bytes_remaining(), transfer_syntax_, false /*length_from_bot*/);
-			if (last_tag == "fffe,e0dd"_tag)
-				break;
-			if (stream->bytes_remaining() < 8) // a fragment takes a least 8 bytes
-				break;
+			std::uint64_t previous_offset_u64 = 0;
+			std::size_t max_frame_end = base_offset_;
+			for (std::size_t i = 0; i < extended_offset_table_count_; ++i) {
+				const auto frame_item_offset_u64 =
+				    endian::load_le<std::uint64_t>(
+				        offset_bytes.data() + i * sizeof(std::uint64_t));
+				const auto frame_length_u64 =
+				    endian::load_le<std::uint64_t>(
+				        length_bytes.data() + i * sizeof(std::uint64_t));
+				if (i > 0 && frame_item_offset_u64 < previous_offset_u64) {
+					diag::error_and_throw(
+					    "PixelSequence::read_attached_stream stream={} reason=ExtendedOffsetTable offsets must be non-decreasing (index={} prev=0x{:X} current=0x{:X})",
+					    stream->identifier(), i, previous_offset_u64, frame_item_offset_u64);
+				}
+				previous_offset_u64 = frame_item_offset_u64;
 
-			frame = add_frame();
+				if (frame_item_offset_u64 >
+				        static_cast<std::uint64_t>(
+				            std::numeric_limits<std::size_t>::max()) ||
+				    frame_length_u64 >
+				        static_cast<std::uint64_t>(
+				            std::numeric_limits<std::size_t>::max())) {
+					diag::error_and_throw(
+					    "PixelSequence::read_attached_stream stream={} reason=ExtendedOffsetTable value exceeds host size_t range",
+					    stream->identifier());
+				}
+
+				const auto frame_item_offset =
+				    static_cast<std::size_t>(frame_item_offset_u64);
+				const auto frame_length =
+				    static_cast<std::size_t>(frame_length_u64);
+				if (frame_item_offset >
+				    std::numeric_limits<std::size_t>::max() - base_offset_) {
+					diag::error_and_throw(
+					    "PixelSequence::read_attached_stream stream={} reason=ExtendedOffsetTable frame offset overflow",
+					    stream->identifier());
+				}
+				const auto absolute_item_offset = base_offset_ + frame_item_offset;
+				if (absolute_item_offset > stream->end_offset() ||
+				    stream->end_offset() - absolute_item_offset < 8) {
+					diag::error_and_throw(
+					    "PixelSequence::read_attached_stream stream={} reason=ExtendedOffsetTable frame item offset out of bounds (offset=0x{:X})",
+					    stream->identifier(), absolute_item_offset);
+				}
+
+				stream->seek(absolute_item_offset);
+				if (stream->read_8bytes(buf8) != 8) {
+					diag::error_and_throw(
+					    "PixelSequence::read_attached_stream stream={} reason=failed to read frame item header from ExtendedOffsetTable offset=0x{:X}",
+					    stream->identifier(), absolute_item_offset);
+				}
+				const Tag frame_item_tag = endian::load_tag_le(buf8.data());
+				const auto frame_item_length =
+				    static_cast<std::size_t>(
+				        endian::load_le<std::uint32_t>(buf8.data() + 4));
+				if (frame_item_tag != "fffe,e000"_tag) {
+					diag::error_and_throw(
+					    "PixelSequence::read_attached_stream stream={} reason=ExtendedOffsetTable frame item must start with (FFFE,E000), got ({:04X},{:04X})",
+					    stream->identifier(), frame_item_tag.group(),
+					    frame_item_tag.element());
+				}
+				const auto max_allowed_item_length =
+				    padded_fragment_length(frame_length);
+				if (frame_item_length < frame_length ||
+				    frame_item_length > max_allowed_item_length) {
+					diag::error_and_throw(
+					    "PixelSequence::read_attached_stream stream={} reason=ExtendedOffsetTableLengths mismatch for frame {} (encoded={}, item={})",
+					    stream->identifier(), i, frame_length,
+					    frame_item_length);
+				}
+				if (frame_item_length > stream->bytes_remaining()) {
+					diag::error_and_throw(
+					    "PixelSequence::read_attached_stream stream={} reason=frame item length exceeds remaining bytes for frame {}",
+					    stream->identifier(), i);
+				}
+
+				const auto fragment_value_offset = stream->tell();
+				const auto fragment_end = fragment_value_offset + frame_item_length;
+				if (fragment_end < fragment_value_offset ||
+				    fragment_end > stream->end_offset()) {
+					diag::error_and_throw(
+					    "PixelSequence::read_attached_stream stream={} reason=frame item exceeds stream bounds for frame {}",
+					    stream->identifier(), i);
+				}
+				auto* frame = add_frame();
+				frame->set_fragments(
+				    {PixelFragment{fragment_value_offset, frame_item_length}});
+				if (fragment_end > max_frame_end) {
+					max_frame_end = fragment_end;
+				}
+			}
+
+			stream->seek(max_frame_end);
+			if (stream->read_8bytes(buf8) != 8) {
+				diag::error_and_throw(
+				    "PixelSequence::read_attached_stream stream={} reason=missing sequence delimitation after ExtendedOffsetTable frames",
+				    stream->identifier());
+			}
+			const Tag sequence_end_tag = endian::load_tag_le(buf8.data());
+			const auto sequence_end_length =
+			    static_cast<std::size_t>(
+			        endian::load_le<std::uint32_t>(buf8.data() + 4));
+			if (sequence_end_tag != "fffe,e0dd"_tag ||
+			    sequence_end_length != 0) {
+				diag::error_and_throw(
+				    "PixelSequence::read_attached_stream stream={} reason=invalid sequence delimitation after ExtendedOffsetTable frames",
+				    stream->identifier());
+			}
+		} else {
+			// Basic Offset Table with NO Item Value
+			// Table A.4-1. Example for Elements of an Encoded Single-frame Image
+			// Defined as a Sequence of Three Fragments Without Basic Offset Table Item Value
+
+			// First frame starts immediately after the Basic Offset Table.
+			base_offset_ = stream->tell();
+
+			PixelFrame* frame = add_frame();
+
+			while (true) {
+				auto last_tag = frame->read_from_stream(
+				    stream, stream->bytes_remaining(), transfer_syntax_,
+				    false /*length_from_bot*/);
+				if (last_tag == "fffe,e0dd"_tag)
+					break;
+				if (stream->bytes_remaining() < 8) // a fragment takes a least 8 bytes
+					break;
+
+				frame = add_frame();
+			}
 		}
 	}
 
