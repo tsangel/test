@@ -180,6 +180,7 @@ Current behavior:
 
 - native -> encapsulated: supported only when target transfer syntax is encode-capable
 - encapsulated -> native: supported (decode to native)
-- encapsulated -> encapsulated: not supported yet
+- encapsulated -> encapsulated: supported when target transfer syntax is encode-capable
 
-So re-encoding between encapsulated syntaxes requires explicit decode + `set_pixel_data` flow.
+`encapsulated -> encapsulated` is implemented as decode-to-native + re-encode in a single
+`set_transfer_syntax(...)` call (not codestream pass-through).

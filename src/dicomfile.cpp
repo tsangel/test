@@ -180,6 +180,8 @@ struct decoded_native_pixel_buffer {
 	decode_options.planar_out = info.planar_configuration;
 	decode_options.alignment = 1;
 	decode_options.scaled = false;
+	// Keep codestream component domain during transfer-syntax transcoding.
+	decode_options.decode_mct = false;
 	const auto decode_strides = file.calc_decode_strides(decode_options);
 	if (decode_strides.frame == 0) {
 		diag::error_and_throw(
@@ -357,6 +359,15 @@ void convert_encapsulated_pixel_data_to_native(DicomFile& file) {
 	file.set_native_pixel_data(
 	    std::move(decoded.bytes),
 	    native_pixel_vr_from_bits_allocated(storage_bits));
+}
+
+void transcode_encapsulated_pixel_data_to_encapsulated(DicomFile& file,
+    uid::WellKnown target_transfer_syntax,
+    const pixel::CodecOptions& codec_opt_override) {
+	convert_encapsulated_pixel_data_to_native(file);
+	auto source =
+	    build_set_pixel_source_from_native_pixel_data(file, target_transfer_syntax);
+	file.set_pixel_data(target_transfer_syntax, source, codec_opt_override);
 }
 
 struct lut_descriptor_values {
@@ -942,19 +953,24 @@ void DicomFile::apply_transfer_syntax(uid::WellKnown transfer_syntax,
 			    source_transfer_syntax.valid() && source_transfer_syntax == transfer_syntax;
 			if (already_target_transfer_syntax) {
 				// Keep existing encoded PixelData as-is.
-			} else if (!has_encapsulated_pixel_data && transfer_syntax.supports_pixel_encode()) {
+			} else if (!has_encapsulated_pixel_data) {
+				if (!transfer_syntax.supports_pixel_encode()) {
+					diag::error_and_throw(
+					    "DicomFile::set_transfer_syntax file={} source_ts={} target_ts={} reason=target encapsulated transfer syntax does not support native pixel encoding",
+					    path(), source_transfer_syntax.value(), transfer_syntax.value());
+				}
 				auto source =
 				    build_set_pixel_source_from_native_pixel_data(*this, transfer_syntax);
 				set_pixel_data(transfer_syntax, source, codec_opt_override);
 				return;
-			} else if (!has_encapsulated_pixel_data) {
+			} else if (!transfer_syntax.supports_pixel_encode()) {
 				diag::error_and_throw(
-				    "DicomFile::set_transfer_syntax file={} source_ts={} target_ts={} reason=encoding native PixelData to encapsulated transfer syntax is not supported yet (supported targets include: EncapsulatedUncompressedExplicitVRLittleEndian, RLELossless, JPEG2000*, HTJ2K*, JPEG-LS, JPEG Baseline/Extended/Lossless, JPEGXL/JPEGXLLossless)",
+				    "DicomFile::set_transfer_syntax file={} source_ts={} target_ts={} reason=target encapsulated transfer syntax does not support encapsulated-to-encapsulated transcoding",
 				    path(), source_transfer_syntax.value(), transfer_syntax.value());
 			} else {
-				diag::error_and_throw(
-				    "DicomFile::set_transfer_syntax file={} source_ts={} target_ts={} reason=transcoding between encapsulated transfer syntaxes is not supported yet (supported targets for native->encapsulated include: EncapsulatedUncompressedExplicitVRLittleEndian, RLELossless, JPEG2000*, HTJ2K*, JPEG-LS, JPEG Baseline/Extended/Lossless, JPEGXL/JPEGXLLossless)",
-				    path(), source_transfer_syntax.value(), transfer_syntax.value());
+				transcode_encapsulated_pixel_data_to_encapsulated(
+				    *this, transfer_syntax, codec_opt_override);
+				return;
 			}
 		} else if (has_encapsulated_pixel_data && !target_uses_encapsulated_pixel_data) {
 			convert_encapsulated_pixel_data_to_native(*this);

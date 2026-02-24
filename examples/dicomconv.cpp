@@ -30,9 +30,13 @@ struct CliOptions {
 };
 
 void print_transfer_syntax_list() {
-	std::cerr << "\nAvailable Transfer Syntax UIDs (keyword = UID):\n";
+	std::cerr << "\nAvailable Transfer Syntax UIDs supported by dicomconv (keyword = UID):\n";
 	for (const auto& entry : dicom::kUidRegistry) {
 		if (entry.uid_type != dicom::UidType::TransferSyntax) {
+			continue;
+		}
+		const auto uid = dicom::uid::from_value(entry.value);
+		if (!uid || !uid->supports_pixel_encode()) {
 			continue;
 		}
 		if (entry.keyword.empty()) {
@@ -96,20 +100,50 @@ void print_usage(const char* prog, bool include_transfer_syntax_list) {
 	    << "  - DICOM keyword or UID value (for example: JPEG2000, 1.2.840.10008.1.2.4.90)\n"
 	    << "  - Short aliases: jpeg, jpeglossless, jpegls, jpegls-near-lossless,\n"
 	    << "                   jpeg2k, jpeg2k-lossless, jpeg2k-mc, htj2k, htj2k-lossless,\n"
-	    << "                   jpegxl, jpegxl-lossless, jpegxl-jpeg-recompression, rle\n"
+	    << "                   jpegxl, jpegxl-lossless, rle\n"
 	    << "\n"
 	    << "Options:\n"
 	    << "  --codec TYPE              auto|none|rle|jpeg|jpegls|j2k|htj2k|jpegxl (default: auto)\n"
 	    << "  --quality N               JPEG quality [1,100]\n"
 	    << "  --near-lossless-error N   JPEG-LS NEAR [0,255]\n"
-	    << "  --target-psnr V           JPEG2000/HTJ2K lossy target PSNR\n"
-	    << "  --target-bpp V            JPEG2000/HTJ2K lossy target bits-per-pixel\n"
+	    << "  --target-psnr V           JPEG2000/HTJ2K lossy target PSNR [>=0]\n"
+	    << "  --target-bpp V            JPEG2000/HTJ2K lossy target bits-per-pixel [>=0]\n"
 	    << "  --distance V              JPEG-XL distance [0,25] (0: lossless)\n"
 	    << "  --effort N                JPEG-XL effort [1,10]\n"
 	    << "  --threads N               JPEG2000/HTJ2K/JPEG-XL encoder threads (-1:auto,0:library,>0:count)\n"
 	    << "  --color-transform         Enable JPEG2000/HTJ2K MCT (RGB->YBR_*)\n"
 	    << "  --no-color-transform      Disable JPEG2000/HTJ2K MCT\n"
 	    << "  -h, --help                Show this help\n"
+	    << "\n"
+	    << "Codec-specific options:\n"
+	    << "  auto   : no codec-specific options\n"
+	    << "  none   : no codec-specific options\n"
+	    << "  rle    : no codec-specific options\n"
+	    << "  jpeg   : --quality N [1,100]\n"
+	    << "  jpegls : --near-lossless-error N [0,255]\n"
+	    << "           (JPEGLSLossless requires 0, JPEGLSNearLossless requires >0)\n"
+	    << "  j2k    : --target-psnr V [>=0], --target-bpp V [>=0],\n"
+	    << "           --threads N (-1:auto,0:library,>0),\n"
+	    << "           --color-transform | --no-color-transform\n"
+	    << "           first try: psnr=45 (balanced), 40 (smaller), 55 (higher quality)\n"
+	    << "           first try: bpp=1.5 (balanced), 1.0 (smaller), 2.0 (higher quality)\n"
+	    << "           if both are set, psnr takes precedence\n"
+	    << "  htj2k  : --target-psnr V [>=0], --target-bpp V [>=0],\n"
+	    << "           --threads N (-1:auto,0:library,>0),\n"
+	    << "           --color-transform | --no-color-transform\n"
+	    << "           first try: psnr=50 (balanced), 45 (smaller), 60 (higher quality)\n"
+	    << "           first try: bpp=1.5 (balanced), 1.0 (smaller), 2.0 (higher quality)\n"
+	    << "           if both are set, psnr takes precedence\n"
+	    << "           note: target-bpp is usually more predictable than target-psnr\n"
+	    << "  jpegxl : --distance V [0,25], --effort N [1,10],\n"
+	    << "           --threads N (-1:auto,0:library,>0)\n"
+	    << "           (JPEGXLLossless requires distance=0, JPEGXL requires distance>0)\n"
+	    << "\n"
+	    << "Modality presets (lossy j2k/htj2k starting points):\n"
+	    << "  CT : psnr=45 or bpp=1.5\n"
+	    << "  MR : psnr=43 or bpp=1.2\n"
+	    << "  CR : psnr=48 or bpp=2.0\n"
+	    << "  verify visually and adjust by task/site policy\n"
 	    << "\n"
 	    << "Examples:\n"
 	    << "  " << prog << " in.dcm out.dcm ExplicitVRLittleEndian\n"
@@ -351,11 +385,6 @@ std::optional<dicom::uid::WellKnown> resolve_transfer_syntax_alias(std::string_v
 	if (normalized == "jpegxllossless" || normalized == "jxllossless") {
 		return "JPEGXLLossless"_uid;
 	}
-	if (normalized == "jpegxljpegrecompression" ||
-	    normalized == "jpegxlrecompression" ||
-	    normalized == "jxljpegrecompression") {
-		return "JPEGXLJPEGRecompression"_uid;
-	}
 
 	return std::nullopt;
 }
@@ -370,6 +399,10 @@ dicom::uid::WellKnown resolve_transfer_syntax(const std::string& text) {
 	}
 	if (uid->uid_type() != dicom::UidType::TransferSyntax) {
 		throw std::invalid_argument("UID is not a Transfer Syntax: " + text);
+	}
+	if (!uid->supports_pixel_encode()) {
+		throw std::invalid_argument(
+		    "Transfer Syntax is not supported by dicomconv target encoding: " + text);
 	}
 	return *uid;
 }

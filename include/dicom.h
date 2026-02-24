@@ -1721,6 +1721,8 @@ public:
 	/// This updates both runtime parse/write state and file meta information.
 	/// When `codec_opt` is AutoCodecOptions, apply_transfer_syntax chooses a default codec policy
 	/// from the target transfer syntax.
+	/// For encapsulated PixelData, encapsulated->encapsulated conversion is handled as
+	/// decode-to-native + re-encode when the target transfer syntax supports pixel encode.
 	void set_transfer_syntax(uid::WellKnown transfer_syntax,
 	    pixel::CodecOptions codec_opt = pixel::AutoCodecOptions{});
 	[[nodiscard]] uid::WellKnown transfer_syntax_uid() const { return transfer_syntax_uid_; }

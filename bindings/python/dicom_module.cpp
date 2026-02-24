@@ -2047,6 +2047,23 @@ m.def("transfer_syntax_uids",
     },
     "Return all well-known Transfer Syntax UIDs in registry order.");
 
+m.def("transfer_syntax_uids_encode_supported",
+    []() {
+	    nb::list result;
+	    for (const auto& entry : dicom::kUidRegistry) {
+		    if (entry.uid_type != dicom::UidType::TransferSyntax) {
+			    continue;
+		    }
+		    if (auto uid = dicom::uid::from_value(entry.value)) {
+			    if (uid->supports_pixel_encode()) {
+				    result.append(nb::cast(*uid));
+			    }
+		    }
+	    }
+	    return result;
+    },
+    "Return Transfer Syntax UIDs supported for target encoding in set_transfer_syntax.");
+
 m.def("uid_prefix",
     []() {
 	    const auto value = dicom::uid::uid_prefix();
@@ -2172,6 +2189,7 @@ m.def("generate_study_instance_uid",
 	    "uid_from_value",
 	    "uid_from_keyword",
 	    "transfer_syntax_uids",
+	    "transfer_syntax_uids_encode_supported",
 	    "uid_prefix",
 	    "implementation_class_uid",
 	    "implementation_version_name",

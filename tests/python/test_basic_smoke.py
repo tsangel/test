@@ -308,3 +308,23 @@ def test_write_roundtrip_sequence_and_pixel(tmp_path):
 	from_file = dicom.read_file(str(out_path))
 	assert from_file.get_dataelement("ReferencedStudySequence").is_sequence
 	assert from_file.get_dataelement("PixelData").is_pixel_sequence
+
+
+def test_set_transfer_syntax_encapsulated_to_encapsulated_cycle():
+	df = dicom.read_file(_test_file())
+	baseline_frame = df.pixel_data(0)
+
+	df.set_transfer_syntax("RLELossless")
+	assert df.transfer_syntax_uid.keyword == "RLELossless"
+	assert df.get_dataelement("PixelData").is_pixel_sequence
+	assert df.pixel_data(0) == baseline_frame
+
+	df.set_transfer_syntax("JPEG2000Lossless")
+	assert df.transfer_syntax_uid.keyword == "JPEG2000Lossless"
+	assert df.get_dataelement("PixelData").is_pixel_sequence
+	assert df.pixel_data(0) == baseline_frame
+
+	df.set_transfer_syntax("JPEGLSLossless")
+	assert df.transfer_syntax_uid.keyword == "JPEGLSLossless"
+	assert df.get_dataelement("PixelData").is_pixel_sequence
+	assert df.pixel_data(0) == baseline_frame

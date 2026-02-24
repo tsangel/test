@@ -21,6 +21,11 @@ namespace diag = dicom::diag;
 
 namespace {
 
+struct sample_value_range {
+	std::int32_t min_value{0};
+	std::int32_t max_value{0};
+};
+
 [[nodiscard]] double resolve_htj2k_qstep(std::size_t samples_per_pixel, int bits_stored,
     const Htj2kOptions& options, std::string_view function_name, std::string_view file_path) {
 	if (options.target_bpp < 0.0 || options.target_psnr < 0.0) {
@@ -45,6 +50,42 @@ namespace {
 		    function_name, file_path);
 	}
 	return std::clamp(qstep, 0.00001, 0.5);
+}
+
+[[nodiscard]] sample_value_range measure_source_sample_range(
+    std::span<const std::uint8_t> frame_data, const SourceFrameLayout& source_layout,
+    std::size_t row_stride, std::size_t rows, std::size_t cols, std::size_t samples_per_pixel,
+    std::size_t bytes_per_sample, int bits_stored, bool source_signed,
+    std::string_view function_name, std::string_view file_path) {
+	const auto* frame_ptr = frame_data.data();
+	std::int32_t min_value = std::numeric_limits<std::int32_t>::max();
+	std::int32_t max_value = std::numeric_limits<std::int32_t>::min();
+
+	for (std::size_t component = 0; component < samples_per_pixel; ++component) {
+		for (std::size_t row = 0; row < rows; ++row) {
+			const std::uint8_t* source_row = nullptr;
+			if (source_layout.source_is_planar) {
+				source_row = frame_ptr + component * source_layout.plane_stride + row * row_stride;
+			} else {
+				source_row = frame_ptr + row * row_stride;
+			}
+			for (std::size_t col = 0; col < cols; ++col) {
+				const std::uint8_t* sample_ptr = nullptr;
+				if (source_layout.source_is_planar) {
+					sample_ptr = source_row + col * bytes_per_sample;
+				} else {
+					sample_ptr = source_row +
+					    (col * samples_per_pixel + component) * bytes_per_sample;
+				}
+				const auto sample_value = load_i8_or_i16_sample_from_source(sample_ptr,
+				    bytes_per_sample, source_signed, bits_stored, function_name, file_path);
+				min_value = std::min(min_value, sample_value);
+				max_value = std::max(max_value, sample_value);
+			}
+		}
+	}
+
+	return {min_value, max_value};
 }
 
 void fill_openjph_line_from_source(ojph::line_buf* line, std::span<const std::uint8_t> frame_data,
@@ -146,99 +187,168 @@ std::vector<std::uint8_t> encode_htj2k_frame(std::span<const std::uint8_t> frame
 	const auto source_layout = make_source_frame_layout(frame_data, rows, cols, samples_per_pixel,
 	    bytes_per_sample, source_planar, row_stride, kFunctionName, file_path);
 	const bool source_signed = pixel_representation == 1;
-	const double qstep = lossless
-	                         ? 0.0
-	                         : resolve_htj2k_qstep(
-	                               samples_per_pixel, bits_stored, options, kFunctionName, file_path);
-
-	try {
-		ojph::codestream codestream{};
-		codestream.set_planar(false);
-
-		auto siz = codestream.access_siz();
-		siz.set_image_extent(ojph::point(static_cast<ojph::ui32>(cols), static_cast<ojph::ui32>(rows)));
-		siz.set_num_components(static_cast<ojph::ui32>(samples_per_pixel));
-		for (std::size_t component = 0; component < samples_per_pixel; ++component) {
-			siz.set_component(static_cast<ojph::ui32>(component), ojph::point(1, 1),
-			    static_cast<ojph::ui32>(bits_stored), source_signed);
-		}
-		siz.set_image_offset(ojph::point(0, 0));
-		siz.set_tile_size(ojph::size(static_cast<ojph::ui32>(cols), static_cast<ojph::ui32>(rows)));
-		siz.set_tile_offset(ojph::point(0, 0));
-
-		auto cod = codestream.access_cod();
-		cod.set_progression_order(rpcl_progression ? "RPCL" : "LRCP");
-		cod.set_color_transform(use_multicomponent_transform);
-		cod.set_reversible(lossless);
-		if (!lossless) {
-			codestream.access_qcd().set_irrev_quant(static_cast<float>(qstep));
-		}
-
-		ojph::mem_outfile outfile{};
-		outfile.open();
-		codestream.write_headers(&outfile);
-
-		ojph::ui32 next_component = 0;
-		ojph::line_buf* line = codestream.exchange(nullptr, next_component);
-		if (codestream.is_planar()) {
-			for (std::size_t component = 0; component < samples_per_pixel; ++component) {
-				for (std::size_t row = 0; row < rows; ++row) {
-					if (next_component != static_cast<ojph::ui32>(component)) {
-						diag::error_and_throw(
-						    "{} file={} reason=OpenJPH planar exchange order mismatch (expected={}, got={})",
-						    kFunctionName, file_path, component, next_component);
-					}
-					fill_openjph_line_from_source(line, frame_data, source_layout, row_stride, row,
-					    component, cols, samples_per_pixel, bytes_per_sample, bits_stored,
-					    source_signed, kFunctionName, file_path);
-					line = codestream.exchange(line, next_component);
-				}
-			}
-		} else {
-			for (std::size_t row = 0; row < rows; ++row) {
-				for (std::size_t component = 0; component < samples_per_pixel; ++component) {
-					if (next_component != static_cast<ojph::ui32>(component)) {
-						diag::error_and_throw(
-						    "{} file={} reason=OpenJPH interleaved exchange order mismatch (expected={}, got={})",
-						    kFunctionName, file_path, component, next_component);
-					}
-					fill_openjph_line_from_source(line, frame_data, source_layout, row_stride, row,
-					    component, cols, samples_per_pixel, bytes_per_sample, bits_stored,
-					    source_signed, kFunctionName, file_path);
-					line = codestream.exchange(line, next_component);
-				}
-			}
-		}
-
-		codestream.flush();
-		codestream.close();
-
-		const auto used_size = outfile.get_used_size();
-		if (used_size == 0 || !outfile.get_data()) {
-			diag::error_and_throw(
-			    "{} file={} reason=OpenJPH produced empty codestream",
-			    kFunctionName, file_path);
-		}
-
-		std::vector<std::uint8_t> encoded(used_size);
-		std::memcpy(encoded.data(), outfile.get_data(), used_size);
-		outfile.close();
-		return encoded;
-	} catch (const std::exception& e) {
+	if (options.target_bpp < 0.0 || options.target_psnr < 0.0) {
 		diag::error_and_throw(
-		    "{} file={} reason=OpenJPH encode failed ({})",
-		    kFunctionName, file_path, e.what());
-	} catch (const char* e) {
-		diag::error_and_throw(
-		    "{} file={} reason=OpenJPH encode failed ({})",
-		    kFunctionName, file_path, e ? e : "unknown error");
-	} catch (...) {
-		diag::error_and_throw(
-		    "{} file={} reason=OpenJPH encode failed (unknown exception)",
+		    "{} file={} reason=Htj2kOptions.target_bpp/target_psnr must be >= 0",
 		    kFunctionName, file_path);
 	}
+	Htj2kOptions effective_options = options;
+	if (!lossless && options.target_psnr > 0.0 && bits_stored > 0 && bits_stored < 31) {
+		const auto source_range = measure_source_sample_range(frame_data, source_layout, row_stride,
+		    rows, cols, samples_per_pixel, bytes_per_sample, bits_stored, source_signed,
+		    kFunctionName, file_path);
+		const std::int64_t dynamic_range_i64 = static_cast<std::int64_t>(source_range.max_value) -
+		    static_cast<std::int64_t>(source_range.min_value);
+		if (dynamic_range_i64 > 0) {
+			const double nominal_peak =
+			    static_cast<double>((std::uint64_t{1} << static_cast<unsigned>(bits_stored)) - 1u);
+			const double dynamic_peak = static_cast<double>(dynamic_range_i64);
+			if (dynamic_peak > 0.0 && nominal_peak > dynamic_peak) {
+				const double correction_db = 20.0 * std::log10(nominal_peak / dynamic_peak);
+				effective_options.target_psnr =
+				    std::clamp(options.target_psnr + correction_db, 0.0, 120.0);
+			}
+		}
+	}
 
-	return {};
+	const auto encode_with_qstep = [&](double qstep) -> std::vector<std::uint8_t> {
+		try {
+			ojph::codestream codestream{};
+			codestream.set_planar(false);
+
+			auto siz = codestream.access_siz();
+			siz.set_image_extent(ojph::point(static_cast<ojph::ui32>(cols), static_cast<ojph::ui32>(rows)));
+			siz.set_num_components(static_cast<ojph::ui32>(samples_per_pixel));
+			for (std::size_t component = 0; component < samples_per_pixel; ++component) {
+				siz.set_component(static_cast<ojph::ui32>(component), ojph::point(1, 1),
+				    static_cast<ojph::ui32>(bits_stored), source_signed);
+			}
+			siz.set_image_offset(ojph::point(0, 0));
+			siz.set_tile_size(ojph::size(static_cast<ojph::ui32>(cols), static_cast<ojph::ui32>(rows)));
+			siz.set_tile_offset(ojph::point(0, 0));
+
+			auto cod = codestream.access_cod();
+			cod.set_progression_order(rpcl_progression ? "RPCL" : "LRCP");
+			cod.set_color_transform(use_multicomponent_transform);
+			cod.set_reversible(lossless);
+			if (!lossless) {
+				codestream.access_qcd().set_irrev_quant(static_cast<float>(qstep));
+			}
+
+			ojph::mem_outfile outfile{};
+			outfile.open();
+			codestream.write_headers(&outfile);
+
+			ojph::ui32 next_component = 0;
+			ojph::line_buf* line = codestream.exchange(nullptr, next_component);
+			if (codestream.is_planar()) {
+				for (std::size_t component = 0; component < samples_per_pixel; ++component) {
+					for (std::size_t row = 0; row < rows; ++row) {
+						if (next_component != static_cast<ojph::ui32>(component)) {
+							diag::error_and_throw(
+							    "{} file={} reason=OpenJPH planar exchange order mismatch (expected={}, got={})",
+							    kFunctionName, file_path, component, next_component);
+						}
+						fill_openjph_line_from_source(line, frame_data, source_layout, row_stride, row,
+						    component, cols, samples_per_pixel, bytes_per_sample, bits_stored,
+						    source_signed, kFunctionName, file_path);
+						line = codestream.exchange(line, next_component);
+					}
+				}
+			} else {
+				for (std::size_t row = 0; row < rows; ++row) {
+					for (std::size_t component = 0; component < samples_per_pixel; ++component) {
+						if (next_component != static_cast<ojph::ui32>(component)) {
+							diag::error_and_throw(
+							    "{} file={} reason=OpenJPH interleaved exchange order mismatch (expected={}, got={})",
+							    kFunctionName, file_path, component, next_component);
+						}
+						fill_openjph_line_from_source(line, frame_data, source_layout, row_stride, row,
+						    component, cols, samples_per_pixel, bytes_per_sample, bits_stored,
+						    source_signed, kFunctionName, file_path);
+						line = codestream.exchange(line, next_component);
+					}
+				}
+			}
+
+			codestream.flush();
+			codestream.close();
+
+			const auto used_size = outfile.get_used_size();
+			if (used_size == 0 || !outfile.get_data()) {
+				diag::error_and_throw(
+				    "{} file={} reason=OpenJPH produced empty codestream",
+				    kFunctionName, file_path);
+			}
+
+			std::vector<std::uint8_t> encoded(used_size);
+			std::memcpy(encoded.data(), outfile.get_data(), used_size);
+			outfile.close();
+			return encoded;
+		} catch (const std::exception& e) {
+			diag::error_and_throw(
+			    "{} file={} reason=OpenJPH encode failed (qstep={} {})",
+			    kFunctionName, file_path, qstep, e.what());
+		} catch (const char* e) {
+			diag::error_and_throw(
+			    "{} file={} reason=OpenJPH encode failed (qstep={} {})",
+			    kFunctionName, file_path, qstep, e ? e : "unknown error");
+		} catch (...) {
+			diag::error_and_throw(
+			    "{} file={} reason=OpenJPH encode failed (qstep={} unknown exception)",
+			    kFunctionName, file_path, qstep);
+		}
+		return {};
+	};
+
+	if (lossless) {
+		return encode_with_qstep(0.0);
+	}
+
+	const bool has_target_psnr = effective_options.target_psnr > 0.0;
+	const bool has_target_bpp = effective_options.target_bpp > 0.0;
+	if (has_target_bpp && !has_target_psnr) {
+		const double target_payload_bytes_f =
+		    (static_cast<double>(rows) * static_cast<double>(cols) * effective_options.target_bpp) /
+		    8.0;
+		const auto target_payload_bytes = static_cast<std::size_t>(
+		    std::max(1.0, std::ceil(target_payload_bytes_f)));
+
+		constexpr int kQstepSearchIterations = 16;
+		double lower_qstep = 0.00001;
+		double upper_qstep = 0.5;
+		std::vector<std::uint8_t> best{};
+		std::size_t best_abs_diff = std::numeric_limits<std::size_t>::max();
+
+		for (int iteration = 0; iteration < kQstepSearchIterations; ++iteration) {
+			// Quantization response is multiplicative; search in log-domain.
+			const double mid_qstep = std::sqrt(lower_qstep * upper_qstep);
+			auto encoded = encode_with_qstep(mid_qstep);
+			const std::size_t encoded_bytes = encoded.size();
+			const std::size_t abs_diff =
+			    encoded_bytes > target_payload_bytes
+			        ? encoded_bytes - target_payload_bytes
+			        : target_payload_bytes - encoded_bytes;
+			if (abs_diff < best_abs_diff) {
+				best_abs_diff = abs_diff;
+				best = std::move(encoded);
+			}
+			if (encoded_bytes > target_payload_bytes) {
+				// Need a smaller codestream; increase quantization.
+				lower_qstep = mid_qstep;
+			} else if (encoded_bytes < target_payload_bytes) {
+				// Need a larger codestream; reduce quantization.
+				upper_qstep = mid_qstep;
+			} else {
+				break;
+			}
+		}
+		return best;
+	}
+
+	const double qstep =
+	    resolve_htj2k_qstep(samples_per_pixel, bits_stored, effective_options, kFunctionName, file_path);
+	return encode_with_qstep(qstep);
 }
 
 void encode_htj2k_pixel_data(DicomFile& file, const EncapsulatedEncodeInput& input,

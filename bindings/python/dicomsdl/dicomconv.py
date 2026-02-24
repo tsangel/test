@@ -54,9 +54,6 @@ TRANSFER_SYNTAX_ALIASES = {
     "jxl": "JPEGXL",
     "jpegxllossless": "JPEGXLLossless",
     "jxllossless": "JPEGXLLossless",
-    "jpegxljpegrecompression": "JPEGXLJPEGRecompression",
-    "jpegxlrecompression": "JPEGXLJPEGRecompression",
-    "jxljpegrecompression": "JPEGXLJPEGRecompression",
 }
 
 HTJ2K_TRANSFER_SYNTAX_KEYWORDS = {
@@ -74,18 +71,14 @@ HTJ2K_TRANSFER_SYNTAX_UID_VALUES = {
 JPEGXL_TRANSFER_SYNTAX_KEYWORDS = {
     "jpegxl",
     "jpegxllossless",
-    "jpegxljpegrecompression",
 }
 
 JPEGXL_TRANSFER_SYNTAX_UID_VALUES = {
     "1.2.840.10008.1.2.4.110",
-    "1.2.840.10008.1.2.4.111",
     "1.2.840.10008.1.2.4.112",
 }
 
 JPEGXL_LOSSLESS_TRANSFER_SYNTAX_UID_VALUES = {"1.2.840.10008.1.2.4.110"}
-
-JPEGXL_JPEG_RECOMP_TRANSFER_SYNTAX_UID_VALUES = {"1.2.840.10008.1.2.4.111"}
 
 
 def normalize_token(text: str) -> str:
@@ -133,12 +126,44 @@ def is_jpegxl_lossless_transfer_syntax(uid: dicom.Uid) -> bool:
     return uid.value in JPEGXL_LOSSLESS_TRANSFER_SYNTAX_UID_VALUES
 
 
-def is_jpegxl_jpeg_recompression_transfer_syntax(uid: dicom.Uid) -> bool:
-    return uid.value in JPEGXL_JPEG_RECOMP_TRANSFER_SYNTAX_UID_VALUES
+def supported_transfer_syntax_uids() -> list[dicom.Uid]:
+    if hasattr(dicom, "transfer_syntax_uids_encode_supported"):
+        return list(dicom.transfer_syntax_uids_encode_supported())
+    return list(dicom.transfer_syntax_uids())
 
 
 def transfer_syntax_help_epilog() -> str:
     lines = [
+        "Codec-specific options:",
+        "  auto   : no codec-specific options",
+        "  none   : no codec-specific options",
+        "  rle    : no codec-specific options",
+        "  jpeg   : --quality N [1,100]",
+        "  jpegls : --near-lossless-error N [0,255]",
+        "           (JPEGLSLossless requires 0, JPEGLSNearLossless requires >0)",
+        "  j2k    : --target-psnr V [>=0], --target-bpp V [>=0],",
+        "           --threads N (-1:auto,0:library,>0),",
+        "           --color-transform | --no-color-transform",
+        "           first try: psnr=45 (balanced), 40 (smaller), 55 (higher quality)",
+        "           first try: bpp=1.5 (balanced), 1.0 (smaller), 2.0 (higher quality)",
+        "           if both are set, psnr takes precedence",
+        "  htj2k  : --target-psnr V [>=0], --target-bpp V [>=0],",
+        "           --threads N (-1:auto,0:library,>0),",
+        "           --color-transform | --no-color-transform",
+        "           first try: psnr=50 (balanced), 45 (smaller), 60 (higher quality)",
+        "           first try: bpp=1.5 (balanced), 1.0 (smaller), 2.0 (higher quality)",
+        "           if both are set, psnr takes precedence",
+        "           note: target-bpp is usually more predictable than target-psnr",
+        "  jpegxl : --distance V [0,25], --effort N [1,10],",
+        "           --threads N (-1:auto,0:library,>0)",
+        "           (JPEGXLLossless requires distance=0, JPEGXL requires distance>0)",
+        "",
+        "Modality presets (lossy j2k/htj2k starting points):",
+        "  CT : psnr=45 or bpp=1.5",
+        "  MR : psnr=43 or bpp=1.2",
+        "  CR : psnr=48 or bpp=2.0",
+        "  verify visually and adjust by task/site policy",
+        "",
         "Examples:",
         "  dicomconv in.dcm out.dcm jpeg --quality 92",
         "  dicomconv in.dcm out.dcm jpegls-near-lossless --near-lossless-error 3",
@@ -153,12 +178,12 @@ def transfer_syntax_help_epilog() -> str:
         "  jpegls / jpegls-near-lossless",
         "  jpeg2k / jpeg2k-lossless / jpeg2k-mc",
         "  htj2k / htj2k-lossless",
-        "  jpegxl / jpegxl-lossless / jpegxl-jpeg-recompression",
+        "  jpegxl / jpegxl-lossless",
         "  rle -> RLELossless",
         "",
-        "Available Transfer Syntax UIDs (keyword = UID):",
+        "Available Transfer Syntax UIDs supported by dicomconv (keyword = UID):",
     ]
-    for uid in dicom.transfer_syntax_uids():
+    for uid in supported_transfer_syntax_uids():
         keyword = uid.keyword or "-"
         lines.append(f"  {keyword} = {uid.value}")
     return "\n".join(lines)
@@ -183,8 +208,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--quality", type=int, help="JPEG quality [1,100]")
     parser.add_argument("--near-lossless-error", type=int, help="JPEG-LS NEAR [0,255]")
-    parser.add_argument("--target-psnr", type=float, help="JPEG2000/HTJ2K target PSNR")
-    parser.add_argument("--target-bpp", type=float, help="JPEG2000/HTJ2K target bits-per-pixel")
+    parser.add_argument("--target-psnr", type=float, help="JPEG2000/HTJ2K target PSNR [>=0]")
+    parser.add_argument("--target-bpp", type=float, help="JPEG2000/HTJ2K target bits-per-pixel [>=0]")
     parser.add_argument("--distance", type=float, help="JPEG-XL distance [0,25] (0: lossless)")
     parser.add_argument("--effort", type=int, help="JPEG-XL effort [1,10]")
     parser.add_argument(
@@ -216,6 +241,11 @@ def resolve_transfer_syntax_uid(text: str) -> dicom.Uid:
         raise ValueError(f"Unknown DICOM UID: {text}")
     if uid.type != "Transfer Syntax":
         raise ValueError(f"UID is not a Transfer Syntax UID: {text}")
+    supported_values = {entry.value for entry in supported_transfer_syntax_uids()}
+    if uid.value not in supported_values:
+        raise ValueError(
+            f"Transfer Syntax is not supported by dicomconv target encoding: {text}"
+        )
     return uid
 
 
@@ -294,10 +324,6 @@ def build_codec_opt(args: argparse.Namespace, transfer_syntax: dicom.Uid) -> dic
     elif codec_type == "jpegxl":
         if has_j2k_fields or has_jpeg_fields or has_jpegls_fields:
             raise ValueError("codec jpegxl does not accept j2k/jpeg/jpegls option fields")
-        if is_jpegxl_jpeg_recompression_transfer_syntax(transfer_syntax):
-            raise ValueError(
-                "JPEGXLJPEGRecompression transfer syntax is decode-only and not supported for encoding"
-            )
 
     codec_opt: dict[str, object] = {"type": codec_type}
 

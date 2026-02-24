@@ -559,6 +559,52 @@ int main() {
 		fail("be raw j2k to native: native PixelData bytes mismatch");
 	}
 
+	// 5a) Encapsulated-to-encapsulated transcoding works in one set_transfer_syntax call.
+	auto be_raw_encap_chain = dicom::read_bytes(
+	    "be-raw-encap-chain", be_raw_file.data(), be_raw_file.size());
+	if (!be_raw_encap_chain) {
+		fail("be raw encapsulated chain read_bytes returned null");
+	}
+	be_raw_encap_chain->set_transfer_syntax("RLELossless"_uid);
+	require_transfer_syntax(
+	    be_raw_encap_chain->dataset(), "RLELossless"_uid, "be raw to rle chain");
+	be_raw_encap_chain->set_transfer_syntax("JPEG2000Lossless"_uid);
+	require_transfer_syntax(
+	    be_raw_encap_chain->dataset(), "JPEG2000Lossless"_uid, "be raw rle to j2k chain");
+	const auto* be_raw_rle_to_j2k_pixel = be_raw_encap_chain->get_dataelement("PixelData"_tag);
+	if (be_raw_rle_to_j2k_pixel->is_missing() ||
+	    !be_raw_rle_to_j2k_pixel->vr().is_pixel_sequence()) {
+		fail("be raw rle to j2k chain: expected encapsulated PixelData");
+	}
+	const auto be_raw_rle_to_j2k_decoded = be_raw_encap_chain->pixel_data(0);
+	if (be_raw_rle_to_j2k_decoded.size() != sizeof(std::uint16_t)) {
+		fail("be raw rle to j2k chain: decoded byte length mismatch");
+	}
+	std::uint16_t be_raw_rle_to_j2k_value = 0;
+	std::memcpy(
+	    &be_raw_rle_to_j2k_value, be_raw_rle_to_j2k_decoded.data(), sizeof(be_raw_rle_to_j2k_value));
+	if (be_raw_rle_to_j2k_value != 0x1234u) {
+		fail("be raw rle to j2k chain: decoded value mismatch");
+	}
+	be_raw_encap_chain->set_transfer_syntax("JPEGLSLossless"_uid);
+	require_transfer_syntax(
+	    be_raw_encap_chain->dataset(), "JPEGLSLossless"_uid, "be raw j2k to jpegls chain");
+	const auto* be_raw_j2k_to_jpegls_pixel = be_raw_encap_chain->get_dataelement("PixelData"_tag);
+	if (be_raw_j2k_to_jpegls_pixel->is_missing() ||
+	    !be_raw_j2k_to_jpegls_pixel->vr().is_pixel_sequence()) {
+		fail("be raw j2k to jpegls chain: expected encapsulated PixelData");
+	}
+	const auto be_raw_j2k_to_jpegls_decoded = be_raw_encap_chain->pixel_data(0);
+	if (be_raw_j2k_to_jpegls_decoded.size() != sizeof(std::uint16_t)) {
+		fail("be raw j2k to jpegls chain: decoded byte length mismatch");
+	}
+	std::uint16_t be_raw_j2k_to_jpegls_value = 0;
+	std::memcpy(&be_raw_j2k_to_jpegls_value,
+	    be_raw_j2k_to_jpegls_decoded.data(), sizeof(be_raw_j2k_to_jpegls_value));
+	if (be_raw_j2k_to_jpegls_value != 0x1234u) {
+		fail("be raw j2k to jpegls chain: decoded value mismatch");
+	}
+
 	// 5b) Native pixel data can be converted to lossy JPEG2000 with default options.
 	auto be_raw_to_j2k_lossy = dicom::read_bytes(
 	    "be-raw-to-j2k-lossy", be_raw_file.data(), be_raw_file.size());

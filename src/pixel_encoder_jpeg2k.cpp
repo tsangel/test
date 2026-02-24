@@ -4,6 +4,7 @@
 #include "diagnostics.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -322,15 +323,8 @@ std::vector<std::uint8_t> encode_jpeg2k_frame(std::span<const std::uint8_t> fram
 	    bytes_per_sample, source_planar, row_stride, kFunctionName, file_path);
 	const bool source_is_planar = source_layout.source_is_planar;
 	const std::size_t plane_stride = source_layout.plane_stride;
-
 	opj_cparameters_t parameters{};
-	configure_j2k_encoder_parameters(parameters, lossless, samples_per_pixel,
-	    bits_stored, use_multicomponent_transform, options, file_path);
-	parameters.numresolution = std::min(
-	    parameters.numresolution, max_num_resolutions_for_image(rows, cols));
-	if (parameters.numresolution < 1) {
-		parameters.numresolution = 1;
-	}
+	opj_set_default_encoder_parameters(&parameters);
 
 	std::vector<opj_image_cmptparm_t> component_parameters(samples_per_pixel);
 	for (auto& component_parameter : component_parameters) {
@@ -361,6 +355,8 @@ std::vector<std::uint8_t> encode_jpeg2k_frame(std::span<const std::uint8_t> fram
 	const auto* frame_ptr = frame_data.data();
 	const bool is_signed = pixel_representation == 1;
 	const std::size_t pixel_stride = source_layout.interleaved_pixel_stride;
+	std::int32_t source_min_value = std::numeric_limits<std::int32_t>::max();
+	std::int32_t source_max_value = std::numeric_limits<std::int32_t>::min();
 	for (std::size_t sample = 0; sample < samples_per_pixel; ++sample) {
 		auto& component = image->comps[sample];
 		if (!component.data) {
@@ -386,9 +382,37 @@ std::vector<std::uint8_t> encode_jpeg2k_frame(std::span<const std::uint8_t> fram
 				const auto sample_value =
 				    load_sample_from_source(sample_ptr, bytes_per_sample, is_signed,
 				        bits_stored, file_path);
+				source_min_value = std::min(source_min_value, sample_value);
+				source_max_value = std::max(source_max_value, sample_value);
 				component.data[row * cols + col] = sample_value;
 			}
 		}
+	}
+
+	// OpenJPEG psnr targeting is effectively based on the full component range.
+	// For modalities whose actual sample range is narrower, compensate target_psnr
+	// so user-facing values are closer to visual expectation.
+	J2kOptions effective_options = options;
+	if (!lossless && options.target_psnr > 0.0 && bits_stored > 0 && bits_stored < 31) {
+		const std::int64_t dynamic_range_i64 =
+		    static_cast<std::int64_t>(source_max_value) - static_cast<std::int64_t>(source_min_value);
+		if (dynamic_range_i64 > 0) {
+			const double nominal_peak =
+			    static_cast<double>((std::uint64_t{1} << static_cast<unsigned>(bits_stored)) - 1u);
+			const double dynamic_peak = static_cast<double>(dynamic_range_i64);
+			if (dynamic_peak > 0.0 && nominal_peak > dynamic_peak) {
+				const double correction_db = 20.0 * std::log10(nominal_peak / dynamic_peak);
+				effective_options.target_psnr =
+				    std::clamp(options.target_psnr + correction_db, 0.0, 120.0);
+			}
+		}
+	}
+	configure_j2k_encoder_parameters(parameters, lossless, samples_per_pixel,
+	    bits_stored, use_multicomponent_transform, effective_options, file_path);
+	parameters.numresolution = std::min(
+	    parameters.numresolution, max_num_resolutions_for_image(rows, cols));
+	if (parameters.numresolution < 1) {
+		parameters.numresolution = 1;
 	}
 
 	opj_codec_ptr codec(opj_create_compress(OPJ_CODEC_J2K));
