@@ -81,12 +81,21 @@ if [[ ! -d "$BUILD_DIR" ]]; then
 fi
 
 TMP_STUB="$(mktemp "${TMPDIR:-/tmp}/dicomsdl_stubgen.XXXXXX.pyi")"
-trap 'rm -f "$TMP_STUB"' EXIT
+TMP_PYTHON_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/dicomsdl_stubgen_pkg.XXXXXX")"
+trap 'rm -f "$TMP_STUB"; rm -rf "$TMP_PYTHON_ROOT"' EXIT
+
+# Build a clean package copy without in-place native extensions so stubgen
+# always imports the target module from --build-dir.
+cp -R "${ROOT_DIR}/bindings/python/dicomsdl" "$TMP_PYTHON_ROOT/"
+rm -rf "${TMP_PYTHON_ROOT}/dicomsdl/__pycache__"
+find "${TMP_PYTHON_ROOT}/dicomsdl" -maxdepth 1 \( -type f -o -type l \) \
+	\( -name '_dicomsdl*.so' -o -name '_dicomsdl*.pyd' -o -name '_dicomsdl*.dylib' \) \
+	-delete
 
 cmd=(
 	"$PYTHON_BIN" "$STUBGEN_SCRIPT"
 	-i "$BUILD_DIR"
-	-i "${ROOT_DIR}/bindings/python"
+	-i "$TMP_PYTHON_ROOT"
 	-m "$MODULE_NAME"
 	-o "$TMP_STUB"
 	--exclude-values
