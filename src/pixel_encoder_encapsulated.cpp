@@ -101,6 +101,16 @@ void encode_encapsulated_pixel_data(const EncapsulatedPixelEncodeDispatchInput& 
 		return;
 	}
 
+	if (input.is_jpegxl) {
+		const auto& jpegxl_options = std::get<JpegXlOptions>(input.resolved_codec_opt);
+		encode_jpegxl_pixel_data(input.file, input.encode_input, input.rows, input.cols,
+		    input.samples_per_pixel, input.bytes_per_sample, input.bits_allocated,
+		    input.bits_stored, input.pixel_representation, input.source_planar,
+		    input.source_row_stride, input.is_jpegxl_lossless, jpegxl_options,
+		    input.file_path);
+		return;
+	}
+
 	if (input.is_rle) {
 		encode_rle_pixel_data(input.file, input.encode_input, input.rows, input.cols,
 		    input.samples_per_pixel, input.bytes_per_sample, input.source_planar,

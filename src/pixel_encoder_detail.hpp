@@ -50,6 +50,8 @@ struct EncapsulatedPixelEncodeDispatchInput {
 	bool is_jpegls{false};
 	bool is_jpeg{false};
 	bool is_jpeg_lossless{false};
+	bool is_jpegxl{false};
+	bool is_jpegxl_lossless{false};
 	bool is_rle{false};
 	std::string_view file_path{};
 };
@@ -274,6 +276,19 @@ void encode_jpeg_pixel_data(DicomFile& file, const EncapsulatedEncodeInput& inpu
 	std::size_t bytes_per_sample, int bits_allocated, int bits_stored,
 	Planar source_planar, std::size_t row_stride, bool lossless,
 	const JpegOptions& options, std::string_view file_path);
+
+// Encodes one native frame into JPEG-XL codestream for encapsulated PixelData.
+std::vector<std::uint8_t> encode_jpegxl_frame(std::span<const std::uint8_t> frame_data,
+    std::size_t rows, std::size_t cols, std::size_t samples_per_pixel,
+    std::size_t bytes_per_sample, int bits_allocated, int bits_stored,
+    int pixel_representation, Planar source_planar, std::size_t row_stride,
+    bool lossless, const JpegXlOptions& options, std::string_view file_path);
+
+void encode_jpegxl_pixel_data(DicomFile& file, const EncapsulatedEncodeInput& input,
+    std::size_t rows, std::size_t cols, std::size_t samples_per_pixel,
+    std::size_t bytes_per_sample, int bits_allocated, int bits_stored,
+    int pixel_representation, Planar source_planar, std::size_t row_stride,
+    bool lossless, const JpegXlOptions& options, std::string_view file_path);
 
 void encode_encapsulated_pixel_data(const EncapsulatedPixelEncodeDispatchInput& input);
 

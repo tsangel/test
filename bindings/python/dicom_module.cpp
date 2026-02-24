@@ -1,5 +1,6 @@
 #include <array>
 #include <cctype>
+#include <cmath>
 #include <cstring>
 #include <cstdint>
 #include <limits>
@@ -146,15 +147,19 @@ std::string normalize_codec_option_name(std::string option) {
 	return normalized;
 }
 
-dicom::pixel::CodecOptions parse_codec_options(nb::handle codec_opt_obj) {
+dicom::pixel::CodecOptions parse_codec_options(
+    nb::handle codec_opt_obj,
+    std::optional<dicom::uid::WellKnown> transfer_syntax = std::nullopt) {
 	using dicom::pixel::AutoCodecOptions;
 	using dicom::pixel::CodecOptions;
 	using dicom::pixel::Htj2kOptions;
 	using dicom::pixel::J2kOptions;
 	using dicom::pixel::JpegLsOptions;
 	using dicom::pixel::JpegOptions;
+	using dicom::pixel::JpegXlOptions;
 	using dicom::pixel::NoCompression;
 	using dicom::pixel::RleOptions;
+	using namespace dicom::literals;
 
 	if (!codec_opt_obj || codec_opt_obj.is_none()) {
 		return CodecOptions{AutoCodecOptions{}};
@@ -167,12 +172,16 @@ dicom::pixel::CodecOptions parse_codec_options(nb::handle codec_opt_obj) {
 		bool has_target_psnr{false};
 		bool has_threads{false};
 		bool has_color_transform{false};
+		bool has_distance{false};
+		bool has_effort{false};
 		bool has_quality{false};
 		bool has_near_lossless_error{false};
 		double target_bpp{0.0};
 		double target_psnr{0.0};
 		int threads{-1};
 		bool color_transform{true};
+		double distance{1.0};
+		int effort{7};
 		int quality{90};
 		int near_lossless_error{0};
 	};
@@ -181,13 +190,15 @@ dicom::pixel::CodecOptions parse_codec_options(nb::handle codec_opt_obj) {
 	    -> CodecOptions {
 		const auto normalized = normalize_codec_option_name(std::move(option_name));
 		const bool has_j2k_fields =
-		    fields.has_target_bpp || fields.has_target_psnr || fields.has_threads ||
-		    fields.has_color_transform;
+		    fields.has_target_bpp || fields.has_target_psnr || fields.has_color_transform;
+		const bool has_thread_field = fields.has_threads;
+		const bool has_jpegxl_fields = fields.has_distance || fields.has_effort;
 		const bool has_jpeg_fields = fields.has_quality;
 		const bool has_jpegls_fields = fields.has_near_lossless_error;
 
 		const auto ensure_no_fields = [&](std::string_view codec_name) {
-			if (has_j2k_fields || has_jpeg_fields || has_jpegls_fields) {
+			if (has_j2k_fields || has_thread_field || has_jpegxl_fields ||
+			    has_jpeg_fields || has_jpegls_fields) {
 				throw nb::value_error(
 				    (std::string(codec_name) +
 				        " codec_opt does not accept extra option fields").c_str());
@@ -208,9 +219,9 @@ dicom::pixel::CodecOptions parse_codec_options(nb::handle codec_opt_obj) {
 			return CodecOptions{RleOptions{}};
 		}
 		if (normalized == "j2k" || normalized == "jpeg2000" || normalized == "j2koptions") {
-			if (has_jpeg_fields || has_jpegls_fields) {
+			if (has_jpeg_fields || has_jpegls_fields || has_jpegxl_fields) {
 				throw nb::value_error(
-				    "J2kOptions codec_opt does not accept quality/near_lossless_error");
+				    "J2kOptions codec_opt does not accept quality/near_lossless_error/distance/effort");
 			}
 			if (fields.target_bpp < 0.0 || fields.target_psnr < 0.0) {
 				throw nb::value_error("codec_opt target_bpp/target_psnr must be >= 0");
@@ -226,9 +237,9 @@ dicom::pixel::CodecOptions parse_codec_options(nb::handle codec_opt_obj) {
 			return CodecOptions{options};
 		}
 		if (normalized == "htj2k" || normalized == "htj2koptions") {
-			if (has_jpeg_fields || has_jpegls_fields) {
+			if (has_jpeg_fields || has_jpegls_fields || has_jpegxl_fields) {
 				throw nb::value_error(
-				    "Htj2kOptions codec_opt does not accept quality/near_lossless_error");
+				    "Htj2kOptions codec_opt does not accept quality/near_lossless_error/distance/effort");
 			}
 			if (fields.target_bpp < 0.0 || fields.target_psnr < 0.0) {
 				throw nb::value_error("codec_opt target_bpp/target_psnr must be >= 0");
@@ -245,9 +256,9 @@ dicom::pixel::CodecOptions parse_codec_options(nb::handle codec_opt_obj) {
 		}
 		if (normalized == "jpegls" || normalized == "jls" ||
 		    normalized == "jpeglsoptions") {
-			if (has_j2k_fields || has_jpeg_fields) {
+			if (has_j2k_fields || has_thread_field || has_jpeg_fields || has_jpegxl_fields) {
 				throw nb::value_error(
-				    "JpegLsOptions codec_opt does not accept target_bpp/target_psnr/threads/color_transform/quality");
+				    "JpegLsOptions codec_opt does not accept target_bpp/target_psnr/threads/color_transform/quality/distance/effort");
 			}
 			if (fields.near_lossless_error < 0 || fields.near_lossless_error > 255) {
 				throw nb::value_error(
@@ -259,9 +270,9 @@ dicom::pixel::CodecOptions parse_codec_options(nb::handle codec_opt_obj) {
 		}
 		if (normalized == "jpeg" || normalized == "jpegbaseline" ||
 		    normalized == "jpeglossless" || normalized == "jpegoptions") {
-			if (has_j2k_fields || has_jpegls_fields) {
+			if (has_j2k_fields || has_thread_field || has_jpegls_fields || has_jpegxl_fields) {
 				throw nb::value_error(
-				    "JpegOptions codec_opt does not accept target_bpp/target_psnr/threads/color_transform/near_lossless_error");
+				    "JpegOptions codec_opt does not accept target_bpp/target_psnr/threads/color_transform/near_lossless_error/distance/effort");
 			}
 			if (fields.quality < 1 || fields.quality > 100) {
 				throw nb::value_error("codec_opt quality must be in [1, 100]");
@@ -270,10 +281,55 @@ dicom::pixel::CodecOptions parse_codec_options(nb::handle codec_opt_obj) {
 			options.quality = fields.quality;
 			return CodecOptions{options};
 		}
+		if (normalized == "jpegxl" || normalized == "jxl" ||
+		    normalized == "jpegxloptions") {
+			if (has_j2k_fields || has_jpeg_fields || has_jpegls_fields) {
+				throw nb::value_error(
+				    "JpegXlOptions codec_opt does not accept target_bpp/target_psnr/color_transform/quality/near_lossless_error");
+			}
+			if (fields.threads < -1) {
+				throw nb::value_error("codec_opt threads must be -1, 0, or positive");
+			}
+			if (fields.effort < 1 || fields.effort > 10) {
+				throw nb::value_error("codec_opt effort must be in [1, 10]");
+			}
+			if (!std::isfinite(fields.distance) || fields.distance < 0.0 ||
+			    fields.distance > 25.0) {
+				throw nb::value_error("codec_opt distance must be in [0, 25]");
+			}
+			JpegXlOptions options{};
+			if (!fields.has_distance && transfer_syntax &&
+			    *transfer_syntax == "JPEGXLLossless"_uid) {
+				options.distance = 0.0;
+			}
+			if (fields.has_distance) {
+				options.distance = fields.distance;
+			}
+			options.effort = fields.effort;
+			options.threads = fields.threads;
+			if (transfer_syntax &&
+			    *transfer_syntax == "JPEGXLJPEGRecompression"_uid) {
+				throw nb::value_error(
+				    "JPEGXLJPEGRecompression transfer syntax is decode-only and not supported for encoding");
+			}
+			if (transfer_syntax &&
+			    *transfer_syntax == "JPEGXLLossless"_uid &&
+			    options.distance != 0.0) {
+				throw nb::value_error(
+				    "JPEGXLLossless transfer syntax requires codec_opt distance=0");
+			}
+			if (transfer_syntax &&
+			    *transfer_syntax == "JPEGXL"_uid &&
+			    options.distance <= 0.0) {
+				throw nb::value_error(
+				    "JPEGXL transfer syntax requires codec_opt distance > 0");
+			}
+			return CodecOptions{options};
+		}
 
 		throw nb::value_error(
-		    "codec_opt must be one of: auto, none, rle, j2k, htj2k, jpegls, jpeg");
-	};
+		    "codec_opt must be one of: auto, none, rle, j2k, htj2k, jpegls, jpeg, jpegxl");
+		};
 
 	if (nb::isinstance<nb::str>(codec_opt_obj)) {
 		const codec_option_fields fields{};
@@ -284,10 +340,10 @@ dicom::pixel::CodecOptions parse_codec_options(nb::handle codec_opt_obj) {
 		throw nb::type_error("codec_opt must be None, str, or dict");
 	}
 
-	nb::dict codec_dict = nb::borrow<nb::dict>(codec_opt_obj);
-	static const std::unordered_set<std::string> allowed_keys{
-	    "type", "target_bpp", "target_psnr", "threads", "color_transform", "use_mct",
-	    "mct", "quality", "near_lossless_error"};
+		nb::dict codec_dict = nb::borrow<nb::dict>(codec_opt_obj);
+		static const std::unordered_set<std::string> allowed_keys{
+		    "type", "target_bpp", "target_psnr", "threads", "color_transform", "use_mct",
+		    "mct", "quality", "near_lossless_error", "distance", "effort"};
 	PyObject* key_obj = nullptr;
 	PyObject* value_obj = nullptr;
 	Py_ssize_t pos = 0;
@@ -344,6 +400,14 @@ dicom::pixel::CodecOptions parse_codec_options(nb::handle codec_opt_obj) {
 		fields.has_quality = true;
 		fields.quality = nb::cast<int>(nb::handle(value));
 	}
+	if (PyObject* value = PyDict_GetItemString(codec_dict.ptr(), "distance")) {
+		fields.has_distance = true;
+		fields.distance = nb::cast<double>(nb::handle(value));
+	}
+	if (PyObject* value = PyDict_GetItemString(codec_dict.ptr(), "effort")) {
+		fields.has_effort = true;
+		fields.effort = nb::cast<int>(nb::handle(value));
+	}
 	if (PyObject* value = PyDict_GetItemString(codec_dict.ptr(), "near_lossless_error")) {
 		fields.has_near_lossless_error = true;
 		fields.near_lossless_error = nb::cast<int>(nb::handle(value));
@@ -352,6 +416,8 @@ dicom::pixel::CodecOptions parse_codec_options(nb::handle codec_opt_obj) {
 	if (!fields.has_type) {
 		if (fields.has_target_bpp || fields.has_target_psnr || fields.has_threads) {
 			fields.type_name = "j2k";
+		} else if (fields.has_distance || fields.has_effort) {
+			fields.type_name = "jpegxl";
 		} else if (fields.has_quality) {
 			fields.type_name = "jpeg";
 		} else if (fields.has_near_lossless_error) {
@@ -1374,18 +1440,19 @@ NB_MODULE(_dicomsdl, m) {
 		.def("set_transfer_syntax",
 		    [](DicomFile& self, const Uid& transfer_syntax, nb::handle codec_opt) {
 			    self.set_transfer_syntax(
-			        transfer_syntax, parse_codec_options(codec_opt));
+			        transfer_syntax, parse_codec_options(codec_opt, transfer_syntax));
 		    },
 		    nb::arg("transfer_syntax"),
 		    nb::kw_only(),
 		    nb::arg("codec_opt") = nb::none(),
 		    "Set transfer syntax using a Uid object and update file meta TransferSyntaxUID.\n"
-		    "`codec_opt` accepts None/'auto', 'none', 'rle', 'j2k', 'htj2k', 'jpegls', 'jpeg',\n"
+		    "`codec_opt` accepts None/'auto', 'none', 'rle', 'j2k', 'htj2k', 'jpegls', 'jpeg', 'jpegxl',\n"
 		    "or dict form such as:\n"
 		    "{'type': 'j2k', 'target_psnr': 45.0, 'target_bpp': 0.0, 'threads': -1, 'color_transform': True},\n"
 		    "{'type': 'htj2k', 'target_psnr': 45.0, 'color_transform': False},\n"
 		    "{'type': 'jpegls', 'near_lossless_error': 2},\n"
-		    "{'type': 'jpeg', 'quality': 90}.")
+		    "{'type': 'jpeg', 'quality': 90},\n"
+		    "{'type': 'jpegxl', 'distance': 1.5, 'effort': 7, 'threads': -1}.")
 		.def("set_transfer_syntax",
 		    [](DicomFile& self, const std::string& transfer_syntax_text, nb::handle codec_opt) {
 			    const auto uid = dicom::uid::lookup(transfer_syntax_text);
@@ -1397,18 +1464,19 @@ NB_MODULE(_dicomsdl, m) {
 				    throw nb::value_error(
 				        ("UID is not a Transfer Syntax UID: " + transfer_syntax_text).c_str());
 			    }
-			    self.set_transfer_syntax(*uid, parse_codec_options(codec_opt));
-		    },
+				    self.set_transfer_syntax(*uid, parse_codec_options(codec_opt, *uid));
+			    },
 		    nb::arg("transfer_syntax"),
 		    nb::kw_only(),
 		    nb::arg("codec_opt") = nb::none(),
 		    "Set transfer syntax using a UID keyword or dotted UID string.\n"
-		    "`codec_opt` accepts None/'auto', 'none', 'rle', 'j2k', 'htj2k', 'jpegls', 'jpeg',\n"
+		    "`codec_opt` accepts None/'auto', 'none', 'rle', 'j2k', 'htj2k', 'jpegls', 'jpeg', 'jpegxl',\n"
 		    "or dict form such as:\n"
 		    "{'type': 'j2k', 'target_psnr': 45.0, 'target_bpp': 0.0, 'threads': -1, 'color_transform': True},\n"
 		    "{'type': 'htj2k', 'target_psnr': 45.0, 'color_transform': False},\n"
 		    "{'type': 'jpegls', 'near_lossless_error': 2},\n"
-		    "{'type': 'jpeg', 'quality': 90}.")
+		    "{'type': 'jpeg', 'quality': 90},\n"
+		    "{'type': 'jpegxl', 'distance': 1.5, 'effort': 7, 'threads': -1}.")
 		.def("write_file",
 		    [](DicomFile& self, const std::string& path, bool include_preamble,
 		        bool write_file_meta, bool keep_existing_meta) {

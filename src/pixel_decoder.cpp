@@ -731,6 +731,10 @@ void decode_frame_into(const DicomFile& df, std::size_t frame_index,
 			detail::decode_jpeg2k_into(df, info, frame_index, dst, dst_strides, effective_opt);
 			return;
 		}
+		if (info.ts.is_jpegxl()) {
+			detail::decode_jpegxl_into(df, info, frame_index, dst, dst_strides, effective_opt);
+			return;
+		}
 		if (info.ts.is_jpegls()) {
 			detail::decode_jpegls_into(df, info, frame_index, dst, dst_strides, effective_opt);
 			return;

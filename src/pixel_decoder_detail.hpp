@@ -63,6 +63,10 @@ void decode_jpegls_into(const DicomFile& df, const pixel::PixelDataInfo& info,
     std::size_t frame_index, std::span<std::uint8_t> dst,
     const DecodeStrides& dst_strides, const DecodeOptions& opt);
 
+void decode_jpegxl_into(const DicomFile& df, const pixel::PixelDataInfo& info,
+    std::size_t frame_index, std::span<std::uint8_t> dst,
+    const DecodeStrides& dst_strides, const DecodeOptions& opt);
+
 void decode_jpeg_into(const DicomFile& df, const pixel::PixelDataInfo& info,
     std::size_t frame_index, std::span<std::uint8_t> dst,
     const DecodeStrides& dst_strides, const DecodeOptions& opt);

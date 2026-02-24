@@ -16,6 +16,7 @@ This document summarizes the current constraints for the pixel encode path:
 - JPEG-LS: `JPEGLSLossless`, `JPEGLSNearLossless`
 - JPEG 2000: `JPEG2000Lossless`, `JPEG2000MCLossless`, `JPEG2000`, `JPEG2000MC`
 - HTJ2K: `HTJ2KLossless`, `HTJ2KLosslessRPCL`, `HTJ2K`
+- JPEG-XL: `JPEGXLLossless`, `JPEGXL`
 
 Anything else is rejected by `set_pixel_data`.
 
@@ -43,20 +44,23 @@ Anything else is rejected by `set_pixel_data`.
 - JPEG-LS -> `JpegLsOptions`
 - JPEG 2000 -> `J2kOptions`
 - HTJ2K -> `Htj2kOptions`
+- JPEG-XL -> `JpegXlOptions`
 
 `AutoCodecOptions` resolves as:
 
 - JPEG 2000 lossy / HTJ2K lossy: `target_psnr = 45.0`
 - JPEG-LS near-lossless: `near_lossless_error = 2`
+- JPEG-XL lossless: `distance = 0.0`
+- JPEG-XL lossy: `distance = 1.0`
 - Otherwise: codec-family defaults
 
-Thread hints are validated for JPEG 2000 / HTJ2K options:
+Thread hints are validated for JPEG 2000 / HTJ2K / JPEG-XL options:
 
 - `threads` must be `-1`, `0`, or a positive integer
 
 ## Common Bit-Depth Rules
 
-For JPEG/JPEG-LS/JPEG2000/HTJ2K encoder paths:
+For JPEG/JPEG-LS/JPEG2000/HTJ2K/JPEG-XL encoder paths:
 
 - `bits_allocated <= 16`
 
@@ -120,6 +124,17 @@ Additional JPEG lossy rule:
 - `target_psnr` / `target_bpp` must be `>= 0`
 - Lossy qstep is derived from options (or default path)
 - `threads` is validated at API level; current OpenJPH encode path does not consume it yet
+
+### JPEG-XL (libjxl)
+
+- `samples_per_pixel` must be `1`, `3`, or `4`
+- `bits_allocated <= 16`
+- `distance` must be in `[0, 25]`
+- `effort` must be in `[1, 10]`
+- Transfer syntax specific:
+  - `JPEGXLLossless` requires `distance = 0`
+  - `JPEGXL` requires `distance > 0`
+  - `JPEGXLJPEGRecompression` is decode-only (encode not supported)
 
 ## MCT/Color Transform Rules and Photometric Update
 

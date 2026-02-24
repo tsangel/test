@@ -3,6 +3,7 @@
 #include "diagnostics.h"
 #include "pixel_encoder_detail.hpp"
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -17,6 +18,7 @@ using namespace dicom::literals;
 namespace {
 constexpr double kDefaultLossyJ2kTargetPsnr = 45.0;
 constexpr int kDefaultNearLosslessJpegLsError = 2;
+constexpr double kDefaultLossyJpegXlDistance = 1.0;
 
 std::size_t bytes_per_sample_of(pixel::DataType dtype) noexcept {
 	switch (dtype) {
@@ -133,6 +135,9 @@ struct pixel_encode_target {
 	bool is_jpeg{false};
 	bool is_jpeg_lossless{false};
 	bool is_jpeg_lossy{false};
+	bool is_jpegxl{false};
+	bool is_jpegxl_lossless{false};
+	bool is_jpegxl_lossy{false};
 };
 
 [[nodiscard]] pixel_encode_target classify_pixel_encode_target(uid::WellKnown transfer_syntax) noexcept {
@@ -157,6 +162,9 @@ struct pixel_encode_target {
 	    !transfer_syntax.is_jpegxl();
 	target.is_jpeg_lossless = target.is_jpeg && transfer_syntax.is_lossless();
 	target.is_jpeg_lossy = target.is_jpeg && transfer_syntax.is_lossy();
+	target.is_jpegxl = transfer_syntax.is_jpegxl();
+	target.is_jpegxl_lossless = target.is_jpegxl && transfer_syntax.is_lossless();
+	target.is_jpegxl_lossy = target.is_jpegxl && transfer_syntax.is_lossy();
 	return target;
 }
 
@@ -190,6 +198,15 @@ struct pixel_encode_target {
 	}
 	if (target.is_jpeg) {
 		return pixel::JpegOptions{};
+	}
+	if (target.is_jpegxl) {
+		pixel::JpegXlOptions default_jpegxl{};
+		if (target.is_jpegxl_lossless) {
+			default_jpegxl.distance = 0.0;
+		} else if (target.is_jpegxl_lossy) {
+			default_jpegxl.distance = kDefaultLossyJpegXlDistance;
+		}
+		return default_jpegxl;
 	}
 	if (target.is_rle) {
 		return pixel::RleOptions{};
@@ -257,6 +274,42 @@ void validate_codec_option_for_target(uid::WellKnown transfer_syntax,
 		}
 		return;
 	}
+	if (target.is_jpegxl) {
+		if (!std::holds_alternative<pixel::JpegXlOptions>(codec_opt)) {
+			diag::error_and_throw(
+			    "DicomFile::set_pixel_data file={} ts={} reason=JPEG-XL transfer syntax requires JpegXlOptions codec",
+			    file_path, transfer_syntax.value());
+		}
+		const auto& options = std::get<pixel::JpegXlOptions>(codec_opt);
+		if (options.threads < -1) {
+			diag::error_and_throw(
+			    "DicomFile::set_pixel_data file={} ts={} reason=JpegXlOptions.threads must be -1, 0, or positive",
+			    file_path, transfer_syntax.value());
+		}
+		if (options.effort < 1 || options.effort > 10) {
+			diag::error_and_throw(
+			    "DicomFile::set_pixel_data file={} ts={} reason=JpegXlOptions.effort must be in [1, 10]",
+			    file_path, transfer_syntax.value());
+		}
+		if (transfer_syntax == "JPEGXLJPEGRecompression"_uid) {
+			diag::error_and_throw(
+			    "DicomFile::set_pixel_data file={} ts={} reason=JPEG XL JPEG Recompression is not supported for native pixel source yet",
+			    file_path, transfer_syntax.value());
+		}
+		if (target.is_jpegxl_lossless && options.distance != 0.0) {
+			diag::error_and_throw(
+			    "DicomFile::set_pixel_data file={} ts={} reason=JPEGXLLossless transfer syntax requires distance=0",
+			    file_path, transfer_syntax.value());
+		}
+		if (target.is_jpegxl_lossy &&
+		    (!std::isfinite(options.distance) || options.distance <= 0.0 ||
+		        options.distance > 25.0)) {
+			diag::error_and_throw(
+			    "DicomFile::set_pixel_data file={} ts={} reason=JPEGXL transfer syntax requires distance in (0, 25]",
+			    file_path, transfer_syntax.value());
+		}
+		return;
+	}
 	if (target.is_rle) {
 		if (!std::holds_alternative<pixel::RleOptions>(codec_opt)) {
 			diag::error_and_throw(
@@ -274,7 +327,8 @@ void validate_codec_option_for_target(uid::WellKnown transfer_syntax,
 
 void validate_target_source_constraints(const pixel_encode_target& target,
     int bits_allocated, int bits_stored, std::string_view file_path) {
-	if ((target.is_j2k || target.is_htj2k || target.is_jpegls || target.is_jpeg) &&
+	if ((target.is_j2k || target.is_htj2k || target.is_jpegls || target.is_jpeg ||
+	        target.is_jpegxl) &&
 	    bits_allocated > 16) {
 		diag::error_and_throw(
 		    "DicomFile::set_pixel_data file={} reason=selected encoder currently supports bits_allocated <= 16",
@@ -444,7 +498,7 @@ void DicomFile::set_pixel_data(uid::WellKnown transfer_syntax, const pixel::Pixe
 	const auto target = classify_pixel_encode_target(transfer_syntax);
 	if (!transfer_syntax.supports_pixel_encode()) {
 		diag::error_and_throw(
-		    "DicomFile::set_pixel_data file={} ts={} reason=transfer syntax is not supported yet in set_pixel_data (supported: native uncompressed, EncapsulatedUncompressedExplicitVRLittleEndian, RLELossless, JPEG2000*, HTJ2K*, JPEG-LS, JPEG Baseline/Extended/Lossless)",
+		    "DicomFile::set_pixel_data file={} ts={} reason=transfer syntax is not supported yet in set_pixel_data (supported: native uncompressed, EncapsulatedUncompressedExplicitVRLittleEndian, RLELossless, JPEG2000*, HTJ2K*, JPEG-LS, JPEG Baseline/Extended/Lossless, JPEGXL/JPEGXLLossless)",
 		    path(), transfer_syntax.value());
 	}
 	auto resolved_codec_opt = resolve_codec_options_for_target(transfer_syntax, target, codec_opt);
@@ -474,34 +528,26 @@ void DicomFile::set_pixel_data(uid::WellKnown transfer_syntax, const pixel::Pixe
 		    path());
 	}
 
-	const auto checked_mul = [&](std::size_t a, std::size_t b, std::string_view label) {
-		if (a != 0 && b > std::numeric_limits<std::size_t>::max() / a) {
-			diag::error_and_throw(
-			    "DicomFile::set_pixel_data file={} reason={} overflows size_t",
-			    path(), label);
-		}
-		return a * b;
-	};
-	const auto checked_add = [&](std::size_t a, std::size_t b, std::string_view label) {
-		if (b > std::numeric_limits<std::size_t>::max() - a) {
-			diag::error_and_throw(
-			    "DicomFile::set_pixel_data file={} reason={} overflows size_t",
-			    path(), label);
-		}
-		return a + b;
-	};
-
 	const auto rows = static_cast<std::size_t>(source.rows);
 	const auto cols = static_cast<std::size_t>(source.cols);
 	const auto frames = static_cast<std::size_t>(source.frames);
 	const auto samples_per_pixel = static_cast<std::size_t>(source.samples_per_pixel);
 	const bool planar_source =
 	    source.planar == pixel::Planar::planar && samples_per_pixel > std::size_t{1};
+	constexpr std::size_t kSizeMax = std::numeric_limits<std::size_t>::max();
 
-	const std::size_t row_samples =
-	    planar_source ? cols : checked_mul(cols, samples_per_pixel, "row samples");
-	const std::size_t row_payload_bytes =
-	    checked_mul(row_samples, bytes_per_sample, "row payload bytes");
+	if (!planar_source && samples_per_pixel > kSizeMax / cols) {
+		diag::error_and_throw(
+		    "DicomFile::set_pixel_data file={} reason=row samples overflows size_t",
+		    path());
+	}
+	const std::size_t row_samples = planar_source ? cols : cols * samples_per_pixel;
+	if (row_samples > kSizeMax / bytes_per_sample) {
+		diag::error_and_throw(
+		    "DicomFile::set_pixel_data file={} reason=row payload bytes overflows size_t",
+		    path());
+	}
+	const std::size_t row_payload_bytes = row_samples * bytes_per_sample;
 
 	const std::size_t source_row_stride =
 	    source.row_stride == 0 ? row_payload_bytes : source.row_stride;
@@ -510,13 +556,22 @@ void DicomFile::set_pixel_data(uid::WellKnown transfer_syntax, const pixel::Pixe
 		    "DicomFile::set_pixel_data file={} reason=row_stride({}) is smaller than row payload({})",
 		    path(), source_row_stride, row_payload_bytes);
 	}
+	if (source_row_stride > kSizeMax / rows) {
+		diag::error_and_throw(
+		    "DicomFile::set_pixel_data file={} reason=source plane stride overflows size_t",
+		    path());
+	}
+	const std::size_t source_plane_stride = source_row_stride * rows;
 
-	const std::size_t source_plane_stride =
-	    checked_mul(source_row_stride, rows, "source plane stride");
-	const std::size_t source_frame_payload = planar_source
-	                                             ? checked_mul(source_plane_stride, samples_per_pixel,
-	                                                   "source frame payload bytes")
-	                                             : source_plane_stride;
+	std::size_t source_frame_payload = source_plane_stride;
+	if (planar_source) {
+		if (samples_per_pixel > kSizeMax / source_plane_stride) {
+			diag::error_and_throw(
+			    "DicomFile::set_pixel_data file={} reason=source frame payload bytes overflows size_t",
+			    path());
+		}
+		source_frame_payload = source_plane_stride * samples_per_pixel;
+	}
 	const std::size_t source_frame_stride =
 	    source.frame_stride == 0 ? source_frame_payload : source.frame_stride;
 	if (source_frame_stride < source_frame_payload) {
@@ -525,38 +580,46 @@ void DicomFile::set_pixel_data(uid::WellKnown transfer_syntax, const pixel::Pixe
 		    path(), source_frame_stride, source_frame_payload);
 	}
 
-	const std::size_t destination_frame_payload = planar_source
-	                                                  ? checked_mul(
-	                                                        checked_mul(row_payload_bytes, rows,
-	                                                            "destination plane stride"),
-	                                                        samples_per_pixel,
-	                                                        "destination frame payload bytes")
-	                                                  : checked_mul(row_payload_bytes, rows,
-	                                                        "destination frame payload bytes");
-	const std::size_t destination_total_bytes =
-	    checked_mul(destination_frame_payload, frames, "destination total bytes");
+	if (row_payload_bytes > kSizeMax / rows) {
+		diag::error_and_throw(
+		    "DicomFile::set_pixel_data file={} reason=destination plane stride overflows size_t",
+		    path());
+	}
+	const std::size_t destination_plane_stride = row_payload_bytes * rows;
+	std::size_t destination_frame_payload = destination_plane_stride;
+	if (planar_source) {
+		if (samples_per_pixel > kSizeMax / destination_plane_stride) {
+			diag::error_and_throw(
+			    "DicomFile::set_pixel_data file={} reason=destination frame payload bytes overflows size_t",
+			    path());
+		}
+		destination_frame_payload = destination_plane_stride * samples_per_pixel;
+	}
+	if (frames > kSizeMax / destination_frame_payload) {
+		diag::error_and_throw(
+		    "DicomFile::set_pixel_data file={} reason=destination total bytes overflows size_t",
+		    path());
+	}
+	const std::size_t destination_total_bytes = destination_frame_payload * frames;
 
-	const std::size_t source_last_frame_begin =
-	    checked_mul(frames - 1, source_frame_stride, "source last frame begin");
+	if (frames > std::size_t{1} && (frames - 1) > kSizeMax / source_frame_stride) {
+		diag::error_and_throw(
+		    "DicomFile::set_pixel_data file={} reason=source last frame begin overflows size_t",
+		    path());
+	}
+	const std::size_t source_last_frame_begin = (frames - 1) * source_frame_stride;
+	const std::size_t source_last_plane_used =
+	    (source_plane_stride - source_row_stride) + row_payload_bytes;
 	const std::size_t source_last_frame_used = planar_source
-	                                               ? checked_add(
-	                                                     checked_add(
-	                                                         checked_mul(samples_per_pixel - 1,
-	                                                             source_plane_stride,
-	                                                             "source last plane offset"),
-	                                                         checked_mul(rows - 1, source_row_stride,
-	                                                             "source last row offset"),
-	                                                         "source planar offsets"),
-	                                                     row_payload_bytes,
-	                                                     "source last planar row payload")
-	                                               : checked_add(
-	                                                     checked_mul(rows - 1, source_row_stride,
-	                                                         "source last row offset"),
-	                                                     row_payload_bytes,
-	                                                     "source last row payload");
-	const std::size_t source_required_bytes =
-	    checked_add(source_last_frame_begin, source_last_frame_used,
-	        "minimum source byte requirement");
+	                                               ? (source_frame_payload - source_plane_stride) +
+	                                                     source_last_plane_used
+	                                               : source_last_plane_used;
+	if (source_last_frame_begin > kSizeMax - source_last_frame_used) {
+		diag::error_and_throw(
+		    "DicomFile::set_pixel_data file={} reason=minimum source byte requirement overflows size_t",
+		    path());
+	}
+	const std::size_t source_required_bytes = source_last_frame_begin + source_last_frame_used;
 	if (source.bytes.size() < source_required_bytes) {
 		diag::error_and_throw(
 		    "DicomFile::set_pixel_data file={} reason=source bytes({}) are shorter than required({})",
@@ -642,6 +705,8 @@ void DicomFile::set_pixel_data(uid::WellKnown transfer_syntax, const pixel::Pixe
 		    .is_jpegls = target.is_jpegls,
 		    .is_jpeg = target.is_jpeg,
 		    .is_jpeg_lossless = target.is_jpeg_lossless,
+		    .is_jpegxl = target.is_jpegxl,
+		    .is_jpegxl_lossless = target.is_jpegxl_lossless,
 		    .is_rle = target.is_rle,
 		    .file_path = path(),
 		};

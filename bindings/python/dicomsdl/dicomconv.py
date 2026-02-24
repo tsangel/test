@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 
 import dicomsdl as dicom
@@ -49,6 +50,13 @@ TRANSFER_SYNTAX_ALIASES = {
     "htj2k": "HTJ2K",
     "htj2klossless": "HTJ2KLossless",
     "htj2klosslessrpcl": "HTJ2KLosslessRPCL",
+    "jpegxl": "JPEGXL",
+    "jxl": "JPEGXL",
+    "jpegxllossless": "JPEGXLLossless",
+    "jxllossless": "JPEGXLLossless",
+    "jpegxljpegrecompression": "JPEGXLJPEGRecompression",
+    "jpegxlrecompression": "JPEGXLJPEGRecompression",
+    "jxljpegrecompression": "JPEGXLJPEGRecompression",
 }
 
 HTJ2K_TRANSFER_SYNTAX_KEYWORDS = {
@@ -62,6 +70,22 @@ HTJ2K_TRANSFER_SYNTAX_UID_VALUES = {
     "1.2.840.10008.1.2.4.202",
     "1.2.840.10008.1.2.4.203",
 }
+
+JPEGXL_TRANSFER_SYNTAX_KEYWORDS = {
+    "jpegxl",
+    "jpegxllossless",
+    "jpegxljpegrecompression",
+}
+
+JPEGXL_TRANSFER_SYNTAX_UID_VALUES = {
+    "1.2.840.10008.1.2.4.110",
+    "1.2.840.10008.1.2.4.111",
+    "1.2.840.10008.1.2.4.112",
+}
+
+JPEGXL_LOSSLESS_TRANSFER_SYNTAX_UID_VALUES = {"1.2.840.10008.1.2.4.110"}
+
+JPEGXL_JPEG_RECOMP_TRANSFER_SYNTAX_UID_VALUES = {"1.2.840.10008.1.2.4.111"}
 
 
 def normalize_token(text: str) -> str:
@@ -84,7 +108,9 @@ def canonical_codec_name(codec_name: str) -> str:
         return "j2k"
     if normalized in {"htj2k", "htj2koptions"}:
         return "htj2k"
-    raise ValueError("codec must be one of: auto, none, rle, jpeg, jpegls, j2k, htj2k")
+    if normalized in {"jpegxl", "jxl", "jpegxloptions"}:
+        return "jpegxl"
+    raise ValueError("codec must be one of: auto, none, rle, jpeg, jpegls, j2k, htj2k, jpegxl")
 
 
 def is_htj2k_transfer_syntax(uid: dicom.Uid) -> bool:
@@ -95,6 +121,22 @@ def is_htj2k_transfer_syntax(uid: dicom.Uid) -> bool:
     return uid.value in HTJ2K_TRANSFER_SYNTAX_UID_VALUES
 
 
+def is_jpegxl_transfer_syntax(uid: dicom.Uid) -> bool:
+    keyword = uid.keyword or ""
+    if isinstance(keyword, str):
+        if normalize_token(keyword) in JPEGXL_TRANSFER_SYNTAX_KEYWORDS:
+            return True
+    return uid.value in JPEGXL_TRANSFER_SYNTAX_UID_VALUES
+
+
+def is_jpegxl_lossless_transfer_syntax(uid: dicom.Uid) -> bool:
+    return uid.value in JPEGXL_LOSSLESS_TRANSFER_SYNTAX_UID_VALUES
+
+
+def is_jpegxl_jpeg_recompression_transfer_syntax(uid: dicom.Uid) -> bool:
+    return uid.value in JPEGXL_JPEG_RECOMP_TRANSFER_SYNTAX_UID_VALUES
+
+
 def transfer_syntax_help_epilog() -> str:
     lines = [
         "Examples:",
@@ -102,6 +144,8 @@ def transfer_syntax_help_epilog() -> str:
         "  dicomconv in.dcm out.dcm jpegls-near-lossless --near-lossless-error 3",
         "  dicomconv in.dcm out.dcm jpeg2k --target-psnr 45 --threads -1",
         "  dicomconv in.dcm out.dcm htj2k-lossless --codec htj2k --no-color-transform",
+        "  dicomconv in.dcm out.dcm jpegxl --distance 1.5 --effort 7 --threads -1",
+        "  dicomconv in.dcm out.dcm jpegxl-lossless --distance 0",
         "",
         "Transfer syntax shortcuts:",
         "  jpeg -> JPEGBaseline8Bit",
@@ -109,6 +153,7 @@ def transfer_syntax_help_epilog() -> str:
         "  jpegls / jpegls-near-lossless",
         "  jpeg2k / jpeg2k-lossless / jpeg2k-mc",
         "  htj2k / htj2k-lossless",
+        "  jpegxl / jpegxl-lossless / jpegxl-jpeg-recompression",
         "  rle -> RLELossless",
         "",
         "Available Transfer Syntax UIDs (keyword = UID):",
@@ -130,20 +175,22 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("output", help="Output DICOM file path")
     parser.add_argument(
         "transfer_syntax",
-        help="Transfer syntax keyword/UID value, or shortcut alias (jpeg, jpeg2k, htj2k, ...)",
+        help="Transfer syntax keyword/UID value, or shortcut alias (jpeg, jpeg2k, htj2k, jpegxl, ...)",
     )
     parser.add_argument(
         "--codec",
-        help="Codec option type: auto|none|rle|jpeg|jpegls|j2k|htj2k (default: auto)",
+        help="Codec option type: auto|none|rle|jpeg|jpegls|j2k|htj2k|jpegxl (default: auto)",
     )
     parser.add_argument("--quality", type=int, help="JPEG quality [1,100]")
     parser.add_argument("--near-lossless-error", type=int, help="JPEG-LS NEAR [0,255]")
     parser.add_argument("--target-psnr", type=float, help="JPEG2000/HTJ2K target PSNR")
     parser.add_argument("--target-bpp", type=float, help="JPEG2000/HTJ2K target bits-per-pixel")
+    parser.add_argument("--distance", type=float, help="JPEG-XL distance [0,25] (0: lossless)")
+    parser.add_argument("--effort", type=int, help="JPEG-XL effort [1,10]")
     parser.add_argument(
         "--threads",
         type=int,
-        help="JPEG2000/HTJ2K encoder threads (-1:auto, 0:library default, >0:count)",
+        help="JPEG2000/HTJ2K/JPEG-XL encoder threads (-1:auto, 0:library default, >0:count)",
     )
     color_transform_group = parser.add_mutually_exclusive_group()
     color_transform_group.add_argument(
@@ -176,12 +223,13 @@ def build_codec_opt(args: argparse.Namespace, transfer_syntax: dicom.Uid) -> dic
     has_j2k_fields = (
         args.target_bpp is not None
         or args.target_psnr is not None
-        or args.threads is not None
         or args.color_transform is not None
     )
+    has_thread_field = args.threads is not None
+    has_jpegxl_fields = args.distance is not None or args.effort is not None
     has_jpeg_fields = args.quality is not None
     has_jpegls_fields = args.near_lossless_error is not None
-    has_any_fields = has_j2k_fields or has_jpeg_fields or has_jpegls_fields
+    has_any_fields = has_j2k_fields or has_thread_field or has_jpegxl_fields or has_jpeg_fields or has_jpegls_fields
 
     if args.target_bpp is not None and args.target_bpp < 0:
         raise ValueError("--target-bpp must be >= 0")
@@ -195,6 +243,12 @@ def build_codec_opt(args: argparse.Namespace, transfer_syntax: dicom.Uid) -> dic
         args.near_lossless_error < 0 or args.near_lossless_error > 255
     ):
         raise ValueError("--near-lossless-error must be in [0, 255]")
+    if args.distance is not None and (
+        not math.isfinite(args.distance) or args.distance < 0 or args.distance > 25
+    ):
+        raise ValueError("--distance must be in [0, 25]")
+    if args.effort is not None and (args.effort < 1 or args.effort > 10):
+        raise ValueError("--effort must be in [1, 10]")
 
     if args.codec:
         codec_type = canonical_codec_name(args.codec)
@@ -202,8 +256,18 @@ def build_codec_opt(args: argparse.Namespace, transfer_syntax: dicom.Uid) -> dic
         codec_type = "jpeg"
     elif has_jpegls_fields:
         codec_type = "jpegls"
+    elif has_jpegxl_fields:
+        codec_type = "jpegxl"
     elif has_j2k_fields:
-        codec_type = "htj2k" if is_htj2k_transfer_syntax(transfer_syntax) else "j2k"
+        if is_jpegxl_transfer_syntax(transfer_syntax):
+            codec_type = "jpegxl"
+        else:
+            codec_type = "htj2k" if is_htj2k_transfer_syntax(transfer_syntax) else "j2k"
+    elif has_thread_field:
+        if is_jpegxl_transfer_syntax(transfer_syntax):
+            codec_type = "jpegxl"
+        else:
+            codec_type = "htj2k" if is_htj2k_transfer_syntax(transfer_syntax) else "j2k"
     else:
         codec_type = "auto"
 
@@ -212,19 +276,57 @@ def build_codec_opt(args: argparse.Namespace, transfer_syntax: dicom.Uid) -> dic
             raise ValueError("codec auto does not accept extra option fields")
         return None
 
+    if codec_type in {"j2k", "htj2k"}:
+        if has_jpeg_fields or has_jpegls_fields or has_jpegxl_fields:
+            raise ValueError(
+                f"codec {codec_type} does not accept quality/near-lossless-error/distance/effort"
+            )
+    elif codec_type == "jpegls":
+        if has_j2k_fields or has_thread_field or has_jpeg_fields or has_jpegxl_fields:
+            raise ValueError(
+                "codec jpegls does not accept target-bpp/target-psnr/threads/color-transform/quality/distance/effort"
+            )
+    elif codec_type == "jpeg":
+        if has_j2k_fields or has_thread_field or has_jpegls_fields or has_jpegxl_fields:
+            raise ValueError(
+                "codec jpeg does not accept target-bpp/target-psnr/threads/color-transform/near-lossless-error/distance/effort"
+            )
+    elif codec_type == "jpegxl":
+        if has_j2k_fields or has_jpeg_fields or has_jpegls_fields:
+            raise ValueError("codec jpegxl does not accept j2k/jpeg/jpegls option fields")
+        if is_jpegxl_jpeg_recompression_transfer_syntax(transfer_syntax):
+            raise ValueError(
+                "JPEGXLJPEGRecompression transfer syntax is decode-only and not supported for encoding"
+            )
+
     codec_opt: dict[str, object] = {"type": codec_type}
-    if args.quality is not None:
-        codec_opt["quality"] = args.quality
-    if args.near_lossless_error is not None:
-        codec_opt["near_lossless_error"] = args.near_lossless_error
-    if args.target_psnr is not None:
-        codec_opt["target_psnr"] = args.target_psnr
-    if args.target_bpp is not None:
-        codec_opt["target_bpp"] = args.target_bpp
-    if args.threads is not None:
-        codec_opt["threads"] = args.threads
-    if args.color_transform is not None:
-        codec_opt["color_transform"] = args.color_transform
+
+    if codec_type in {"j2k", "htj2k"}:
+        if args.target_psnr is not None:
+            codec_opt["target_psnr"] = args.target_psnr
+        if args.target_bpp is not None:
+            codec_opt["target_bpp"] = args.target_bpp
+        if args.threads is not None:
+            codec_opt["threads"] = args.threads
+        if args.color_transform is not None:
+            codec_opt["color_transform"] = args.color_transform
+    elif codec_type == "jpeg":
+        if args.quality is not None:
+            codec_opt["quality"] = args.quality
+    elif codec_type == "jpegls":
+        if args.near_lossless_error is not None:
+            codec_opt["near_lossless_error"] = args.near_lossless_error
+    elif codec_type == "jpegxl":
+        distance = args.distance
+        if distance is None and is_jpegxl_lossless_transfer_syntax(transfer_syntax):
+            distance = 0.0
+        if distance is not None:
+            codec_opt["distance"] = distance
+        if args.effort is not None:
+            codec_opt["effort"] = args.effort
+        if args.threads is not None:
+            codec_opt["threads"] = args.threads
+
     return codec_opt
 
 

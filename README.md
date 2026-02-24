@@ -4,8 +4,37 @@ Minimal DICOM file wrapper with optional Python bindings.
 
 ## Repository Setup
 
-```
+### Full setup (default)
+
+```bash
 git submodule update --init --recursive
+```
+
+### JPEG-XL minimal setup (optional)
+
+If you want to work on JPEG-XL integration without downloading all nested `extern/libjxl`
+submodules, use:
+
+```bash
+# macOS / Linux
+./scripts/setup_libjxl_minimal.sh
+```
+
+```bat
+:: Windows (cmd.exe)
+scripts\setup_libjxl_minimal.bat
+```
+
+The minimal script initializes only:
+
+- `extern/libjxl/third_party/highway`
+- `extern/libjxl/third_party/brotli`
+- `extern/libjxl/third_party/skcms`
+
+To enable JPEG-XL dependency build in this project:
+
+```bash
+cmake -S . -B build -DDICOMSDL_ENABLE_JPEGXL=ON
 ```
 
 ## JPEG-LS (CharLS) Pin
@@ -60,6 +89,8 @@ cmake --build build
 ./build/dicomconv input.dcm output.dcm jpeg --quality 92
 ./build/dicomconv input.dcm output.dcm jpeg2k --target-psnr 45 --threads -1
 ./build/dicomconv input.dcm output.dcm htj2k-lossless --no-color-transform
+./build/dicomconv input.dcm output.dcm jpegxl --distance 1.5 --effort 7 --threads -1
+./build/dicomconv input.dcm output.dcm jpegxl-lossless
 ```
 
 ### Preferred C++ DataSet access pattern
@@ -140,6 +171,8 @@ dicomconv input.dcm output.dcm 1.2.840.10008.1.2
 dicomconv input.dcm output.dcm jpeg --quality 92
 dicomconv input.dcm output.dcm jpeg2k --target-psnr 45 --threads -1
 dicomconv input.dcm output.dcm htj2k-lossless --no-color-transform
+dicomconv input.dcm output.dcm jpegxl --distance 1.5 --effort 7 --threads -1
+dicomconv input.dcm output.dcm jpegxl-lossless
 
 # Show full help (all options + examples)
 dicomconv -h

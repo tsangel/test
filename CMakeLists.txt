@@ -90,9 +90,11 @@ add_library(dicomsdl STATIC
 	src/pixel_encoder_htj2k.cpp
 	src/pixel_encoder_jpegls.cpp
 	src/pixel_encoder_jpeg.cpp
+	src/pixel_encoder_jpegxl.cpp
 	src/pixel_decoder_jpeg2k.cpp
 	src/pixel_decoder_htj2k.cpp
 	src/pixel_decoder_jpegls.cpp
+	src/pixel_decoder_jpegxl.cpp
 	src/pixel_decoder_jpeg.cpp
 )
 set_target_properties(dicomsdl PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -134,6 +136,31 @@ if(DICOMSDL_ENABLE_OPENJPH)
 		message(FATAL_ERROR
 			"openjph not found at ${CMAKE_CURRENT_SOURCE_DIR}/extern/openjph. "
 			"Initialize submodules (git submodule update --init --recursive).")
+	endif()
+endif()
+
+option(DICOMSDL_ENABLE_JPEGXL "Enable JPEG XL backend dependencies (libjxl) for codec development" OFF)
+if(DICOMSDL_ENABLE_JPEGXL)
+	if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/libjxl/CMakeLists.txt")
+		message(FATAL_ERROR
+			"libjxl not found at ${CMAKE_CURRENT_SOURCE_DIR}/extern/libjxl. "
+			"Initialize submodules (git submodule update --init --recursive) "
+			"or run scripts/setup_libjxl_minimal.sh (.bat on Windows).")
+	endif()
+	if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/libjxl/third_party/highway/CMakeLists.txt")
+		message(FATAL_ERROR
+			"libjxl third_party/highway is missing. "
+			"Run scripts/setup_libjxl_minimal.sh (.bat on Windows).")
+	endif()
+	if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/libjxl/third_party/brotli/c/include/brotli/decode.h")
+		message(FATAL_ERROR
+			"libjxl third_party/brotli is missing. "
+			"Run scripts/setup_libjxl_minimal.sh (.bat on Windows).")
+	endif()
+	if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/libjxl/third_party/skcms/skcms.h")
+		message(FATAL_ERROR
+			"libjxl third_party/skcms is missing. "
+			"Run scripts/setup_libjxl_minimal.sh (.bat on Windows).")
 	endif()
 endif()
 
@@ -269,6 +296,96 @@ if(DICOMSDL_ENABLE_OPENJPH)
 	unset(_dicomsdl_openjph_build_shared_libs_cache_defined)
 endif()
 
+if(DICOMSDL_ENABLE_JPEGXL)
+	if(DEFINED BUILD_SHARED_LIBS)
+		set(_dicomsdl_jpegxl_build_shared_libs_defined TRUE)
+		set(_dicomsdl_jpegxl_build_shared_libs "${BUILD_SHARED_LIBS}")
+	else()
+		set(_dicomsdl_jpegxl_build_shared_libs_defined FALSE)
+	endif()
+	if(DEFINED CACHE{BUILD_SHARED_LIBS})
+		set(_dicomsdl_jpegxl_build_shared_libs_cache_defined TRUE)
+		get_property(
+			_dicomsdl_jpegxl_build_shared_libs_cache
+			CACHE BUILD_SHARED_LIBS
+			PROPERTY VALUE
+		)
+	else()
+		set(_dicomsdl_jpegxl_build_shared_libs_cache_defined FALSE)
+	endif()
+
+	if(DEFINED BUILD_TESTING)
+		set(_dicomsdl_jpegxl_build_testing_defined TRUE)
+		set(_dicomsdl_jpegxl_build_testing "${BUILD_TESTING}")
+	else()
+		set(_dicomsdl_jpegxl_build_testing_defined FALSE)
+	endif()
+	if(DEFINED CACHE{BUILD_TESTING})
+		set(_dicomsdl_jpegxl_build_testing_cache_defined TRUE)
+		get_property(
+			_dicomsdl_jpegxl_build_testing_cache
+			CACHE BUILD_TESTING
+			PROPERTY VALUE
+		)
+	else()
+		set(_dicomsdl_jpegxl_build_testing_cache_defined FALSE)
+	endif()
+
+	set(BUILD_SHARED_LIBS OFF)
+	set(BUILD_SHARED_LIBS OFF CACHE BOOL "Force static libjxl build in dicomsdl superbuild" FORCE)
+	set(BUILD_TESTING OFF)
+	set(BUILD_TESTING OFF CACHE BOOL "Disable libjxl tests in dicomsdl superbuild" FORCE)
+
+	set(JPEGXL_ENABLE_FUZZERS OFF CACHE BOOL "Disable libjxl fuzzers in dicomsdl superbuild" FORCE)
+	set(JPEGXL_ENABLE_DEVTOOLS OFF CACHE BOOL "Disable libjxl dev tools in dicomsdl superbuild" FORCE)
+	set(JPEGXL_ENABLE_TOOLS OFF CACHE BOOL "Disable libjxl CLI tools in dicomsdl superbuild" FORCE)
+	set(JPEGXL_ENABLE_BENCHMARK OFF CACHE BOOL "Disable libjxl benchmarks in dicomsdl superbuild" FORCE)
+	set(JPEGXL_ENABLE_EXAMPLES OFF CACHE BOOL "Disable libjxl examples in dicomsdl superbuild" FORCE)
+	set(JPEGXL_ENABLE_DOXYGEN OFF CACHE BOOL "Disable libjxl doxygen in dicomsdl superbuild" FORCE)
+	set(JPEGXL_ENABLE_MANPAGES OFF CACHE BOOL "Disable libjxl manpages in dicomsdl superbuild" FORCE)
+	set(JPEGXL_ENABLE_JNI OFF CACHE BOOL "Disable libjxl JNI wrapper in dicomsdl superbuild" FORCE)
+	set(JPEGXL_ENABLE_OPENEXR OFF CACHE BOOL "Disable libjxl OpenEXR integration in dicomsdl superbuild" FORCE)
+	set(JPEGXL_ENABLE_VIEWERS OFF CACHE BOOL "Disable libjxl viewers in dicomsdl superbuild" FORCE)
+	set(JPEGXL_ENABLE_PLUGINS OFF CACHE BOOL "Disable libjxl plugins in dicomsdl superbuild" FORCE)
+	set(JPEGXL_ENABLE_SJPEG OFF CACHE BOOL "Disable libjxl sjpeg path in dicomsdl superbuild" FORCE)
+	set(JPEGXL_ENABLE_JPEGLI OFF CACHE BOOL "Disable libjxl jpegli path in dicomsdl superbuild" FORCE)
+	set(JPEGXL_ENABLE_TCMALLOC OFF CACHE BOOL "Disable libjxl tcmalloc in dicomsdl superbuild" FORCE)
+	set(JPEGXL_BUNDLE_LIBPNG OFF CACHE BOOL "Disable libjxl bundled libpng in dicomsdl superbuild" FORCE)
+	set(JPEGXL_ENABLE_SKCMS ON CACHE BOOL "Enable skcms for libjxl in dicomsdl superbuild" FORCE)
+
+	add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/libjxl EXCLUDE_FROM_ALL)
+
+	if(_dicomsdl_jpegxl_build_shared_libs_defined)
+		set(BUILD_SHARED_LIBS "${_dicomsdl_jpegxl_build_shared_libs}")
+	else()
+		unset(BUILD_SHARED_LIBS)
+	endif()
+	if(_dicomsdl_jpegxl_build_shared_libs_cache_defined)
+		set(BUILD_SHARED_LIBS "${_dicomsdl_jpegxl_build_shared_libs_cache}" CACHE BOOL "" FORCE)
+	else()
+		unset(BUILD_SHARED_LIBS CACHE)
+	endif()
+	if(_dicomsdl_jpegxl_build_testing_defined)
+		set(BUILD_TESTING "${_dicomsdl_jpegxl_build_testing}")
+	else()
+		unset(BUILD_TESTING)
+	endif()
+	if(_dicomsdl_jpegxl_build_testing_cache_defined)
+		set(BUILD_TESTING "${_dicomsdl_jpegxl_build_testing_cache}" CACHE BOOL "" FORCE)
+	else()
+		unset(BUILD_TESTING CACHE)
+	endif()
+
+	unset(_dicomsdl_jpegxl_build_shared_libs_defined)
+	unset(_dicomsdl_jpegxl_build_shared_libs)
+	unset(_dicomsdl_jpegxl_build_shared_libs_cache_defined)
+	unset(_dicomsdl_jpegxl_build_shared_libs_cache)
+	unset(_dicomsdl_jpegxl_build_testing_defined)
+	unset(_dicomsdl_jpegxl_build_testing)
+	unset(_dicomsdl_jpegxl_build_testing_cache_defined)
+	unset(_dicomsdl_jpegxl_build_testing_cache)
+endif()
+
 set(_dicomsdl_libturbojpeg_prefix "${CMAKE_CURRENT_BINARY_DIR}/extern/libjpeg-turbo")
 set(_dicomsdl_libturbojpeg_build_dir "${_dicomsdl_libturbojpeg_prefix}/build")
 set(_dicomsdl_libturbojpeg_install_dir "${_dicomsdl_libturbojpeg_prefix}/install")
@@ -351,6 +468,15 @@ if(DICOMSDL_ENABLE_OPENJPH)
 	target_compile_definitions(dicomsdl PRIVATE DICOMSDL_HAS_OPENJPH=1)
 else()
 	target_compile_definitions(dicomsdl PRIVATE DICOMSDL_HAS_OPENJPH=0)
+endif()
+if(DICOMSDL_ENABLE_JPEGXL)
+	if(NOT TARGET jxl OR NOT TARGET jxl_threads OR NOT TARGET jxl_cms)
+		message(FATAL_ERROR "libjxl targets (jxl/jxl_threads/jxl_cms) were not generated")
+	endif()
+	target_link_libraries(dicomsdl PRIVATE jxl jxl_threads jxl_cms)
+	target_compile_definitions(dicomsdl PRIVATE DICOMSDL_HAS_JPEGXL=1)
+else()
+	target_compile_definitions(dicomsdl PRIVATE DICOMSDL_HAS_JPEGXL=0)
 endif()
 target_link_libraries(dicomsdl PRIVATE charls)
 target_link_libraries(dicomsdl PRIVATE dicomsdl_turbojpeg)

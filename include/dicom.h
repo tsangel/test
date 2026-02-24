@@ -842,12 +842,14 @@ inline constexpr std::uint32_t ts_mask(std::uint16_t idx) {
 
 	// JPEG XL
 	case "JPEGXLLossless"_uid.raw_index():
-		return kTSJpegXL | kTSJpegFamily | kTSFfd9 | kTSEncapsulated |
-		    kTSLossless;
+		return kTSJpegXL | kTSJpegFamily | kTSEncapsulated |
+		    kTSLossless | kTSPixelEncodeSupported | kTSPixelDecodeSupported;
 	case "JPEGXLJPEGRecompression"_uid.raw_index():
+		return kTSJpegXL | kTSJpegFamily | kTSEncapsulated |
+		    kTSLossy | kTSPixelDecodeSupported;
 	case "JPEGXL"_uid.raw_index():
-		return kTSJpegXL | kTSJpegFamily | kTSFfd9 | kTSEncapsulated |
-		    kTSLossy;
+		return kTSJpegXL | kTSJpegFamily | kTSEncapsulated |
+		    kTSLossy | kTSPixelEncodeSupported | kTSPixelDecodeSupported;
 
 	// HTJ2K codestream transfer syntaxes
 	case "HTJ2KLossless"_uid.raw_index():
@@ -1050,11 +1052,22 @@ struct Htj2kOptions {
 	int threads{-1};
 	bool use_color_transform{true};
 };
+struct JpegXlOptions {
+	// Lossy distance target (0: mathematically lossless, recommended lossy range ~0.5..3.0).
+	// For JPEGXL transfer syntax, this must be > 0.
+	// For JPEGXLLossless transfer syntax, this must be 0.
+	double distance{1.0};
+	// Encoder effort/speed: 1(fastest) .. 10(slowest), default 7.
+	int effort{7};
+	// Encoder thread hint:
+	//  -1: auto(all CPUs) [default], 0: library default, >0: explicit thread count.
+	int threads{-1};
+};
 struct DeflateOptions { int level{6}; };
 
 using CodecOptions = std::variant<
     AutoCodecOptions, NoCompression, RleOptions, JpegOptions, JpegLsOptions, J2kOptions, Htj2kOptions,
-    DeflateOptions>;
+    JpegXlOptions, DeflateOptions>;
 
 enum class Htj2kDecoder : std::uint8_t {
 	auto_select = 0,

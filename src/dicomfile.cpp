@@ -949,11 +949,11 @@ void DicomFile::apply_transfer_syntax(uid::WellKnown transfer_syntax,
 				return;
 			} else if (!has_encapsulated_pixel_data) {
 				diag::error_and_throw(
-				    "DicomFile::set_transfer_syntax file={} source_ts={} target_ts={} reason=encoding native PixelData to encapsulated transfer syntax is not supported yet (supported targets include: EncapsulatedUncompressedExplicitVRLittleEndian, RLELossless, JPEG2000*, HTJ2K*, JPEG-LS, JPEG Baseline/Extended/Lossless)",
+				    "DicomFile::set_transfer_syntax file={} source_ts={} target_ts={} reason=encoding native PixelData to encapsulated transfer syntax is not supported yet (supported targets include: EncapsulatedUncompressedExplicitVRLittleEndian, RLELossless, JPEG2000*, HTJ2K*, JPEG-LS, JPEG Baseline/Extended/Lossless, JPEGXL/JPEGXLLossless)",
 				    path(), source_transfer_syntax.value(), transfer_syntax.value());
 			} else {
 				diag::error_and_throw(
-				    "DicomFile::set_transfer_syntax file={} source_ts={} target_ts={} reason=transcoding between encapsulated transfer syntaxes is not supported yet (supported targets for native->encapsulated include: EncapsulatedUncompressedExplicitVRLittleEndian, RLELossless, JPEG2000*, HTJ2K*, JPEG-LS, JPEG Baseline/Extended/Lossless)",
+				    "DicomFile::set_transfer_syntax file={} source_ts={} target_ts={} reason=transcoding between encapsulated transfer syntaxes is not supported yet (supported targets for native->encapsulated include: EncapsulatedUncompressedExplicitVRLittleEndian, RLELossless, JPEG2000*, HTJ2K*, JPEG-LS, JPEG Baseline/Extended/Lossless, JPEGXL/JPEGXLLossless)",
 				    path(), source_transfer_syntax.value(), transfer_syntax.value());
 			}
 		} else if (has_encapsulated_pixel_data && !target_uses_encapsulated_pixel_data) {

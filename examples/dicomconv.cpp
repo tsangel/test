@@ -21,6 +21,8 @@ struct CliOptions {
 	std::optional<std::string> codec_type{};
 	std::optional<double> target_bpp{};
 	std::optional<double> target_psnr{};
+	std::optional<double> distance{};
+	std::optional<int> effort{};
 	std::optional<int> threads{};
 	std::optional<bool> color_transform{};
 	std::optional<int> quality{};
@@ -93,15 +95,18 @@ void print_usage(const char* prog, bool include_transfer_syntax_list) {
 	    << "Transfer syntax:\n"
 	    << "  - DICOM keyword or UID value (for example: JPEG2000, 1.2.840.10008.1.2.4.90)\n"
 	    << "  - Short aliases: jpeg, jpeglossless, jpegls, jpegls-near-lossless,\n"
-	    << "                   jpeg2k, jpeg2k-lossless, jpeg2k-mc, htj2k, htj2k-lossless, rle\n"
+	    << "                   jpeg2k, jpeg2k-lossless, jpeg2k-mc, htj2k, htj2k-lossless,\n"
+	    << "                   jpegxl, jpegxl-lossless, jpegxl-jpeg-recompression, rle\n"
 	    << "\n"
 	    << "Options:\n"
-	    << "  --codec TYPE              auto|none|rle|jpeg|jpegls|j2k|htj2k (default: auto)\n"
+	    << "  --codec TYPE              auto|none|rle|jpeg|jpegls|j2k|htj2k|jpegxl (default: auto)\n"
 	    << "  --quality N               JPEG quality [1,100]\n"
 	    << "  --near-lossless-error N   JPEG-LS NEAR [0,255]\n"
 	    << "  --target-psnr V           JPEG2000/HTJ2K lossy target PSNR\n"
 	    << "  --target-bpp V            JPEG2000/HTJ2K lossy target bits-per-pixel\n"
-	    << "  --threads N               JPEG2000/HTJ2K encoder threads (-1:auto,0:library,>0:count)\n"
+	    << "  --distance V              JPEG-XL distance [0,25] (0: lossless)\n"
+	    << "  --effort N                JPEG-XL effort [1,10]\n"
+	    << "  --threads N               JPEG2000/HTJ2K/JPEG-XL encoder threads (-1:auto,0:library,>0:count)\n"
 	    << "  --color-transform         Enable JPEG2000/HTJ2K MCT (RGB->YBR_*)\n"
 	    << "  --no-color-transform      Disable JPEG2000/HTJ2K MCT\n"
 	    << "  -h, --help                Show this help\n"
@@ -112,6 +117,8 @@ void print_usage(const char* prog, bool include_transfer_syntax_list) {
 	    << "  " << prog << " in.dcm out.dcm jpegls-near-lossless --near-lossless-error 3\n"
 	    << "  " << prog << " in.dcm out.dcm jpeg2k --target-psnr 45 --threads -1\n"
 	    << "  " << prog << " in.dcm out.dcm htj2k-lossless --codec htj2k --no-color-transform\n"
+	    << "  " << prog << " in.dcm out.dcm jpegxl --distance 1.5 --effort 7 --threads -1\n"
+	    << "  " << prog << " in.dcm out.dcm jpegxl-lossless --distance 0\n"
 	    << "\n"
 	    << "The tool calls DicomFile::set_transfer_syntax(..., codec_opt) internally.\n";
 	if (include_transfer_syntax_list) {
@@ -220,6 +227,34 @@ bool parse_args(int argc, char** argv, CliOptions& opts, bool& help_shown) {
 			opts.threads = parsed;
 			continue;
 		}
+		if (arg == "--distance") {
+			auto value = read_option_value("--distance");
+			if (!value) {
+				return false;
+			}
+			double parsed = 0.0;
+			if (!parse_double_value(*value, parsed)) {
+				std::cerr << "Invalid --distance value: " << *value << '\n';
+				print_usage(argv[0], false);
+				return false;
+			}
+			opts.distance = parsed;
+			continue;
+		}
+		if (arg == "--effort") {
+			auto value = read_option_value("--effort");
+			if (!value) {
+				return false;
+			}
+			int parsed = 0;
+			if (!parse_int_value(*value, parsed)) {
+				std::cerr << "Invalid --effort value: " << *value << '\n';
+				print_usage(argv[0], false);
+				return false;
+			}
+			opts.effort = parsed;
+			continue;
+		}
 		if (arg == "--color-transform") {
 			opts.color_transform = true;
 			continue;
@@ -310,6 +345,17 @@ std::optional<dicom::uid::WellKnown> resolve_transfer_syntax_alias(std::string_v
 	if (normalized == "htj2klosslessrpcl") {
 		return "HTJ2KLosslessRPCL"_uid;
 	}
+	if (normalized == "jpegxl" || normalized == "jxl") {
+		return "JPEGXL"_uid;
+	}
+	if (normalized == "jpegxllossless" || normalized == "jxllossless") {
+		return "JPEGXLLossless"_uid;
+	}
+	if (normalized == "jpegxljpegrecompression" ||
+	    normalized == "jpegxlrecompression" ||
+	    normalized == "jxljpegrecompression") {
+		return "JPEGXLJPEGRecompression"_uid;
+	}
 
 	return std::nullopt;
 }
@@ -336,15 +382,19 @@ dicom::pixel::CodecOptions build_codec_options(
 	using dicom::pixel::J2kOptions;
 	using dicom::pixel::JpegLsOptions;
 	using dicom::pixel::JpegOptions;
+	using dicom::pixel::JpegXlOptions;
 	using dicom::pixel::NoCompression;
 	using dicom::pixel::RleOptions;
+	using namespace dicom::literals;
 
 	const bool has_j2k_fields = opts.target_bpp.has_value() ||
-	    opts.target_psnr.has_value() || opts.threads.has_value() ||
-	    opts.color_transform.has_value();
+	    opts.target_psnr.has_value() || opts.color_transform.has_value();
+	const bool has_thread_field = opts.threads.has_value();
+	const bool has_jpegxl_fields = opts.distance.has_value() || opts.effort.has_value();
 	const bool has_jpeg_fields = opts.quality.has_value();
 	const bool has_jpegls_fields = opts.near_lossless_error.has_value();
-	const bool has_any_fields = has_j2k_fields || has_jpeg_fields || has_jpegls_fields;
+	const bool has_any_fields = has_j2k_fields || has_thread_field ||
+	    has_jpegxl_fields || has_jpeg_fields || has_jpegls_fields;
 
 	std::string codec = opts.codec_type ? normalize_token(*opts.codec_type) : std::string{};
 	if (codec.empty()) {
@@ -352,8 +402,20 @@ dicom::pixel::CodecOptions build_codec_options(
 			codec = "jpeg";
 		} else if (has_jpegls_fields) {
 			codec = "jpegls";
+		} else if (has_jpegxl_fields) {
+			codec = "jpegxl";
 		} else if (has_j2k_fields) {
-			codec = transfer_syntax.is_htj2k() ? "htj2k" : "j2k";
+			if (transfer_syntax.is_jpegxl()) {
+				codec = "jpegxl";
+			} else {
+				codec = transfer_syntax.is_htj2k() ? "htj2k" : "j2k";
+			}
+		} else if (has_thread_field) {
+			if (transfer_syntax.is_jpegxl()) {
+				codec = "jpegxl";
+			} else {
+				codec = transfer_syntax.is_htj2k() ? "htj2k" : "j2k";
+			}
 		} else {
 			codec = "auto";
 		}
@@ -381,9 +443,9 @@ dicom::pixel::CodecOptions build_codec_options(
 	}
 	if (codec == "j2k" || codec == "jpeg2k" || codec == "jpeg2000" ||
 	    codec == "j2koptions") {
-		if (has_jpeg_fields || has_jpegls_fields) {
+		if (has_jpeg_fields || has_jpegls_fields || has_jpegxl_fields) {
 			throw std::invalid_argument(
-			    "j2k codec does not accept quality/near-lossless-error");
+			    "j2k codec does not accept quality/near-lossless-error/distance/effort");
 		}
 		J2kOptions options{};
 		if (opts.target_bpp) {
@@ -407,9 +469,9 @@ dicom::pixel::CodecOptions build_codec_options(
 		return CodecOptions{options};
 	}
 	if (codec == "htj2k" || codec == "htj2koptions") {
-		if (has_jpeg_fields || has_jpegls_fields) {
+		if (has_jpeg_fields || has_jpegls_fields || has_jpegxl_fields) {
 			throw std::invalid_argument(
-			    "htj2k codec does not accept quality/near-lossless-error");
+			    "htj2k codec does not accept quality/near-lossless-error/distance/effort");
 		}
 		Htj2kOptions options{};
 		if (opts.target_bpp) {
@@ -433,9 +495,9 @@ dicom::pixel::CodecOptions build_codec_options(
 		return CodecOptions{options};
 	}
 	if (codec == "jpegls" || codec == "jls" || codec == "jpeglsoptions") {
-		if (has_j2k_fields || has_jpeg_fields) {
+		if (has_j2k_fields || has_thread_field || has_jpeg_fields || has_jpegxl_fields) {
 			throw std::invalid_argument(
-			    "jpegls codec does not accept j2k/jpeg option fields");
+			    "jpegls codec does not accept target-bpp/target-psnr/threads/color-transform/quality/distance/effort");
 		}
 		JpegLsOptions options{};
 		if (opts.near_lossless_error) {
@@ -448,9 +510,9 @@ dicom::pixel::CodecOptions build_codec_options(
 	}
 	if (codec == "jpeg" || codec == "jpegbaseline" ||
 	    codec == "jpeglossless" || codec == "jpegoptions") {
-		if (has_j2k_fields || has_jpegls_fields) {
+		if (has_j2k_fields || has_thread_field || has_jpegls_fields || has_jpegxl_fields) {
 			throw std::invalid_argument(
-			    "jpeg codec does not accept j2k/jpegls option fields");
+			    "jpeg codec does not accept target-bpp/target-psnr/threads/color-transform/near-lossless-error/distance/effort");
 		}
 		JpegOptions options{};
 		if (opts.quality) {
@@ -461,9 +523,50 @@ dicom::pixel::CodecOptions build_codec_options(
 		}
 		return CodecOptions{options};
 	}
+	if (codec == "jpegxl" || codec == "jxl" || codec == "jpegxloptions") {
+		if (has_j2k_fields || has_jpeg_fields || has_jpegls_fields) {
+			throw std::invalid_argument(
+			    "jpegxl codec does not accept j2k/jpeg/jpegls option fields");
+		}
+		JpegXlOptions options{};
+		if (transfer_syntax == "JPEGXLLossless"_uid) {
+			options.distance = 0.0;
+		}
+		if (opts.distance) {
+			options.distance = *opts.distance;
+		}
+		if (opts.effort) {
+			options.effort = *opts.effort;
+		}
+		if (opts.threads) {
+			options.threads = *opts.threads;
+		}
+		if (options.threads < -1) {
+			throw std::invalid_argument("threads must be -1, 0, or positive");
+		}
+		if (!std::isfinite(options.distance) || options.distance < 0.0 ||
+		    options.distance > 25.0) {
+			throw std::invalid_argument("distance must be in [0, 25]");
+		}
+		if (options.effort < 1 || options.effort > 10) {
+			throw std::invalid_argument("effort must be in [1, 10]");
+		}
+		if (transfer_syntax == "JPEGXLJPEGRecompression"_uid) {
+			throw std::invalid_argument(
+			    "JPEGXLJPEGRecompression transfer syntax is decode-only and not supported for encoding");
+		}
+		if (transfer_syntax == "JPEGXLLossless"_uid && options.distance != 0.0) {
+			throw std::invalid_argument(
+			    "JPEGXLLossless requires distance=0");
+		}
+		if (transfer_syntax == "JPEGXL"_uid && options.distance <= 0.0) {
+			throw std::invalid_argument("JPEGXL requires distance > 0");
+		}
+		return CodecOptions{options};
+	}
 
 	throw std::invalid_argument(
-	    "Unknown codec type; expected one of: auto, none, rle, jpeg, jpegls, j2k, htj2k");
+	    "Unknown codec type; expected one of: auto, none, rle, jpeg, jpegls, j2k, htj2k, jpegxl");
 }
 
 } // namespace
