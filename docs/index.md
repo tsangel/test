@@ -23,6 +23,7 @@ python_dataset_access_benchmarks
 jpeg2000_htj2k_mct_benchmarks
 pydicom_pixel_decoding_wg04
 pixel_encode_constraints
+pixel_codec_plugin_guidelines
 tag_path_lookup
 ```
 

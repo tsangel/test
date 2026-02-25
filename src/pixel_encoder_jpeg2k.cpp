@@ -1,11 +1,11 @@
 #include "pixel_encoder_detail.hpp"
 
 #include "dicom_endian.h"
-#include "diagnostics.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <exception>
 #include <limits>
 #include <memory>
 #include <string>
@@ -15,9 +15,14 @@
 #include <openjpeg.h>
 
 namespace dicom::pixel::detail {
-namespace diag = dicom::diag;
-
 namespace {
+
+void set_codec_error(codec_error& out_error, codec_status_code code,
+    std::string_view stage, std::string detail) {
+	out_error.code = code;
+	out_error.stage = std::string(stage);
+	out_error.detail = std::move(detail);
+}
 
 struct openjpeg_log_sink {
 	std::string warning{};
@@ -175,13 +180,12 @@ OPJ_BOOL OPJ_CALLCONV opj_seek_in_memory_stream(OPJ_OFF_T absolute_position, voi
 }
 
 [[nodiscard]] std::int32_t load_sample_from_source(const std::uint8_t* sample_ptr,
-    std::size_t bytes_per_sample, bool is_signed, int bits_stored,
-    std::string_view file_path) {
+    std::size_t bytes_per_sample, bool is_signed, int bits_stored) {
 	switch (bytes_per_sample) {
 	case 1:
 	case 2:
 		return load_i8_or_i16_sample_from_source(sample_ptr, bytes_per_sample, is_signed,
-		    bits_stored, "pixel::encode_jpeg2k_frame", file_path);
+		    bits_stored);
 	case 4:
 		if (is_signed) {
 			return normalize_signed_sample_bits(
@@ -191,24 +195,23 @@ OPJ_BOOL OPJ_CALLCONV opj_seek_in_memory_stream(OPJ_OFF_T absolute_position, voi
 		// To keep behavior deterministic, reject values beyond int32 range here.
 		{
 			const auto raw = endian::load_le<std::uint32_t>(sample_ptr);
-			if (raw > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max())) {
-				diag::error_and_throw(
-				    "pixel::encode_jpeg2k_frame file={} reason=unsigned 32-bit sample exceeds OpenJPEG int32 range",
-				    file_path);
-			}
+				if (raw > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max())) {
+					throw_encode_error(
+					    "pixel::encode_jpeg2k_frame reason=unsigned 32-bit sample exceeds OpenJPEG int32 range");
+				}
 			return static_cast<std::int32_t>(raw);
 		}
-	default:
-		diag::error_and_throw(
-		    "pixel::encode_jpeg2k_frame file={} reason=unsupported bytes_per_sample={}",
-		    file_path, bytes_per_sample);
-		return 0;
+		default:
+			throw_encode_error(
+			    "pixel::encode_jpeg2k_frame reason=unsupported bytes_per_sample={}",
+			    bytes_per_sample);
+			return 0;
 	}
 }
 
 void configure_j2k_encoder_parameters(opj_cparameters_t& parameters, bool lossless,
     std::size_t samples_per_pixel, int bits_stored, bool use_multicomponent_transform,
-    const J2kOptions& options, std::string_view file_path) {
+    const J2kOptions& options) {
 	opj_set_default_encoder_parameters(&parameters);
 	parameters.cod_format = 0; // raw J2K codestream
 	parameters.tcp_numlayers = 1;
@@ -242,9 +245,8 @@ void configure_j2k_encoder_parameters(opj_cparameters_t& parameters, bool lossle
 		return;
 	}
 
-	diag::error_and_throw(
-	    "pixel::encode_jpeg2k_frame file={} reason=lossy JPEG2000 transfer syntax requires J2kOptions.target_psnr or target_bpp",
-	    file_path);
+	throw_encode_error(
+	    "pixel::encode_jpeg2k_frame reason=lossy JPEG2000 transfer syntax requires J2kOptions.target_psnr or target_bpp");
 }
 
 [[nodiscard]] int max_num_resolutions_for_image(std::size_t rows, std::size_t cols) {
@@ -259,12 +261,11 @@ void configure_j2k_encoder_parameters(opj_cparameters_t& parameters, bool lossle
 }
 
 [[nodiscard]] OPJ_UINT32 resolve_openjpeg_encode_thread_count(
-    const J2kOptions& options, std::string_view file_path) {
+    const J2kOptions& options) {
 	int configured_threads = options.threads;
 	if (configured_threads < -1) {
-		diag::error_and_throw(
-		    "pixel::encode_jpeg2k_frame file={} reason=J2kOptions.threads must be -1, 0, or positive",
-		    file_path);
+		throw_encode_error(
+		    "pixel::encode_jpeg2k_frame reason=J2kOptions.threads must be -1, 0, or positive");
 	}
 	if (configured_threads == 0) {
 		return 0;
@@ -277,50 +278,128 @@ void configure_j2k_encoder_parameters(opj_cparameters_t& parameters, bool lossle
 	}
 	if (static_cast<unsigned long long>(configured_threads) >
 	    static_cast<unsigned long long>(std::numeric_limits<OPJ_UINT32>::max())) {
-		diag::error_and_throw(
-		    "pixel::encode_jpeg2k_frame file={} reason=encoder threads {} exceed OpenJPEG limit {}",
-		    file_path, configured_threads, std::numeric_limits<OPJ_UINT32>::max());
+		throw_encode_error(
+		    "pixel::encode_jpeg2k_frame reason=encoder threads {} exceed OpenJPEG limit {}",
+		    configured_threads, std::numeric_limits<OPJ_UINT32>::max());
 	}
 	return static_cast<OPJ_UINT32>(configured_threads);
 }
 
 } // namespace
 
+bool try_encode_jpeg2k_frame(std::span<const std::uint8_t> frame_data,
+    std::size_t rows, std::size_t cols, std::size_t samples_per_pixel,
+    std::size_t bytes_per_sample, int bits_allocated, int bits_stored,
+    int pixel_representation, Planar source_planar, std::size_t row_stride,
+    bool use_multicomponent_transform, bool lossless,
+    const J2kOptions& options, std::vector<std::uint8_t>& out_encoded,
+    codec_error& out_error) noexcept {
+	out_encoded.clear();
+	out_error = codec_error{};
+
+	if (rows == 0 || cols == 0 || samples_per_pixel == 0 || bytes_per_sample == 0) {
+		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		    "rows/cols/samples_per_pixel/bytes_per_sample must be positive");
+		return false;
+	}
+	if (samples_per_pixel != 1 && samples_per_pixel != 3 && samples_per_pixel != 4) {
+		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		    "only samples_per_pixel=1/3/4 are supported in current JPEG2000 encoder path");
+		return false;
+	}
+	if (use_multicomponent_transform && samples_per_pixel != 3) {
+		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		    "multicomponent JPEG2000 requires samples_per_pixel=3");
+		return false;
+	}
+	if (bits_allocated <= 0 || bits_allocated > 16) {
+		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		    "bits_allocated must be in [1,16]");
+		return false;
+	}
+	if (bits_stored <= 0 || bits_stored > bits_allocated) {
+		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		    "bits_stored must be in [1,bits_allocated]");
+		return false;
+	}
+	if (pixel_representation != 0 && pixel_representation != 1) {
+		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		    "pixel_representation must be 0 or 1");
+		return false;
+	}
+	if (bytes_per_sample != 1 && bytes_per_sample != 2 && bytes_per_sample != 4) {
+		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		    "unsupported bytes_per_sample (expected 1, 2, or 4)");
+		return false;
+	}
+	if (options.target_bpp < 0.0 || options.target_psnr < 0.0) {
+		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		    "J2kOptions.target_bpp/target_psnr must be >= 0");
+		return false;
+	}
+	if (options.threads < -1) {
+		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		    "J2kOptions.threads must be -1, 0, or positive");
+		return false;
+	}
+	if (!lossless && options.target_psnr <= 0.0 && options.target_bpp <= 0.0) {
+		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		    "lossy JPEG2000 requires target_psnr or target_bpp");
+		return false;
+	}
+
+	try {
+		out_encoded = encode_jpeg2k_frame(frame_data, rows, cols, samples_per_pixel,
+		    bytes_per_sample, bits_allocated, bits_stored, pixel_representation,
+		    source_planar, row_stride, use_multicomponent_transform, lossless,
+		    options);
+		out_error = codec_error{};
+		return true;
+	} catch (const std::bad_alloc&) {
+		set_codec_error(out_error, codec_status_code::internal_error, "allocate",
+		    "memory allocation failed");
+	} catch (const std::exception& e) {
+		set_codec_error(out_error, codec_status_code::backend_error, "encode",
+		    e.what());
+	} catch (...) {
+		set_codec_error(out_error, codec_status_code::backend_error, "encode",
+		    "non-standard exception");
+	}
+	out_encoded.clear();
+	return false;
+}
+
 std::vector<std::uint8_t> encode_jpeg2k_frame(std::span<const std::uint8_t> frame_data,
     std::size_t rows, std::size_t cols, std::size_t samples_per_pixel,
     std::size_t bytes_per_sample, int bits_allocated, int bits_stored,
     int pixel_representation, Planar source_planar, std::size_t row_stride,
     bool use_multicomponent_transform, bool lossless,
-    const J2kOptions& options, std::string_view file_path) {
-	constexpr std::string_view kFunctionName = "pixel::encode_jpeg2k_frame";
+    const J2kOptions& options) {
 	if (samples_per_pixel != 1 && samples_per_pixel != 3 && samples_per_pixel != 4) {
-		diag::error_and_throw(
-		    "pixel::encode_jpeg2k_frame file={} reason=only samples_per_pixel=1/3/4 are supported in current JPEG2000 encoder path",
-		    file_path);
+		throw_encode_error(
+		    "pixel::encode_jpeg2k_frame reason=only samples_per_pixel=1/3/4 are supported in current JPEG2000 encoder path");
 	}
 	if (use_multicomponent_transform && samples_per_pixel != 3) {
-		diag::error_and_throw(
-		    "pixel::encode_jpeg2k_frame file={} reason=multicomponent JPEG2000 requires samples_per_pixel=3",
-		    file_path);
+		throw_encode_error(
+		    "pixel::encode_jpeg2k_frame reason=multicomponent JPEG2000 requires samples_per_pixel=3");
 	}
 	if (bits_allocated <= 0 || bits_allocated > 16) {
-		diag::error_and_throw(
-		    "pixel::encode_jpeg2k_frame file={} reason=bits_allocated={} is not supported yet (supported: <= 16)",
-		    file_path, bits_allocated);
+		throw_encode_error(
+		    "pixel::encode_jpeg2k_frame reason=bits_allocated={} is not supported yet (supported: <= 16)",
+		    bits_allocated);
 	}
 	if (bits_stored <= 0 || bits_stored > bits_allocated) {
-		diag::error_and_throw(
-		    "pixel::encode_jpeg2k_frame file={} reason=bits_stored={} must be in [1, bits_allocated={}]",
-		    file_path, bits_stored, bits_allocated);
+		throw_encode_error(
+		    "pixel::encode_jpeg2k_frame reason=bits_stored={} must be in [1, bits_allocated={}]",
+		    bits_stored, bits_allocated);
 	}
 	if (pixel_representation != 0 && pixel_representation != 1) {
-		diag::error_and_throw(
-		    "pixel::encode_jpeg2k_frame file={} reason=pixel_representation must be 0 or 1",
-		    file_path);
+		throw_encode_error(
+		    "pixel::encode_jpeg2k_frame reason=pixel_representation must be 0 or 1");
 	}
 
 	const auto source_layout = make_source_frame_layout(frame_data, rows, cols, samples_per_pixel,
-	    bytes_per_sample, source_planar, row_stride, kFunctionName, file_path);
+	    bytes_per_sample, source_planar, row_stride);
 	const bool source_is_planar = source_layout.source_is_planar;
 	const std::size_t plane_stride = source_layout.plane_stride;
 	opj_cparameters_t parameters{};
@@ -342,9 +421,8 @@ std::vector<std::uint8_t> encode_jpeg2k_frame(std::span<const std::uint8_t> fram
 	opj_image_ptr image(opj_image_create(static_cast<OPJ_UINT32>(samples_per_pixel),
 	    component_parameters.data(), resolve_color_space(samples_per_pixel)));
 	if (!image) {
-		diag::error_and_throw(
-		    "pixel::encode_jpeg2k_frame file={} reason=failed to create OpenJPEG image",
-		    file_path);
+		throw_encode_error(
+		    "pixel::encode_jpeg2k_frame reason=failed to create OpenJPEG image");
 	}
 
 	image->x0 = 0;
@@ -360,9 +438,9 @@ std::vector<std::uint8_t> encode_jpeg2k_frame(std::span<const std::uint8_t> fram
 	for (std::size_t sample = 0; sample < samples_per_pixel; ++sample) {
 		auto& component = image->comps[sample];
 		if (!component.data) {
-			diag::error_and_throw(
-			    "pixel::encode_jpeg2k_frame file={} reason=OpenJPEG component {} data buffer is null",
-			    file_path, sample);
+			throw_encode_error(
+			    "pixel::encode_jpeg2k_frame reason=OpenJPEG component {} data buffer is null",
+			    sample);
 		}
 		for (std::size_t row = 0; row < rows; ++row) {
 			const std::uint8_t* source_row = nullptr;
@@ -381,7 +459,7 @@ std::vector<std::uint8_t> encode_jpeg2k_frame(std::span<const std::uint8_t> fram
 				}
 				const auto sample_value =
 				    load_sample_from_source(sample_ptr, bytes_per_sample, is_signed,
-				        bits_stored, file_path);
+				        bits_stored);
 				source_min_value = std::min(source_min_value, sample_value);
 				source_max_value = std::max(source_max_value, sample_value);
 				component.data[row * cols + col] = sample_value;
@@ -408,7 +486,7 @@ std::vector<std::uint8_t> encode_jpeg2k_frame(std::span<const std::uint8_t> fram
 		}
 	}
 	configure_j2k_encoder_parameters(parameters, lossless, samples_per_pixel,
-	    bits_stored, use_multicomponent_transform, effective_options, file_path);
+	    bits_stored, use_multicomponent_transform, effective_options);
 	parameters.numresolution = std::min(
 	    parameters.numresolution, max_num_resolutions_for_image(rows, cols));
 	if (parameters.numresolution < 1) {
@@ -417,9 +495,8 @@ std::vector<std::uint8_t> encode_jpeg2k_frame(std::span<const std::uint8_t> fram
 
 	opj_codec_ptr codec(opj_create_compress(OPJ_CODEC_J2K));
 	if (!codec) {
-		diag::error_and_throw(
-		    "pixel::encode_jpeg2k_frame file={} reason=failed to create OpenJPEG encoder codec",
-		    file_path);
+		throw_encode_error(
+		    "pixel::encode_jpeg2k_frame reason=failed to create OpenJPEG encoder codec");
 	}
 
 	openjpeg_log_sink sink{};
@@ -427,65 +504,48 @@ std::vector<std::uint8_t> encode_jpeg2k_frame(std::span<const std::uint8_t> fram
 	opj_set_error_handler(codec.get(), opj_error_handler, &sink);
 
 	if (!opj_setup_encoder(codec.get(), &parameters, image.get())) {
-		diag::error_and_throw(
-		    "pixel::encode_jpeg2k_frame file={} reason=OpenJPEG setup_encoder failed ({})",
-		    file_path, encode_failure_message(sink, "setup", "setup_encoder returned false"));
+		throw_encode_error(
+		    "pixel::encode_jpeg2k_frame reason=OpenJPEG setup_encoder failed ({})",
+		    encode_failure_message(sink, "setup", "setup_encoder returned false"));
 	}
-	const auto thread_count = resolve_openjpeg_encode_thread_count(options, file_path);
+	const auto thread_count = resolve_openjpeg_encode_thread_count(options);
 	if (thread_count > 0 && !opj_codec_set_threads(codec.get(), static_cast<int>(thread_count))) {
-		diag::error_and_throw(
-		    "pixel::encode_jpeg2k_frame file={} reason=failed to set OpenJPEG encoder threads={}",
-		    file_path, thread_count);
+		throw_encode_error(
+		    "pixel::encode_jpeg2k_frame reason=failed to set OpenJPEG encoder threads={}",
+		    thread_count);
 	}
 
 	jpeg2k_output_stream output_stream{};
 	opj_stream_ptr stream = create_openjpeg_output_stream(output_stream);
 	if (!stream) {
-		diag::error_and_throw(
-		    "pixel::encode_jpeg2k_frame file={} reason=failed to create OpenJPEG output stream",
-		    file_path);
+		throw_encode_error(
+		    "pixel::encode_jpeg2k_frame reason=failed to create OpenJPEG output stream");
 	}
 
 	if (!opj_start_compress(codec.get(), image.get(), stream.get())) {
-		diag::error_and_throw(
-		    "pixel::encode_jpeg2k_frame file={} reason=OpenJPEG start_compress failed ({})",
-		    file_path, encode_failure_message(sink, "start_compress", "start_compress returned false"));
+		throw_encode_error(
+		    "pixel::encode_jpeg2k_frame reason=OpenJPEG start_compress failed ({})",
+		    encode_failure_message(sink, "start_compress", "start_compress returned false"));
 	}
 	if (!opj_encode(codec.get(), stream.get())) {
-		diag::error_and_throw(
-		    "pixel::encode_jpeg2k_frame file={} reason=OpenJPEG encode failed ({})",
-		    file_path, encode_failure_message(sink, "encode", "encode returned false"));
+		throw_encode_error(
+		    "pixel::encode_jpeg2k_frame reason=OpenJPEG encode failed ({})",
+		    encode_failure_message(sink, "encode", "encode returned false"));
 	}
 	if (!opj_end_compress(codec.get(), stream.get())) {
-		diag::error_and_throw(
-		    "pixel::encode_jpeg2k_frame file={} reason=OpenJPEG end_compress failed ({})",
-		    file_path, encode_failure_message(sink, "end_compress", "end_compress returned false"));
+		throw_encode_error(
+		    "pixel::encode_jpeg2k_frame reason=OpenJPEG end_compress failed ({})",
+		    encode_failure_message(sink, "end_compress", "end_compress returned false"));
 	}
 
 	if (output_stream.position < output_stream.bytes.size()) {
 		output_stream.bytes.resize(output_stream.position);
 	}
 	if (output_stream.bytes.empty()) {
-		diag::error_and_throw(
-		    "pixel::encode_jpeg2k_frame file={} reason=OpenJPEG produced empty codestream",
-		    file_path);
+		throw_encode_error(
+		    "pixel::encode_jpeg2k_frame reason=OpenJPEG produced empty codestream");
 	}
 	return output_stream.bytes;
-}
-
-void encode_jpeg2k_pixel_data(DicomFile& file, const EncapsulatedEncodeInput& input,
-    std::size_t rows, std::size_t cols, std::size_t samples_per_pixel,
-    std::size_t bytes_per_sample, int bits_allocated, int bits_stored,
-    int pixel_representation, Planar source_planar, std::size_t row_stride,
-    bool use_multicomponent_transform, bool lossless, const J2kOptions& options,
-    std::string_view file_path) {
-	encode_frames_to_encapsulated_pixel_data(
-	    file, input, [&](std::span<const std::uint8_t> source_frame_view) {
-		    return encode_jpeg2k_frame(source_frame_view, rows, cols, samples_per_pixel,
-		        bytes_per_sample, bits_allocated, bits_stored, pixel_representation,
-		        source_planar, row_stride, use_multicomponent_transform, lossless,
-		        options, file_path);
-	    });
 }
 
 } // namespace dicom::pixel::detail

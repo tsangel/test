@@ -1,140 +1,217 @@
 #include "pixel_decoder_detail.hpp"
+#include "pixel_codec_registry.hpp"
 
 #include <cstring>
+#include <exception>
+#include <limits>
+#include <new>
+#include <string>
+#include <string_view>
+#include <vector>
 
-#include "diagnostics.h"
-
-using namespace dicom::literals;
-namespace diag = dicom::diag;
+#include <fmt/format.h>
 
 namespace dicom {
 namespace pixel::detail {
+using namespace dicom::literals;
 
-void decode_encapsulated_uncompressed_into(const DicomFile& df, const pixel::PixelDataInfo& info,
-    std::size_t frame_index, std::span<std::uint8_t> dst,
-    const DecodeStrides& dst_strides, const DecodeOptions& opt) {
-	if (!info.has_pixel_data) {
-		diag::error_and_throw(
-		    "pixel::decode_frame_into file={} reason=sv_dtype is unknown", df.path());
-	}
+namespace {
 
-	if (info.rows <= 0 || info.cols <= 0 || info.samples_per_pixel <= 0) {
-		diag::error_and_throw(
-		    "pixel::decode_frame_into file={} reason=invalid Rows/Columns/SamplesPerPixel",
-		    df.path());
-	}
+void set_codec_error(codec_error& out_error, codec_status_code code,
+    std::string_view stage, std::string detail) {
+	out_error.code = code;
+	out_error.stage = std::string(stage);
+	out_error.detail = std::move(detail);
+}
 
-	const auto samples_per_pixel_value = info.samples_per_pixel;
-	if (samples_per_pixel_value != 1 && samples_per_pixel_value != 3 && samples_per_pixel_value != 4) {
-		diag::error_and_throw(
-		    "pixel::decode_frame_into file={} reason=only SamplesPerPixel=1/3/4 is supported in current encapsulated-uncompressed path",
-		    df.path());
+[[nodiscard]] bool checked_mul_size_t(
+    std::size_t lhs, std::size_t rhs, std::size_t& out) noexcept {
+	if (lhs == 0 || rhs == 0) {
+		out = 0;
+		return true;
 	}
-	const auto samples_per_pixel = static_cast<std::size_t>(samples_per_pixel_value);
+	if (lhs > std::numeric_limits<std::size_t>::max() / rhs) {
+		return false;
+	}
+	out = lhs * rhs;
+	return true;
+}
 
-	const auto src_bytes_per_sample = sv_dtype_bytes(info.sv_dtype);
-	if (src_bytes_per_sample == 0) {
-		diag::error_and_throw(
-		    "pixel::decode_frame_into file={} reason=only sv_dtype=u8/s8/u16/s16/u32/s32/f32/f64 is supported in current encapsulated-uncompressed path",
-		    df.path());
-	}
-	const std::size_t dst_bytes_per_sample = opt.scaled ? sizeof(float) : src_bytes_per_sample;
+} // namespace
 
-	if (info.frames <= 0) {
-		diag::error_and_throw(
-		    "pixel::decode_frame_into file={} reason=invalid NumberOfFrames",
-		    df.path());
-	}
+bool decode_encapsulated_uncompressed_into(const pixel::PixelDataInfo& info,
+    const decode_value_transform& value_transform,
+    std::span<std::uint8_t> dst,
+    const DecodeStrides& dst_strides, const DecodeOptions& opt, codec_error& out_error,
+    std::span<const std::uint8_t> prepared_source) noexcept {
+	out_error = codec_error{};
+	auto fail = [&](codec_status_code code, std::string_view stage,
+	                std::string detail) noexcept -> bool {
+		set_codec_error(out_error, code, stage, std::move(detail));
+		return false;
+	};
 
-	const auto& pixel_data = df.dataset()["PixelData"_tag];
-	if (!pixel_data || !pixel_data.vr().is_pixel_sequence()) {
-		diag::error_and_throw(
-		    "pixel::decode_frame_into file={} reason=encapsulated uncompressed transfer syntax requires encapsulated PixelData",
-		    df.path());
-	}
-	const auto* pixel_sequence = pixel_data.as_pixel_sequence();
-	if (!pixel_sequence) {
-		diag::error_and_throw(
-		    "pixel::decode_frame_into file={} reason=PixelData encapsulated sequence is missing",
-		    df.path());
-	}
+	try {
+		if (!info.has_pixel_data) {
+			return fail(codec_status_code::invalid_argument, "validate",
+			    "sv_dtype is unknown");
+		}
 
-	const auto rows = static_cast<std::size_t>(info.rows);
-	const auto cols = static_cast<std::size_t>(info.cols);
-	const auto frame_count = static_cast<std::size_t>(info.frames);
-	if (frame_index >= frame_count) {
-		diag::error_and_throw(
-		    "pixel::decode_frame_into file={} frame={} reason=frame index out of range (frames={})",
-		    df.path(), frame_index, frame_count);
-	}
-	if (pixel_sequence->number_of_frames() <= frame_index) {
-		diag::error_and_throw(
-		    "pixel::decode_frame_into file={} frame={} reason=encapsulated frame is missing (frames={})",
-		    df.path(), frame_index, pixel_sequence->number_of_frames());
-	}
+		if (info.rows <= 0 || info.cols <= 0 || info.samples_per_pixel <= 0) {
+			return fail(codec_status_code::invalid_argument, "validate",
+			    "invalid Rows/Columns/SamplesPerPixel");
+		}
 
-	const auto src_planar = info.planar_configuration;
-	const auto dst_planar = opt.planar_out;
-	const auto transform = select_planar_transform(src_planar, dst_planar);
+		const auto samples_per_pixel_value = info.samples_per_pixel;
+		if (samples_per_pixel_value != 1 && samples_per_pixel_value != 3 &&
+		    samples_per_pixel_value != 4) {
+			return fail(codec_status_code::unsupported, "validate",
+			    "only SamplesPerPixel=1/3/4 is supported in current encapsulated-uncompressed path");
+		}
+		const auto samples_per_pixel = static_cast<std::size_t>(samples_per_pixel_value);
 
-	const std::size_t src_row_components =
-	    (src_planar == Planar::interleaved) ? samples_per_pixel : std::size_t{1};
-	const std::size_t dst_row_components =
-	    (dst_planar == Planar::interleaved) ? samples_per_pixel : std::size_t{1};
+		const auto src_bytes_per_sample = sv_dtype_bytes(info.sv_dtype);
+		if (src_bytes_per_sample == 0) {
+			return fail(codec_status_code::unsupported, "validate",
+			    "only sv_dtype=u8/s8/u16/s16/u32/s32/f32/f64 is supported in current encapsulated-uncompressed path");
+		}
+		const std::size_t dst_bytes_per_sample =
+		    opt.scaled ? sizeof(float) : src_bytes_per_sample;
 
-	const std::size_t src_row_bytes = cols * src_row_components * src_bytes_per_sample;
-	std::size_t src_frame_bytes = src_row_bytes * rows;
-	if (src_planar == Planar::planar) {
-		src_frame_bytes *= samples_per_pixel;
-	}
+		if (info.frames <= 0) {
+			return fail(codec_status_code::invalid_argument, "validate",
+			    "invalid NumberOfFrames");
+		}
 
-	const std::size_t dst_min_row_bytes = cols * dst_row_components * dst_bytes_per_sample;
-	if (dst_strides.row < dst_min_row_bytes) {
-		diag::error_and_throw(
-		    "pixel::decode_frame_into file={} reason=row stride too small (need>={}, got={})",
-		    df.path(), dst_min_row_bytes, dst_strides.row);
-	}
-	std::size_t min_frame_bytes = dst_strides.row * rows;
-	if (dst_planar == Planar::planar) {
-		min_frame_bytes *= samples_per_pixel;
-	}
-	if (dst_strides.frame < min_frame_bytes) {
-		diag::error_and_throw(
-		    "pixel::decode_frame_into file={} reason=frame stride too small (need>={}, got={})",
-		    df.path(), min_frame_bytes, dst_strides.frame);
-	}
-	if (dst.size() < dst_strides.frame) {
-		diag::error_and_throw(
-		    "pixel::decode_frame_into file={} reason=destination too small (need={}, got={})",
-		    df.path(), dst_strides.frame, dst.size());
-	}
+		const auto rows = static_cast<std::size_t>(info.rows);
+		const auto cols = static_cast<std::size_t>(info.cols);
 
-	auto* mutable_sequence = const_cast<PixelSequence*>(pixel_sequence);
-	const auto src_frame = mutable_sequence->frame_encoded_span(frame_index);
-	if (src_frame.size() < src_frame_bytes) {
-		diag::error_and_throw(
-		    "pixel::decode_frame_into file={} frame={} reason=encapsulated frame payload is shorter than expected (have={}, need={})",
-		    df.path(), frame_index, src_frame.size(), src_frame_bytes);
-	}
+		const auto src_planar = info.planar_configuration;
+		const auto dst_planar = opt.planar_out;
+		const auto transform = select_planar_transform(src_planar, dst_planar);
 
-	if (opt.scaled) {
-		decode_mono_scaled_into_f32(
-		    df, info, src_frame.data(), dst, dst_strides, rows, cols, src_row_bytes);
-		return;
-	}
+		const std::size_t src_row_components =
+		    (src_planar == Planar::interleaved) ? samples_per_pixel : std::size_t{1};
+		const std::size_t dst_row_components =
+		    (dst_planar == Planar::interleaved) ? samples_per_pixel : std::size_t{1};
 
-	const bool equivalent_single_channel_layout = samples_per_pixel == 1;
-	const bool interleaved_no_transform =
-	    transform == planar_transform::interleaved_to_interleaved;
-	if (dst_strides.row == src_row_bytes &&
-	    (equivalent_single_channel_layout || interleaved_no_transform)) {
-		std::memcpy(dst.data(), src_frame.data(), src_row_bytes * rows);
-		return;
-	}
+		std::size_t src_row_pixels = 0;
+		std::size_t src_row_bytes = 0;
+		if (!checked_mul_size_t(cols, src_row_components, src_row_pixels) ||
+		    !checked_mul_size_t(src_row_pixels, src_bytes_per_sample, src_row_bytes)) {
+			return fail(codec_status_code::internal_error, "validate",
+			    "source row bytes exceed size_t range");
+		}
 
-	run_planar_transform_copy(transform, src_bytes_per_sample,
-	    src_frame.data(), dst.data(), rows, cols, samples_per_pixel,
-	    src_row_bytes, dst_strides.row);
+		std::size_t src_frame_bytes = 0;
+		if (!checked_mul_size_t(src_row_bytes, rows, src_frame_bytes)) {
+			return fail(codec_status_code::internal_error, "validate",
+			    "source frame bytes exceed size_t range");
+		}
+		if (src_planar == Planar::planar &&
+		    !checked_mul_size_t(src_frame_bytes, samples_per_pixel, src_frame_bytes)) {
+			return fail(codec_status_code::internal_error, "validate",
+			    "source planar frame bytes exceed size_t range");
+		}
+
+		std::size_t dst_row_pixels = 0;
+		std::size_t dst_min_row_bytes = 0;
+		if (!checked_mul_size_t(cols, dst_row_components, dst_row_pixels) ||
+		    !checked_mul_size_t(dst_row_pixels, dst_bytes_per_sample, dst_min_row_bytes)) {
+			return fail(codec_status_code::internal_error, "validate",
+			    "destination row bytes exceed size_t range");
+		}
+		if (dst_strides.row < dst_min_row_bytes) {
+			return fail(codec_status_code::invalid_argument, "validate",
+			    fmt::format("row stride too small (need>={}, got={})",
+			        dst_min_row_bytes, dst_strides.row));
+		}
+
+		std::size_t min_frame_bytes = 0;
+		if (!checked_mul_size_t(dst_strides.row, rows, min_frame_bytes)) {
+			return fail(codec_status_code::internal_error, "validate",
+			    "destination frame bytes exceed size_t range");
+		}
+		if (dst_planar == Planar::planar &&
+		    !checked_mul_size_t(min_frame_bytes, samples_per_pixel, min_frame_bytes)) {
+			return fail(codec_status_code::internal_error, "validate",
+			    "destination planar frame bytes exceed size_t range");
+		}
+		if (dst_strides.frame < min_frame_bytes) {
+			return fail(codec_status_code::invalid_argument, "validate",
+			    fmt::format("frame stride too small (need>={}, got={})",
+			        min_frame_bytes, dst_strides.frame));
+		}
+		if (dst.size() < dst_strides.frame) {
+			return fail(codec_status_code::invalid_argument, "validate",
+			    fmt::format("destination too small (need={}, got={})",
+			        dst_strides.frame, dst.size()));
+		}
+
+			const auto src_frame = prepared_source;
+			if (src_frame.empty()) {
+				return fail(codec_status_code::invalid_argument, "load_frame_source",
+				    "encapsulated frame payload is empty");
+			}
+
+		if (src_frame.size() < src_frame_bytes) {
+			return fail(codec_status_code::invalid_argument, "load_frame_source",
+			    fmt::format(
+			        "encapsulated frame payload is shorter than expected (have={}, need={})",
+			        src_frame.size(), src_frame_bytes));
+		}
+
+		if (opt.scaled) {
+			try {
+				decode_mono_scaled_into_f32(
+				    value_transform, info, src_frame.data(), dst, dst_strides,
+				    rows, cols, src_row_bytes);
+				return true;
+			} catch (const std::bad_alloc&) {
+				return fail(codec_status_code::internal_error, "allocate",
+				    "memory allocation failed");
+			} catch (const std::exception& e) {
+				return fail(codec_status_code::invalid_argument, "postprocess",
+				    e.what());
+			} catch (...) {
+				return fail(codec_status_code::backend_error, "postprocess",
+				    "scaled decode failed (non-standard exception)");
+			}
+		}
+
+		const bool equivalent_single_channel_layout = samples_per_pixel == 1;
+		const bool interleaved_no_transform =
+		    transform == planar_transform::interleaved_to_interleaved;
+		if (dst_strides.row == src_row_bytes &&
+		    (equivalent_single_channel_layout || interleaved_no_transform)) {
+			std::size_t copy_size = 0;
+			if (!checked_mul_size_t(src_row_bytes, rows, copy_size)) {
+				return fail(codec_status_code::internal_error, "validate",
+				    "copy size exceeds size_t range");
+			}
+			std::memcpy(dst.data(), src_frame.data(), copy_size);
+			return true;
+		}
+
+		run_planar_transform_copy(transform, src_bytes_per_sample,
+		    src_frame.data(), dst.data(), rows, cols, samples_per_pixel,
+		    src_row_bytes, dst_strides.row);
+		return true;
+	} catch (const std::bad_alloc&) {
+		return fail(codec_status_code::internal_error, "allocate",
+		    "memory allocation failed");
+	} catch (const std::exception& e) {
+		if (out_error.code != codec_status_code::ok) {
+			return false;
+		}
+		return fail(codec_status_code::backend_error, "decode_frame", e.what());
+	} catch (...) {
+		if (out_error.code != codec_status_code::ok) {
+			return false;
+		}
+		return fail(codec_status_code::backend_error, "decode_frame",
+		    "non-standard exception");
+	}
 }
 
 } // namespace pixel::detail

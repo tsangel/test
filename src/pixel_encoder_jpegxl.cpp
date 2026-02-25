@@ -1,12 +1,12 @@
 #include "pixel_encoder_detail.hpp"
 
-#include "diagnostics.h"
-
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <exception>
 #include <limits>
 #include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -19,9 +19,14 @@
 #endif
 
 namespace dicom::pixel::detail {
-namespace diag = dicom::diag;
-
 namespace {
+
+void set_codec_error(codec_error& out_error, codec_status_code code,
+    std::string_view stage, std::string detail) {
+	out_error.code = code;
+	out_error.stage = std::string(stage);
+	out_error.detail = std::move(detail);
+}
 
 #if DICOMSDL_HAS_JPEGXL
 
@@ -103,11 +108,11 @@ private:
 }
 
 [[nodiscard]] std::size_t resolve_jpegxl_worker_threads(
-    const JpegXlOptions& options, std::string_view function_name, std::string_view file_path) {
+    const JpegXlOptions& options, std::string_view function_name) {
 	if (options.threads < -1) {
-		diag::error_and_throw(
-		    "{} file={} reason=JpegXlOptions.threads must be -1, 0, or positive",
-		    function_name, file_path);
+		throw_encode_error(
+		    "{} reason=JpegXlOptions.threads must be -1, 0, or positive",
+		    function_name);
 	}
 	if (options.threads == -1) {
 		return JxlThreadParallelRunnerDefaultNumWorkerThreads();
@@ -122,24 +127,22 @@ private:
     std::span<const std::uint8_t> frame_data, const SourceFrameLayout& source_layout,
     std::size_t rows, std::size_t cols, std::size_t samples_per_pixel,
     std::size_t bytes_per_sample, std::size_t row_stride, int bits_stored,
-    std::string_view function_name, std::string_view file_path) {
+    std::string_view function_name) {
 	const auto row_bytes_u64 =
 	    static_cast<std::uint64_t>(cols) *
 	    static_cast<std::uint64_t>(samples_per_pixel) *
 	    static_cast<std::uint64_t>(bytes_per_sample);
 	if (row_bytes_u64 > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) {
-		diag::error_and_throw(
-		    "{} file={} reason=interleaved row bytes exceed size_t range",
-		    function_name, file_path);
+		throw_encode_error("{} reason=interleaved row bytes exceed size_t range",
+		    function_name);
 	}
 	const std::size_t row_bytes = static_cast<std::size_t>(row_bytes_u64);
 
 	const auto total_bytes_u64 =
 	    static_cast<std::uint64_t>(row_bytes) * static_cast<std::uint64_t>(rows);
 	if (total_bytes_u64 > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) {
-		diag::error_and_throw(
-		    "{} file={} reason=interleaved frame bytes exceed size_t range",
-		    function_name, file_path);
+		throw_encode_error("{} reason=interleaved frame bytes exceed size_t range",
+		    function_name);
 	}
 	const std::size_t total_bytes = static_cast<std::size_t>(total_bytes_u64);
 	std::vector<std::uint8_t> interleaved(total_bytes);
@@ -182,14 +185,14 @@ private:
 }
 
 void check_jxl_success(JxlEncoder* encoder, JxlEncoderStatus status,
-    std::string_view action, std::string_view function_name, std::string_view file_path) {
+    std::string_view action, std::string_view function_name) {
 	if (status == JXL_ENC_SUCCESS) {
 		return;
 	}
 	const auto error = JxlEncoderGetError(encoder);
-	diag::error_and_throw(
-	    "{} file={} reason={} failed (status={}, error={})",
-	    function_name, file_path, action, jxl_encode_status_name(status),
+	throw_encode_error(
+	    "{} reason={} failed (status={}, error={})",
+	    function_name, action, jxl_encode_status_name(status),
 	    jxl_encode_error_name(error));
 }
 
@@ -197,86 +200,173 @@ void check_jxl_success(JxlEncoder* encoder, JxlEncoderStatus status,
 
 } // namespace
 
+bool try_encode_jpegxl_frame(std::span<const std::uint8_t> frame_data,
+    std::size_t rows, std::size_t cols, std::size_t samples_per_pixel,
+    std::size_t bytes_per_sample, int bits_allocated, int bits_stored,
+    int pixel_representation, Planar source_planar, std::size_t row_stride,
+    bool lossless, const JpegXlOptions& options,
+    std::vector<std::uint8_t>& out_encoded, codec_error& out_error) noexcept {
+	out_encoded.clear();
+	out_error = codec_error{};
+
+	if (rows == 0 || cols == 0 || samples_per_pixel == 0 || bytes_per_sample == 0) {
+		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		    "rows/cols/samples_per_pixel/bytes_per_sample must be positive");
+		return false;
+	}
+	if (samples_per_pixel != 1 && samples_per_pixel != 3 && samples_per_pixel != 4) {
+		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		    "only samples_per_pixel=1/3/4 are supported in current JPEG-XL encoder path");
+		return false;
+	}
+	if (bits_allocated <= 0 || bits_allocated > 16 || (bits_allocated % 8) != 0) {
+		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		    "bits_allocated must be 8 or 16");
+		return false;
+	}
+	if (bits_stored <= 0 || bits_stored > bits_allocated) {
+		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		    "bits_stored must be in [1,bits_allocated]");
+		return false;
+	}
+	if (pixel_representation != 0 && pixel_representation != 1) {
+		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		    "pixel_representation must be 0 or 1");
+		return false;
+	}
+	if (options.effort < 1 || options.effort > 10) {
+		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		    "JpegXlOptions.effort must be in [1,10]");
+		return false;
+	}
+	if (options.threads < -1) {
+		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		    "JpegXlOptions.threads must be -1, 0, or positive");
+		return false;
+	}
+	if (!lossless && (!std::isfinite(options.distance) || options.distance <= 0.0 ||
+	        options.distance > 25.0)) {
+		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		    "JpegXlOptions.distance must be in (0,25] for lossy JPEG-XL");
+		return false;
+	}
+	if (lossless && options.distance != 0.0) {
+		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		    "lossless JPEG-XL requires distance=0");
+		return false;
+	}
+	if (bytes_per_sample != 1 && bytes_per_sample != 2) {
+		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		    "bytes_per_sample must be 1 or 2");
+		return false;
+	}
+	if ((bits_stored <= 8 && bytes_per_sample != 1) ||
+	    (bits_stored > 8 && bytes_per_sample != 2)) {
+		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		    "bytes_per_sample is incompatible with bits_stored");
+		return false;
+	}
+
+	try {
+		out_encoded = encode_jpegxl_frame(frame_data, rows, cols, samples_per_pixel,
+		    bytes_per_sample, bits_allocated, bits_stored, pixel_representation,
+		    source_planar, row_stride, lossless, options);
+		out_error = codec_error{};
+		return true;
+	} catch (const std::bad_alloc&) {
+		set_codec_error(out_error, codec_status_code::internal_error, "allocate",
+		    "memory allocation failed");
+	} catch (const std::exception& e) {
+		set_codec_error(out_error, codec_status_code::backend_error, "encode",
+		    e.what());
+	} catch (...) {
+		set_codec_error(out_error, codec_status_code::backend_error, "encode",
+		    "non-standard exception");
+	}
+	out_encoded.clear();
+	return false;
+}
+
 std::vector<std::uint8_t> encode_jpegxl_frame(std::span<const std::uint8_t> frame_data,
     std::size_t rows, std::size_t cols, std::size_t samples_per_pixel,
     std::size_t bytes_per_sample, int bits_allocated, int bits_stored,
     int pixel_representation, Planar source_planar, std::size_t row_stride,
-    bool lossless, const JpegXlOptions& options, std::string_view file_path) {
+    bool lossless, const JpegXlOptions& options) {
 	constexpr std::string_view kFunctionName = "pixel::encode_jpegxl_frame";
 	if (samples_per_pixel != 1 && samples_per_pixel != 3 && samples_per_pixel != 4) {
-		diag::error_and_throw(
-		    "{} file={} reason=only samples_per_pixel=1/3/4 are supported in current JPEG-XL encoder path",
-		    kFunctionName, file_path);
+		throw_encode_error(
+		    "{} reason=only samples_per_pixel=1/3/4 are supported in current JPEG-XL encoder path",
+		    kFunctionName);
 	}
 	if (bits_allocated <= 0 || bits_allocated > 16 || (bits_allocated % 8) != 0) {
-		diag::error_and_throw(
-		    "{} file={} reason=bits_allocated={} is not supported (supported: 8 or 16)",
-		    kFunctionName, file_path, bits_allocated);
+		throw_encode_error(
+		    "{} reason=bits_allocated={} is not supported (supported: 8 or 16)",
+		    kFunctionName, bits_allocated);
 	}
 	if (bits_stored <= 0 || bits_stored > bits_allocated) {
-		diag::error_and_throw(
-		    "{} file={} reason=bits_stored={} must be in [1, bits_allocated={}]",
-		    kFunctionName, file_path, bits_stored, bits_allocated);
+		throw_encode_error(
+		    "{} reason=bits_stored={} must be in [1, bits_allocated={}]",
+		    kFunctionName, bits_stored, bits_allocated);
 	}
 	if (pixel_representation != 0 && pixel_representation != 1) {
-		diag::error_and_throw(
-		    "{} file={} reason=pixel_representation must be 0 or 1",
-		    kFunctionName, file_path);
+		throw_encode_error(
+		    "{} reason=pixel_representation must be 0 or 1",
+		    kFunctionName);
 	}
 	if (options.effort < 1 || options.effort > 10) {
-		diag::error_and_throw(
-		    "{} file={} reason=JpegXlOptions.effort must be in [1, 10]",
-		    kFunctionName, file_path);
+		throw_encode_error(
+		    "{} reason=JpegXlOptions.effort must be in [1, 10]",
+		    kFunctionName);
 	}
 	if (!lossless && (!std::isfinite(options.distance) || options.distance <= 0.0 ||
 	        options.distance > 25.0)) {
-		diag::error_and_throw(
-		    "{} file={} reason=JpegXlOptions.distance must be in (0, 25] for lossy JPEG-XL",
-		    kFunctionName, file_path);
+		throw_encode_error(
+		    "{} reason=JpegXlOptions.distance must be in (0, 25] for lossy JPEG-XL",
+		    kFunctionName);
 	}
 	if (lossless && options.distance != 0.0) {
-		diag::error_and_throw(
-		    "{} file={} reason=lossless JPEG-XL requires distance=0",
-		    kFunctionName, file_path);
+		throw_encode_error(
+		    "{} reason=lossless JPEG-XL requires distance=0",
+		    kFunctionName);
 	}
 	if (bytes_per_sample != 1 && bytes_per_sample != 2) {
-		diag::error_and_throw(
-		    "{} file={} reason=bytes_per_sample={} is not supported (supported: 1 or 2)",
-		    kFunctionName, file_path, bytes_per_sample);
+		throw_encode_error(
+		    "{} reason=bytes_per_sample={} is not supported (supported: 1 or 2)",
+		    kFunctionName, bytes_per_sample);
 	}
 	if ((bits_stored <= 8 && bytes_per_sample != 1) ||
 	    (bits_stored > 8 && bytes_per_sample != 2)) {
-		diag::error_and_throw(
-		    "{} file={} reason=bytes_per_sample={} is incompatible with bits_stored={}",
-		    kFunctionName, file_path, bytes_per_sample, bits_stored);
+		throw_encode_error(
+		    "{} reason=bytes_per_sample={} is incompatible with bits_stored={}",
+		    kFunctionName, bytes_per_sample, bits_stored);
 	}
 
 	const auto source_layout = make_source_frame_layout(frame_data, rows, cols, samples_per_pixel,
-	    bytes_per_sample, source_planar, row_stride, kFunctionName, file_path);
+	    bytes_per_sample, source_planar, row_stride);
 
 #if DICOMSDL_HAS_JPEGXL
 	auto interleaved = build_normalized_interleaved_buffer(frame_data, source_layout, rows, cols,
-	    samples_per_pixel, bytes_per_sample, row_stride, bits_stored, kFunctionName, file_path);
+	    samples_per_pixel, bytes_per_sample, row_stride, bits_stored, kFunctionName);
 
 	jxl_encoder_guard encoder(JxlEncoderCreate(nullptr));
 	if (!encoder.get()) {
-		diag::error_and_throw(
-		    "{} file={} reason=failed to initialize JPEG-XL encoder",
-		    kFunctionName, file_path);
+		throw_encode_error(
+		    "{} reason=failed to initialize JPEG-XL encoder",
+		    kFunctionName);
 	}
 
-	const auto worker_threads = resolve_jpegxl_worker_threads(options, kFunctionName, file_path);
+	const auto worker_threads = resolve_jpegxl_worker_threads(options, kFunctionName);
 	jxl_runner_guard runner{};
 	if (worker_threads > 0) {
 		runner.reset(JxlThreadParallelRunnerCreate(nullptr, worker_threads));
 		if (!runner.get()) {
-			diag::error_and_throw(
-			    "{} file={} reason=failed to initialize JPEG-XL thread runner (threads={})",
-			    kFunctionName, file_path, worker_threads);
+			throw_encode_error(
+			    "{} reason=failed to initialize JPEG-XL thread runner (threads={})",
+			    kFunctionName, worker_threads);
 		}
 		check_jxl_success(encoder.get(),
 		    JxlEncoderSetParallelRunner(encoder.get(), JxlThreadParallelRunner, runner.get()),
-		    "set parallel runner", kFunctionName, file_path);
+		    "set parallel runner", kFunctionName);
 	}
 
 	JxlBasicInfo basic_info{};
@@ -294,7 +384,7 @@ std::vector<std::uint8_t> encode_jpegxl_frame(std::span<const std::uint8_t> fram
 	basic_info.uses_original_profile = lossless ? JXL_TRUE : JXL_FALSE;
 	check_jxl_success(encoder.get(),
 	    JxlEncoderSetBasicInfo(encoder.get(), &basic_info), "set basic info",
-	    kFunctionName, file_path);
+	    kFunctionName);
 
 	if (samples_per_pixel == 4) {
 		JxlExtraChannelInfo alpha_info{};
@@ -304,35 +394,35 @@ std::vector<std::uint8_t> encode_jpegxl_frame(std::span<const std::uint8_t> fram
 		alpha_info.alpha_premultiplied = JXL_FALSE;
 		check_jxl_success(encoder.get(),
 		    JxlEncoderSetExtraChannelInfo(encoder.get(), 0, &alpha_info),
-		    "set alpha channel info", kFunctionName, file_path);
+		    "set alpha channel info", kFunctionName);
 	}
 
 	JxlColorEncoding color_encoding{};
 	JxlColorEncodingSetToSRGB(&color_encoding, samples_per_pixel == 1 ? JXL_TRUE : JXL_FALSE);
 	check_jxl_success(encoder.get(),
 	    JxlEncoderSetColorEncoding(encoder.get(), &color_encoding),
-	    "set color encoding", kFunctionName, file_path);
+	    "set color encoding", kFunctionName);
 
 	auto* frame_settings = JxlEncoderFrameSettingsCreate(encoder.get(), nullptr);
 	if (!frame_settings) {
-		diag::error_and_throw(
-		    "{} file={} reason=failed to allocate JPEG-XL frame settings",
-		    kFunctionName, file_path);
+		throw_encode_error(
+		    "{} reason=failed to allocate JPEG-XL frame settings",
+		    kFunctionName);
 	}
 
 	check_jxl_success(encoder.get(),
 	    JxlEncoderFrameSettingsSetOption(
 	        frame_settings, JXL_ENC_FRAME_SETTING_EFFORT, options.effort),
-	    "set effort", kFunctionName, file_path);
+	    "set effort", kFunctionName);
 
 	if (lossless) {
 		check_jxl_success(encoder.get(),
 		    JxlEncoderSetFrameLossless(frame_settings, JXL_TRUE),
-		    "set lossless mode", kFunctionName, file_path);
+		    "set lossless mode", kFunctionName);
 	} else {
 		check_jxl_success(encoder.get(),
 		    JxlEncoderSetFrameDistance(frame_settings, static_cast<float>(options.distance)),
-		    "set distance", kFunctionName, file_path);
+		    "set distance", kFunctionName);
 	}
 
 	const JxlBitDepth bit_depth{
@@ -342,7 +432,7 @@ std::vector<std::uint8_t> encode_jpegxl_frame(std::span<const std::uint8_t> fram
 	};
 	check_jxl_success(encoder.get(),
 	    JxlEncoderSetFrameBitDepth(frame_settings, &bit_depth),
-	    "set frame bit depth", kFunctionName, file_path);
+	    "set frame bit depth", kFunctionName);
 
 	const JxlPixelFormat pixel_format{
 	    static_cast<std::uint32_t>(samples_per_pixel),
@@ -353,7 +443,7 @@ std::vector<std::uint8_t> encode_jpegxl_frame(std::span<const std::uint8_t> fram
 	check_jxl_success(encoder.get(),
 	    JxlEncoderAddImageFrame(
 	        frame_settings, &pixel_format, interleaved.data(), interleaved.size()),
-	    "add image frame", kFunctionName, file_path);
+	    "add image frame", kFunctionName);
 
 	JxlEncoderCloseInput(encoder.get());
 
@@ -379,41 +469,28 @@ std::vector<std::uint8_t> encode_jpegxl_frame(std::span<const std::uint8_t> fram
 			continue;
 		}
 		const auto error = JxlEncoderGetError(encoder.get());
-		diag::error_and_throw(
-		    "{} file={} reason=JPEG-XL encode failed (status={}, error={})",
-		    kFunctionName, file_path, jxl_encode_status_name(status),
+		throw_encode_error(
+		    "{} reason=JPEG-XL encode failed (status={}, error={})",
+		    kFunctionName, jxl_encode_status_name(status),
 		    jxl_encode_error_name(error));
 	}
 
 	encoded.resize(produced_bytes);
 	if (encoded.empty()) {
-		diag::error_and_throw(
-		    "{} file={} reason=JPEG-XL encoder produced empty codestream",
-		    kFunctionName, file_path);
+		throw_encode_error(
+		    "{} reason=JPEG-XL encoder produced empty codestream",
+		    kFunctionName);
 	}
 	return encoded;
 #else
 	(void)source_layout;
 	(void)lossless;
 	(void)options;
-	diag::error_and_throw(
-	    "{} file={} reason=JPEG-XL backend is disabled; configure with DICOMSDL_ENABLE_JPEGXL=ON",
-	    kFunctionName, file_path);
+	throw_encode_error(
+	    "{} reason=JPEG-XL backend is disabled; configure with DICOMSDL_ENABLE_JPEGXL=ON",
+	    kFunctionName);
 	return {};
 #endif
-}
-
-void encode_jpegxl_pixel_data(DicomFile& file, const EncapsulatedEncodeInput& input,
-    std::size_t rows, std::size_t cols, std::size_t samples_per_pixel,
-    std::size_t bytes_per_sample, int bits_allocated, int bits_stored,
-    int pixel_representation, Planar source_planar, std::size_t row_stride,
-    bool lossless, const JpegXlOptions& options, std::string_view file_path) {
-	encode_frames_to_encapsulated_pixel_data(
-	    file, input, [&](std::span<const std::uint8_t> source_frame_view) {
-		    return encode_jpegxl_frame(source_frame_view, rows, cols, samples_per_pixel,
-		        bytes_per_sample, bits_allocated, bits_stored, pixel_representation,
-		        source_planar, row_stride, lossless, options, file_path);
-	    });
 }
 
 } // namespace dicom::pixel::detail

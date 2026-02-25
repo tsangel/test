@@ -79,6 +79,8 @@ add_library(dicomsdl STATIC
 	src/dataelement.cpp
 	src/instream.cpp
 	src/pixelsequence.cpp
+	src/pixel_codec_registry.cpp
+	src/pixel_codec_dispatch.cpp
 	src/pixel_decoder.cpp
 	src/pixel_decoder_raw.cpp
 	src/pixel_decoder_encapsulated.cpp
@@ -533,6 +535,7 @@ if(DICOM_BUILD_EXAMPLES)
 		examples/dicomconv.cpp
 	)
 	target_link_libraries(dicomconv PRIVATE dicomsdl)
+	target_include_directories(dicomconv PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 	add_executable(batch_assign_with_error_check
 		examples/batch_assign_with_error_check.cpp
@@ -616,6 +619,13 @@ if(BUILD_TESTING)
 	target_link_libraries(dicomsdl_codec_cycle_roundtrip PRIVATE dicomsdl)
 	add_test(NAME codec_cycle_roundtrip COMMAND dicomsdl_codec_cycle_roundtrip)
 	set_tests_properties(codec_cycle_roundtrip PROPERTIES LABELS "dicomsdl")
+
+	add_executable(dicomsdl_codec_error_boundary
+		tests/codec_error_boundary.cpp
+	)
+	target_link_libraries(dicomsdl_codec_error_boundary PRIVATE dicomsdl)
+	add_test(NAME codec_error_boundary COMMAND dicomsdl_codec_error_boundary)
+	set_tests_properties(codec_error_boundary PROPERTIES LABELS "dicomsdl")
 
 	add_executable(dicomsdl_codec_cycle_realdata
 		tests/codec_cycle_realdata.cpp

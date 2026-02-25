@@ -1,126 +1,182 @@
 #include "pixel_encoder_detail.hpp"
 
-#include "diagnostics.h"
-
-#include <cstddef>
-#include <cstdint>
-#include <cstring>
-#include <span>
+#include <cctype>
+#include <exception>
+#include <string>
 #include <string_view>
 #include <vector>
 
 namespace dicom::pixel::detail {
-using namespace dicom::literals;
-namespace diag = dicom::diag;
 
 namespace {
 
-[[nodiscard]] std::vector<std::uint8_t> copy_single_frame_to_native_layout(
-    std::span<const std::uint8_t> source_bytes, std::size_t rows, std::size_t samples_per_pixel,
-    bool planar_source, std::size_t row_payload_bytes, std::size_t source_row_stride,
-    std::size_t source_plane_stride, std::size_t destination_frame_payload) {
-	std::vector<std::uint8_t> native_pixel_data(destination_frame_payload);
-	if (native_pixel_data.empty()) {
-		return native_pixel_data;
+std::string normalize_encode_error_detail(std::string detail) {
+	// Legacy encoder helpers may include "pixel::encode_* reason=...".
+	// Keep only reason payload so call-site context is the single source of file/frame info.
+	const auto reason_pos = detail.find("reason=");
+	if (detail.rfind("pixel::encode_", 0) == 0 && reason_pos != std::string::npos) {
+		detail = detail.substr(reason_pos + 7);
 	}
-
-	const auto* source_base = source_bytes.data();
-	auto* destination_base = native_pixel_data.data();
-
-	if (planar_source) {
-		const std::size_t destination_plane_stride =
-		    destination_frame_payload / samples_per_pixel;
-		for (std::size_t sample = 0; sample < samples_per_pixel; ++sample) {
-			const auto* source_plane = source_base + sample * source_plane_stride;
-			auto* destination_plane = destination_base + sample * destination_plane_stride;
-			for (std::size_t row = 0; row < rows; ++row) {
-				std::memcpy(destination_plane + row * row_payload_bytes,
-				    source_plane + row * source_row_stride, row_payload_bytes);
-			}
-		}
-		return native_pixel_data;
+	while (!detail.empty() &&
+	       std::isspace(static_cast<unsigned char>(detail.front())) != 0) {
+		detail.erase(detail.begin());
 	}
-
-	for (std::size_t row = 0; row < rows; ++row) {
-		std::memcpy(destination_base + row * row_payload_bytes,
-		    source_base + row * source_row_stride, row_payload_bytes);
+	if (detail.empty()) {
+		detail = "encoder plugin failed";
 	}
-	return native_pixel_data;
+	return detail;
 }
 
 } // namespace
 
-void encode_encapsulated_pixel_data(const EncapsulatedPixelEncodeDispatchInput& input) {
-	if (input.is_encapsulated_uncompressed) {
-		encode_frames_to_encapsulated_pixel_data(
-		    input.file, input.encode_input, [&](std::span<const std::uint8_t> source_frame_view) {
-			    return copy_single_frame_to_native_layout(source_frame_view, input.rows,
-			        input.samples_per_pixel, input.planar_source, input.row_payload_bytes,
-			        input.source_row_stride, input.source_plane_stride,
-			        input.destination_frame_payload);
+void encode_encapsulated_pixel_data(const CodecEncodeFnInput& input) {
+	constexpr std::string_view kFunctionName = "DicomFile::set_pixel_data";
+	const auto file_path = input.file.path();
+	const auto& registry = global_codec_registry();
+	const auto* binding = registry.find_binding(input.transfer_syntax);
+	const auto plugin_list = registry.plugins();
+	const codec_plugin* plugin = nullptr;
+	if (binding && binding->plugin_key == input.plugin_key &&
+	    binding->plugin_index < plugin_list.size()) {
+		const auto& candidate = plugin_list[binding->plugin_index];
+		if (candidate.key == input.plugin_key) {
+			plugin = &candidate;
+		}
+	}
+	if (!plugin) {
+		plugin = registry.find_plugin(input.plugin_key);
+	}
+	if (!plugin) {
+		throw_codec_error_with_context(kFunctionName, file_path,
+		    input.transfer_syntax, input.plugin_key, std::nullopt,
+		    codec_error{
+		        .code = codec_status_code::unsupported,
+		        .stage = "plugin_lookup",
+		        .detail = "plugin is not registered in codec registry",
 		    });
+	}
+	if (!plugin->encode_frame) {
+		throw_codec_error_with_context(kFunctionName, file_path,
+		    input.transfer_syntax, input.plugin_key, std::nullopt,
+		    codec_error{
+		        .code = codec_status_code::unsupported,
+		        .stage = "plugin_lookup",
+		        .detail = "plugin does not provide encode_frame dispatch",
+		    });
+	}
+	if (!plugin->parse_options) {
+		throw_codec_error_with_context(kFunctionName, file_path,
+		    input.transfer_syntax, input.plugin_key, std::nullopt,
+		    codec_error{
+		        .code = codec_status_code::unsupported,
+		        .stage = "parse_options",
+		        .detail = "plugin does not provide parse_options hook",
+		    });
+	}
+
+	CodecOptions parsed_codec_options{};
+	try {
+		if (const auto parse_error = plugin->parse_options(
+		        input.transfer_syntax, input.codec_options, parsed_codec_options)) {
+			throw_codec_error_with_context(kFunctionName, file_path,
+			    input.transfer_syntax, input.plugin_key, std::nullopt,
+			    codec_error{
+			        .code = codec_status_code::invalid_argument,
+			        .stage = "parse_options",
+			        .detail = *parse_error,
+			    });
+		}
+	} catch (const std::exception& e) {
+		throw_codec_error_with_context(kFunctionName, file_path,
+		    input.transfer_syntax, input.plugin_key, std::nullopt,
+		    codec_error{
+		        .code = codec_status_code::backend_error,
+		        .stage = "parse_options",
+		        .detail = e.what(),
+		    });
+	} catch (...) {
+		throw_codec_error_with_context(kFunctionName, file_path,
+		    input.transfer_syntax, input.plugin_key, std::nullopt,
+		    codec_error{
+		        .code = codec_status_code::backend_error,
+		        .stage = "parse_options",
+		        .detail = "non-standard exception from parse_options",
+		    });
+	}
+
+	const auto encode_frame_or_throw = [&](std::size_t frame_index,
+	                                   std::span<const std::uint8_t> source_frame_view) {
+		CodecEncodeFrameInput frame_input{
+		    .source_frame = source_frame_view,
+		    .transfer_syntax = input.transfer_syntax,
+		    .rows = input.rows,
+		    .cols = input.cols,
+		    .samples_per_pixel = input.samples_per_pixel,
+		    .bytes_per_sample = input.bytes_per_sample,
+		    .bits_allocated = input.bits_allocated,
+		    .bits_stored = input.bits_stored,
+		    .pixel_representation = input.pixel_representation,
+		    .use_multicomponent_transform = input.use_multicomponent_transform,
+		    .source_planar = input.source_planar,
+		    .planar_source = input.planar_source,
+		    .row_payload_bytes = input.row_payload_bytes,
+		    .source_row_stride = input.source_row_stride,
+		    .source_plane_stride = input.source_plane_stride,
+		    .source_frame_payload = input.source_frame_payload,
+		    .destination_frame_payload = input.destination_frame_payload,
+		    .profile = input.profile,
+		};
+
+		std::vector<std::uint8_t> encoded_frame{};
+		codec_error error{};
+		const bool ok =
+		    plugin->encode_frame(frame_input, parsed_codec_options, encoded_frame, error);
+		if (!ok) {
+			if (error.code == codec_status_code::ok) {
+				error.code = codec_status_code::backend_error;
+			}
+			if (error.stage.empty()) {
+				error.stage = "encode_frame";
+			}
+			error.detail = normalize_encode_error_detail(std::move(error.detail));
+			throw_codec_error_with_context(kFunctionName, file_path,
+			    input.transfer_syntax, input.plugin_key, frame_index, error);
+		}
+		return encoded_frame;
+	};
+
+	const auto& encode_input = input.encode_input;
+	if (encode_input.source_aliases_current_native_pixel_data) {
+		std::vector<std::vector<std::uint8_t>> encoded_frames;
+		encoded_frames.reserve(encode_input.frame_count);
+		for (std::size_t frame_index = 0; frame_index < encode_input.frame_count;
+		     ++frame_index) {
+			const auto* source_frame =
+			    encode_input.source_base + frame_index * encode_input.source_frame_stride;
+			const auto source_frame_view = std::span<const std::uint8_t>(
+			    source_frame, encode_input.source_frame_payload);
+			encoded_frames.push_back(
+			    encode_frame_or_throw(frame_index, source_frame_view));
+		}
+		input.file.reset_encapsulated_pixel_data(encode_input.frame_count);
+		for (std::size_t frame_index = 0; frame_index < encode_input.frame_count;
+		     ++frame_index) {
+			input.file.set_encoded_pixel_frame(
+			    frame_index, std::move(encoded_frames[frame_index]));
+		}
 		return;
 	}
 
-	if (input.is_j2k) {
-		const auto& j2k_options = std::get<J2kOptions>(input.resolved_codec_opt);
-		encode_jpeg2k_pixel_data(input.file, input.encode_input, input.rows, input.cols,
-		    input.samples_per_pixel, input.bytes_per_sample, input.bits_allocated,
-		    input.bits_stored, input.pixel_representation, input.source_planar,
-		    input.source_row_stride, input.use_multicomponent_transform,
-		    input.is_j2k_lossless, j2k_options, input.file_path);
-		return;
+	input.file.reset_encapsulated_pixel_data(encode_input.frame_count);
+	for (std::size_t frame_index = 0; frame_index < encode_input.frame_count;
+	     ++frame_index) {
+		const auto* source_frame =
+		    encode_input.source_base + frame_index * encode_input.source_frame_stride;
+		const auto source_frame_view = std::span<const std::uint8_t>(
+		    source_frame, encode_input.source_frame_payload);
+		auto encoded_frame = encode_frame_or_throw(frame_index, source_frame_view);
+		input.file.set_encoded_pixel_frame(frame_index, std::move(encoded_frame));
 	}
-
-	if (input.is_htj2k) {
-		const bool rpcl_progression = input.transfer_syntax == "HTJ2KLosslessRPCL"_uid;
-		const auto& htj2k_options = std::get<Htj2kOptions>(input.resolved_codec_opt);
-		encode_htj2k_pixel_data(input.file, input.encode_input, input.rows, input.cols,
-		    input.samples_per_pixel, input.bytes_per_sample, input.bits_allocated,
-		    input.bits_stored, input.pixel_representation, input.source_planar,
-		    input.source_row_stride, input.use_multicomponent_transform,
-		    input.is_htj2k_lossless, rpcl_progression, htj2k_options, input.file_path);
-		return;
-	}
-
-	if (input.is_jpegls) {
-		const auto& jpegls_options = std::get<JpegLsOptions>(input.resolved_codec_opt);
-		encode_jpegls_pixel_data(input.file, input.encode_input, input.rows, input.cols,
-		    input.samples_per_pixel, input.bytes_per_sample, input.bits_allocated,
-		    input.bits_stored, input.source_planar, input.source_row_stride,
-		    jpegls_options.near_lossless_error, input.file_path);
-		return;
-	}
-
-	if (input.is_jpeg) {
-		const auto& jpeg_options = std::get<JpegOptions>(input.resolved_codec_opt);
-		encode_jpeg_pixel_data(input.file, input.encode_input, input.rows, input.cols,
-		    input.samples_per_pixel, input.bytes_per_sample, input.bits_allocated,
-		    input.bits_stored, input.source_planar, input.source_row_stride,
-		    input.is_jpeg_lossless, jpeg_options, input.file_path);
-		return;
-	}
-
-	if (input.is_jpegxl) {
-		const auto& jpegxl_options = std::get<JpegXlOptions>(input.resolved_codec_opt);
-		encode_jpegxl_pixel_data(input.file, input.encode_input, input.rows, input.cols,
-		    input.samples_per_pixel, input.bytes_per_sample, input.bits_allocated,
-		    input.bits_stored, input.pixel_representation, input.source_planar,
-		    input.source_row_stride, input.is_jpegxl_lossless, jpegxl_options,
-		    input.file_path);
-		return;
-	}
-
-	if (input.is_rle) {
-		encode_rle_pixel_data(input.file, input.encode_input, input.rows, input.cols,
-		    input.samples_per_pixel, input.bytes_per_sample, input.source_planar,
-		    input.source_row_stride, input.file_path);
-		return;
-	}
-
-	diag::error_and_throw(
-	    "DicomFile::set_pixel_data file={} ts={} reason=internal codec dispatch could not resolve an encoder path",
-	    input.file_path, input.transfer_syntax.value());
 }
 
 } // namespace dicom::pixel::detail

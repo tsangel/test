@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <array>
 #include <cctype>
 #include <cerrno>
 #include <cmath>
@@ -11,6 +13,7 @@
 #include <vector>
 
 #include <dicom.h>
+#include "pixel_codec_registry.hpp"
 
 namespace {
 
@@ -31,20 +34,90 @@ struct CliOptions {
 
 void print_transfer_syntax_list() {
 	std::cerr << "\nAvailable Transfer Syntax UIDs supported by dicomconv (keyword = UID):\n";
-	for (const auto& entry : dicom::kUidRegistry) {
-		if (entry.uid_type != dicom::UidType::TransferSyntax) {
+	std::vector<dicom::uid::WellKnown> transfer_syntaxes;
+	const auto& registry = dicom::pixel::detail::global_codec_registry();
+	transfer_syntaxes.reserve(registry.bindings().size());
+	for (const auto& binding : registry.bindings()) {
+		if (!binding.encode_supported || !binding.transfer_syntax.valid()) {
 			continue;
 		}
-		const auto uid = dicom::uid::from_value(entry.value);
-		if (!uid || !uid->supports_pixel_encode()) {
-			continue;
-		}
-		if (entry.keyword.empty()) {
-			std::cerr << "  " << entry.value << '\n';
-			continue;
-		}
-		std::cerr << "  " << entry.keyword << " = " << entry.value << '\n';
+		transfer_syntaxes.push_back(binding.transfer_syntax);
 	}
+	std::sort(transfer_syntaxes.begin(), transfer_syntaxes.end(),
+	    [](const dicom::uid::WellKnown& lhs, const dicom::uid::WellKnown& rhs) {
+		    return lhs.value() < rhs.value();
+	    });
+	transfer_syntaxes.erase(
+	    std::unique(transfer_syntaxes.begin(), transfer_syntaxes.end()),
+	    transfer_syntaxes.end());
+
+	for (const auto& transfer_syntax : transfer_syntaxes) {
+		const auto* entry = transfer_syntax.entry();
+		if (!entry || entry->uid_type != dicom::UidType::TransferSyntax) {
+			continue;
+		}
+		if (entry->keyword.empty()) {
+			std::cerr << "  " << entry->value << '\n';
+			continue;
+		}
+		std::cerr << "  " << entry->keyword << " = " << entry->value << '\n';
+	}
+}
+
+std::string codec_option_flag(std::string_view option_name) {
+	std::string out{"--"};
+	out.reserve(option_name.size() + 2);
+	for (const char ch : option_name) {
+		out.push_back(ch == '_' ? '-' : ch);
+	}
+	return out;
+}
+
+void print_codec_option_schema(std::string_view plugin_label,
+    std::string_view plugin_key) {
+	const auto& registry = dicom::pixel::detail::global_codec_registry();
+	const auto* plugin = registry.find_plugin(plugin_key);
+	if (!plugin || plugin->option_schema.empty()) {
+		std::cerr << "  " << plugin_label << " : no codec-specific options\n";
+		return;
+	}
+
+	bool first = true;
+	for (const auto& option : plugin->option_schema) {
+		std::string option_text{};
+		if (option.name == "color_transform") {
+			option_text = "--color-transform | --no-color-transform";
+		} else {
+			option_text = codec_option_flag(option.name);
+		}
+		if (!option.valid_range.empty()) {
+			option_text += " " + std::string(option.valid_range);
+		}
+		if (!option.recommendation.empty()) {
+			option_text += " (try: " + std::string(option.recommendation) + ")";
+		}
+		if (first) {
+			std::cerr << "  " << plugin_label << " : " << option_text << '\n';
+			first = false;
+		} else {
+			std::cerr << "           " << option_text << '\n';
+		}
+	}
+	if (plugin_key == "jpeg2k" || plugin_key == "htj2k") {
+		std::cerr << "           if both --target-psnr and --target-bpp are set, --target-psnr takes precedence\n";
+	}
+}
+
+void print_codec_option_schema_section() {
+	std::cerr << "Codec-specific options (plugin schema):\n";
+	std::cerr << "  auto   : no codec-specific options\n";
+	std::cerr << "  none   : no codec-specific options\n";
+	print_codec_option_schema("rle", "rle");
+	print_codec_option_schema("jpeg", "jpeg");
+	print_codec_option_schema("jpegls", "jpegls");
+	print_codec_option_schema("j2k", "jpeg2k");
+	print_codec_option_schema("htj2k", "htj2k");
+	print_codec_option_schema("jpegxl", "jpegxl");
 }
 
 std::string normalize_token(std::string_view text) {
@@ -115,36 +188,6 @@ void print_usage(const char* prog, bool include_transfer_syntax_list) {
 	    << "  --no-color-transform      Disable JPEG2000/HTJ2K MCT\n"
 	    << "  -h, --help                Show this help\n"
 	    << "\n"
-	    << "Codec-specific options:\n"
-	    << "  auto   : no codec-specific options\n"
-	    << "  none   : no codec-specific options\n"
-	    << "  rle    : no codec-specific options\n"
-	    << "  jpeg   : --quality N [1,100]\n"
-	    << "  jpegls : --near-lossless-error N [0,255]\n"
-	    << "           (JPEGLSLossless requires 0, JPEGLSNearLossless requires >0)\n"
-	    << "  j2k    : --target-psnr V [>=0], --target-bpp V [>=0],\n"
-	    << "           --threads N (-1:auto,0:library,>0),\n"
-	    << "           --color-transform | --no-color-transform\n"
-	    << "           first try: psnr=45 (balanced), 40 (smaller), 55 (higher quality)\n"
-	    << "           first try: bpp=1.5 (balanced), 1.0 (smaller), 2.0 (higher quality)\n"
-	    << "           if both are set, psnr takes precedence\n"
-	    << "  htj2k  : --target-psnr V [>=0], --target-bpp V [>=0],\n"
-	    << "           --threads N (-1:auto,0:library,>0),\n"
-	    << "           --color-transform | --no-color-transform\n"
-	    << "           first try: psnr=50 (balanced), 45 (smaller), 60 (higher quality)\n"
-	    << "           first try: bpp=1.5 (balanced), 1.0 (smaller), 2.0 (higher quality)\n"
-	    << "           if both are set, psnr takes precedence\n"
-	    << "           note: target-bpp is usually more predictable than target-psnr\n"
-	    << "  jpegxl : --distance V [0,25], --effort N [1,10],\n"
-	    << "           --threads N (-1:auto,0:library,>0)\n"
-	    << "           (JPEGXLLossless requires distance=0, JPEGXL requires distance>0)\n"
-	    << "\n"
-	    << "Modality presets (lossy j2k/htj2k starting points):\n"
-	    << "  CT : psnr=45 or bpp=1.5\n"
-	    << "  MR : psnr=43 or bpp=1.2\n"
-	    << "  CR : psnr=48 or bpp=2.0\n"
-	    << "  verify visually and adjust by task/site policy\n"
-	    << "\n"
 	    << "Examples:\n"
 	    << "  " << prog << " in.dcm out.dcm ExplicitVRLittleEndian\n"
 	    << "  " << prog << " in.dcm out.dcm jpeg --quality 92\n"
@@ -155,6 +198,8 @@ void print_usage(const char* prog, bool include_transfer_syntax_list) {
 	    << "  " << prog << " in.dcm out.dcm jpegxl-lossless --distance 0\n"
 	    << "\n"
 	    << "The tool calls DicomFile::set_transfer_syntax(..., codec_opt) internally.\n";
+	std::cerr << '\n';
+	print_codec_option_schema_section();
 	if (include_transfer_syntax_list) {
 		print_transfer_syntax_list();
 	}

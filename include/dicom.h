@@ -1180,16 +1180,10 @@ public:
 	[[nodiscard]] constexpr explicit operator bool() const noexcept { return is_present(); }
 	/// Raw value as a byte span for non-sequence VRs. SQ/PX returns an empty span.
 	[[nodiscard]] std::span<const std::uint8_t> value_span() const;
-	/// Pointer to stored value or nested sequence/pixel sequence.
-	[[deprecated("Use value_span() for bytes, and sequence()/pixel_sequence() for nested values.")]]
-	void* value_ptr() const;
 	/// Value multiplicity; returns -1 when not applicable or parse fails.
 	[[nodiscard]] int vm() const;
 	/// Current storage backing kind for this element value.
 	[[nodiscard]] constexpr StorageKind storage_kind() const noexcept { return storage_kind_; }
-	/// Raw storage pointer for non-sequence VRs.
-	[[deprecated("Use value_span() instead.")]]
-	[[nodiscard]] void* data() const noexcept;
 	/// Returns the nested Sequence value if VR indicates a sequence, otherwise nullptr.
 	[[nodiscard]] constexpr Sequence* sequence() const noexcept {
 		return storage_kind_ == StorageKind::sequence ? storage_.seq : nullptr;
@@ -2010,19 +2004,6 @@ inline void DataElement::set_offset(std::size_t offset) noexcept {
 		break;
 	default:
 		break;
-	}
-}
-
-inline void* DataElement::data() const noexcept {
-	switch (storage_kind_) {
-	case StorageKind::inline_bytes:
-		return const_cast<std::uint8_t*>(storage_.inline_bytes);
-	case StorageKind::heap:
-		return storage_.ptr;
-	case StorageKind::owned_bytes:
-		return storage_.vec ? storage_.vec->data() : nullptr;
-	default:
-		return nullptr;
 	}
 }
 

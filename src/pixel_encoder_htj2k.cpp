@@ -1,13 +1,12 @@
 #include "pixel_encoder_detail.hpp"
 
-#include "diagnostics.h"
-
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <exception>
 #include <limits>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -17,9 +16,14 @@
 #include <ojph_params.h>
 
 namespace dicom::pixel::detail {
-namespace diag = dicom::diag;
-
 namespace {
+
+void set_codec_error(codec_error& out_error, codec_status_code code,
+    std::string_view stage, std::string detail) {
+	out_error.code = code;
+	out_error.stage = std::string(stage);
+	out_error.detail = std::move(detail);
+}
 
 struct sample_value_range {
 	std::int32_t min_value{0};
@@ -27,11 +31,11 @@ struct sample_value_range {
 };
 
 [[nodiscard]] double resolve_htj2k_qstep(std::size_t samples_per_pixel, int bits_stored,
-    const Htj2kOptions& options, std::string_view function_name, std::string_view file_path) {
+    const Htj2kOptions& options, std::string_view function_name) {
 	if (options.target_bpp < 0.0 || options.target_psnr < 0.0) {
-		diag::error_and_throw(
-		    "{} file={} reason=Htj2kOptions.target_bpp/target_psnr must be >= 0",
-		    function_name, file_path);
+		throw_encode_error(
+		    "{} reason=Htj2kOptions.target_bpp/target_psnr must be >= 0",
+		    function_name);
 	}
 
 	double qstep = 0.01;
@@ -45,9 +49,9 @@ struct sample_value_range {
 	}
 
 	if (!std::isfinite(qstep) || qstep <= 0.0) {
-		diag::error_and_throw(
-		    "{} file={} reason=failed to resolve HTJ2K qstep from options",
-		    function_name, file_path);
+		throw_encode_error(
+		    "{} reason=failed to resolve HTJ2K qstep from options",
+		    function_name);
 	}
 	return std::clamp(qstep, 0.00001, 0.5);
 }
@@ -56,7 +60,7 @@ struct sample_value_range {
     std::span<const std::uint8_t> frame_data, const SourceFrameLayout& source_layout,
     std::size_t row_stride, std::size_t rows, std::size_t cols, std::size_t samples_per_pixel,
     std::size_t bytes_per_sample, int bits_stored, bool source_signed,
-    std::string_view function_name, std::string_view file_path) {
+    std::string_view function_name) {
 	const auto* frame_ptr = frame_data.data();
 	std::int32_t min_value = std::numeric_limits<std::int32_t>::max();
 	std::int32_t max_value = std::numeric_limits<std::int32_t>::min();
@@ -77,8 +81,8 @@ struct sample_value_range {
 					sample_ptr = source_row +
 					    (col * samples_per_pixel + component) * bytes_per_sample;
 				}
-				const auto sample_value = load_i8_or_i16_sample_from_source(sample_ptr,
-				    bytes_per_sample, source_signed, bits_stored, function_name, file_path);
+					const auto sample_value = load_i8_or_i16_sample_from_source(sample_ptr,
+					    bytes_per_sample, source_signed, bits_stored);
 				min_value = std::min(min_value, sample_value);
 				max_value = std::max(max_value, sample_value);
 			}
@@ -92,28 +96,28 @@ void fill_openjph_line_from_source(ojph::line_buf* line, std::span<const std::ui
     const SourceFrameLayout& source_layout, std::size_t row_stride, std::size_t row,
     std::size_t component_index, std::size_t cols, std::size_t samples_per_pixel,
     std::size_t bytes_per_sample, int bits_stored, bool source_signed,
-    std::string_view function_name, std::string_view file_path) {
+    std::string_view function_name) {
 	if (!line) {
-		diag::error_and_throw(
-		    "{} file={} reason=OpenJPH returned null line buffer",
-		    function_name, file_path);
+		throw_encode_error(
+		    "{} reason=OpenJPH returned null line buffer",
+		    function_name);
 	}
 	if (line->size < cols) {
-		diag::error_and_throw(
-		    "{} file={} reason=OpenJPH line size too small (have={}, need={})",
-		    function_name, file_path, line->size, cols);
+		throw_encode_error(
+		    "{} reason=OpenJPH line size too small (have={}, need={})",
+		    function_name, line->size, cols);
 	}
 
 	const bool line_is_integer = (line->flags & ojph::line_buf::LFT_INTEGER) != 0;
 	if (line_is_integer && !line->i32) {
-		diag::error_and_throw(
-		    "{} file={} reason=OpenJPH integer line has null data pointer",
-		    function_name, file_path);
+		throw_encode_error(
+		    "{} reason=OpenJPH integer line has null data pointer",
+		    function_name);
 	}
 	if (!line_is_integer && !line->f32) {
-		diag::error_and_throw(
-		    "{} file={} reason=OpenJPH floating line has null data pointer",
-		    function_name, file_path);
+		throw_encode_error(
+		    "{} reason=OpenJPH floating line has null data pointer",
+		    function_name);
 	}
 
 	const auto* frame_ptr = frame_data.data();
@@ -133,7 +137,7 @@ void fill_openjph_line_from_source(ojph::line_buf* line, std::span<const std::ui
 			    (col * samples_per_pixel + component_index) * bytes_per_sample;
 		}
 		const auto sample_value = load_i8_or_i16_sample_from_source(sample_ptr,
-		    bytes_per_sample, source_signed, bits_stored, function_name, file_path);
+		    bytes_per_sample, source_signed, bits_stored);
 		if (line_is_integer) {
 			line->i32[col] = sample_value;
 		} else {
@@ -144,59 +148,136 @@ void fill_openjph_line_from_source(ojph::line_buf* line, std::span<const std::ui
 
 } // namespace
 
+bool try_encode_htj2k_frame(std::span<const std::uint8_t> frame_data,
+    std::size_t rows, std::size_t cols, std::size_t samples_per_pixel,
+    std::size_t bytes_per_sample, int bits_allocated, int bits_stored,
+    int pixel_representation, Planar source_planar, std::size_t row_stride,
+    bool use_multicomponent_transform, bool lossless, bool rpcl_progression,
+    const Htj2kOptions& options, std::vector<std::uint8_t>& out_encoded,
+    codec_error& out_error) noexcept {
+	out_encoded.clear();
+	out_error = codec_error{};
+
+	if (rows == 0 || cols == 0 || samples_per_pixel == 0 || bytes_per_sample == 0) {
+		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		    "rows/cols/samples_per_pixel/bytes_per_sample must be positive");
+		return false;
+	}
+	if (samples_per_pixel != 1 && samples_per_pixel != 3 && samples_per_pixel != 4) {
+		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		    "only samples_per_pixel=1/3/4 are supported in current HTJ2K encoder path");
+		return false;
+	}
+	if (use_multicomponent_transform && samples_per_pixel != 3) {
+		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		    "multicomponent HTJ2K requires samples_per_pixel=3");
+		return false;
+	}
+	if (bits_allocated <= 0 || bits_allocated > 16 || (bits_allocated % 8) != 0) {
+		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		    "bits_allocated must be 8 or 16");
+		return false;
+	}
+	if (bits_stored <= 0 || bits_stored > bits_allocated) {
+		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		    "bits_stored must be in [1,bits_allocated]");
+		return false;
+	}
+	if (pixel_representation != 0 && pixel_representation != 1) {
+		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		    "pixel_representation must be 0 or 1");
+		return false;
+	}
+	if (bytes_per_sample != 1 && bytes_per_sample != 2) {
+		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		    "unsupported bytes_per_sample (expected 1 or 2)");
+		return false;
+	}
+	if (options.target_bpp < 0.0 || options.target_psnr < 0.0) {
+		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		    "Htj2kOptions.target_bpp/target_psnr must be >= 0");
+		return false;
+	}
+	if (options.threads < -1) {
+		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		    "Htj2kOptions.threads must be -1, 0, or positive");
+		return false;
+	}
+
+	try {
+		out_encoded = encode_htj2k_frame(frame_data, rows, cols, samples_per_pixel,
+		    bytes_per_sample, bits_allocated, bits_stored, pixel_representation,
+		    source_planar, row_stride, use_multicomponent_transform, lossless,
+		    rpcl_progression, options);
+		out_error = codec_error{};
+		return true;
+	} catch (const std::bad_alloc&) {
+		set_codec_error(out_error, codec_status_code::internal_error, "allocate",
+		    "memory allocation failed");
+	} catch (const std::exception& e) {
+		set_codec_error(out_error, codec_status_code::backend_error, "encode",
+		    e.what());
+	} catch (...) {
+		set_codec_error(out_error, codec_status_code::backend_error, "encode",
+		    "non-standard exception");
+	}
+	out_encoded.clear();
+	return false;
+}
+
 std::vector<std::uint8_t> encode_htj2k_frame(std::span<const std::uint8_t> frame_data,
     std::size_t rows, std::size_t cols, std::size_t samples_per_pixel,
     std::size_t bytes_per_sample, int bits_allocated, int bits_stored,
     int pixel_representation, Planar source_planar, std::size_t row_stride,
     bool use_multicomponent_transform, bool lossless, bool rpcl_progression,
-    const Htj2kOptions& options, std::string_view file_path) {
+    const Htj2kOptions& options) {
 	constexpr std::string_view kFunctionName = "pixel::encode_htj2k_frame";
 	if (samples_per_pixel != 1 && samples_per_pixel != 3 && samples_per_pixel != 4) {
-		diag::error_and_throw(
-		    "{} file={} reason=only samples_per_pixel=1/3/4 are supported in current HTJ2K encoder path",
-		    kFunctionName, file_path);
+		throw_encode_error(
+		    "{} reason=only samples_per_pixel=1/3/4 are supported in current HTJ2K encoder path",
+		    kFunctionName);
 	}
 	if (use_multicomponent_transform && samples_per_pixel != 3) {
-		diag::error_and_throw(
-		    "{} file={} reason=multicomponent HTJ2K requires samples_per_pixel=3",
-		    kFunctionName, file_path);
+		throw_encode_error(
+		    "{} reason=multicomponent HTJ2K requires samples_per_pixel=3",
+		    kFunctionName);
 	}
 	if (bits_allocated <= 0 || bits_allocated > 16 || (bits_allocated % 8) != 0) {
-		diag::error_and_throw(
-		    "{} file={} reason=bits_allocated={} is not supported (supported: 8 or 16)",
-		    kFunctionName, file_path, bits_allocated);
+		throw_encode_error(
+		    "{} reason=bits_allocated={} is not supported (supported: 8 or 16)",
+		    kFunctionName, bits_allocated);
 	}
 	if (bits_stored <= 0 || bits_stored > bits_allocated) {
-		diag::error_and_throw(
-		    "{} file={} reason=bits_stored={} must be in [1, bits_allocated={}]",
-		    kFunctionName, file_path, bits_stored, bits_allocated);
+		throw_encode_error(
+		    "{} reason=bits_stored={} must be in [1, bits_allocated={}]",
+		    kFunctionName, bits_stored, bits_allocated);
 	}
 	if (pixel_representation != 0 && pixel_representation != 1) {
-		diag::error_and_throw(
-		    "{} file={} reason=pixel_representation must be 0 or 1",
-		    kFunctionName, file_path);
+		throw_encode_error(
+		    "{} reason=pixel_representation must be 0 or 1",
+		    kFunctionName);
 	}
 	if (cols > std::numeric_limits<ojph::ui32>::max() ||
 	    rows > std::numeric_limits<ojph::ui32>::max() ||
 	    samples_per_pixel > std::numeric_limits<ojph::ui32>::max()) {
-		diag::error_and_throw(
-		    "{} file={} reason=rows/cols/samples_per_pixel exceed OpenJPH range",
-		    kFunctionName, file_path);
+		throw_encode_error(
+		    "{} reason=rows/cols/samples_per_pixel exceed OpenJPH range",
+		    kFunctionName);
 	}
 
 	const auto source_layout = make_source_frame_layout(frame_data, rows, cols, samples_per_pixel,
-	    bytes_per_sample, source_planar, row_stride, kFunctionName, file_path);
+	    bytes_per_sample, source_planar, row_stride);
 	const bool source_signed = pixel_representation == 1;
 	if (options.target_bpp < 0.0 || options.target_psnr < 0.0) {
-		diag::error_and_throw(
-		    "{} file={} reason=Htj2kOptions.target_bpp/target_psnr must be >= 0",
-		    kFunctionName, file_path);
+		throw_encode_error(
+		    "{} reason=Htj2kOptions.target_bpp/target_psnr must be >= 0",
+		    kFunctionName);
 	}
 	Htj2kOptions effective_options = options;
 	if (!lossless && options.target_psnr > 0.0 && bits_stored > 0 && bits_stored < 31) {
 		const auto source_range = measure_source_sample_range(frame_data, source_layout, row_stride,
 		    rows, cols, samples_per_pixel, bytes_per_sample, bits_stored, source_signed,
-		    kFunctionName, file_path);
+		    kFunctionName);
 		const std::int64_t dynamic_range_i64 = static_cast<std::int64_t>(source_range.max_value) -
 		    static_cast<std::int64_t>(source_range.min_value);
 		if (dynamic_range_i64 > 0) {
@@ -245,13 +326,13 @@ std::vector<std::uint8_t> encode_htj2k_frame(std::span<const std::uint8_t> frame
 				for (std::size_t component = 0; component < samples_per_pixel; ++component) {
 					for (std::size_t row = 0; row < rows; ++row) {
 						if (next_component != static_cast<ojph::ui32>(component)) {
-							diag::error_and_throw(
-							    "{} file={} reason=OpenJPH planar exchange order mismatch (expected={}, got={})",
-							    kFunctionName, file_path, component, next_component);
+							throw_encode_error(
+							    "{} reason=OpenJPH planar exchange order mismatch (expected={}, got={})",
+							    kFunctionName, component, next_component);
 						}
 						fill_openjph_line_from_source(line, frame_data, source_layout, row_stride, row,
 						    component, cols, samples_per_pixel, bytes_per_sample, bits_stored,
-						    source_signed, kFunctionName, file_path);
+						    source_signed, kFunctionName);
 						line = codestream.exchange(line, next_component);
 					}
 				}
@@ -259,13 +340,13 @@ std::vector<std::uint8_t> encode_htj2k_frame(std::span<const std::uint8_t> frame
 				for (std::size_t row = 0; row < rows; ++row) {
 					for (std::size_t component = 0; component < samples_per_pixel; ++component) {
 						if (next_component != static_cast<ojph::ui32>(component)) {
-							diag::error_and_throw(
-							    "{} file={} reason=OpenJPH interleaved exchange order mismatch (expected={}, got={})",
-							    kFunctionName, file_path, component, next_component);
+							throw_encode_error(
+							    "{} reason=OpenJPH interleaved exchange order mismatch (expected={}, got={})",
+							    kFunctionName, component, next_component);
 						}
 						fill_openjph_line_from_source(line, frame_data, source_layout, row_stride, row,
 						    component, cols, samples_per_pixel, bytes_per_sample, bits_stored,
-						    source_signed, kFunctionName, file_path);
+						    source_signed, kFunctionName);
 						line = codestream.exchange(line, next_component);
 					}
 				}
@@ -276,9 +357,9 @@ std::vector<std::uint8_t> encode_htj2k_frame(std::span<const std::uint8_t> frame
 
 			const auto used_size = outfile.get_used_size();
 			if (used_size == 0 || !outfile.get_data()) {
-				diag::error_and_throw(
-				    "{} file={} reason=OpenJPH produced empty codestream",
-				    kFunctionName, file_path);
+				throw_encode_error(
+				    "{} reason=OpenJPH produced empty codestream",
+				    kFunctionName);
 			}
 
 			std::vector<std::uint8_t> encoded(used_size);
@@ -286,17 +367,17 @@ std::vector<std::uint8_t> encode_htj2k_frame(std::span<const std::uint8_t> frame
 			outfile.close();
 			return encoded;
 		} catch (const std::exception& e) {
-			diag::error_and_throw(
-			    "{} file={} reason=OpenJPH encode failed (qstep={} {})",
-			    kFunctionName, file_path, qstep, e.what());
+			throw_encode_error(
+			    "{} reason=OpenJPH encode failed (qstep={} {})",
+			    kFunctionName, qstep, e.what());
 		} catch (const char* e) {
-			diag::error_and_throw(
-			    "{} file={} reason=OpenJPH encode failed (qstep={} {})",
-			    kFunctionName, file_path, qstep, e ? e : "unknown error");
+			throw_encode_error(
+			    "{} reason=OpenJPH encode failed (qstep={} {})",
+			    kFunctionName, qstep, e ? e : "unknown error");
 		} catch (...) {
-			diag::error_and_throw(
-			    "{} file={} reason=OpenJPH encode failed (qstep={} unknown exception)",
-			    kFunctionName, file_path, qstep);
+			throw_encode_error(
+			    "{} reason=OpenJPH encode failed (qstep={} unknown exception)",
+			    kFunctionName, qstep);
 		}
 		return {};
 	};
@@ -347,23 +428,8 @@ std::vector<std::uint8_t> encode_htj2k_frame(std::span<const std::uint8_t> frame
 	}
 
 	const double qstep =
-	    resolve_htj2k_qstep(samples_per_pixel, bits_stored, effective_options, kFunctionName, file_path);
+	    resolve_htj2k_qstep(samples_per_pixel, bits_stored, effective_options, kFunctionName);
 	return encode_with_qstep(qstep);
-}
-
-void encode_htj2k_pixel_data(DicomFile& file, const EncapsulatedEncodeInput& input,
-    std::size_t rows, std::size_t cols, std::size_t samples_per_pixel,
-    std::size_t bytes_per_sample, int bits_allocated, int bits_stored,
-    int pixel_representation, Planar source_planar, std::size_t row_stride,
-    bool use_multicomponent_transform, bool lossless, bool rpcl_progression,
-    const Htj2kOptions& options, std::string_view file_path) {
-	encode_frames_to_encapsulated_pixel_data(
-	    file, input, [&](std::span<const std::uint8_t> source_frame_view) {
-		    return encode_htj2k_frame(source_frame_view, rows, cols, samples_per_pixel,
-		        bytes_per_sample, bits_allocated, bits_stored, pixel_representation,
-		        source_planar, row_stride, use_multicomponent_transform, lossless,
-		        rpcl_progression, options, file_path);
-	    });
 }
 
 } // namespace dicom::pixel::detail

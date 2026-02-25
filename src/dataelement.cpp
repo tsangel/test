@@ -504,29 +504,6 @@ std::span<const std::uint8_t> DataElement::value_span() const {
 	return {};
 }
 
-void* DataElement::value_ptr() const {
-	switch (storage_kind_) {
-	case StorageKind::inline_bytes:
-		return const_cast<std::uint8_t*>(storage_.inline_bytes);
-	case StorageKind::heap:
-		return storage_.ptr;
-	case StorageKind::owned_bytes:
-		return storage_.vec ? storage_.vec->data() : nullptr;
-	case StorageKind::stream:
-		if (!parent_) {
-			return nullptr;
-		}
-		return parent_->stream().get_pointer(storage_.offset_, length_);
-	case StorageKind::sequence:
-		return storage_.seq;
-	case StorageKind::pixel_sequence:
-		return storage_.pixseq;
-	case StorageKind::none:
-		return nullptr;
-	}
-	return nullptr;
-}
-
 void DataElement::reserve_value_bytes(std::size_t length) {
 	if (vr_.is_sequence() || vr_.is_pixel_sequence()) {
 		diag::error_and_throw(

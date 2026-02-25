@@ -5,6 +5,17 @@ This document summarizes the current constraints for the pixel encode path:
 - `DicomFile::set_pixel_data(...)`
 - `DicomFile::set_transfer_syntax(...)` when it triggers native -> encapsulated encoding
 
+## Plugin Boundary Contract (Encoder Migration)
+
+- Plugin encode entrypoints operate on frame bytes + primitive metadata + codec options.
+- Plugin boundary does not take `DicomFile`, `DataSet`, or `DataElement`.
+- Plugin frame encode handlers are `noexcept` and report failures via `codec_error`:
+  - `code`: `invalid_argument`, `unsupported`, `backend_error`, `internal_error`
+  - `stage`: typically `parse_options`, `validate`, `encode`, `allocate`
+  - `detail`: codec/backend-specific detail text
+- Final exception creation is centralized in common orchestration with context:
+  `file`, `transfer syntax`, `plugin key`, and optional `frame index`.
+
 ## Encode-capable Transfer Syntax UIDs
 
 `uid::WellKnown::supports_pixel_encode()` is currently true for:
@@ -92,7 +103,8 @@ Additional JPEG lossy rule:
 - `bytes_per_sample` must match precision:
   - `bits_stored <= 8` -> 1 byte
   - `bits_stored > 8` -> 2 bytes
-- Lossy quality is clamped to `[1, 100]`.
+- `quality` must be in `[1, 100]` (`dicomconv -h` and registry schema).
+- Encoder path also clamps to `[1, 100]` as a defensive guard for direct/internal calls.
 
 ### JPEG-LS (CharLS)
 

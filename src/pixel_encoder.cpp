@@ -1,6 +1,7 @@
 #include "dicom.h"
 
 #include "diagnostics.h"
+#include "pixel_codec_registry.hpp"
 #include "pixel_encoder_detail.hpp"
 
 #include <algorithm>
@@ -10,6 +11,7 @@
 #include <cstring>
 #include <limits>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -19,10 +21,6 @@ namespace dicom {
 using namespace dicom::literals;
 
 namespace {
-constexpr double kDefaultLossyJ2kTargetPsnr = 45.0;
-constexpr int kDefaultNearLosslessJpegLsError = 2;
-constexpr double kDefaultLossyJpegXlDistance = 1.0;
-
 std::size_t bytes_per_sample_of(pixel::DataType dtype) noexcept {
 	switch (dtype) {
 	case pixel::DataType::u8:
@@ -143,189 +141,37 @@ struct pixel_encode_target {
 	bool is_jpegxl_lossy{false};
 };
 
-[[nodiscard]] pixel_encode_target classify_pixel_encode_target(uid::WellKnown transfer_syntax) noexcept {
+[[nodiscard]] pixel_encode_target classify_pixel_encode_target(
+    const pixel::detail::transfer_syntax_plugin_binding& binding) noexcept {
 	pixel_encode_target target{};
 	target.is_native_uncompressed =
-	    transfer_syntax.is_uncompressed() && !transfer_syntax.is_encapsulated();
+	    binding.profile == pixel::detail::codec_profile::native_uncompressed;
 	target.is_encapsulated_uncompressed =
-	    transfer_syntax.is_uncompressed() && transfer_syntax.is_encapsulated();
-	target.is_rle = transfer_syntax.is_rle();
-	target.is_j2k = transfer_syntax.is_jpeg2000() && !transfer_syntax.is_htj2k();
-	target.is_j2k_lossless = target.is_j2k && transfer_syntax.is_lossless();
-	target.is_j2k_lossy = target.is_j2k && transfer_syntax.is_lossy();
-	target.is_htj2k = transfer_syntax.is_htj2k();
-	target.is_htj2k_lossless = target.is_htj2k && transfer_syntax.is_lossless();
-	target.is_htj2k_lossy = target.is_htj2k && transfer_syntax.is_lossy();
-	target.is_jpegls = transfer_syntax.is_jpegls();
-	target.is_jpegls_lossless = target.is_jpegls && transfer_syntax.is_lossless();
-	target.is_jpegls_lossy = target.is_jpegls && transfer_syntax.is_lossy();
-	target.is_jpeg = transfer_syntax.is_jpeg_family() &&
-	    !transfer_syntax.is_jpeg2000() &&
-	    !transfer_syntax.is_jpegls() &&
-	    !transfer_syntax.is_jpegxl();
-	target.is_jpeg_lossless = target.is_jpeg && transfer_syntax.is_lossless();
-	target.is_jpeg_lossy = target.is_jpeg && transfer_syntax.is_lossy();
-	target.is_jpegxl = transfer_syntax.is_jpegxl();
-	target.is_jpegxl_lossless = target.is_jpegxl && transfer_syntax.is_lossless();
-	target.is_jpegxl_lossy = target.is_jpegxl && transfer_syntax.is_lossy();
+	    binding.profile == pixel::detail::codec_profile::encapsulated_uncompressed;
+	target.is_rle = binding.profile == pixel::detail::codec_profile::rle_lossless;
+	target.is_j2k = binding.plugin_key == "jpeg2k";
+	target.is_j2k_lossless =
+	    binding.profile == pixel::detail::codec_profile::jpeg2000_lossless;
+	target.is_j2k_lossy =
+	    binding.profile == pixel::detail::codec_profile::jpeg2000_lossy;
+	target.is_htj2k = binding.plugin_key == "htj2k";
+	target.is_htj2k_lossless =
+	    binding.profile == pixel::detail::codec_profile::htj2k_lossless ||
+	    binding.profile == pixel::detail::codec_profile::htj2k_lossless_rpcl;
+	target.is_htj2k_lossy = binding.profile == pixel::detail::codec_profile::htj2k_lossy;
+	target.is_jpegls = binding.plugin_key == "jpegls";
+	target.is_jpegls_lossless =
+	    binding.profile == pixel::detail::codec_profile::jpegls_lossless;
+	target.is_jpegls_lossy =
+	    binding.profile == pixel::detail::codec_profile::jpegls_near_lossless;
+	target.is_jpeg = binding.plugin_key == "jpeg";
+	target.is_jpeg_lossless = binding.profile == pixel::detail::codec_profile::jpeg_lossless;
+	target.is_jpeg_lossy = binding.profile == pixel::detail::codec_profile::jpeg_lossy;
+	target.is_jpegxl = binding.plugin_key == "jpegxl";
+	target.is_jpegxl_lossless =
+	    binding.profile == pixel::detail::codec_profile::jpegxl_lossless;
+	target.is_jpegxl_lossy = binding.profile == pixel::detail::codec_profile::jpegxl_lossy;
 	return target;
-}
-
-[[nodiscard]] pixel::CodecOptions resolve_codec_options_for_target(
-    uid::WellKnown transfer_syntax, const pixel_encode_target& target,
-    pixel::CodecOptions codec_opt) {
-	if (!std::holds_alternative<pixel::AutoCodecOptions>(codec_opt)) {
-		return codec_opt;
-	}
-
-	if (target.is_j2k) {
-		pixel::J2kOptions default_j2k{};
-		if (target.is_j2k_lossy) {
-			default_j2k.target_psnr = kDefaultLossyJ2kTargetPsnr;
-		}
-		return default_j2k;
-	}
-	if (target.is_htj2k) {
-		pixel::Htj2kOptions default_htj2k{};
-		if (target.is_htj2k_lossy) {
-			default_htj2k.target_psnr = kDefaultLossyJ2kTargetPsnr;
-		}
-		return default_htj2k;
-	}
-	if (target.is_jpegls) {
-		pixel::JpegLsOptions default_jpegls{};
-		if (target.is_jpegls_lossy) {
-			default_jpegls.near_lossless_error = kDefaultNearLosslessJpegLsError;
-		}
-		return default_jpegls;
-	}
-	if (target.is_jpeg) {
-		return pixel::JpegOptions{};
-	}
-	if (target.is_jpegxl) {
-		pixel::JpegXlOptions default_jpegxl{};
-		if (target.is_jpegxl_lossless) {
-			default_jpegxl.distance = 0.0;
-		} else if (target.is_jpegxl_lossy) {
-			default_jpegxl.distance = kDefaultLossyJpegXlDistance;
-		}
-		return default_jpegxl;
-	}
-	if (target.is_rle) {
-		return pixel::RleOptions{};
-	}
-
-	(void)transfer_syntax;
-	return pixel::NoCompression{};
-}
-
-void validate_codec_option_for_target(uid::WellKnown transfer_syntax,
-    const pixel_encode_target& target, const pixel::CodecOptions& codec_opt,
-    std::string_view file_path) {
-	if (target.is_j2k) {
-		if (!std::holds_alternative<pixel::J2kOptions>(codec_opt)) {
-			diag::error_and_throw(
-			    "DicomFile::set_pixel_data file={} ts={} reason=JPEG2000 transfer syntax requires J2kOptions codec",
-			    file_path, transfer_syntax.value());
-		}
-		const auto& options = std::get<pixel::J2kOptions>(codec_opt);
-		if (options.threads < -1) {
-			diag::error_and_throw(
-			    "DicomFile::set_pixel_data file={} ts={} reason=J2kOptions.threads must be -1, 0, or positive",
-			    file_path, transfer_syntax.value());
-		}
-		return;
-	}
-	if (target.is_htj2k) {
-		if (!std::holds_alternative<pixel::Htj2kOptions>(codec_opt)) {
-			diag::error_and_throw(
-			    "DicomFile::set_pixel_data file={} ts={} reason=HTJ2K transfer syntax requires Htj2kOptions codec",
-			    file_path, transfer_syntax.value());
-		}
-		const auto& options = std::get<pixel::Htj2kOptions>(codec_opt);
-		if (options.threads < -1) {
-			diag::error_and_throw(
-			    "DicomFile::set_pixel_data file={} ts={} reason=Htj2kOptions.threads must be -1, 0, or positive",
-			    file_path, transfer_syntax.value());
-		}
-		return;
-	}
-	if (target.is_jpegls) {
-		if (!std::holds_alternative<pixel::JpegLsOptions>(codec_opt)) {
-			diag::error_and_throw(
-			    "DicomFile::set_pixel_data file={} ts={} reason=JPEG-LS transfer syntax requires JpegLsOptions codec",
-			    file_path, transfer_syntax.value());
-		}
-		const auto& options = std::get<pixel::JpegLsOptions>(codec_opt);
-		if (target.is_jpegls_lossless && options.near_lossless_error != 0) {
-			diag::error_and_throw(
-			    "DicomFile::set_pixel_data file={} ts={} reason=JPEG-LS lossless transfer syntax requires near_lossless_error=0",
-			    file_path, transfer_syntax.value());
-		}
-		if (target.is_jpegls_lossy && options.near_lossless_error <= 0) {
-			diag::error_and_throw(
-			    "DicomFile::set_pixel_data file={} ts={} reason=JPEG-LS near-lossless transfer syntax requires near_lossless_error>0",
-			    file_path, transfer_syntax.value());
-		}
-		return;
-	}
-	if (target.is_jpeg) {
-		if (!std::holds_alternative<pixel::JpegOptions>(codec_opt)) {
-			diag::error_and_throw(
-			    "DicomFile::set_pixel_data file={} ts={} reason=JPEG transfer syntax requires JpegOptions codec",
-			    file_path, transfer_syntax.value());
-		}
-		return;
-	}
-	if (target.is_jpegxl) {
-		if (!std::holds_alternative<pixel::JpegXlOptions>(codec_opt)) {
-			diag::error_and_throw(
-			    "DicomFile::set_pixel_data file={} ts={} reason=JPEG-XL transfer syntax requires JpegXlOptions codec",
-			    file_path, transfer_syntax.value());
-		}
-		const auto& options = std::get<pixel::JpegXlOptions>(codec_opt);
-		if (options.threads < -1) {
-			diag::error_and_throw(
-			    "DicomFile::set_pixel_data file={} ts={} reason=JpegXlOptions.threads must be -1, 0, or positive",
-			    file_path, transfer_syntax.value());
-		}
-		if (options.effort < 1 || options.effort > 10) {
-			diag::error_and_throw(
-			    "DicomFile::set_pixel_data file={} ts={} reason=JpegXlOptions.effort must be in [1, 10]",
-			    file_path, transfer_syntax.value());
-		}
-		if (transfer_syntax == "JPEGXLJPEGRecompression"_uid) {
-			diag::error_and_throw(
-			    "DicomFile::set_pixel_data file={} ts={} reason=JPEG XL JPEG Recompression is not supported for native pixel source yet",
-			    file_path, transfer_syntax.value());
-		}
-		if (target.is_jpegxl_lossless && options.distance != 0.0) {
-			diag::error_and_throw(
-			    "DicomFile::set_pixel_data file={} ts={} reason=JPEGXLLossless transfer syntax requires distance=0",
-			    file_path, transfer_syntax.value());
-		}
-		if (target.is_jpegxl_lossy &&
-		    (!std::isfinite(options.distance) || options.distance <= 0.0 ||
-		        options.distance > 25.0)) {
-			diag::error_and_throw(
-			    "DicomFile::set_pixel_data file={} ts={} reason=JPEGXL transfer syntax requires distance in (0, 25]",
-			    file_path, transfer_syntax.value());
-		}
-		return;
-	}
-	if (target.is_rle) {
-		if (!std::holds_alternative<pixel::RleOptions>(codec_opt)) {
-			diag::error_and_throw(
-			    "DicomFile::set_pixel_data file={} ts={} reason=RLELossless transfer syntax requires RleOptions codec",
-			    file_path, transfer_syntax.value());
-		}
-		return;
-	}
-	if (!std::holds_alternative<pixel::NoCompression>(codec_opt)) {
-		diag::error_and_throw(
-		    "DicomFile::set_pixel_data file={} ts={} reason=native uncompressed transfer syntax requires NoCompression codec",
-		    file_path, transfer_syntax.value());
-	}
 }
 
 void validate_target_source_constraints(const pixel_encode_target& target,
@@ -674,14 +520,82 @@ void DicomFile::set_pixel_data(uid::WellKnown transfer_syntax, const pixel::Pixe
 		    "DicomFile::set_pixel_data reason=transfer_syntax must be a valid Transfer Syntax UID");
 	}
 
-	const auto target = classify_pixel_encode_target(transfer_syntax);
-	if (!transfer_syntax.supports_pixel_encode()) {
+	const auto& codec_registry = pixel::detail::global_codec_registry();
+	const auto* binding = codec_registry.find_binding(transfer_syntax);
+	if (!binding || !binding->encode_supported) {
 		diag::error_and_throw(
-		    "DicomFile::set_pixel_data file={} ts={} reason=transfer syntax is not supported yet in set_pixel_data (supported: native uncompressed, EncapsulatedUncompressedExplicitVRLittleEndian, RLELossless, JPEG2000*, HTJ2K*, JPEG-LS, JPEG Baseline/Extended/Lossless, JPEGXL/JPEGXLLossless)",
+		    "DicomFile::set_pixel_data file={} ts={} reason=transfer syntax is not supported for encoding by registry binding",
 		    path(), transfer_syntax.value());
 	}
-	auto resolved_codec_opt = resolve_codec_options_for_target(transfer_syntax, target, codec_opt);
-	validate_codec_option_for_target(transfer_syntax, target, resolved_codec_opt, path());
+	const auto plugin_list = codec_registry.plugins();
+	const pixel::detail::codec_plugin* encode_plugin = nullptr;
+	if (binding->plugin_index < plugin_list.size()) {
+		const auto& candidate = plugin_list[binding->plugin_index];
+		if (candidate.key == binding->plugin_key) {
+			encode_plugin = &candidate;
+		}
+	}
+	if (!encode_plugin) {
+		encode_plugin = codec_registry.find_plugin(binding->plugin_key);
+	}
+	if (!encode_plugin) {
+		diag::error_and_throw(
+		    "DicomFile::set_pixel_data file={} ts={} plugin={} reason=registry binding references a missing plugin",
+		    path(), transfer_syntax.value(), binding->plugin_key);
+	}
+
+	auto resolved_codec_opt = codec_opt;
+	if (std::holds_alternative<pixel::AutoCodecOptions>(codec_opt)) {
+		if (!encode_plugin->default_options) {
+			diag::error_and_throw(
+			    "DicomFile::set_pixel_data file={} ts={} plugin={} reason=codec plugin does not provide default options",
+			    path(), transfer_syntax.value(), encode_plugin->key);
+		}
+		const auto default_codec_opt = encode_plugin->default_options(transfer_syntax);
+		if (!default_codec_opt) {
+			diag::error_and_throw(
+			    "DicomFile::set_pixel_data file={} ts={} plugin={} reason=codec plugin could not resolve default options",
+			    path(), transfer_syntax.value(), encode_plugin->key);
+		}
+		resolved_codec_opt = *default_codec_opt;
+	}
+	if (!encode_plugin->export_options) {
+		diag::error_and_throw(
+		    "DicomFile::set_pixel_data file={} ts={} plugin={} reason=codec plugin does not provide export_options hook",
+		    path(), transfer_syntax.value(), encode_plugin->key);
+	}
+	pixel::detail::codec_option_pairs codec_options{};
+	if (const auto export_error = encode_plugin->export_options(
+	        transfer_syntax, resolved_codec_opt, codec_options)) {
+		diag::error_and_throw(
+		    "DicomFile::set_pixel_data file={} ts={} plugin={} reason={}",
+		    path(), transfer_syntax.value(), encode_plugin->key, *export_error);
+	}
+	if (!encode_plugin->parse_options) {
+		diag::error_and_throw(
+		    "DicomFile::set_pixel_data file={} ts={} plugin={} reason=codec plugin does not provide parse_options hook",
+		    path(), transfer_syntax.value(), encode_plugin->key);
+	}
+	pixel::CodecOptions reparsed_codec_opt{};
+	if (const auto parse_error = encode_plugin->parse_options(
+	        transfer_syntax, std::span<const pixel::detail::codec_option_kv>(codec_options),
+	        reparsed_codec_opt)) {
+		diag::error_and_throw(
+		    "DicomFile::set_pixel_data file={} ts={} plugin={} reason={}",
+		    path(), transfer_syntax.value(), encode_plugin->key, *parse_error);
+	}
+	resolved_codec_opt = std::move(reparsed_codec_opt);
+	if (encode_plugin->validate_options) {
+		const auto validation_error =
+		    encode_plugin->validate_options(transfer_syntax, resolved_codec_opt);
+		if (validation_error) {
+			diag::error_and_throw(
+			    "DicomFile::set_pixel_data file={} ts={} plugin={} reason={}",
+			    path(), transfer_syntax.value(), encode_plugin->key, *validation_error);
+		}
+	}
+
+	const auto target = classify_pixel_encode_target(*binding);
 
 	const auto native_layout = native_source_layout_of(source.data_type);
 	if (!native_layout) {
@@ -856,11 +770,12 @@ void DicomFile::set_pixel_data(uid::WellKnown transfer_syntax, const pixel::Pixe
 		auto native_pixel_data = build_native_pixel_payload(native_copy_input);
 		set_native_pixel_data(std::move(native_pixel_data));
 	} else {
-		const pixel::detail::EncapsulatedPixelEncodeDispatchInput dispatch_input{
+		const pixel::detail::CodecEncodeFnInput dispatch_input{
 		    .file = *this,
 		    .transfer_syntax = transfer_syntax,
-		    .resolved_codec_opt = resolved_codec_opt,
 		    .encode_input = encapsulated_encode_input,
+		    .codec_options = std::span<const pixel::detail::codec_option_kv>(
+		        codec_options),
 		    .rows = rows,
 		    .cols = cols,
 		    .samples_per_pixel = samples_per_pixel,
@@ -876,18 +791,8 @@ void DicomFile::set_pixel_data(uid::WellKnown transfer_syntax, const pixel::Pixe
 		    .source_plane_stride = source_plane_stride,
 		    .source_frame_payload = source_frame_payload,
 		    .destination_frame_payload = destination_frame_payload,
-		    .is_encapsulated_uncompressed = target.is_encapsulated_uncompressed,
-		    .is_j2k = target.is_j2k,
-		    .is_j2k_lossless = target.is_j2k_lossless,
-		    .is_htj2k = target.is_htj2k,
-		    .is_htj2k_lossless = target.is_htj2k_lossless,
-		    .is_jpegls = target.is_jpegls,
-		    .is_jpeg = target.is_jpeg,
-		    .is_jpeg_lossless = target.is_jpeg_lossless,
-		    .is_jpegxl = target.is_jpegxl,
-		    .is_jpegxl_lossless = target.is_jpegxl_lossless,
-		    .is_rle = target.is_rle,
-		    .file_path = path(),
+		    .profile = binding->profile,
+		    .plugin_key = binding->plugin_key,
 		};
 		pixel::detail::encode_encapsulated_pixel_data(dispatch_input);
 	}

@@ -1,34 +1,24 @@
 #include "pixel_decoder_detail.hpp"
+#include "pixel_codec_registry.hpp"
 
 #include "dicom_endian.h"
 #include "diagnostics.h"
 
 #include <bit>
+#include <cctype>
 #include <cmath>
 #include <cstring>
+#include <limits>
+#include <new>
+#include <string_view>
 #include <type_traits>
+#include <vector>
 
 using namespace dicom::literals;
 namespace diag = dicom::diag;
 
 namespace dicom {
 namespace pixel::detail {
-
-decode_backend select_decode_backend(uid::WellKnown ts) noexcept {
-	if (ts.is_uncompressed() && ts.is_encapsulated()) {
-		return decode_backend::encapsulated_uncompressed;
-	}
-	if (ts.is_uncompressed()) {
-		return decode_backend::raw;
-	}
-	if (ts.is_rle()) {
-		return decode_backend::rle;
-	}
-	if (ts.is_jpeg_family()) {
-		return decode_backend::jpeg_family;
-	}
-	return decode_backend::unsupported;
-}
 
 planar_transform select_planar_transform(Planar src_planar, Planar dst_planar) noexcept {
 	if (src_planar == Planar::interleaved) {
@@ -58,6 +48,228 @@ std::size_t sv_dtype_bytes(DataType sv_dtype) noexcept {
 	default:
 		return 0;
 	}
+}
+
+encapsulated_frame_source load_encapsulated_frame_source(const DataSet& ds,
+    std::string_view file_path, std::size_t frame_index, std::string_view codec_name) {
+	const auto& pixel_data = ds["PixelData"_tag];
+	if (!pixel_data || !pixel_data.vr().is_pixel_sequence()) {
+		diag::error_and_throw(
+		    "pixel::decode_frame_into file={} reason={} requires encapsulated PixelData",
+		    file_path, codec_name);
+	}
+
+	const auto* pixel_sequence = pixel_data.as_pixel_sequence();
+	if (!pixel_sequence) {
+		diag::error_and_throw(
+		    "pixel::decode_frame_into file={} reason={} pixel sequence is missing",
+		    file_path, codec_name);
+	}
+
+	const auto frame_count = pixel_sequence->number_of_frames();
+	if (frame_index >= frame_count) {
+		diag::error_and_throw(
+		    "pixel::decode_frame_into file={} frame={} reason={} frame index out of range (frames={})",
+		    file_path, frame_index, codec_name, frame_count);
+	}
+
+	const auto* frame = pixel_sequence->frame(frame_index);
+	if (!frame) {
+		diag::error_and_throw(
+		    "pixel::decode_frame_into file={} frame={} reason={} frame is missing",
+		    file_path, frame_index, codec_name);
+	}
+
+	encapsulated_frame_source source{};
+	source.frame = frame;
+	if (frame->encoded_data_size() != 0) {
+		source.contiguous = frame->encoded_data_view();
+		source.total_size = source.contiguous.size();
+		return source;
+	}
+
+	const auto& fragments = frame->fragments();
+	if (fragments.empty()) {
+		diag::error_and_throw(
+		    "pixel::decode_frame_into file={} frame={} reason={} frame has no fragments",
+		    file_path, frame_index, codec_name);
+	}
+	for (const auto& fragment : fragments) {
+		if (fragment.length == 0) {
+			diag::error_and_throw(
+			    "pixel::decode_frame_into file={} frame={} reason={} zero-length fragment is not supported",
+			    file_path, frame_index, codec_name);
+		}
+	}
+
+	auto* mutable_sequence = const_cast<PixelSequence*>(pixel_sequence);
+	source.contiguous = mutable_sequence->frame_encoded_span(frame_index);
+	if (!source.contiguous.empty()) {
+		source.total_size = source.contiguous.size();
+		return source;
+	}
+
+	const auto* stream = pixel_sequence->stream();
+	if (!stream) {
+		diag::error_and_throw(
+		    "pixel::decode_frame_into file={} frame={} reason={} pixel sequence stream is missing",
+		    file_path, frame_index, codec_name);
+	}
+	source.stream = stream;
+
+	if (fragments.size() == 1) {
+		const auto& fragment = fragments.front();
+		source.contiguous = stream->get_span(fragment.offset, fragment.length);
+		source.total_size = source.contiguous.size();
+		return source;
+	}
+
+	source.fragments = &fragments;
+	std::size_t total_size = 0;
+	for (const auto& fragment : fragments) {
+		if (fragment.length > std::numeric_limits<std::size_t>::max() - total_size) {
+			diag::error_and_throw(
+			    "pixel::decode_frame_into file={} frame={} reason={} frame size overflow",
+			    file_path, frame_index, codec_name);
+		}
+		total_size += fragment.length;
+	}
+	source.total_size = total_size;
+	return source;
+}
+
+namespace {
+
+struct native_source_element {
+	const DataElement* element{nullptr};
+	std::string_view name{"PixelData"};
+};
+
+native_source_element select_native_source_element(
+    const DataSet& ds, DataType sv_dtype) {
+	switch (sv_dtype) {
+	case DataType::f32:
+		return native_source_element{&ds["FloatPixelData"_tag], "FloatPixelData"};
+	case DataType::f64:
+		return native_source_element{&ds["DoubleFloatPixelData"_tag], "DoubleFloatPixelData"};
+	default:
+		return native_source_element{&ds["PixelData"_tag], "PixelData"};
+	}
+}
+
+[[nodiscard]] bool checked_mul_size_t(
+    std::size_t lhs, std::size_t rhs, std::size_t& out) noexcept {
+	if (lhs == 0 || rhs == 0) {
+		out = 0;
+		return true;
+	}
+	if (lhs > std::numeric_limits<std::size_t>::max() / rhs) {
+		return false;
+	}
+	out = lhs * rhs;
+	return true;
+}
+
+} // namespace
+
+native_frame_source load_native_frame_source(
+    const DataSet& ds, std::string_view file_path,
+    const pixel::PixelDataInfo& info, std::size_t frame_index) {
+	const auto sv_dtype = info.sv_dtype;
+	const auto source = select_native_source_element(ds, sv_dtype);
+	if (!source.element || !(*source.element)) {
+		diag::error_and_throw(
+		    "pixel::decode_frame_into file={} reason=missing {}",
+		    file_path, source.name);
+	}
+	if (source.element->vr().is_pixel_sequence()) {
+		diag::error_and_throw(
+		    "pixel::decode_frame_into file={} reason=encapsulated {} is not raw",
+		    file_path, source.name);
+	}
+
+	if (info.rows <= 0 || info.cols <= 0 || info.samples_per_pixel <= 0 ||
+	    info.frames <= 0) {
+		diag::error_and_throw(
+		    "pixel::decode_frame_into file={} reason=invalid raw pixel metadata",
+		    file_path);
+	}
+
+	const auto bytes_per_sample = sv_dtype_bytes(info.sv_dtype);
+	if (bytes_per_sample == 0) {
+		diag::error_and_throw(
+		    "pixel::decode_frame_into file={} reason=unsupported sv_dtype for native raw source",
+		    file_path);
+	}
+
+	const auto rows = static_cast<std::size_t>(info.rows);
+	const auto cols = static_cast<std::size_t>(info.cols);
+	const auto samples_per_pixel = static_cast<std::size_t>(info.samples_per_pixel);
+	const auto frame_count = static_cast<std::size_t>(info.frames);
+	if (frame_index >= frame_count) {
+		diag::error_and_throw(
+		    "pixel::decode_frame_into file={} frame={} reason=raw frame index out of range (frames={})",
+		    file_path, frame_index, frame_count);
+	}
+
+	const auto src_planar = info.planar_configuration;
+	const std::size_t src_row_components =
+	    (src_planar == Planar::interleaved) ? samples_per_pixel : std::size_t{1};
+	std::size_t src_row_pixels = 0;
+	std::size_t src_row_bytes = 0;
+	if (!checked_mul_size_t(cols, src_row_components, src_row_pixels) ||
+	    !checked_mul_size_t(src_row_pixels, bytes_per_sample, src_row_bytes)) {
+		diag::error_and_throw(
+		    "pixel::decode_frame_into file={} reason=raw row bytes exceed size_t range",
+		    file_path);
+	}
+
+	std::size_t src_frame_bytes = 0;
+	if (!checked_mul_size_t(src_row_bytes, rows, src_frame_bytes)) {
+		diag::error_and_throw(
+		    "pixel::decode_frame_into file={} reason=raw frame bytes exceed size_t range",
+		    file_path);
+	}
+	if (src_planar == Planar::planar &&
+	    !checked_mul_size_t(src_frame_bytes, samples_per_pixel, src_frame_bytes)) {
+		diag::error_and_throw(
+		    "pixel::decode_frame_into file={} reason=raw planar frame bytes exceed size_t range",
+		    file_path);
+	}
+
+	native_frame_source native_source{};
+	native_source.contiguous = source.element->value_span();
+	native_source.name = source.name;
+	std::size_t src_frame_offset = 0;
+	if (!checked_mul_size_t(frame_index, src_frame_bytes, src_frame_offset)) {
+		diag::error_and_throw(
+		    "pixel::decode_frame_into file={} reason=raw frame offset exceeds size_t range",
+		    file_path);
+	}
+	if (native_source.contiguous.size() < src_frame_offset ||
+	    native_source.contiguous.size() - src_frame_offset < src_frame_bytes) {
+		diag::error_and_throw(
+		    "pixel::decode_frame_into file={} frame={} reason={} length is shorter than expected",
+		    file_path, frame_index, native_source.name);
+	}
+	native_source.contiguous =
+	    native_source.contiguous.subspan(src_frame_offset, src_frame_bytes);
+	return native_source;
+}
+
+std::span<const std::uint8_t> materialize_encapsulated_frame_source(
+    std::string_view file_path, std::size_t frame_index, std::string_view codec_name,
+    const encapsulated_frame_source& source, std::vector<std::uint8_t>& out_owned) {
+	if (!source.contiguous.empty()) {
+		return source.contiguous;
+	}
+	if (!source.frame || !source.stream || !source.fragments) {
+		diag::error_and_throw(
+		    "pixel::decode_frame_into file={} frame={} reason={} frame source is not materializable",
+		    file_path, frame_index, codec_name);
+	}
+	out_owned = source.frame->coalesce_encoded_data(*source.stream);
+	return std::span<const std::uint8_t>(out_owned);
 }
 
 namespace {
@@ -483,64 +695,66 @@ void dispatch_planar_transform_copy_by_bytes(planar_transform transform, std::si
 
 } // namespace
 
-void decode_mono_scaled_into_f32(const DicomFile& df, const pixel::PixelDataInfo& info,
+void decode_mono_scaled_into_f32(const decode_value_transform& value_transform,
+    const pixel::PixelDataInfo& info,
     const std::uint8_t* src_frame, std::span<std::uint8_t> dst,
     const DecodeStrides& dst_strides, std::size_t rows, std::size_t cols,
     std::size_t src_row_bytes) {
-	const auto& ds = df.dataset();
 	if (info.samples_per_pixel != 1) {
 		diag::error_and_throw(
-		    "pixel::decode_frame_into file={} reason=scaled output supports SamplesPerPixel=1 only",
-		    df.path());
+		    "pixel::decode_frame_into reason=scaled output supports SamplesPerPixel=1 only");
 	}
 
-	const auto modality_lut = df.modality_lut();
-	if (modality_lut) {
+	if (!value_transform.enabled) {
+		diag::error_and_throw(
+		    "pixel::decode_frame_into reason=scaled output requested without value transform metadata");
+	}
+
+	if (value_transform.modality_lut) {
+		const auto& modality_lut = *value_transform.modality_lut;
 		switch (info.sv_dtype) {
 			case DataType::u8:
 				decode_mono_lut_samples_into<std::uint8_t>(
 				    src_frame, dst.data(), rows, cols, src_row_bytes, dst_strides.row,
-				    *modality_lut);
+				    modality_lut);
 				return;
 			case DataType::s8:
 				decode_mono_lut_samples_into<std::int8_t>(
 				    src_frame, dst.data(), rows, cols, src_row_bytes, dst_strides.row,
-				    *modality_lut);
+				    modality_lut);
 				return;
 			case DataType::u16:
 				decode_mono_lut_samples_into<std::uint16_t>(
 				    src_frame, dst.data(), rows, cols, src_row_bytes, dst_strides.row,
-				    *modality_lut);
+				    modality_lut);
 				return;
 			case DataType::s16:
 				decode_mono_lut_samples_into<std::int16_t>(
 				    src_frame, dst.data(), rows, cols, src_row_bytes, dst_strides.row,
-				    *modality_lut);
+				    modality_lut);
 				return;
 			case DataType::u32:
 				decode_mono_lut_samples_into<std::uint32_t>(
 				    src_frame, dst.data(), rows, cols, src_row_bytes, dst_strides.row,
-				    *modality_lut);
+				    modality_lut);
 				return;
 			case DataType::s32:
 				decode_mono_lut_samples_into<std::int32_t>(
 				    src_frame, dst.data(), rows, cols, src_row_bytes, dst_strides.row,
-				    *modality_lut);
+				    modality_lut);
 				return;
 		default:
 			diag::error_and_throw(
-			    "pixel::decode_frame_into file={} reason=Modality LUT path supports integral sv_dtype only",
-			    df.path());
+			    "pixel::decode_frame_into reason=Modality LUT path supports integral sv_dtype only");
 			return;
 		}
 	}
 
-	const auto slope = ds["RescaleSlope"_tag].to_double().value_or(1.0);
-	const auto intercept = ds["RescaleIntercept"_tag].to_double().value_or(0.0);
+	const auto slope = value_transform.rescale_slope;
+	const auto intercept = value_transform.rescale_intercept;
 	if (!std::isfinite(slope) || !std::isfinite(intercept)) {
 		diag::error_and_throw(
-		    "pixel::decode_frame_into file={} reason=RescaleSlope/RescaleIntercept must be finite",
-		    df.path());
+		    "pixel::decode_frame_into reason=RescaleSlope/RescaleIntercept must be finite");
 	}
 
 	switch (info.sv_dtype) {
@@ -586,8 +800,8 @@ void decode_mono_scaled_into_f32(const DicomFile& df, const pixel::PixelDataInfo
 		return;
 	default:
 		diag::error_and_throw(
-		    "pixel::decode_frame_into file={} reason=scaled output does not support sv_dtype={}",
-		    df.path(), static_cast<int>(info.sv_dtype));
+		    "pixel::decode_frame_into reason=scaled output does not support sv_dtype={}",
+		    static_cast<int>(info.sv_dtype));
 		return;
 	}
 }
@@ -658,95 +872,241 @@ namespace pixel {
 
 namespace {
 
-bool has_rescale_transform_metadata(const DicomFile& df) {
-	const auto& ds = df.dataset();
+bool has_rescale_transform_metadata(const DataSet& ds) {
 	return static_cast<bool>(ds["RescaleSlope"_tag]) ||
 	    static_cast<bool>(ds["RescaleIntercept"_tag]);
 }
 
-bool should_use_scaled_output_impl(
-    const DicomFile& df, const pixel::PixelDataInfo& info, const DecodeOptions& opt) {
+bool has_modality_lut_metadata(const DataSet& ds) {
+	return static_cast<bool>(ds["ModalityLUTSequence"_tag]);
+}
+
+std::string decorate_decode_detail_with_callsite_context(
+    std::string detail, std::string_view file_path, std::size_t frame_index) {
+	// Legacy decoder helpers often return fully formatted strings like:
+	// "pixel::decode_frame_into file=... frame=... reason=..."
+	// Strip only that prefix form; keep codec-native detail intact.
+	if (detail.rfind("pixel::decode_frame_into ", 0) == 0) {
+		const auto reason_pos = detail.find("reason=");
+		if (reason_pos != std::string::npos) {
+			detail = detail.substr(reason_pos + 7);
+		}
+	}
+	while (!detail.empty() &&
+	       std::isspace(static_cast<unsigned char>(detail.front())) != 0) {
+		detail.erase(detail.begin());
+	}
+	if (detail.empty()) {
+		detail = "decoder plugin failed";
+	}
+	return "file=" + std::string(file_path) + " frame=" +
+	    std::to_string(frame_index) + " " + detail;
+}
+
+bool can_apply_scaled_output(
+    const pixel::PixelDataInfo& info, const DecodeOptions& opt) {
 	if (!opt.scaled) {
 		return false;
 	}
 	if (!info.has_pixel_data) {
 		return false;
 	}
-	if (info.samples_per_pixel != 1) {
-		return false;
+	return info.samples_per_pixel == 1;
+}
+
+std::optional<pixel::ModalityLut> load_modality_lut_for_scaled_output(
+    const DicomFile& df, const DataSet& ds, const pixel::PixelDataInfo& info,
+    const DecodeOptions& opt) {
+	if (!can_apply_scaled_output(info, opt)) {
+		return std::nullopt;
+	}
+	if (!has_modality_lut_metadata(ds)) {
+		return std::nullopt;
+	}
+	// Validate and load LUT eagerly so malformed metadata still fails loudly.
+	return df.modality_lut();
+}
+
+detail::decode_value_transform prepare_decode_value_transform(
+    const DataSet& ds, const pixel::PixelDataInfo& info, const DecodeOptions& opt,
+    std::optional<pixel::ModalityLut> modality_lut) {
+	detail::decode_value_transform value_transform{};
+	if (!can_apply_scaled_output(info, opt)) {
+		return value_transform;
 	}
 
-	const auto& ds = df.dataset();
-	const bool has_modality_lut = static_cast<bool>(ds["ModalityLUTSequence"_tag]);
-	if (has_modality_lut) {
-		// Validate and load LUT eagerly so malformed metadata still fails loudly.
-		(void)df.modality_lut();
-		return true;
+	if (has_modality_lut_metadata(ds)) {
+		value_transform.modality_lut = std::move(modality_lut);
+		value_transform.enabled = true;
+		return value_transform;
 	}
 
-	return has_rescale_transform_metadata(df);
+	if (has_rescale_transform_metadata(ds)) {
+		value_transform.rescale_slope =
+		    ds["RescaleSlope"_tag].to_double().value_or(1.0);
+		value_transform.rescale_intercept =
+		    ds["RescaleIntercept"_tag].to_double().value_or(0.0);
+		value_transform.enabled = true;
+	}
+	return value_transform;
+}
+
+void decode_frame_into_with_prepared_transform(const DicomFile& df, const DataSet& ds,
+    const pixel::PixelDataInfo& info, const detail::decode_value_transform& value_transform,
+    std::size_t frame_index, std::span<std::uint8_t> dst,
+    const DecodeStrides& dst_strides, const DecodeOptions& effective_opt) {
+	const auto& codec_registry = detail::global_codec_registry();
+	const auto* binding = codec_registry.find_binding(info.ts);
+	detail::codec_error decode_error{};
+	if (!binding || !binding->decode_supported) {
+		decode_error.code = detail::codec_status_code::unsupported;
+		decode_error.stage = "plugin_lookup";
+		decode_error.detail =
+		    "transfer syntax is not supported for decode by codec registry binding";
+		detail::throw_codec_error_with_context("pixel::decode_frame_into",
+		    df.path(), info.ts, "<none>", frame_index, decode_error);
+	}
+	const auto plugin_list = codec_registry.plugins();
+	const detail::codec_plugin* plugin = nullptr;
+	if (binding->plugin_index < plugin_list.size()) {
+		const auto& candidate = plugin_list[binding->plugin_index];
+		if (candidate.key == binding->plugin_key) {
+			plugin = &candidate;
+		}
+	}
+	if (!plugin) {
+		plugin = codec_registry.find_plugin(binding->plugin_key);
+	}
+	if (!plugin) {
+		decode_error.code = detail::codec_status_code::internal_error;
+		decode_error.stage = "plugin_lookup";
+		decode_error.detail = "registry binding references a missing plugin";
+		detail::throw_codec_error_with_context("pixel::decode_frame_into",
+		    df.path(), info.ts, binding->plugin_key, frame_index, decode_error);
+	}
+	if (!plugin->decode_frame) {
+		decode_error.code = detail::codec_status_code::internal_error;
+		decode_error.stage = "plugin_lookup";
+		decode_error.detail = "registered decode plugin has no dispatcher";
+		detail::throw_codec_error_with_context("pixel::decode_frame_into",
+		    df.path(), info.ts, binding->plugin_key, frame_index, decode_error);
+	}
+	std::span<const std::uint8_t> prepared_source{};
+	std::vector<std::uint8_t> prepared_source_owned{};
+	try {
+		switch (binding->profile) {
+		case detail::codec_profile::native_uncompressed: {
+			const auto native_source = detail::load_native_frame_source(
+			    ds, df.path(), info, frame_index);
+			prepared_source = native_source.contiguous;
+			break;
+		}
+		case detail::codec_profile::encapsulated_uncompressed:
+		case detail::codec_profile::rle_lossless:
+		case detail::codec_profile::jpeg_lossless:
+		case detail::codec_profile::jpeg_lossy:
+		case detail::codec_profile::jpegls_lossless:
+		case detail::codec_profile::jpegls_near_lossless:
+		case detail::codec_profile::jpeg2000_lossless:
+		case detail::codec_profile::jpeg2000_lossy:
+		case detail::codec_profile::htj2k_lossless:
+		case detail::codec_profile::htj2k_lossless_rpcl:
+		case detail::codec_profile::htj2k_lossy:
+		case detail::codec_profile::jpegxl_lossless:
+		case detail::codec_profile::jpegxl_lossy:
+		case detail::codec_profile::jpegxl_jpeg_recompression: {
+			const auto source = detail::load_encapsulated_frame_source(
+			    ds, df.path(), frame_index, binding->plugin_key);
+			prepared_source = detail::materialize_encapsulated_frame_source(
+			    df.path(), frame_index, binding->plugin_key, source,
+			    prepared_source_owned);
+			break;
+		}
+		case detail::codec_profile::unknown:
+		default:
+			break;
+		}
+	} catch (const std::bad_alloc&) {
+		decode_error.code = detail::codec_status_code::internal_error;
+		decode_error.stage = "allocate";
+		decode_error.detail = "memory allocation failed";
+		detail::throw_codec_error_with_context("pixel::decode_frame_into",
+		    df.path(), info.ts, binding->plugin_key, frame_index, decode_error);
+	} catch (const std::exception& e) {
+		decode_error.code = detail::codec_status_code::invalid_argument;
+		decode_error.stage = "load_frame_source";
+		decode_error.detail = e.what();
+		detail::throw_codec_error_with_context("pixel::decode_frame_into",
+		    df.path(), info.ts, binding->plugin_key, frame_index, decode_error);
+	} catch (...) {
+		decode_error.code = detail::codec_status_code::backend_error;
+		decode_error.stage = "load_frame_source";
+		decode_error.detail = "non-standard exception";
+		detail::throw_codec_error_with_context("pixel::decode_frame_into",
+		    df.path(), info.ts, binding->plugin_key, frame_index, decode_error);
+	}
+	const detail::CodecDecodeFrameInput decode_input{
+	    .info = info,
+	    .value_transform = value_transform,
+	    .prepared_source = prepared_source,
+	    .destination = dst,
+	    .destination_strides = dst_strides,
+	    .options = effective_opt,
+	};
+	const bool decode_ok = plugin->decode_frame(decode_input, decode_error);
+
+	if (!decode_ok) {
+		if (decode_error.code == detail::codec_status_code::ok) {
+			decode_error.code = detail::codec_status_code::backend_error;
+		}
+		if (decode_error.stage.empty()) {
+			decode_error.stage = "decode_frame";
+		}
+		if (decode_error.detail.empty()) {
+			decode_error.detail = "decoder plugin failed";
+		}
+		decode_error.detail = decorate_decode_detail_with_callsite_context(
+		    std::move(decode_error.detail), df.path(), frame_index);
+		detail::throw_codec_error_with_context("pixel::decode_frame_into",
+		    df.path(), info.ts, binding->plugin_key, frame_index, decode_error);
+	}
 }
 
 } // namespace
 
 bool should_use_scaled_output(const DicomFile& df, const DecodeOptions& opt) {
 	const auto& info = df.pixeldata_info();
-	return should_use_scaled_output_impl(df, info, opt);
+	const auto& ds = df.dataset();
+	auto modality_lut = load_modality_lut_for_scaled_output(df, ds, info, opt);
+	return prepare_decode_value_transform(ds, info, opt, std::move(modality_lut)).enabled;
 }
 
 void decode_frame_into(const DicomFile& df, std::size_t frame_index,
     std::span<std::uint8_t> dst, const DecodeOptions& opt) {
 	const auto& info = df.pixeldata_info();
+	const auto& ds = df.dataset();
+	auto modality_lut = load_modality_lut_for_scaled_output(df, ds, info, opt);
+	const auto value_transform = prepare_decode_value_transform(
+	    ds, info, opt, std::move(modality_lut));
 	auto effective_opt = opt;
-	effective_opt.scaled = should_use_scaled_output_impl(df, info, opt);
+	effective_opt.scaled = value_transform.enabled;
 
 	const auto dst_strides = df.calc_decode_strides(effective_opt);
-	decode_frame_into(df, frame_index, dst, dst_strides, effective_opt);
+	decode_frame_into_with_prepared_transform(
+	    df, ds, info, value_transform, frame_index, dst, dst_strides, effective_opt);
 }
 
 void decode_frame_into(const DicomFile& df, std::size_t frame_index,
     std::span<std::uint8_t> dst, const DecodeStrides& dst_strides, const DecodeOptions& opt) {
 	const auto& info = df.pixeldata_info();
+	const auto& ds = df.dataset();
+	auto modality_lut = load_modality_lut_for_scaled_output(df, ds, info, opt);
+	const auto value_transform = prepare_decode_value_transform(
+	    ds, info, opt, std::move(modality_lut));
 	auto effective_opt = opt;
-	effective_opt.scaled = should_use_scaled_output_impl(df, info, opt);
-
-	const auto backend = detail::select_decode_backend(info.ts);
-	switch (backend) {
-	case detail::decode_backend::raw:
-		detail::decode_raw_into(df, info, frame_index, dst, dst_strides, effective_opt);
-		return;
-	case detail::decode_backend::encapsulated_uncompressed:
-		detail::decode_encapsulated_uncompressed_into(
-		    df, info, frame_index, dst, dst_strides, effective_opt);
-		return;
-	case detail::decode_backend::rle:
-		detail::decode_rle_into(df, info, frame_index, dst, dst_strides, effective_opt);
-		return;
-	case detail::decode_backend::jpeg_family:
-		if (info.ts.is_htj2k()) {
-			detail::decode_htj2k_into(df, info, frame_index, dst, dst_strides, effective_opt);
-			return;
-		}
-		if (info.ts.is_jpeg2000()) {
-			detail::decode_jpeg2k_into(df, info, frame_index, dst, dst_strides, effective_opt);
-			return;
-		}
-		if (info.ts.is_jpegxl()) {
-			detail::decode_jpegxl_into(df, info, frame_index, dst, dst_strides, effective_opt);
-			return;
-		}
-		if (info.ts.is_jpegls()) {
-			detail::decode_jpegls_into(df, info, frame_index, dst, dst_strides, effective_opt);
-			return;
-		}
-		detail::decode_jpeg_into(df, info, frame_index, dst, dst_strides, effective_opt);
-		return;
-	default:
-		diag::error_and_throw(
-		    "pixel::decode_frame_into file={} reason=unsupported transfer syntax {}",
-		    df.path(), df.transfer_syntax_uid().value());
-		return;
-	}
+	effective_opt.scaled = value_transform.enabled;
+	decode_frame_into_with_prepared_transform(
+	    df, ds, info, value_transform, frame_index, dst, dst_strides, effective_opt);
 }
 
 } // namespace pixel
