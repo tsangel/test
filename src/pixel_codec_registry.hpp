@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <shared_mutex>
 #include <span>
 #include <string>
 #include <string_view>
@@ -159,6 +160,8 @@ struct TransferSyntaxPluginBinding {
 
 class CodecRegistry {
 public:
+	using dispatch_read_lock = std::shared_lock<std::shared_mutex>;
+
 	bool register_plugin(const CodecPlugin& plugin);
 	bool register_binding(const TransferSyntaxPluginBinding& binding);
 
@@ -174,10 +177,13 @@ public:
 	    uid::WellKnown transfer_syntax) const noexcept;
 	[[nodiscard]] const CodecPlugin* select_decoder(
 	    uid::WellKnown transfer_syntax) const noexcept;
+	[[nodiscard]] dispatch_read_lock acquire_dispatch_read_lock() const;
 	bool update_plugin_dispatch(
 	    std::string_view plugin_key, codec_encode_frame_fn encode_frame,
 	    bool update_encode, codec_decode_frame_fn decode_frame,
-	    bool update_decode) noexcept;
+	    bool update_decode,
+	    codec_encode_frame_fn* out_previous_encode_frame = nullptr,
+	    codec_decode_frame_fn* out_previous_decode_frame = nullptr) noexcept;
 
 	void clear();
 
@@ -195,6 +201,7 @@ private:
 	    std::string_view plugin_key) const noexcept;
 	std::vector<CodecPlugin> plugins_{};
 	std::vector<TransferSyntaxPluginBinding> bindings_{};
+	mutable std::shared_mutex dispatch_mutex_{};
 };
 
 [[nodiscard]] CodecRegistry& global_codec_registry();

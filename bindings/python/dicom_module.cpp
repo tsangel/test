@@ -569,12 +569,23 @@ dicom::pixel::Htj2kDecoder parse_htj2k_decoder(std::string decoder) {
 	if (normalized == "openjpeg" || normalized == "openjp2") {
 		return dicom::pixel::Htj2kDecoder::openjpeg;
 	}
-	throw nb::value_error("htj2k_decoder must be one of: 'auto', 'openjph', 'openjpeg'");
+	throw nb::value_error("backend must be one of: 'auto', 'openjph', 'openjpeg'");
+}
+
+std::string_view htj2k_decoder_name(dicom::pixel::Htj2kDecoder decoder) noexcept {
+	switch (decoder) {
+	case dicom::pixel::Htj2kDecoder::openjph:
+		return "openjph";
+	case dicom::pixel::Htj2kDecoder::openjpeg:
+		return "openjpeg";
+	case dicom::pixel::Htj2kDecoder::auto_select:
+	default:
+		return "auto";
+	}
 }
 
 DecodedArrayLayout build_decode_layout(
     const DicomFile& self, long frame, bool scaled, int decoder_threads = -1,
-    dicom::pixel::Htj2kDecoder htj2k_decoder_backend = dicom::pixel::Htj2kDecoder::auto_select,
     bool decode_mct = true) {
 	if (frame < -1) {
 		throw nb::value_error("frame must be >= -1");
@@ -607,7 +618,6 @@ DecodedArrayLayout build_decode_layout(
 	layout.opt.scaled = scaled;
 	layout.opt.decode_mct = decode_mct;
 	layout.opt.decoder_threads = decoder_threads;
-	layout.opt.htj2k_decoder_backend = htj2k_decoder_backend;
 	const bool effective_scaled = dicom::pixel::should_use_scaled_output(self, layout.opt);
 	layout.opt.scaled = effective_scaled;
 
@@ -769,10 +779,8 @@ nb::object dicomfile_to_array_view(const DicomFile& self, long frame) {
 }
 
 nb::object dicomfile_to_array(
-    const DicomFile& self, long frame, bool scaled, const std::string& htj2k_decoder,
-    bool decode_mct) {
-	const auto layout = build_decode_layout(
-	    self, frame, scaled, -1, parse_htj2k_decoder(htj2k_decoder), decode_mct);
+    const DicomFile& self, long frame, bool scaled, bool decode_mct) {
+	const auto layout = build_decode_layout(self, frame, scaled, -1, decode_mct);
 	auto out = make_writable_numpy_array(
 	    layout.ndim, layout.shape, layout.strides, layout.spec.dtype, layout.required_bytes);
 	decode_layout_into(self, layout, out.bytes);
@@ -801,10 +809,8 @@ private:
 };
 
 nb::object dicomfile_decode_into_array(const DicomFile& self, nb::handle out,
-    long frame, bool scaled, int threads, const std::string& htj2k_decoder,
-    bool decode_mct) {
-	const auto layout = build_decode_layout(
-	    self, frame, scaled, threads, parse_htj2k_decoder(htj2k_decoder), decode_mct);
+    long frame, bool scaled, int threads, bool decode_mct) {
+	const auto layout = build_decode_layout(self, frame, scaled, threads, decode_mct);
 
 	PyWritableBufferView writable(out);
 	const auto& view = writable.view();
@@ -1706,7 +1712,6 @@ NB_MODULE(_dicomsdl, m) {
 		    &dicomfile_to_array,
 		    nb::arg("frame") = -1,
 		    nb::arg("scaled") = false,
-		    nb::arg("htj2k_decoder") = "auto",
 		    nb::arg("decode_mct") = true,
 		    "Decode pixel samples and return a NumPy array.\n"
 		    "\n"
@@ -1718,8 +1723,6 @@ NB_MODULE(_dicomsdl, m) {
 		    "    If True, apply Modality LUT/Rescale when available.\n"
 		    "    Scaled output is ignored when SamplesPerPixel != 1, or when both\n"
 		    "    Modality LUT Sequence and Rescale Slope/Intercept are absent.\n"
-		    "htj2k_decoder : {'auto', 'openjph', 'openjpeg'}, optional\n"
-		    "    HTJ2K backend selection. 'auto' prefers OpenJPEG then falls back to OpenJPH.\n"
 		    "decode_mct : bool, optional\n"
 		    "    Whether to apply codestream-level MCT/color inverse transform when supported.\n"
 		    "    True by default. Currently honored by OpenJPEG-based decode paths.\n"
@@ -1744,7 +1747,6 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::arg("frame") = 0,
 		    nb::arg("scaled") = false,
 		    nb::arg("threads") = -1,
-		    nb::arg("htj2k_decoder") = "auto",
 		    nb::arg("decode_mct") = true,
 		    "Decode pixel samples into an existing writable C-contiguous buffer.\n"
 		    "\n"
@@ -1762,8 +1764,6 @@ NB_MODULE(_dicomsdl, m) {
 		    "    Default is -1 (use all CPUs).\n"
 		    "    0 uses library default, -1 uses all CPUs, >0 sets explicit thread count.\n"
 		    "    Currently applied to JPEG 2000; unsupported decoders may ignore it.\n"
-		    "htj2k_decoder : {'auto', 'openjph', 'openjpeg'}, optional\n"
-		    "    HTJ2K backend selection. 'auto' prefers OpenJPEG then falls back to OpenJPH.\n"
 		    "decode_mct : bool, optional\n"
 		    "    Whether to apply codestream-level MCT/color inverse transform when supported.\n"
 		    "    True by default. Currently honored by OpenJPEG-based decode paths.\n"
@@ -1776,9 +1776,8 @@ NB_MODULE(_dicomsdl, m) {
 		    &dicomfile_to_array,
 		    nb::arg("frame") = -1,
 		    nb::arg("scaled") = false,
-		    nb::arg("htj2k_decoder") = "auto",
 		    nb::arg("decode_mct") = true,
-		    "Alias of to_array(frame=-1, scaled=False, htj2k_decoder='auto', decode_mct=True).")
+		    "Alias of to_array(frame=-1, scaled=False, decode_mct=True).")
 		.def("__getitem__",
 		    [](DicomFile& self, nb::object key) -> nb::object {
 			    DataSet& dataset = self.dataset();
@@ -1970,6 +1969,29 @@ m.def("reset_root_elements_reserve_hint",
 	    dicom::reset_root_elements_reserve_hint();
     },
     "Reset adaptive root DataSet reserve hint to its initial value.");
+
+	m.def("set_htj2k_decoder_backend",
+	    [](const std::string& backend) {
+		    std::string error{};
+		    if (!dicom::pixel::set_htj2k_decoder_backend(
+		            parse_htj2k_decoder(backend), &error)) {
+			    if (error.empty()) {
+				    error = "failed to update htj2k decoder backend";
+			    }
+			    throw nb::value_error(error.c_str());
+		    }
+	    },
+	    nb::arg("backend"),
+	    "Set global HTJ2K decoder backend for builtin registry dispatch.\n"
+	    "Allowed values: 'auto', 'openjph', 'openjpeg'.");
+
+	m.def("get_htj2k_decoder_backend",
+	    []() {
+		    const auto backend = dicom::pixel::get_htj2k_decoder_backend();
+		    const auto name = htj2k_decoder_name(backend);
+		    return std::string(name);
+	    },
+	    "Return current global HTJ2K decoder backend name.");
 
 		nb::class_<Tag>(m, "Tag")
 		.def(nb::init<>())
@@ -2389,6 +2411,8 @@ m.def("generate_study_instance_uid",
 	    "read_bytes",
 	    "load_root_elements_reserve_hint",
 	    "reset_root_elements_reserve_hint",
+	    "set_htj2k_decoder_backend",
+	    "get_htj2k_decoder_backend",
 	    "keyword_to_tag_vr",
 	    "tag_to_keyword",
 	    "tag_to_entry",

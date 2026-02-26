@@ -956,8 +956,10 @@ void decode_frame_into_with_prepared_transform(const DicomFile& df, const DataSe
     const pixel::PixelDataInfo& info, const detail::DecodeValueTransform& value_transform,
     std::size_t frame_index, std::span<std::uint8_t> dst,
     const DecodeStrides& dst_strides, const DecodeOptions& effective_opt) {
-	const auto& CodecRegistry = detail::global_codec_registry();
-	const auto* binding = CodecRegistry.find_binding(info.ts);
+	const auto& codec_registry = detail::global_codec_registry();
+	// Keep dispatch stable for the whole decode call while plugin dispatchers may be swapped.
+	[[maybe_unused]] const auto dispatch_lock = codec_registry.acquire_dispatch_read_lock();
+	const auto* binding = codec_registry.find_binding(info.ts);
 	detail::CodecError decode_error{};
 	if (!binding || !binding->decode_supported) {
 		decode_error.code = detail::CodecStatusCode::unsupported;
@@ -967,7 +969,7 @@ void decode_frame_into_with_prepared_transform(const DicomFile& df, const DataSe
 		detail::throw_codec_error_with_context("pixel::decode_frame_into",
 		    df.path(), info.ts, "<none>", frame_index, decode_error);
 	}
-	const auto* plugin = CodecRegistry.select_decoder(*binding);
+	const auto* plugin = codec_registry.select_decoder(*binding);
 	if (!plugin) {
 		decode_error.code = detail::CodecStatusCode::internal_error;
 		decode_error.stage = "plugin_lookup";

@@ -606,14 +606,13 @@ int htj2k_decoder_decode_frame(void* ctx,
   options.scaled = scaled_output;
   options.decode_mct = request->frame.decode_mct != 0;
   options.decoder_threads = context->decoder_threads;
-  options.htj2k_decoder_backend = context->backend;
 
   const auto source =
       std::span<const std::uint8_t>(request->source.source_buffer.data, source_size);
   const auto destination = std::span<std::uint8_t>(request->output.dst, dst_size);
   const DecodeStrides strides{.row = row_stride, .frame = frame_stride};
   if (!decode_htj2k_into(info, value_transform, destination, strides, options,
-          decode_error, source)) {
+          decode_error, source, context->backend)) {
     set_abi_error_from_codec_error(error, decode_error, "decode_frame",
         "HTJ2K decoder backend failed");
     return 0;
@@ -899,8 +898,8 @@ htj2k_encoder_plugin_api_v1() noexcept {
   return api;
 }
 
-bool invoke_htj2k_decoder_via_plugin_api(
-    const CodecDecodeFrameInput& input, CodecError& out_error) noexcept {
+bool invoke_htj2k_decoder_via_plugin_api(const CodecDecodeFrameInput& input,
+    Htj2kDecoder backend, CodecError& out_error) noexcept {
   out_error = {};
 
   dicomsdl_decoder_request_v1 request{};
@@ -932,7 +931,7 @@ bool invoke_htj2k_decoder_via_plugin_api(
   dicomsdl_codec_option_kv_v1 option_items[2] = {
       dicomsdl_codec_option_kv_v1{
           "backend",
-          htj2k_backend_option_value(input.options.htj2k_decoder_backend)},
+          htj2k_backend_option_value(backend)},
       dicomsdl_codec_option_kv_v1{"threads", threads_value.c_str()},
   };
   dicomsdl_codec_option_list_v1 option_list{};
@@ -1093,15 +1092,18 @@ bool invoke_htj2k_encoder_via_plugin_api(const CodecEncodeFrameInput& input,
 
 }  // namespace
 
-bool decode_frame_plugin_htj2k_via_abi(
-    const CodecDecodeFrameInput& input, CodecError& out_error) noexcept {
+namespace {
+
+bool decode_frame_plugin_htj2k_via_abi_with_backend(
+    const CodecDecodeFrameInput& input, Htj2kDecoder backend,
+    CodecError& out_error) noexcept {
   try {
     if (!input.info.has_pixel_data) {
       set_codec_error(out_error, CodecStatusCode::invalid_argument, "validate",
           "sv_dtype is unknown");
       return false;
     }
-    return invoke_htj2k_decoder_via_plugin_api(input, out_error);
+    return invoke_htj2k_decoder_via_plugin_api(input, backend, out_error);
   } catch (const std::exception& e) {
     set_codec_error(out_error, CodecStatusCode::backend_error, "decode_frame",
         e.what());
@@ -1110,6 +1112,63 @@ bool decode_frame_plugin_htj2k_via_abi(
         "non-standard exception");
   }
   return false;
+}
+
+} // namespace
+
+bool decode_frame_plugin_htj2k_via_abi(
+    const CodecDecodeFrameInput& input, CodecError& out_error) noexcept {
+  return decode_frame_plugin_htj2k_via_abi_auto(input, out_error);
+}
+
+bool decode_frame_plugin_htj2k_via_abi_auto(
+    const CodecDecodeFrameInput& input, CodecError& out_error) noexcept {
+  return decode_frame_plugin_htj2k_via_abi_with_backend(
+      input, Htj2kDecoder::auto_select, out_error);
+}
+
+bool decode_frame_plugin_htj2k_via_abi_openjph(
+    const CodecDecodeFrameInput& input, CodecError& out_error) noexcept {
+  return decode_frame_plugin_htj2k_via_abi_with_backend(
+      input, Htj2kDecoder::openjph, out_error);
+}
+
+bool decode_frame_plugin_htj2k_via_abi_openjpeg(
+    const CodecDecodeFrameInput& input, CodecError& out_error) noexcept {
+  return decode_frame_plugin_htj2k_via_abi_with_backend(
+      input, Htj2kDecoder::openjpeg, out_error);
+}
+
+codec_decode_frame_fn htj2k_decode_dispatch_for_backend(
+    Htj2kDecoder backend) noexcept {
+  switch (backend) {
+  case Htj2kDecoder::openjph:
+    return &decode_frame_plugin_htj2k_via_abi_openjph;
+  case Htj2kDecoder::openjpeg:
+    return &decode_frame_plugin_htj2k_via_abi_openjpeg;
+  case Htj2kDecoder::auto_select:
+  default:
+    return &decode_frame_plugin_htj2k_via_abi_auto;
+  }
+}
+
+Htj2kDecoder htj2k_decoder_backend_for_dispatch(
+    codec_decode_frame_fn decode_dispatch) noexcept {
+  if (decode_dispatch == &decode_frame_plugin_htj2k_via_abi_openjph) {
+    return Htj2kDecoder::openjph;
+  }
+  if (decode_dispatch == &decode_frame_plugin_htj2k_via_abi_openjpeg) {
+    return Htj2kDecoder::openjpeg;
+  }
+  return Htj2kDecoder::auto_select;
+}
+
+bool is_builtin_htj2k_decode_dispatch(
+    codec_decode_frame_fn decode_dispatch) noexcept {
+  return decode_dispatch == &decode_frame_plugin_htj2k_via_abi ||
+      decode_dispatch == &decode_frame_plugin_htj2k_via_abi_auto ||
+      decode_dispatch == &decode_frame_plugin_htj2k_via_abi_openjph ||
+      decode_dispatch == &decode_frame_plugin_htj2k_via_abi_openjpeg;
 }
 
 bool encode_frame_plugin_htj2k_via_abi(const CodecEncodeFrameInput& input,

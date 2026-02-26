@@ -78,7 +78,7 @@
 This section adds decode-backend-forced results for HTJ2K (`openjph` vs `openjpeg`), while keeping the same encode settings and MCT on/off combinations.
 
 - Measured date: 2026-02-24
-- Decode benchmark method: `to_array(frame=-1, scaled=False, htj2k_decoder=...)`
+- Decode benchmark method: `set_htj2k_decoder_backend(...)` + `to_array(frame=-1, scaled=False)`
 - Warm-up discarded: 1 run
 - Measured repetitions: 4 runs
 - Encoder side remains `threads=-1` (auto CPU)

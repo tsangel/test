@@ -538,7 +538,8 @@ bool decode_htj2k_into(const pixel::PixelDataInfo& info,
     const DecodeValueTransform& value_transform,
     std::span<std::uint8_t> dst,
     const DecodeStrides& dst_strides, const DecodeOptions& opt,
-    CodecError& out_error, std::span<const std::uint8_t> prepared_source) noexcept {
+    CodecError& out_error, std::span<const std::uint8_t> prepared_source,
+    Htj2kDecoder backend) noexcept {
 	out_error = CodecError{};
 	auto fail = [&](CodecStatusCode code, std::string_view stage,
 	                std::string detail) noexcept -> bool {
@@ -611,7 +612,7 @@ bool decode_htj2k_into(const pixel::PixelDataInfo& info,
 				    "HTJ2K frame has empty codestream");
 			}
 
-			if (opt.htj2k_decoder_backend == Htj2kDecoder::openjpeg) {
+			if (backend == Htj2kDecoder::openjpeg) {
 				CodecError jpeg2k_error{};
 				if (decode_jpeg2k_into(
 				        info, value_transform, dst, dst_strides, opt,
@@ -633,7 +634,7 @@ bool decode_htj2k_into(const pixel::PixelDataInfo& info,
 				    "HTJ2K decode failed (backend=openjpeg): {}", reason));
 			}
 
-			if (opt.htj2k_decoder_backend == Htj2kDecoder::openjph) {
+			if (backend == Htj2kDecoder::openjph) {
 				std::string openjph_failure{};
 				if (try_decode_openjph_into(info, value_transform, frame_source,
 				        dst, dst_strides, opt, rows, cols, samples_per_pixel, openjph_failure)) {
@@ -642,7 +643,7 @@ bool decode_htj2k_into(const pixel::PixelDataInfo& info,
 			const auto failure_reason = trimmed_message(openjph_failure);
 			return fail(CodecStatusCode::backend_error, "decode_frame",
 			    fmt::format("HTJ2K decode failed (backend={}): {}",
-			        htj2k_backend_name(opt.htj2k_decoder_backend),
+			        htj2k_backend_name(backend),
 			        failure_reason.empty() ? "OpenJPH decode failed" : failure_reason));
 		}
 

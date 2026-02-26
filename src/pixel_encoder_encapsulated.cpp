@@ -33,6 +33,8 @@ void encode_encapsulated_pixel_data(const CodecEncodeFnInput& input) {
 	constexpr std::string_view kFunctionName = "DicomFile::set_pixel_data";
 	const auto file_path = input.file.path();
 	const auto& registry = global_codec_registry();
+	// Keep dispatch stable while external plugins may update encode/decode dispatchers.
+	[[maybe_unused]] const auto dispatch_lock = registry.acquire_dispatch_read_lock();
 	const auto* binding = registry.find_binding(input.transfer_syntax);
 	const auto plugin_list = registry.plugins();
 	const CodecPlugin* plugin = nullptr;

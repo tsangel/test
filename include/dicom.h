@@ -1091,11 +1091,6 @@ struct DecodeOptions {
 	//  -1: auto(all CPUs) [default], 0: library default, >0: explicit thread count.
 	// Backends may ignore this option when unsupported.
 	int decoder_threads{-1};
-	// HTJ2K decoder backend selection:
-	//  auto_select: prefer OpenJPEG, then fallback to OpenJPH.
-	//  openjph: use OpenJPH only.
-	//  openjpeg: use OpenJPEG only.
-	Htj2kDecoder htj2k_decoder_backend{Htj2kDecoder::auto_select};
 };
 
 struct DecodeStrides {
@@ -1127,6 +1122,16 @@ void decode_frame_into(const DicomFile& df, std::size_t frame_index,
     std::span<std::uint8_t> dst, const DecodeOptions& opt = {});
 void decode_frame_into(const DicomFile& df, std::size_t frame_index,
     std::span<std::uint8_t> dst, const DecodeStrides& dst_strides, const DecodeOptions& opt = {});
+
+/// Set global HTJ2K decode backend for the builtin "htj2k" registry dispatch.
+/// This affects subsequent decode calls and is applied only after in-flight decodes complete.
+/// Returns false when HTJ2K dispatch is currently overridden by an external plugin.
+[[nodiscard]] bool set_htj2k_decoder_backend(
+    Htj2kDecoder backend, std::string* out_error = nullptr);
+
+/// Return current global HTJ2K decode backend for builtin registry dispatch.
+/// When an external plugin overrides "htj2k" dispatch, this returns auto_select.
+[[nodiscard]] Htj2kDecoder get_htj2k_decoder_backend() noexcept;
 
 /// Register external codec plugin(s) from a shared library.
 /// The library may export decoder and/or encoder plugin API symbols.

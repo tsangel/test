@@ -81,7 +81,8 @@ bool decode_htj2k_into(const pixel::PixelDataInfo& info,
     const DecodeValueTransform& value_transform,
     std::span<std::uint8_t> dst,
     const DecodeStrides& dst_strides, const DecodeOptions& opt, CodecError& out_error,
-    std::span<const std::uint8_t> prepared_source = {}) noexcept;
+    std::span<const std::uint8_t> prepared_source = {},
+    Htj2kDecoder backend = Htj2kDecoder::auto_select) noexcept;
 
 bool decode_jpegls_into(const pixel::PixelDataInfo& info,
     const DecodeValueTransform& value_transform,

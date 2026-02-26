@@ -11,8 +11,10 @@
 #include <algorithm>
 #include <array>
 #include <limits>
+#include <mutex>
 #include <optional>
 #include <string>
+#include <utility>
 
 namespace dicom::pixel::detail {
 using namespace dicom::literals;
@@ -285,6 +287,7 @@ void register_binding_if_missing(CodecRegistry& registry,
 } // namespace
 
 bool CodecRegistry::register_plugin(const CodecPlugin& plugin) {
+	std::unique_lock<std::shared_mutex> lock(dispatch_mutex_);
 	if (plugin.key.empty() || find_plugin(plugin.key)) {
 		return false;
 	}
@@ -301,6 +304,7 @@ bool CodecRegistry::register_plugin(const CodecPlugin& plugin) {
 
 bool CodecRegistry::register_binding(
     const TransferSyntaxPluginBinding& binding) {
+	std::unique_lock<std::shared_mutex> lock(dispatch_mutex_);
 	if (!binding.transfer_syntax.valid() ||
 	    binding.transfer_syntax.uid_type() != UidType::TransferSyntax ||
 	    binding.plugin_key.empty() || find_binding(binding.transfer_syntax)) {
@@ -387,15 +391,27 @@ const CodecPlugin* CodecRegistry::select_decoder(
 	return select_decoder(*binding);
 }
 
+CodecRegistry::dispatch_read_lock CodecRegistry::acquire_dispatch_read_lock() const {
+	return dispatch_read_lock(dispatch_mutex_);
+}
+
 bool CodecRegistry::update_plugin_dispatch(
     std::string_view plugin_key, codec_encode_frame_fn encode_frame,
     bool update_encode, codec_decode_frame_fn decode_frame,
-    bool update_decode) noexcept {
+    bool update_decode, codec_encode_frame_fn* out_previous_encode_frame,
+    codec_decode_frame_fn* out_previous_decode_frame) noexcept {
+	std::unique_lock<std::shared_mutex> lock(dispatch_mutex_);
 	const auto plugin_index = find_plugin_index(plugin_key);
 	if (plugin_index == kInvalidPluginIndex) {
 		return false;
 	}
 	auto& plugin = plugins_[plugin_index];
+	if (out_previous_encode_frame) {
+		*out_previous_encode_frame = plugin.encode_frame;
+	}
+	if (out_previous_decode_frame) {
+		*out_previous_decode_frame = plugin.decode_frame;
+	}
 	if (update_encode) {
 		plugin.encode_frame = encode_frame;
 	}
@@ -406,17 +422,19 @@ bool CodecRegistry::update_plugin_dispatch(
 }
 
 void CodecRegistry::clear() {
+	std::unique_lock<std::shared_mutex> lock(dispatch_mutex_);
 	plugins_.clear();
 	bindings_.clear();
 }
 
 CodecRegistry& global_codec_registry() {
-	static CodecRegistry registry = [] {
-		CodecRegistry value{};
-		register_default_codec_plugins(value);
-		register_default_transfer_syntax_bindings(value);
-		return value;
+	static CodecRegistry registry{};
+	static const bool initialized = [] {
+		register_default_codec_plugins(registry);
+		register_default_transfer_syntax_bindings(registry);
+		return true;
 	}();
+	(void)initialized;
 	return registry;
 }
 
@@ -526,3 +544,55 @@ void register_default_transfer_syntax_bindings(CodecRegistry& registry) {
 }
 
 } // namespace dicom::pixel::detail
+
+namespace dicom::pixel {
+
+namespace {
+
+void set_optional_error(std::string* out_error, std::string message) {
+	if (out_error) {
+		*out_error = std::move(message);
+	}
+}
+
+[[nodiscard]] detail::codec_decode_frame_fn decode_dispatch_for_backend(
+    Htj2kDecoder backend) noexcept {
+	return detail::htj2k_decode_dispatch_for_backend(backend);
+}
+
+} // namespace
+
+bool set_htj2k_decoder_backend(Htj2kDecoder backend, std::string* out_error) {
+	if (out_error) {
+		out_error->clear();
+	}
+	auto& registry = detail::global_codec_registry();
+	const auto decode_dispatch = decode_dispatch_for_backend(backend);
+	detail::codec_decode_frame_fn previous_decode = nullptr;
+	if (!registry.update_plugin_dispatch("htj2k", nullptr, false, decode_dispatch,
+	        true, nullptr, &previous_decode)) {
+		set_optional_error(out_error,
+		    "htj2k plugin is not registered in codec registry");
+		return false;
+	}
+	if (!detail::is_builtin_htj2k_decode_dispatch(previous_decode)) {
+		(void)registry.update_plugin_dispatch(
+		    "htj2k", nullptr, false, previous_decode, true);
+		set_optional_error(out_error,
+		    "htj2k decode dispatch is externally overridden; backend switch is unavailable");
+		return false;
+	}
+	return true;
+}
+
+Htj2kDecoder get_htj2k_decoder_backend() noexcept {
+	auto& registry = detail::global_codec_registry();
+	[[maybe_unused]] const auto dispatch_lock = registry.acquire_dispatch_read_lock();
+	const auto* plugin = registry.find_plugin("htj2k");
+	if (!plugin) {
+		return Htj2kDecoder::auto_select;
+	}
+	return detail::htj2k_decoder_backend_for_dispatch(plugin->decode_frame);
+}
+
+} // namespace dicom::pixel

@@ -154,29 +154,25 @@ bool apply_external_bridge_dispatch(
     const std::shared_ptr<ExternalPluginBridgeEntry>& entry,
     std::string& out_error) {
   auto& registry = global_codec_registry();
-  const auto* plugin = registry.find_plugin(entry->plugin_key);
-  if (!plugin) {
-    out_error = fmt::format(
-        "plugin key '{}' is not registered in codec registry",
-        entry->plugin_key);
-    return false;
-  }
-  if (entry->fallback_encode == nullptr && entry->fallback_decode == nullptr) {
-    entry->fallback_encode = plugin->encode_frame;
-    entry->fallback_decode = plugin->decode_frame;
-  }
-
   const auto encode_dispatch = entry->encoder_active
                                    ? &encode_frame_plugin_external_bridge
                                    : entry->fallback_encode;
   const auto decode_dispatch = entry->decoder_active
                                    ? &decode_frame_plugin_external_bridge
                                    : entry->fallback_decode;
-  if (!registry.update_plugin_dispatch(entry->plugin_key, encode_dispatch, true,
-          decode_dispatch, true)) {
+  const bool update_encode = entry->encoder_active || entry->fallback_encode != nullptr;
+  const bool update_decode = entry->decoder_active || entry->fallback_decode != nullptr;
+  codec_encode_frame_fn previous_encode = nullptr;
+  codec_decode_frame_fn previous_decode = nullptr;
+  if (!registry.update_plugin_dispatch(entry->plugin_key, encode_dispatch, update_encode,
+          decode_dispatch, update_decode, &previous_encode, &previous_decode)) {
     out_error = fmt::format("failed to update dispatch for plugin '{}'",
         entry->plugin_key);
     return false;
+  }
+  if (entry->fallback_encode == nullptr && entry->fallback_decode == nullptr) {
+    entry->fallback_encode = previous_encode;
+    entry->fallback_decode = previous_decode;
   }
   return true;
 }

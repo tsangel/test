@@ -57,6 +57,15 @@ void expect_no_throw(Fn&& fn, std::string_view label) {
   }
 }
 
+bool stub_external_htj2k_decode_dispatch(
+    const dicom::pixel::detail::CodecDecodeFrameInput&,
+    dicom::pixel::detail::CodecError& out_error) noexcept {
+  out_error.code = dicom::pixel::detail::CodecStatusCode::backend_error;
+  out_error.stage = "decode_frame";
+  out_error.detail = "stub external htj2k decode";
+  return false;
+}
+
 void append_u16_le(std::vector<std::uint8_t>& out, std::uint16_t value) {
   out.push_back(static_cast<std::uint8_t>(value & 0xFFu));
   out.push_back(static_cast<std::uint8_t>((value >> 8) & 0xFFu));
@@ -546,6 +555,43 @@ int main() {
   using dicom::pixel::detail::global_codec_registry;
 
   auto& registry = global_codec_registry();
+  const auto* htj2k_plugin = registry.find_plugin("htj2k");
+  expect_true(htj2k_plugin != nullptr, "htj2k plugin is not registered");
+  const auto original_htj2k_decode = htj2k_plugin->decode_frame;
+  const auto original_htj2k_backend = dicom::pixel::get_htj2k_decoder_backend();
+  std::string backend_error{};
+  expect_true(dicom::pixel::set_htj2k_decoder_backend(
+                  dicom::pixel::Htj2kDecoder::openjpeg, &backend_error),
+      "set htj2k backend openjpeg");
+  expect_eq(dicom::pixel::get_htj2k_decoder_backend(),
+      dicom::pixel::Htj2kDecoder::openjpeg,
+      "get htj2k backend openjpeg");
+  expect_true(dicom::pixel::set_htj2k_decoder_backend(
+                  dicom::pixel::Htj2kDecoder::openjph, &backend_error),
+      "set htj2k backend openjph");
+  expect_eq(dicom::pixel::get_htj2k_decoder_backend(),
+      dicom::pixel::Htj2kDecoder::openjph,
+      "get htj2k backend openjph");
+  expect_true(registry.update_plugin_dispatch(
+                  "htj2k", nullptr, false, &stub_external_htj2k_decode_dispatch, true),
+      "override htj2k decode dispatch for external simulation");
+  backend_error.clear();
+  expect_false(dicom::pixel::set_htj2k_decoder_backend(
+                   dicom::pixel::Htj2kDecoder::auto_select, &backend_error),
+      "set htj2k backend should fail on external override");
+  expect_contains(backend_error, "externally overridden",
+      "set htj2k backend external override error");
+  htj2k_plugin = registry.find_plugin("htj2k");
+  expect_true(htj2k_plugin != nullptr, "htj2k plugin exists after override");
+  expect_true(htj2k_plugin->decode_frame == &stub_external_htj2k_decode_dispatch,
+      "set htj2k backend should preserve external override dispatch");
+  expect_true(registry.update_plugin_dispatch(
+                  "htj2k", nullptr, false, original_htj2k_decode, true),
+      "restore htj2k decode dispatch");
+  expect_true(dicom::pixel::set_htj2k_decoder_backend(
+                  original_htj2k_backend, &backend_error),
+      "restore htj2k backend");
+
   const auto* jpeg_plugin = registry.find_plugin("jpeg");
   if (!jpeg_plugin) {
     fail("jpeg plugin is not registered");
