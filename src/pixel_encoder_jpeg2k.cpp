@@ -17,24 +17,17 @@
 namespace dicom::pixel::detail {
 namespace {
 
-void set_codec_error(codec_error& out_error, codec_status_code code,
-    std::string_view stage, std::string detail) {
-	out_error.code = code;
-	out_error.stage = std::string(stage);
-	out_error.detail = std::move(detail);
-}
-
-struct openjpeg_log_sink {
+struct OpenJpegLogSink {
 	std::string warning{};
 	std::string error{};
 };
 
-struct jpeg2k_output_stream {
+struct Jpeg2kOutputStream {
 	std::vector<std::uint8_t> bytes{};
 	std::size_t position{0};
 };
 
-class opj_stream_deleter {
+class OpjStreamDeleter {
 public:
 	void operator()(opj_stream_t* stream) const noexcept {
 		if (stream) {
@@ -43,7 +36,7 @@ public:
 	}
 };
 
-class opj_codec_deleter {
+class OpjCodecDeleter {
 public:
 	void operator()(opj_codec_t* codec) const noexcept {
 		if (codec) {
@@ -52,7 +45,7 @@ public:
 	}
 };
 
-class opj_image_deleter {
+class OpjImageDeleter {
 public:
 	void operator()(opj_image_t* image) const noexcept {
 		if (image) {
@@ -61,9 +54,9 @@ public:
 	}
 };
 
-using opj_stream_ptr = std::unique_ptr<opj_stream_t, opj_stream_deleter>;
-using opj_codec_ptr = std::unique_ptr<opj_codec_t, opj_codec_deleter>;
-using opj_image_ptr = std::unique_ptr<opj_image_t, opj_image_deleter>;
+using opj_stream_ptr = std::unique_ptr<opj_stream_t, OpjStreamDeleter>;
+using opj_codec_ptr = std::unique_ptr<opj_codec_t, OpjCodecDeleter>;
+using opj_image_ptr = std::unique_ptr<opj_image_t, OpjImageDeleter>;
 
 [[nodiscard]] std::string trimmed_message(std::string message) {
 	while (!message.empty() &&
@@ -78,7 +71,7 @@ void OPJ_CALLCONV opj_warning_handler(const char* message, void* user_data) {
 	if (!user_data || !message) {
 		return;
 	}
-	auto* sink = static_cast<openjpeg_log_sink*>(user_data);
+	auto* sink = static_cast<OpenJpegLogSink*>(user_data);
 	sink->warning = message;
 }
 
@@ -86,12 +79,12 @@ void OPJ_CALLCONV opj_error_handler(const char* message, void* user_data) {
 	if (!user_data || !message) {
 		return;
 	}
-	auto* sink = static_cast<openjpeg_log_sink*>(user_data);
+	auto* sink = static_cast<OpenJpegLogSink*>(user_data);
 	sink->error = message;
 }
 
 [[nodiscard]] std::string encode_failure_message(
-    const openjpeg_log_sink& sink, std::string_view stage, std::string_view fallback) {
+    const OpenJpegLogSink& sink, std::string_view stage, std::string_view fallback) {
 	if (!sink.error.empty()) {
 		return trimmed_message(sink.error);
 	}
@@ -111,7 +104,7 @@ OPJ_SIZE_T OPJ_CALLCONV opj_write_to_memory_stream(void* buffer,
 		return static_cast<OPJ_SIZE_T>(-1);
 	}
 
-	auto* sink = static_cast<jpeg2k_output_stream*>(user_data);
+	auto* sink = static_cast<Jpeg2kOutputStream*>(user_data);
 	const auto write_size = static_cast<std::size_t>(bytes_to_write);
 	const auto write_end = sink->position + write_size;
 	if (write_end < sink->position) {
@@ -129,7 +122,7 @@ OPJ_OFF_T OPJ_CALLCONV opj_skip_in_memory_stream(OPJ_OFF_T bytes_to_skip, void* 
 	if (!user_data || bytes_to_skip < 0) {
 		return static_cast<OPJ_OFF_T>(-1);
 	}
-	auto* sink = static_cast<jpeg2k_output_stream*>(user_data);
+	auto* sink = static_cast<Jpeg2kOutputStream*>(user_data);
 	const auto skip_size = static_cast<std::size_t>(bytes_to_skip);
 	const auto next_position = sink->position + skip_size;
 	if (next_position < sink->position) {
@@ -146,7 +139,7 @@ OPJ_BOOL OPJ_CALLCONV opj_seek_in_memory_stream(OPJ_OFF_T absolute_position, voi
 	if (!user_data || absolute_position < 0) {
 		return OPJ_FALSE;
 	}
-	auto* sink = static_cast<jpeg2k_output_stream*>(user_data);
+	auto* sink = static_cast<Jpeg2kOutputStream*>(user_data);
 	const auto next_position = static_cast<std::size_t>(absolute_position);
 	if (next_position > sink->bytes.size()) {
 		sink->bytes.resize(next_position);
@@ -155,7 +148,7 @@ OPJ_BOOL OPJ_CALLCONV opj_seek_in_memory_stream(OPJ_OFF_T absolute_position, voi
 	return OPJ_TRUE;
 }
 
-[[nodiscard]] opj_stream_ptr create_openjpeg_output_stream(jpeg2k_output_stream& sink) {
+[[nodiscard]] opj_stream_ptr create_openjpeg_output_stream(Jpeg2kOutputStream& sink) {
 	constexpr OPJ_SIZE_T kStreamBufferSize = 64 * 1024;
 	opj_stream_ptr stream(opj_stream_create(kStreamBufferSize, OPJ_STREAM_WRITE));
 	if (!stream) {
@@ -293,57 +286,57 @@ bool try_encode_jpeg2k_frame(std::span<const std::uint8_t> frame_data,
     int pixel_representation, Planar source_planar, std::size_t row_stride,
     bool use_multicomponent_transform, bool lossless,
     const J2kOptions& options, std::vector<std::uint8_t>& out_encoded,
-    codec_error& out_error) noexcept {
+    CodecError& out_error) noexcept {
 	out_encoded.clear();
-	out_error = codec_error{};
+	out_error = CodecError{};
 
 	if (rows == 0 || cols == 0 || samples_per_pixel == 0 || bytes_per_sample == 0) {
-		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		set_codec_error(out_error, CodecStatusCode::invalid_argument, "validate",
 		    "rows/cols/samples_per_pixel/bytes_per_sample must be positive");
 		return false;
 	}
 	if (samples_per_pixel != 1 && samples_per_pixel != 3 && samples_per_pixel != 4) {
-		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		set_codec_error(out_error, CodecStatusCode::invalid_argument, "validate",
 		    "only samples_per_pixel=1/3/4 are supported in current JPEG2000 encoder path");
 		return false;
 	}
 	if (use_multicomponent_transform && samples_per_pixel != 3) {
-		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		set_codec_error(out_error, CodecStatusCode::invalid_argument, "validate",
 		    "multicomponent JPEG2000 requires samples_per_pixel=3");
 		return false;
 	}
 	if (bits_allocated <= 0 || bits_allocated > 16) {
-		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		set_codec_error(out_error, CodecStatusCode::invalid_argument, "validate",
 		    "bits_allocated must be in [1,16]");
 		return false;
 	}
 	if (bits_stored <= 0 || bits_stored > bits_allocated) {
-		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		set_codec_error(out_error, CodecStatusCode::invalid_argument, "validate",
 		    "bits_stored must be in [1,bits_allocated]");
 		return false;
 	}
 	if (pixel_representation != 0 && pixel_representation != 1) {
-		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		set_codec_error(out_error, CodecStatusCode::invalid_argument, "validate",
 		    "pixel_representation must be 0 or 1");
 		return false;
 	}
 	if (bytes_per_sample != 1 && bytes_per_sample != 2 && bytes_per_sample != 4) {
-		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		set_codec_error(out_error, CodecStatusCode::invalid_argument, "validate",
 		    "unsupported bytes_per_sample (expected 1, 2, or 4)");
 		return false;
 	}
 	if (options.target_bpp < 0.0 || options.target_psnr < 0.0) {
-		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		set_codec_error(out_error, CodecStatusCode::invalid_argument, "validate",
 		    "J2kOptions.target_bpp/target_psnr must be >= 0");
 		return false;
 	}
 	if (options.threads < -1) {
-		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		set_codec_error(out_error, CodecStatusCode::invalid_argument, "validate",
 		    "J2kOptions.threads must be -1, 0, or positive");
 		return false;
 	}
 	if (!lossless && options.target_psnr <= 0.0 && options.target_bpp <= 0.0) {
-		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		set_codec_error(out_error, CodecStatusCode::invalid_argument, "validate",
 		    "lossy JPEG2000 requires target_psnr or target_bpp");
 		return false;
 	}
@@ -353,16 +346,16 @@ bool try_encode_jpeg2k_frame(std::span<const std::uint8_t> frame_data,
 		    bytes_per_sample, bits_allocated, bits_stored, pixel_representation,
 		    source_planar, row_stride, use_multicomponent_transform, lossless,
 		    options);
-		out_error = codec_error{};
+		out_error = CodecError{};
 		return true;
 	} catch (const std::bad_alloc&) {
-		set_codec_error(out_error, codec_status_code::internal_error, "allocate",
+		set_codec_error(out_error, CodecStatusCode::internal_error, "allocate",
 		    "memory allocation failed");
 	} catch (const std::exception& e) {
-		set_codec_error(out_error, codec_status_code::backend_error, "encode",
+		set_codec_error(out_error, CodecStatusCode::backend_error, "encode",
 		    e.what());
 	} catch (...) {
-		set_codec_error(out_error, codec_status_code::backend_error, "encode",
+		set_codec_error(out_error, CodecStatusCode::backend_error, "encode",
 		    "non-standard exception");
 	}
 	out_encoded.clear();
@@ -499,7 +492,7 @@ std::vector<std::uint8_t> encode_jpeg2k_frame(std::span<const std::uint8_t> fram
 		    "pixel::encode_jpeg2k_frame reason=failed to create OpenJPEG encoder codec");
 	}
 
-	openjpeg_log_sink sink{};
+	OpenJpegLogSink sink{};
 	opj_set_warning_handler(codec.get(), opj_warning_handler, &sink);
 	opj_set_error_handler(codec.get(), opj_error_handler, &sink);
 
@@ -515,7 +508,7 @@ std::vector<std::uint8_t> encode_jpeg2k_frame(std::span<const std::uint8_t> fram
 		    thread_count);
 	}
 
-	jpeg2k_output_stream output_stream{};
+	Jpeg2kOutputStream output_stream{};
 	opj_stream_ptr stream = create_openjpeg_output_stream(output_stream);
 	if (!stream) {
 		throw_encode_error(

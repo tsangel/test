@@ -15,24 +15,17 @@
 namespace dicom::pixel::detail {
 namespace {
 
-void set_codec_error(codec_error& out_error, codec_status_code code,
-    std::string_view stage, std::string detail) {
-	out_error.code = code;
-	out_error.stage = std::string(stage);
-	out_error.detail = std::move(detail);
-}
-
-class turbojpeg_handle_guard {
+class TurboJpegHandleGuard {
 public:
-	explicit turbojpeg_handle_guard(tjhandle handle) noexcept : handle_(handle) {}
-	~turbojpeg_handle_guard() {
+	explicit TurboJpegHandleGuard(tjhandle handle) noexcept : handle_(handle) {}
+	~TurboJpegHandleGuard() {
 		if (handle_) {
 			tj3Destroy(handle_);
 		}
 	}
 
-	turbojpeg_handle_guard(const turbojpeg_handle_guard&) = delete;
-	turbojpeg_handle_guard& operator=(const turbojpeg_handle_guard&) = delete;
+	TurboJpegHandleGuard(const TurboJpegHandleGuard&) = delete;
+	TurboJpegHandleGuard& operator=(const TurboJpegHandleGuard&) = delete;
 
 	[[nodiscard]] tjhandle get() const noexcept { return handle_; }
 
@@ -40,17 +33,17 @@ private:
 	tjhandle handle_{nullptr};
 };
 
-class turbojpeg_buffer_guard {
+class TurboJpegBufferGuard {
 public:
-	turbojpeg_buffer_guard() = default;
-	~turbojpeg_buffer_guard() {
+	TurboJpegBufferGuard() = default;
+	~TurboJpegBufferGuard() {
 		if (data_) {
 			tj3Free(data_);
 		}
 	}
 
-	turbojpeg_buffer_guard(const turbojpeg_buffer_guard&) = delete;
-	turbojpeg_buffer_guard& operator=(const turbojpeg_buffer_guard&) = delete;
+	TurboJpegBufferGuard(const TurboJpegBufferGuard&) = delete;
+	TurboJpegBufferGuard& operator=(const TurboJpegBufferGuard&) = delete;
 
 	[[nodiscard]] unsigned char** out_ptr() noexcept { return &data_; }
 	[[nodiscard]] unsigned char* get() const noexcept { return data_; }
@@ -153,43 +146,43 @@ bool try_encode_jpeg_frame(std::span<const std::uint8_t> frame_data,
     std::size_t bytes_per_sample, int bits_allocated, int bits_stored,
     Planar source_planar, std::size_t row_stride, bool lossless,
     const JpegOptions& options, std::vector<std::uint8_t>& out_encoded,
-    codec_error& out_error) noexcept {
+    CodecError& out_error) noexcept {
 	out_encoded.clear();
-	out_error = codec_error{};
+	out_error = CodecError{};
 
 	if (rows == 0 || cols == 0 || samples_per_pixel == 0 || bytes_per_sample == 0) {
-		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		set_codec_error(out_error, CodecStatusCode::invalid_argument, "validate",
 		    "rows/cols/samples_per_pixel/bytes_per_sample must be positive");
 		return false;
 	}
 	if (samples_per_pixel != 1 && samples_per_pixel != 3 && samples_per_pixel != 4) {
-		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		set_codec_error(out_error, CodecStatusCode::invalid_argument, "validate",
 		    "only samples_per_pixel=1/3/4 are supported in current JPEG encoder path");
 		return false;
 	}
 	if (bits_allocated <= 0 || bits_allocated > 16 || (bits_allocated % 8) != 0) {
-		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		set_codec_error(out_error, CodecStatusCode::invalid_argument, "validate",
 		    "bits_allocated must be 8 or 16");
 		return false;
 	}
 	if (bits_stored <= 0 || bits_stored > bits_allocated) {
-		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		set_codec_error(out_error, CodecStatusCode::invalid_argument, "validate",
 		    "bits_stored must be in [1,bits_allocated]");
 		return false;
 	}
 	if (!lossless && bits_stored > 12) {
-		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		set_codec_error(out_error, CodecStatusCode::invalid_argument, "validate",
 		    "lossy JPEG encoder supports precision up to 12 bits");
 		return false;
 	}
 	if ((bits_stored <= 8 && bytes_per_sample != 1) ||
 	    (bits_stored > 8 && bytes_per_sample != 2)) {
-		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		set_codec_error(out_error, CodecStatusCode::invalid_argument, "validate",
 		    "bytes_per_sample is incompatible with bits_stored");
 		return false;
 	}
 	if (options.quality < 1 || options.quality > 100) {
-		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		set_codec_error(out_error, CodecStatusCode::invalid_argument, "validate",
 		    "JpegOptions.quality must be in [1,100]");
 		return false;
 	}
@@ -198,16 +191,16 @@ bool try_encode_jpeg_frame(std::span<const std::uint8_t> frame_data,
 		out_encoded = encode_jpeg_frame(frame_data, rows, cols, samples_per_pixel,
 		    bytes_per_sample, bits_allocated, bits_stored, source_planar,
 		    row_stride, lossless, options);
-		out_error = codec_error{};
+		out_error = CodecError{};
 		return true;
 	} catch (const std::bad_alloc&) {
-		set_codec_error(out_error, codec_status_code::internal_error, "allocate",
+		set_codec_error(out_error, CodecStatusCode::internal_error, "allocate",
 		    "memory allocation failed");
 	} catch (const std::exception& e) {
-		set_codec_error(out_error, codec_status_code::backend_error, "encode",
+		set_codec_error(out_error, CodecStatusCode::backend_error, "encode",
 		    e.what());
 	} catch (...) {
-		set_codec_error(out_error, codec_status_code::backend_error, "encode",
+		set_codec_error(out_error, CodecStatusCode::backend_error, "encode",
 		    "non-standard exception");
 	}
 	out_encoded.clear();
@@ -317,7 +310,7 @@ std::vector<std::uint8_t> encode_jpeg_frame(std::span<const std::uint8_t> frame_
 		    kFunctionName);
 	}
 
-	turbojpeg_handle_guard handle(tj3Init(TJINIT_COMPRESS));
+	TurboJpegHandleGuard handle(tj3Init(TJINIT_COMPRESS));
 	if (!handle.get()) {
 		throw_encode_error(
 		    "{} reason=failed to initialize TurboJPEG compressor",
@@ -349,7 +342,7 @@ std::vector<std::uint8_t> encode_jpeg_frame(std::span<const std::uint8_t> frame_
 		    handle.get(), TJPARAM_QUALITY, quality, "QUALITY", kFunctionName);
 	}
 
-	turbojpeg_buffer_guard encoded_buffer{};
+	TurboJpegBufferGuard encoded_buffer{};
 	std::size_t encoded_size = 0;
 	int rc = -1;
 	if (bits_stored <= 8) {

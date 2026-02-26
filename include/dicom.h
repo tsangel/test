@@ -27,6 +27,8 @@
 #include "specific_character_set_registry.hpp"
 #include "version.h"
 #include "uid_lookup_detail.hpp"
+#include "pixel_decoder_plugin_abi.h"
+#include "pixel_encoder_plugin_abi.h"
 
 namespace dicom {
 
@@ -1031,43 +1033,43 @@ struct PixelDataInfo {
 	bool has_pixel_data{false};
 };
 
-struct AutoCodecOptions {};
-struct NoCompression {};
-struct RleOptions {};
-struct JpegOptions { int quality{90}; };
-struct JpegLsOptions { int near_lossless_error{0}; };
-struct J2kOptions {
-	double target_bpp{0.0};
-	double target_psnr{0.0};
-	// Encoder thread hint:
-	//  -1: auto(all CPUs) [default], 0: library default, >0: explicit thread count.
-	int threads{-1};
-	bool use_color_transform{true};
-};
-struct Htj2kOptions {
-	double target_bpp{0.0};
-	double target_psnr{0.0};
-	// Encoder thread hint:
-	//  -1: auto(all CPUs) [default], 0: library default, >0: explicit thread count.
-	int threads{-1};
-	bool use_color_transform{true};
-};
-struct JpegXlOptions {
-	// Lossy distance target (0: mathematically lossless, recommended lossy range ~0.5..3.0).
-	// For JPEGXL transfer syntax, this must be > 0.
-	// For JPEGXLLossless transfer syntax, this must be 0.
-	double distance{1.0};
-	// Encoder effort/speed: 1(fastest) .. 10(slowest), default 7.
-	int effort{7};
-	// Encoder thread hint:
-	//  -1: auto(all CPUs) [default], 0: library default, >0: explicit thread count.
-	int threads{-1};
-};
-struct DeflateOptions { int level{6}; };
+using CodecOptionValue = std::variant<std::int64_t, double, bool, std::string>;
 
-using CodecOptions = std::variant<
-    AutoCodecOptions, NoCompression, RleOptions, JpegOptions, JpegLsOptions, J2kOptions, Htj2kOptions,
-    JpegXlOptions, DeflateOptions>;
+struct CodecOptionKv {
+	std::string_view key{};
+	CodecOptionValue value{};
+};
+
+struct CodecOptionTextKv {
+	std::string_view key{};
+	std::string_view value{};
+};
+
+class EncoderContext {
+public:
+	EncoderContext() = default;
+
+	void configure(uid::WellKnown transfer_syntax);
+	void configure(uid::WellKnown transfer_syntax,
+	    std::span<const CodecOptionTextKv> codec_opt);
+	[[nodiscard]] bool configured() const noexcept { return configured_; }
+	[[nodiscard]] uid::WellKnown transfer_syntax_uid() const noexcept {
+		return transfer_syntax_uid_;
+	}
+
+private:
+	friend class ::dicom::DicomFile;
+
+	uid::WellKnown transfer_syntax_uid_{};
+	std::string plugin_key_{};
+	std::vector<std::string> option_keys_{};
+	std::vector<CodecOptionKv> codec_options_{};
+	bool configured_{false};
+};
+
+[[nodiscard]] EncoderContext create_encoder_context(uid::WellKnown transfer_syntax);
+[[nodiscard]] EncoderContext create_encoder_context(uid::WellKnown transfer_syntax,
+    std::span<const CodecOptionTextKv> codec_opt);
 
 enum class Htj2kDecoder : std::uint8_t {
 	auto_select = 0,
@@ -1125,6 +1127,25 @@ void decode_frame_into(const DicomFile& df, std::size_t frame_index,
     std::span<std::uint8_t> dst, const DecodeOptions& opt = {});
 void decode_frame_into(const DicomFile& df, std::size_t frame_index,
     std::span<std::uint8_t> dst, const DecodeStrides& dst_strides, const DecodeOptions& opt = {});
+
+/// Register external codec plugin(s) from a shared library.
+/// The library may export decoder and/or encoder plugin API symbols.
+/// When the plugin key matches an existing registry key, frame dispatch is overridden.
+[[nodiscard]] bool register_external_codec_plugin_from_library(
+    std::string_view library_path, std::string* out_plugin_key = nullptr,
+    std::string* out_error = nullptr);
+
+/// Register an external decoder plugin API without dynamic loading (static registrar path).
+[[nodiscard]] bool register_external_decoder_plugin_static(
+    const dicomsdl_decoder_plugin_api_v1* api, std::string* out_error = nullptr);
+
+/// Register an external encoder plugin API without dynamic loading (static registrar path).
+[[nodiscard]] bool register_external_encoder_plugin_static(
+    const dicomsdl_encoder_plugin_api_v1* api, std::string* out_error = nullptr);
+
+/// Unregister previously registered external plugin bridge and restore original dispatch.
+[[nodiscard]] bool unregister_external_codec_plugin(
+    std::string_view plugin_key, std::string* out_error = nullptr);
 
 } // namespace pixel
 
@@ -1713,19 +1734,23 @@ public:
 
 	/// Set transfer syntax for subsequent write operations and synchronize (0002,0010).
 	/// This updates both runtime parse/write state and file meta information.
-	/// When `codec_opt` is AutoCodecOptions, apply_transfer_syntax chooses a default codec policy
-	/// from the target transfer syntax.
 	/// For encapsulated PixelData, encapsulated->encapsulated conversion is handled as
 	/// decode-to-native + re-encode when the target transfer syntax supports pixel encode.
+	void set_transfer_syntax(uid::WellKnown transfer_syntax);
 	void set_transfer_syntax(uid::WellKnown transfer_syntax,
-	    pixel::CodecOptions codec_opt = pixel::AutoCodecOptions{});
+	    const pixel::EncoderContext& encoder_ctx);
+	void set_transfer_syntax(uid::WellKnown transfer_syntax,
+	    std::span<const pixel::CodecOptionTextKv> codec_opt);
 	[[nodiscard]] uid::WellKnown transfer_syntax_uid() const { return transfer_syntax_uid_; }
 	[[nodiscard]] const pixel::PixelDataInfo& pixeldata_info(bool recalc = false) const;
 	[[nodiscard]] pixel::DecodeStrides calc_decode_strides(const pixel::DecodeOptions& opt = {}) const;
 	[[nodiscard]] std::optional<pixel::ModalityLut> modality_lut() const;
-	/// When `codec_opt` is AutoCodecOptions, a default codec is selected from transfer syntax.
+	void set_pixel_data(uid::WellKnown transfer_syntax,
+	    const pixel::PixelSource& source);
+	void set_pixel_data(uid::WellKnown transfer_syntax,
+	    const pixel::PixelSource& source, const pixel::EncoderContext& encoder_ctx);
 	void set_pixel_data(uid::WellKnown transfer_syntax, const pixel::PixelSource& source,
-	    pixel::CodecOptions codec_opt = pixel::AutoCodecOptions{});
+	    std::span<const pixel::CodecOptionTextKv> codec_opt);
 	/// Replace PixelData with native bytes (OB/OW) by moving ownership from `native_pixel_data`.
 	/// If `vr` is None, OB/OW is inferred from BitsAllocated (<=8 -> OB, otherwise OW).
 	void set_native_pixel_data(std::vector<std::uint8_t>&& native_pixel_data, VR vr = VR::None);
@@ -1767,8 +1792,11 @@ private:
 	friend class DataSet;
 	void invalidate_pixeldata_info_cache() const { pixeldata_info_cache_.reset(); }
 	void set_transfer_syntax_state_only(uid::WellKnown transfer_syntax);
+	void apply_transfer_syntax(uid::WellKnown transfer_syntax);
 	void apply_transfer_syntax(uid::WellKnown transfer_syntax,
-	    const pixel::CodecOptions& codec_opt_override);
+	    const pixel::EncoderContext& encoder_ctx);
+	void apply_transfer_syntax(uid::WellKnown transfer_syntax,
+	    std::span<const pixel::CodecOptionTextKv> codec_opt_override);
 	void clear_error_state() noexcept;
 	void set_error_state(std::string message);
 

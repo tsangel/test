@@ -18,14 +18,7 @@
 namespace dicom::pixel::detail {
 namespace {
 
-void set_codec_error(codec_error& out_error, codec_status_code code,
-    std::string_view stage, std::string detail) {
-	out_error.code = code;
-	out_error.stage = std::string(stage);
-	out_error.detail = std::move(detail);
-}
-
-struct sample_value_range {
+struct SampleValueRange {
 	std::int32_t min_value{0};
 	std::int32_t max_value{0};
 };
@@ -56,7 +49,7 @@ struct sample_value_range {
 	return std::clamp(qstep, 0.00001, 0.5);
 }
 
-[[nodiscard]] sample_value_range measure_source_sample_range(
+[[nodiscard]] SampleValueRange measure_source_sample_range(
     std::span<const std::uint8_t> frame_data, const SourceFrameLayout& source_layout,
     std::size_t row_stride, std::size_t rows, std::size_t cols, std::size_t samples_per_pixel,
     std::size_t bytes_per_sample, int bits_stored, bool source_signed,
@@ -154,52 +147,52 @@ bool try_encode_htj2k_frame(std::span<const std::uint8_t> frame_data,
     int pixel_representation, Planar source_planar, std::size_t row_stride,
     bool use_multicomponent_transform, bool lossless, bool rpcl_progression,
     const Htj2kOptions& options, std::vector<std::uint8_t>& out_encoded,
-    codec_error& out_error) noexcept {
+    CodecError& out_error) noexcept {
 	out_encoded.clear();
-	out_error = codec_error{};
+	out_error = CodecError{};
 
 	if (rows == 0 || cols == 0 || samples_per_pixel == 0 || bytes_per_sample == 0) {
-		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		set_codec_error(out_error, CodecStatusCode::invalid_argument, "validate",
 		    "rows/cols/samples_per_pixel/bytes_per_sample must be positive");
 		return false;
 	}
 	if (samples_per_pixel != 1 && samples_per_pixel != 3 && samples_per_pixel != 4) {
-		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		set_codec_error(out_error, CodecStatusCode::invalid_argument, "validate",
 		    "only samples_per_pixel=1/3/4 are supported in current HTJ2K encoder path");
 		return false;
 	}
 	if (use_multicomponent_transform && samples_per_pixel != 3) {
-		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		set_codec_error(out_error, CodecStatusCode::invalid_argument, "validate",
 		    "multicomponent HTJ2K requires samples_per_pixel=3");
 		return false;
 	}
 	if (bits_allocated <= 0 || bits_allocated > 16 || (bits_allocated % 8) != 0) {
-		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		set_codec_error(out_error, CodecStatusCode::invalid_argument, "validate",
 		    "bits_allocated must be 8 or 16");
 		return false;
 	}
 	if (bits_stored <= 0 || bits_stored > bits_allocated) {
-		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		set_codec_error(out_error, CodecStatusCode::invalid_argument, "validate",
 		    "bits_stored must be in [1,bits_allocated]");
 		return false;
 	}
 	if (pixel_representation != 0 && pixel_representation != 1) {
-		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		set_codec_error(out_error, CodecStatusCode::invalid_argument, "validate",
 		    "pixel_representation must be 0 or 1");
 		return false;
 	}
 	if (bytes_per_sample != 1 && bytes_per_sample != 2) {
-		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		set_codec_error(out_error, CodecStatusCode::invalid_argument, "validate",
 		    "unsupported bytes_per_sample (expected 1 or 2)");
 		return false;
 	}
 	if (options.target_bpp < 0.0 || options.target_psnr < 0.0) {
-		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		set_codec_error(out_error, CodecStatusCode::invalid_argument, "validate",
 		    "Htj2kOptions.target_bpp/target_psnr must be >= 0");
 		return false;
 	}
 	if (options.threads < -1) {
-		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		set_codec_error(out_error, CodecStatusCode::invalid_argument, "validate",
 		    "Htj2kOptions.threads must be -1, 0, or positive");
 		return false;
 	}
@@ -209,16 +202,16 @@ bool try_encode_htj2k_frame(std::span<const std::uint8_t> frame_data,
 		    bytes_per_sample, bits_allocated, bits_stored, pixel_representation,
 		    source_planar, row_stride, use_multicomponent_transform, lossless,
 		    rpcl_progression, options);
-		out_error = codec_error{};
+		out_error = CodecError{};
 		return true;
 	} catch (const std::bad_alloc&) {
-		set_codec_error(out_error, codec_status_code::internal_error, "allocate",
+		set_codec_error(out_error, CodecStatusCode::internal_error, "allocate",
 		    "memory allocation failed");
 	} catch (const std::exception& e) {
-		set_codec_error(out_error, codec_status_code::backend_error, "encode",
+		set_codec_error(out_error, CodecStatusCode::backend_error, "encode",
 		    e.what());
 	} catch (...) {
-		set_codec_error(out_error, codec_status_code::backend_error, "encode",
+		set_codec_error(out_error, CodecStatusCode::backend_error, "encode",
 		    "non-standard exception");
 	}
 	out_encoded.clear();

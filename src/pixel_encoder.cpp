@@ -40,26 +40,26 @@ std::size_t bytes_per_sample_of(pixel::DataType dtype) noexcept {
 	}
 }
 
-struct native_source_layout {
+struct NativeSourceLayout {
 	int bits_allocated{0};
 	int pixel_representation{0}; // 0 unsigned, 1 signed
 };
 
-[[nodiscard]] std::optional<native_source_layout> native_source_layout_of(
+[[nodiscard]] std::optional<NativeSourceLayout> native_source_layout_of(
     pixel::DataType data_type) noexcept {
 	switch (data_type) {
 	case pixel::DataType::u8:
-		return native_source_layout{8, 0};
+		return NativeSourceLayout{8, 0};
 	case pixel::DataType::s8:
-		return native_source_layout{8, 1};
+		return NativeSourceLayout{8, 1};
 	case pixel::DataType::u16:
-		return native_source_layout{16, 0};
+		return NativeSourceLayout{16, 0};
 	case pixel::DataType::s16:
-		return native_source_layout{16, 1};
+		return NativeSourceLayout{16, 1};
 	case pixel::DataType::u32:
-		return native_source_layout{32, 0};
+		return NativeSourceLayout{32, 0};
 	case pixel::DataType::s32:
-		return native_source_layout{32, 1};
+		return NativeSourceLayout{32, 1};
 	default:
 		return std::nullopt;
 	}
@@ -120,7 +120,7 @@ struct native_source_layout {
 	return spans_overlap(source_bytes, pixel_data.value_span());
 }
 
-struct pixel_encode_target {
+struct PixelEncodeTarget {
 	bool is_native_uncompressed{false};
 	bool is_encapsulated_uncompressed{false};
 	bool is_rle{false};
@@ -141,40 +141,40 @@ struct pixel_encode_target {
 	bool is_jpegxl_lossy{false};
 };
 
-[[nodiscard]] pixel_encode_target classify_pixel_encode_target(
-    const pixel::detail::transfer_syntax_plugin_binding& binding) noexcept {
-	pixel_encode_target target{};
+[[nodiscard]] PixelEncodeTarget classify_pixel_encode_target(
+    const pixel::detail::TransferSyntaxPluginBinding& binding) noexcept {
+	PixelEncodeTarget target{};
 	target.is_native_uncompressed =
-	    binding.profile == pixel::detail::codec_profile::native_uncompressed;
+	    binding.profile == pixel::detail::CodecProfile::native_uncompressed;
 	target.is_encapsulated_uncompressed =
-	    binding.profile == pixel::detail::codec_profile::encapsulated_uncompressed;
-	target.is_rle = binding.profile == pixel::detail::codec_profile::rle_lossless;
+	    binding.profile == pixel::detail::CodecProfile::encapsulated_uncompressed;
+	target.is_rle = binding.profile == pixel::detail::CodecProfile::rle_lossless;
 	target.is_j2k = binding.plugin_key == "jpeg2k";
 	target.is_j2k_lossless =
-	    binding.profile == pixel::detail::codec_profile::jpeg2000_lossless;
+	    binding.profile == pixel::detail::CodecProfile::jpeg2000_lossless;
 	target.is_j2k_lossy =
-	    binding.profile == pixel::detail::codec_profile::jpeg2000_lossy;
+	    binding.profile == pixel::detail::CodecProfile::jpeg2000_lossy;
 	target.is_htj2k = binding.plugin_key == "htj2k";
 	target.is_htj2k_lossless =
-	    binding.profile == pixel::detail::codec_profile::htj2k_lossless ||
-	    binding.profile == pixel::detail::codec_profile::htj2k_lossless_rpcl;
-	target.is_htj2k_lossy = binding.profile == pixel::detail::codec_profile::htj2k_lossy;
+	    binding.profile == pixel::detail::CodecProfile::htj2k_lossless ||
+	    binding.profile == pixel::detail::CodecProfile::htj2k_lossless_rpcl;
+	target.is_htj2k_lossy = binding.profile == pixel::detail::CodecProfile::htj2k_lossy;
 	target.is_jpegls = binding.plugin_key == "jpegls";
 	target.is_jpegls_lossless =
-	    binding.profile == pixel::detail::codec_profile::jpegls_lossless;
+	    binding.profile == pixel::detail::CodecProfile::jpegls_lossless;
 	target.is_jpegls_lossy =
-	    binding.profile == pixel::detail::codec_profile::jpegls_near_lossless;
+	    binding.profile == pixel::detail::CodecProfile::jpegls_near_lossless;
 	target.is_jpeg = binding.plugin_key == "jpeg";
-	target.is_jpeg_lossless = binding.profile == pixel::detail::codec_profile::jpeg_lossless;
-	target.is_jpeg_lossy = binding.profile == pixel::detail::codec_profile::jpeg_lossy;
+	target.is_jpeg_lossless = binding.profile == pixel::detail::CodecProfile::jpeg_lossless;
+	target.is_jpeg_lossy = binding.profile == pixel::detail::CodecProfile::jpeg_lossy;
 	target.is_jpegxl = binding.plugin_key == "jpegxl";
 	target.is_jpegxl_lossless =
-	    binding.profile == pixel::detail::codec_profile::jpegxl_lossless;
-	target.is_jpegxl_lossy = binding.profile == pixel::detail::codec_profile::jpegxl_lossy;
+	    binding.profile == pixel::detail::CodecProfile::jpegxl_lossless;
+	target.is_jpegxl_lossy = binding.profile == pixel::detail::CodecProfile::jpegxl_lossy;
 	return target;
 }
 
-void validate_target_source_constraints(const pixel_encode_target& target,
+void validate_target_source_constraints(const PixelEncodeTarget& target,
     int bits_allocated, int bits_stored, std::string_view file_path) {
 	if ((target.is_j2k || target.is_htj2k || target.is_jpegls || target.is_jpeg ||
 	        target.is_jpegxl) &&
@@ -190,13 +190,138 @@ void validate_target_source_constraints(const pixel_encode_target& target,
 	}
 }
 
+struct BoolOptionLookupResult {
+	bool found{false};
+	bool valid{true};
+	bool value{false};
+};
+
+[[nodiscard]] bool option_key_matches_exact(
+    std::string_view key, std::string_view expected) noexcept {
+	return key == expected;
+}
+
+[[nodiscard]] bool try_decode_codec_bool_option(
+    const pixel::detail::codec_option_value& value, bool& out_value) noexcept {
+	if (const auto* bool_value = std::get_if<bool>(&value)) {
+		out_value = *bool_value;
+		return true;
+	}
+	if (const auto* int_value = std::get_if<std::int64_t>(&value)) {
+		if (*int_value == 0) {
+			out_value = false;
+			return true;
+		}
+		if (*int_value == 1) {
+			out_value = true;
+			return true;
+		}
+		return false;
+	}
+	if (const auto* double_value = std::get_if<double>(&value)) {
+		if (!std::isfinite(*double_value)) {
+			return false;
+		}
+		if (*double_value == 0.0) {
+			out_value = false;
+			return true;
+		}
+		if (*double_value == 1.0) {
+			out_value = true;
+			return true;
+		}
+		return false;
+	}
+	if (const auto* string_value = std::get_if<std::string>(&value)) {
+		std::string_view text(*string_value);
+		while (!text.empty() &&
+		       (text.front() == ' ' || text.front() == '\t' ||
+		           text.front() == '\n' || text.front() == '\r')) {
+			text.remove_prefix(1);
+		}
+		while (!text.empty() &&
+		       (text.back() == ' ' || text.back() == '\t' ||
+		           text.back() == '\n' || text.back() == '\r')) {
+			text.remove_suffix(1);
+		}
+		if (text.empty()) {
+			return false;
+		}
+		if (text == "0") {
+			out_value = false;
+			return true;
+		}
+		if (text == "1") {
+			out_value = true;
+			return true;
+		}
+
+		const auto equals_ascii_case_insensitive =
+		    [](std::string_view lhs, std::string_view rhs) noexcept {
+			    if (lhs.size() != rhs.size()) {
+				    return false;
+			    }
+			    for (std::size_t index = 0; index < lhs.size(); ++index) {
+				    char left = lhs[index];
+				    char right = rhs[index];
+				    if (left >= 'A' && left <= 'Z') {
+					    left = static_cast<char>(left - 'A' + 'a');
+				    }
+				    if (right >= 'A' && right <= 'Z') {
+					    right = static_cast<char>(right - 'A' + 'a');
+				    }
+				    if (left != right) {
+					    return false;
+				    }
+			    }
+			    return true;
+		    };
+		if (equals_ascii_case_insensitive(text, "true")) {
+			out_value = true;
+			return true;
+		}
+		if (equals_ascii_case_insensitive(text, "false")) {
+			out_value = false;
+			return true;
+		}
+		return false;
+	}
+	return false;
+}
+
+[[nodiscard]] BoolOptionLookupResult lookup_use_mct_option(
+    std::span<const pixel::detail::CodecOptionKv> codec_options) noexcept {
+	for (const auto& option : codec_options) {
+		if (!option_key_matches_exact(option.key, "color_transform") &&
+		    !option_key_matches_exact(option.key, "mct") &&
+		    !option_key_matches_exact(option.key, "use_mct")) {
+			continue;
+		}
+		BoolOptionLookupResult result{};
+		result.found = true;
+		bool parsed = false;
+		result.valid = try_decode_codec_bool_option(option.value, parsed);
+		result.value = parsed;
+		return result;
+	}
+	return BoolOptionLookupResult{};
+}
+
 [[nodiscard]] bool resolve_use_multicomponent_transform(uid::WellKnown transfer_syntax,
-    const pixel_encode_target& target, const pixel::CodecOptions& resolved_codec_opt,
+    const PixelEncodeTarget& target,
+    std::span<const pixel::detail::CodecOptionKv> codec_options,
     std::size_t samples_per_pixel, std::string_view file_path) {
+	const auto mct_option = lookup_use_mct_option(codec_options);
+	if (mct_option.found && !mct_option.valid) {
+		diag::error_and_throw(
+		    "DicomFile::set_pixel_data file={} reason=color_transform/mct option must be bool (or 0/1)",
+		    file_path);
+	}
+	const bool use_color_transform = mct_option.found ? mct_option.value : true;
+
 	if (target.is_j2k) {
-		const auto& options = std::get<pixel::J2kOptions>(resolved_codec_opt);
 		if (is_jpeg2000_mc_transfer_syntax(transfer_syntax)) {
-			if (!options.use_color_transform) {
+			if (!use_color_transform) {
 				diag::error_and_throw(
 				    "DicomFile::set_pixel_data file={} ts={} reason=JPEG2000 MC transfer syntax requires color transform enabled",
 				    file_path, transfer_syntax.value());
@@ -208,17 +333,16 @@ void validate_target_source_constraints(const pixel_encode_target& target,
 			}
 			return true;
 		}
-		return options.use_color_transform && samples_per_pixel == std::size_t{3};
+		return use_color_transform && samples_per_pixel == std::size_t{3};
 	}
 	if (target.is_htj2k) {
-		const auto& options = std::get<pixel::Htj2kOptions>(resolved_codec_opt);
-		return options.use_color_transform && samples_per_pixel == std::size_t{3};
+		return use_color_transform && samples_per_pixel == std::size_t{3};
 	}
 	return false;
 }
 
 [[nodiscard]] pixel::Photometric resolve_output_photometric(
-    const pixel_encode_target& target, bool use_multicomponent_transform,
+    const PixelEncodeTarget& target, bool use_multicomponent_transform,
     pixel::Photometric source_photometric) noexcept {
 	if (!use_multicomponent_transform) {
 		return source_photometric;
@@ -230,14 +354,14 @@ void validate_target_source_constraints(const pixel_encode_target& target,
 }
 
 [[nodiscard]] bool target_uses_lossy_compression(
-    const pixel_encode_target& target) noexcept {
+    const PixelEncodeTarget& target) noexcept {
 	return target.is_j2k_lossy || target.is_htj2k_lossy ||
 	    target.is_jpegls_lossy || target.is_jpeg_lossy ||
 	    target.is_jpegxl_lossy;
 }
 
 [[nodiscard]] std::optional<std::string_view> lossy_method_for_target(
-    const pixel_encode_target& target) noexcept {
+    const PixelEncodeTarget& target) noexcept {
 	if (target.is_j2k_lossy) {
 		return std::string_view("ISO_15444_1");
 	}
@@ -324,7 +448,7 @@ void validate_target_source_constraints(const pixel_encode_target& target,
 
 void update_lossy_compression_metadata_for_set_pixel_data(DataSet& dataset,
     std::string_view file_path, uid::WellKnown transfer_syntax,
-    const pixel_encode_target& target, std::size_t uncompressed_payload_bytes,
+    const PixelEncodeTarget& target, std::size_t uncompressed_payload_bytes,
     std::size_t encoded_payload_bytes) {
 	const bool current_encode_is_lossy = target_uses_lossy_compression(target);
 	const bool had_prior_lossy = has_prior_lossy_history(dataset);
@@ -511,114 +635,89 @@ struct NativePixelCopyInput {
 	return native_pixel_data;
 }
 
-} // namespace
+struct SelectedEncodePluginBinding {
+	const pixel::detail::TransferSyntaxPluginBinding* binding{nullptr};
+	const pixel::detail::CodecPlugin* plugin{nullptr};
+};
 
-void DicomFile::set_pixel_data(uid::WellKnown transfer_syntax, const pixel::PixelSource& source,
-    pixel::CodecOptions codec_opt) {
-	if (!transfer_syntax.valid() || transfer_syntax.uid_type() != UidType::TransferSyntax) {
-		diag::error_and_throw(
-		    "DicomFile::set_pixel_data reason=transfer_syntax must be a valid Transfer Syntax UID");
-	}
-
+[[nodiscard]] SelectedEncodePluginBinding select_encode_plugin_binding_or_throw(
+    std::string_view function_name, std::string_view file_path,
+    uid::WellKnown transfer_syntax) {
 	const auto& codec_registry = pixel::detail::global_codec_registry();
 	const auto* binding = codec_registry.find_binding(transfer_syntax);
 	if (!binding || !binding->encode_supported) {
 		diag::error_and_throw(
-		    "DicomFile::set_pixel_data file={} ts={} reason=transfer syntax is not supported for encoding by registry binding",
-		    path(), transfer_syntax.value());
+		    "{} file={} ts={} reason=transfer syntax is not supported for encoding by registry binding",
+		    function_name, file_path, transfer_syntax.value());
 	}
-	const auto plugin_list = codec_registry.plugins();
-	const pixel::detail::codec_plugin* encode_plugin = nullptr;
-	if (binding->plugin_index < plugin_list.size()) {
-		const auto& candidate = plugin_list[binding->plugin_index];
-		if (candidate.key == binding->plugin_key) {
-			encode_plugin = &candidate;
-		}
-	}
-	if (!encode_plugin) {
-		encode_plugin = codec_registry.find_plugin(binding->plugin_key);
-	}
+	const auto* encode_plugin = codec_registry.select_encoder(*binding);
 	if (!encode_plugin) {
 		diag::error_and_throw(
-		    "DicomFile::set_pixel_data file={} ts={} plugin={} reason=registry binding references a missing plugin",
-		    path(), transfer_syntax.value(), binding->plugin_key);
+		    "{} file={} ts={} plugin={} reason=registry binding references a missing plugin",
+		    function_name, file_path, transfer_syntax.value(), binding->plugin_key);
 	}
+	return SelectedEncodePluginBinding{binding, encode_plugin};
+}
 
-	auto resolved_codec_opt = codec_opt;
-	if (std::holds_alternative<pixel::AutoCodecOptions>(codec_opt)) {
-		if (!encode_plugin->default_options) {
+[[nodiscard]] pixel::detail::codec_option_pairs build_codec_option_pairs_from_text_or_throw(
+    std::string_view function_name, std::string_view file_path,
+    uid::WellKnown transfer_syntax, std::string_view plugin_key,
+    std::span<const pixel::CodecOptionTextKv> codec_opt,
+    std::vector<std::string>* owned_option_keys = nullptr) {
+	pixel::detail::codec_option_pairs pairs{};
+	pairs.reserve(codec_opt.size());
+	if (owned_option_keys) {
+		owned_option_keys->clear();
+		owned_option_keys->reserve(codec_opt.size());
+	}
+	for (const auto& option : codec_opt) {
+		if (option.key.empty()) {
 			diag::error_and_throw(
-			    "DicomFile::set_pixel_data file={} ts={} plugin={} reason=codec plugin does not provide default options",
-			    path(), transfer_syntax.value(), encode_plugin->key);
+			    "{} file={} ts={} plugin={} reason=codec option key must not be empty",
+			    function_name, file_path, transfer_syntax.value(), plugin_key);
 		}
-		const auto default_codec_opt = encode_plugin->default_options(transfer_syntax);
-		if (!default_codec_opt) {
-			diag::error_and_throw(
-			    "DicomFile::set_pixel_data file={} ts={} plugin={} reason=codec plugin could not resolve default options",
-			    path(), transfer_syntax.value(), encode_plugin->key);
+		std::string_view option_key = option.key;
+		if (owned_option_keys) {
+			owned_option_keys->emplace_back(option.key);
+			option_key = owned_option_keys->back();
 		}
-		resolved_codec_opt = *default_codec_opt;
+		pairs.push_back(pixel::CodecOptionKv{
+		    .key = option_key,
+		    .value = pixel::CodecOptionValue{std::string(option.value)},
+		});
 	}
-	if (!encode_plugin->export_options) {
-		diag::error_and_throw(
-		    "DicomFile::set_pixel_data file={} ts={} plugin={} reason=codec plugin does not provide export_options hook",
-		    path(), transfer_syntax.value(), encode_plugin->key);
-	}
-	pixel::detail::codec_option_pairs codec_options{};
-	if (const auto export_error = encode_plugin->export_options(
-	        transfer_syntax, resolved_codec_opt, codec_options)) {
-		diag::error_and_throw(
-		    "DicomFile::set_pixel_data file={} ts={} plugin={} reason={}",
-		    path(), transfer_syntax.value(), encode_plugin->key, *export_error);
-	}
-	if (!encode_plugin->parse_options) {
-		diag::error_and_throw(
-		    "DicomFile::set_pixel_data file={} ts={} plugin={} reason=codec plugin does not provide parse_options hook",
-		    path(), transfer_syntax.value(), encode_plugin->key);
-	}
-	pixel::CodecOptions reparsed_codec_opt{};
-	if (const auto parse_error = encode_plugin->parse_options(
-	        transfer_syntax, std::span<const pixel::detail::codec_option_kv>(codec_options),
-	        reparsed_codec_opt)) {
-		diag::error_and_throw(
-		    "DicomFile::set_pixel_data file={} ts={} plugin={} reason={}",
-		    path(), transfer_syntax.value(), encode_plugin->key, *parse_error);
-	}
-	resolved_codec_opt = std::move(reparsed_codec_opt);
-	if (encode_plugin->validate_options) {
-		const auto validation_error =
-		    encode_plugin->validate_options(transfer_syntax, resolved_codec_opt);
-		if (validation_error) {
-			diag::error_and_throw(
-			    "DicomFile::set_pixel_data file={} ts={} plugin={} reason={}",
-			    path(), transfer_syntax.value(), encode_plugin->key, *validation_error);
-		}
-	}
+	return pairs;
+}
 
-	const auto target = classify_pixel_encode_target(*binding);
+void set_pixel_data_with_resolved_codec_options(DicomFile& file,
+    uid::WellKnown transfer_syntax, const pixel::PixelSource& source,
+    const pixel::detail::TransferSyntaxPluginBinding& binding,
+    std::span<const pixel::detail::CodecOptionKv> codec_options) {
+	const auto target = classify_pixel_encode_target(binding);
+	const auto file_path = file.path();
 
 	const auto native_layout = native_source_layout_of(source.data_type);
 	if (!native_layout) {
 		diag::error_and_throw(
 		    "DicomFile::set_pixel_data file={} reason=source.data_type must be one of u8/s8/u16/s16/u32/s32 for current implementation",
-		    path());
+		    file_path);
 	}
 	const auto bytes_per_sample = bytes_per_sample_of(source.data_type);
 	if (bytes_per_sample == 0) {
 		diag::error_and_throw(
 		    "DicomFile::set_pixel_data file={} reason=invalid source.data_type",
-		    path());
+		    file_path);
 	}
 
 	if (source.rows <= 0 || source.cols <= 0 || source.frames <= 0 || source.samples_per_pixel <= 0) {
 		diag::error_and_throw(
 		    "DicomFile::set_pixel_data file={} reason=rows/cols/frames/samples_per_pixel must be positive",
-		    path());
+		    file_path);
 	}
 	if (source.rows > 65535 || source.cols > 65535) {
 		diag::error_and_throw(
 		    "DicomFile::set_pixel_data file={} reason=rows/cols must be <= 65535",
-		    path());
+		    file_path);
 	}
 
 	const auto rows = static_cast<std::size_t>(source.rows);
@@ -632,13 +731,13 @@ void DicomFile::set_pixel_data(uid::WellKnown transfer_syntax, const pixel::Pixe
 	if (!planar_source && samples_per_pixel > kSizeMax / cols) {
 		diag::error_and_throw(
 		    "DicomFile::set_pixel_data file={} reason=row samples overflows size_t",
-		    path());
+		    file_path);
 	}
 	const std::size_t row_samples = planar_source ? cols : cols * samples_per_pixel;
 	if (row_samples > kSizeMax / bytes_per_sample) {
 		diag::error_and_throw(
 		    "DicomFile::set_pixel_data file={} reason=row payload bytes overflows size_t",
-		    path());
+		    file_path);
 	}
 	const std::size_t row_payload_bytes = row_samples * bytes_per_sample;
 
@@ -647,76 +746,76 @@ void DicomFile::set_pixel_data(uid::WellKnown transfer_syntax, const pixel::Pixe
 	if (source_row_stride < row_payload_bytes) {
 		diag::error_and_throw(
 		    "DicomFile::set_pixel_data file={} reason=row_stride({}) is smaller than row payload({})",
-		    path(), source_row_stride, row_payload_bytes);
+		    file_path, source_row_stride, row_payload_bytes);
 	}
 	if (source_row_stride > kSizeMax / rows) {
 		diag::error_and_throw(
 		    "DicomFile::set_pixel_data file={} reason=source plane stride overflows size_t",
-		    path());
+		    file_path);
 	}
 	const std::size_t source_plane_stride = source_row_stride * rows;
 
-	std::size_t source_frame_payload = source_plane_stride;
+	std::size_t source_frame_size_bytes = source_plane_stride;
 	if (planar_source) {
 		if (samples_per_pixel > kSizeMax / source_plane_stride) {
 			diag::error_and_throw(
-			    "DicomFile::set_pixel_data file={} reason=source frame payload bytes overflows size_t",
-			    path());
+			    "DicomFile::set_pixel_data file={} reason=source frame size bytes overflows size_t",
+			    file_path);
 		}
-		source_frame_payload = source_plane_stride * samples_per_pixel;
+		source_frame_size_bytes = source_plane_stride * samples_per_pixel;
 	}
 	const std::size_t source_frame_stride =
-	    source.frame_stride == 0 ? source_frame_payload : source.frame_stride;
-	if (source_frame_stride < source_frame_payload) {
+	    source.frame_stride == 0 ? source_frame_size_bytes : source.frame_stride;
+	if (source_frame_stride < source_frame_size_bytes) {
 		diag::error_and_throw(
-		    "DicomFile::set_pixel_data file={} reason=frame_stride({}) is smaller than frame payload({})",
-		    path(), source_frame_stride, source_frame_payload);
+		    "DicomFile::set_pixel_data file={} reason=frame_stride({}) is smaller than frame size({})",
+		    file_path, source_frame_stride, source_frame_size_bytes);
 	}
 
 	if (row_payload_bytes > kSizeMax / rows) {
 		diag::error_and_throw(
 		    "DicomFile::set_pixel_data file={} reason=destination plane stride overflows size_t",
-		    path());
+		    file_path);
 	}
 	const std::size_t destination_plane_stride = row_payload_bytes * rows;
 	std::size_t destination_frame_payload = destination_plane_stride;
 	if (planar_source) {
 		if (samples_per_pixel > kSizeMax / destination_plane_stride) {
 			diag::error_and_throw(
-			    "DicomFile::set_pixel_data file={} reason=destination frame payload bytes overflows size_t",
-			    path());
+			    "DicomFile::set_pixel_data file={} reason=destination frame size bytes overflows size_t",
+			    file_path);
 		}
 		destination_frame_payload = destination_plane_stride * samples_per_pixel;
 	}
 	if (frames > kSizeMax / destination_frame_payload) {
 		diag::error_and_throw(
 		    "DicomFile::set_pixel_data file={} reason=destination total bytes overflows size_t",
-		    path());
+		    file_path);
 	}
 	const std::size_t destination_total_bytes = destination_frame_payload * frames;
 
 	if (frames > std::size_t{1} && (frames - 1) > kSizeMax / source_frame_stride) {
 		diag::error_and_throw(
 		    "DicomFile::set_pixel_data file={} reason=source last frame begin overflows size_t",
-		    path());
+		    file_path);
 	}
 	const std::size_t source_last_frame_begin = (frames - 1) * source_frame_stride;
 	const std::size_t source_last_plane_used =
 	    (source_plane_stride - source_row_stride) + row_payload_bytes;
 	const std::size_t source_last_frame_used = planar_source
-	                                               ? (source_frame_payload - source_plane_stride) +
+	                                               ? (source_frame_size_bytes - source_plane_stride) +
 	                                                     source_last_plane_used
 	                                               : source_last_plane_used;
 	if (source_last_frame_begin > kSizeMax - source_last_frame_used) {
 		diag::error_and_throw(
 		    "DicomFile::set_pixel_data file={} reason=minimum source byte requirement overflows size_t",
-		    path());
+		    file_path);
 	}
 	const std::size_t source_required_bytes = source_last_frame_begin + source_last_frame_used;
 	if (source.bytes.size() < source_required_bytes) {
 		diag::error_and_throw(
 		    "DicomFile::set_pixel_data file={} reason=source bytes({}) are shorter than required({})",
-		    path(), source.bytes.size(), source_required_bytes);
+		    file_path, source.bytes.size(), source_required_bytes);
 	}
 
 	const int bits_allocated = native_layout->bits_allocated;
@@ -725,31 +824,31 @@ void DicomFile::set_pixel_data(uid::WellKnown transfer_syntax, const pixel::Pixe
 	if (bits_stored <= 0 || bits_stored > bits_allocated) {
 		diag::error_and_throw(
 		    "DicomFile::set_pixel_data file={} reason=bits_stored({}) must be in [1, bits_allocated({})]",
-		    path(), bits_stored, bits_allocated);
+		    file_path, bits_stored, bits_allocated);
 	}
 	const int high_bit = bits_stored - 1;
-	validate_target_source_constraints(target, bits_allocated, bits_stored, path());
+	validate_target_source_constraints(target, bits_allocated, bits_stored, file_path);
 	const bool use_multicomponent_transform = resolve_use_multicomponent_transform(
-	    transfer_syntax, target, resolved_codec_opt, samples_per_pixel, path());
+	    transfer_syntax, target, codec_options, samples_per_pixel, file_path);
 	const pixel::Photometric output_photometric = resolve_output_photometric(
 	    target, use_multicomponent_transform, source.photometric);
 
-	root_dataset_->ensure_loaded(Tag(0xFFFFu, 0xFFFFu));
+	auto& dataset = file.dataset();
+	dataset.ensure_loaded(Tag(0xFFFFu, 0xFFFFu));
 	update_pixel_metadata_for_set_pixel_data(
-	    *root_dataset_, path(), transfer_syntax, source, target.is_rle,
-	    output_photometric,
+	    dataset, file_path, transfer_syntax, source, target.is_rle, output_photometric,
 	    bits_allocated, bits_stored, high_bit, pixel_representation,
 	    source_row_stride, source_frame_stride);
 
 	// set_transfer_syntax(native->encapsulated) can pass a span that aliases current
 	// native PixelData bytes. We must preserve those bytes until all frames are encoded.
 	const bool source_aliases_current_native_pixel_data =
-	    source_aliases_native_pixel_data(*root_dataset_, source.bytes);
+	    source_aliases_native_pixel_data(dataset, source.bytes);
 	const pixel::detail::EncapsulatedEncodeInput encapsulated_encode_input{
 	    .source_base = source.bytes.data(),
 	    .frame_count = frames,
 	    .source_frame_stride = source_frame_stride,
-	    .source_frame_payload = source_frame_payload,
+	    .source_frame_size_bytes = source_frame_size_bytes,
 	    .source_aliases_current_native_pixel_data = source_aliases_current_native_pixel_data,
 	};
 
@@ -768,14 +867,13 @@ void DicomFile::set_pixel_data(uid::WellKnown transfer_syntax, const pixel::Pixe
 		    .destination_total_bytes = destination_total_bytes,
 		};
 		auto native_pixel_data = build_native_pixel_payload(native_copy_input);
-		set_native_pixel_data(std::move(native_pixel_data));
+		file.set_native_pixel_data(std::move(native_pixel_data));
 	} else {
 		const pixel::detail::CodecEncodeFnInput dispatch_input{
-		    .file = *this,
+		    .file = file,
 		    .transfer_syntax = transfer_syntax,
 		    .encode_input = encapsulated_encode_input,
-		    .codec_options = std::span<const pixel::detail::codec_option_kv>(
-		        codec_options),
+		    .codec_options = codec_options,
 		    .rows = rows,
 		    .cols = cols,
 		    .samples_per_pixel = samples_per_pixel,
@@ -789,21 +887,166 @@ void DicomFile::set_pixel_data(uid::WellKnown transfer_syntax, const pixel::Pixe
 		    .row_payload_bytes = row_payload_bytes,
 		    .source_row_stride = source_row_stride,
 		    .source_plane_stride = source_plane_stride,
-		    .source_frame_payload = source_frame_payload,
+		    .source_frame_size_bytes = source_frame_size_bytes,
 		    .destination_frame_payload = destination_frame_payload,
-		    .profile = binding->profile,
-		    .plugin_key = binding->plugin_key,
+		    .profile = binding.profile,
+		    .plugin_key = binding.plugin_key,
 		};
 		pixel::detail::encode_encapsulated_pixel_data(dispatch_input);
 	}
 
 	const auto encoded_payload_bytes = target_uses_lossy_compression(target)
-	    ? encoded_payload_size_from_pixel_sequence(
-	          *root_dataset_, path(), transfer_syntax)
+	    ? encoded_payload_size_from_pixel_sequence(dataset, file_path, transfer_syntax)
 	    : std::size_t{0};
 	update_lossy_compression_metadata_for_set_pixel_data(
-	    *root_dataset_, path(), transfer_syntax, target,
-	    destination_total_bytes, encoded_payload_bytes);
+	    dataset, file_path, transfer_syntax, target, destination_total_bytes,
+	    encoded_payload_bytes);
+}
+
+} // namespace
+
+void pixel::EncoderContext::configure(uid::WellKnown transfer_syntax) {
+	if (!transfer_syntax.valid() || transfer_syntax.uid_type() != UidType::TransferSyntax) {
+		diag::error_and_throw(
+		    "pixel::EncoderContext::configure reason=transfer_syntax must be a valid Transfer Syntax UID");
+	}
+	const auto selected = select_encode_plugin_binding_or_throw(
+	    "pixel::EncoderContext::configure", "<context>", transfer_syntax);
+	if (!selected.plugin->default_options) {
+		diag::error_and_throw(
+		    "pixel::EncoderContext::configure ts={} plugin={} reason=codec plugin does not provide default options",
+		    transfer_syntax.value(), selected.plugin->key);
+	}
+	option_keys_.clear();
+	codec_options_.clear();
+	if (const auto default_error =
+	        selected.plugin->default_options(transfer_syntax, codec_options_)) {
+		diag::error_and_throw(
+		    "pixel::EncoderContext::configure ts={} plugin={} reason={}",
+		    transfer_syntax.value(), selected.plugin->key, *default_error);
+	}
+	transfer_syntax_uid_ = transfer_syntax;
+	plugin_key_ = std::string(selected.plugin->key);
+	configured_ = true;
+}
+
+void pixel::EncoderContext::configure(uid::WellKnown transfer_syntax,
+    std::span<const pixel::CodecOptionTextKv> codec_opt) {
+	if (!transfer_syntax.valid() || transfer_syntax.uid_type() != UidType::TransferSyntax) {
+		diag::error_and_throw(
+		    "pixel::EncoderContext::configure reason=transfer_syntax must be a valid Transfer Syntax UID");
+	}
+	const auto selected = select_encode_plugin_binding_or_throw(
+	    "pixel::EncoderContext::configure", "<context>", transfer_syntax);
+	codec_options_ = build_codec_option_pairs_from_text_or_throw(
+	    "pixel::EncoderContext::configure", "<context>", transfer_syntax,
+	    selected.plugin->key, codec_opt, &option_keys_);
+	transfer_syntax_uid_ = transfer_syntax;
+	plugin_key_ = std::string(selected.plugin->key);
+	configured_ = true;
+}
+
+pixel::EncoderContext pixel::create_encoder_context(
+    uid::WellKnown transfer_syntax) {
+	pixel::EncoderContext context{};
+	context.configure(transfer_syntax);
+	return context;
+}
+
+pixel::EncoderContext pixel::create_encoder_context(uid::WellKnown transfer_syntax,
+    std::span<const pixel::CodecOptionTextKv> codec_opt) {
+	pixel::EncoderContext context{};
+	context.configure(transfer_syntax, codec_opt);
+	return context;
+}
+
+void DicomFile::set_pixel_data(uid::WellKnown transfer_syntax,
+    const pixel::PixelSource& source) {
+	if (!transfer_syntax.valid() || transfer_syntax.uid_type() != UidType::TransferSyntax) {
+		diag::error_and_throw(
+		    "DicomFile::set_pixel_data reason=transfer_syntax must be a valid Transfer Syntax UID");
+	}
+
+	const auto selected = select_encode_plugin_binding_or_throw(
+	    "DicomFile::set_pixel_data", path(), transfer_syntax);
+	pixel::detail::codec_option_pairs codec_options{};
+	if (!selected.plugin->default_options) {
+		diag::error_and_throw(
+		    "DicomFile::set_pixel_data file={} ts={} plugin={} reason=codec plugin does not provide default options",
+		    path(), transfer_syntax.value(), selected.plugin->key);
+	}
+	if (const auto default_error =
+	        selected.plugin->default_options(transfer_syntax, codec_options)) {
+		diag::error_and_throw(
+		    "DicomFile::set_pixel_data file={} ts={} plugin={} reason={}",
+		    path(), transfer_syntax.value(), selected.plugin->key, *default_error);
+	}
+
+	set_pixel_data_with_resolved_codec_options(
+	    *this, transfer_syntax, source, *selected.binding, codec_options);
+
+	set_transfer_syntax_state_only(transfer_syntax);
+	DataElement* transfer_syntax_element = add_dataelement("(0002,0010)"_tag, VR::UI);
+	if (!transfer_syntax_element || !transfer_syntax_element->from_transfer_syntax_uid(transfer_syntax)) {
+		diag::error_and_throw(
+		    "DicomFile::set_pixel_data file={} reason=failed to update (0002,0010) TransferSyntaxUID",
+		    path());
+	}
+}
+
+void DicomFile::set_pixel_data(uid::WellKnown transfer_syntax,
+    const pixel::PixelSource& source, const pixel::EncoderContext& encoder_ctx) {
+	if (!transfer_syntax.valid() || transfer_syntax.uid_type() != UidType::TransferSyntax) {
+		diag::error_and_throw(
+		    "DicomFile::set_pixel_data reason=transfer_syntax must be a valid Transfer Syntax UID");
+	}
+	if (!encoder_ctx.configured_) {
+		diag::error_and_throw(
+		    "DicomFile::set_pixel_data file={} ts={} reason=encoder context is not configured",
+		    path(), transfer_syntax.value());
+	}
+	if (!encoder_ctx.transfer_syntax_uid_.valid() ||
+	    encoder_ctx.transfer_syntax_uid_ != transfer_syntax) {
+		diag::error_and_throw(
+		    "DicomFile::set_pixel_data file={} ts={} ctx_ts={} reason=encoder context transfer syntax mismatch",
+		    path(), transfer_syntax.value(),
+		    encoder_ctx.transfer_syntax_uid_.value());
+	}
+
+	const auto selected = select_encode_plugin_binding_or_throw(
+	    "DicomFile::set_pixel_data", path(), transfer_syntax);
+	if (selected.plugin->key != encoder_ctx.plugin_key_) {
+		diag::error_and_throw(
+		    "DicomFile::set_pixel_data file={} ts={} plugin={} ctx_plugin={} reason=encoder context plugin mismatch",
+		    path(), transfer_syntax.value(), selected.plugin->key,
+		    encoder_ctx.plugin_key_);
+	}
+	set_pixel_data_with_resolved_codec_options(*this, transfer_syntax, source,
+	    *selected.binding, encoder_ctx.codec_options_);
+
+	set_transfer_syntax_state_only(transfer_syntax);
+	DataElement* transfer_syntax_element = add_dataelement("(0002,0010)"_tag, VR::UI);
+	if (!transfer_syntax_element || !transfer_syntax_element->from_transfer_syntax_uid(transfer_syntax)) {
+		diag::error_and_throw(
+		    "DicomFile::set_pixel_data file={} reason=failed to update (0002,0010) TransferSyntaxUID",
+		    path());
+	}
+}
+
+void DicomFile::set_pixel_data(uid::WellKnown transfer_syntax, const pixel::PixelSource& source,
+    std::span<const pixel::CodecOptionTextKv> codec_opt) {
+	if (!transfer_syntax.valid() || transfer_syntax.uid_type() != UidType::TransferSyntax) {
+		diag::error_and_throw(
+		    "DicomFile::set_pixel_data reason=transfer_syntax must be a valid Transfer Syntax UID");
+	}
+
+	const auto selected = select_encode_plugin_binding_or_throw(
+	    "DicomFile::set_pixel_data", path(), transfer_syntax);
+	auto codec_options = build_codec_option_pairs_from_text_or_throw(
+	    "DicomFile::set_pixel_data", path(), transfer_syntax,
+	    selected.plugin->key, codec_opt);
+	set_pixel_data_with_resolved_codec_options(
+	    *this, transfer_syntax, source, *selected.binding, codec_options);
 
 	set_transfer_syntax_state_only(transfer_syntax);
 	DataElement* transfer_syntax_element = add_dataelement("(0002,0010)"_tag, VR::UI);

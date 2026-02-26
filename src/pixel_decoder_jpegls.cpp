@@ -34,13 +34,6 @@ bool sv_dtype_is_integral(DataType sv_dtype) noexcept {
 	}
 }
 
-void set_codec_error(codec_error& out_error, codec_status_code code,
-    std::string_view stage, std::string detail) {
-	out_error.code = code;
-	out_error.stage = std::string(stage);
-	out_error.detail = std::move(detail);
-}
-
 template <typename... Args>
 [[noreturn]] void throw_decode_error(fmt::format_string<Args...> format, Args... args) {
 	throw std::runtime_error(fmt::vformat(format, fmt::make_format_args(args...)));
@@ -121,12 +114,12 @@ std::uint32_t checked_u32_stride(const char* path_name, std::size_t stride) {
 } // namespace
 
 bool decode_jpegls_into(const pixel::PixelDataInfo& info,
-    const decode_value_transform& value_transform,
+    const DecodeValueTransform& value_transform,
     std::span<std::uint8_t> dst,
     const DecodeStrides& dst_strides, const DecodeOptions& opt,
-    codec_error& out_error, std::span<const std::uint8_t> prepared_source) noexcept {
-	out_error = codec_error{};
-	auto fail = [&](codec_status_code code, std::string_view stage,
+    CodecError& out_error, std::span<const std::uint8_t> prepared_source) noexcept {
+	out_error = CodecError{};
+	auto fail = [&](CodecStatusCode code, std::string_view stage,
 	                std::string detail) noexcept -> bool {
 		set_codec_error(out_error, code, stage, std::move(detail));
 		return false;
@@ -134,41 +127,41 @@ bool decode_jpegls_into(const pixel::PixelDataInfo& info,
 
 	try {
 		if (!info.has_pixel_data) {
-			return fail(codec_status_code::invalid_argument, "validate",
+			return fail(CodecStatusCode::invalid_argument, "validate",
 			    "sv_dtype is unknown");
 		}
 		if (!info.ts.is_jpegls()) {
-			return fail(codec_status_code::unsupported, "validate",
+			return fail(CodecStatusCode::unsupported, "validate",
 			    "transfer syntax is not JPEG-LS");
 		}
 		if (info.rows <= 0 || info.cols <= 0 || info.samples_per_pixel <= 0) {
-			return fail(codec_status_code::invalid_argument, "validate",
+			return fail(CodecStatusCode::invalid_argument, "validate",
 			    "invalid Rows/Columns/SamplesPerPixel");
 		}
 		if (info.frames <= 0) {
-			return fail(codec_status_code::invalid_argument, "validate",
+			return fail(CodecStatusCode::invalid_argument, "validate",
 			    "invalid NumberOfFrames");
 		}
 
 		const auto samples_per_pixel_value = info.samples_per_pixel;
 		if (samples_per_pixel_value != 1 && samples_per_pixel_value != 3 &&
 		    samples_per_pixel_value != 4) {
-			return fail(codec_status_code::unsupported, "validate",
+			return fail(CodecStatusCode::unsupported, "validate",
 			    "only SamplesPerPixel=1/3/4 is supported in current JPEG-LS path");
 		}
 		const auto samples_per_pixel = static_cast<std::size_t>(samples_per_pixel_value);
 		if (opt.scaled && samples_per_pixel != 1) {
-			return fail(codec_status_code::invalid_argument, "validate",
+			return fail(CodecStatusCode::invalid_argument, "validate",
 			    "scaled output supports SamplesPerPixel=1 only");
 		}
 		if (!sv_dtype_is_integral(info.sv_dtype)) {
-			return fail(codec_status_code::unsupported, "validate",
+			return fail(CodecStatusCode::unsupported, "validate",
 			    "JPEG-LS supports integral sv_dtype only");
 		}
 
 		const auto src_bytes_per_sample = sv_dtype_bytes(info.sv_dtype);
 		if (src_bytes_per_sample == 0 || src_bytes_per_sample > 2) {
-			return fail(codec_status_code::unsupported, "validate",
+			return fail(CodecStatusCode::unsupported, "validate",
 			    "JPEG-LS supports integral sv_dtype up to 16-bit only");
 		}
 
@@ -180,18 +173,18 @@ bool decode_jpegls_into(const pixel::PixelDataInfo& info,
 			validate_destination(dst, dst_strides, opt.planar_out, rows, cols,
 			    samples_per_pixel, dst_bytes_per_sample);
 		} catch (const std::bad_alloc&) {
-			return fail(codec_status_code::internal_error, "allocate",
+			return fail(CodecStatusCode::internal_error, "allocate",
 			    "memory allocation failed");
 		} catch (const std::exception& e) {
-			return fail(codec_status_code::invalid_argument, "validate", e.what());
+			return fail(CodecStatusCode::invalid_argument, "validate", e.what());
 		} catch (...) {
-			return fail(codec_status_code::backend_error, "validate",
+			return fail(CodecStatusCode::backend_error, "validate",
 			    "non-standard exception");
 		}
 
 			const auto frame_source = prepared_source;
 			if (frame_source.empty()) {
-				return fail(codec_status_code::invalid_argument, "load_frame_source",
+				return fail(CodecStatusCode::invalid_argument, "load_frame_source",
 				    "JPEG-LS frame has empty codestream");
 			}
 
@@ -204,7 +197,7 @@ bool decode_jpegls_into(const pixel::PixelDataInfo& info,
 			frame_info = decoder.frame_info();
 			interleave_mode = decoder.interleave_mode();
 		} catch (const std::exception& e) {
-			return fail(codec_status_code::backend_error, "decode_frame", e.what());
+			return fail(CodecStatusCode::backend_error, "decode_frame", e.what());
 		}
 
 		validate_decoded_header(
@@ -220,7 +213,7 @@ bool decode_jpegls_into(const pixel::PixelDataInfo& info,
 			src_planar = Planar::interleaved;
 			break;
 		default:
-			return fail(codec_status_code::unsupported, "validate",
+			return fail(CodecStatusCode::unsupported, "validate",
 			    "JPEG-LS reported unsupported interleave mode");
 		}
 
@@ -230,7 +223,7 @@ bool decode_jpegls_into(const pixel::PixelDataInfo& info,
 			try {
 				decoder.decode(dst.data(), dst_strides.frame, decode_stride);
 			} catch (const std::exception& e) {
-				return fail(codec_status_code::backend_error, "decode_frame", e.what());
+				return fail(CodecStatusCode::backend_error, "decode_frame", e.what());
 			}
 			return true;
 		}
@@ -248,7 +241,7 @@ bool decode_jpegls_into(const pixel::PixelDataInfo& info,
 		try {
 			decoder.decode(decoded.data(), decoded.size(), decode_stride);
 		} catch (const std::exception& e) {
-			return fail(codec_status_code::backend_error, "decode_frame", e.what());
+			return fail(CodecStatusCode::backend_error, "decode_frame", e.what());
 		}
 
 		if (opt.scaled) {
@@ -263,18 +256,18 @@ bool decode_jpegls_into(const pixel::PixelDataInfo& info,
 		    dst.data(), rows, cols, samples_per_pixel, src_row_bytes, dst_strides.row);
 		return true;
 	} catch (const std::bad_alloc&) {
-		return fail(codec_status_code::internal_error, "allocate",
+		return fail(CodecStatusCode::internal_error, "allocate",
 		    "memory allocation failed");
 	} catch (const std::exception& e) {
-		if (out_error.code != codec_status_code::ok) {
+		if (out_error.code != CodecStatusCode::ok) {
 			return false;
 		}
-		return fail(codec_status_code::backend_error, "decode_frame", e.what());
+		return fail(CodecStatusCode::backend_error, "decode_frame", e.what());
 	} catch (...) {
-		if (out_error.code != codec_status_code::ok) {
+		if (out_error.code != CodecStatusCode::ok) {
 			return false;
 		}
-		return fail(codec_status_code::backend_error, "decode_frame",
+		return fail(CodecStatusCode::backend_error, "decode_frame",
 		    "non-standard exception");
 	}
 }

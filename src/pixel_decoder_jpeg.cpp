@@ -21,17 +21,17 @@ namespace pixel::detail {
 
 namespace {
 
-class turbojpeg_handle_guard {
+class TurboJpegHandleGuard {
 public:
-	explicit turbojpeg_handle_guard(tjhandle handle) noexcept : handle_(handle) {}
-	~turbojpeg_handle_guard() {
+	explicit TurboJpegHandleGuard(tjhandle handle) noexcept : handle_(handle) {}
+	~TurboJpegHandleGuard() {
 		if (handle_) {
 			tj3Destroy(handle_);
 		}
 	}
 
-	turbojpeg_handle_guard(const turbojpeg_handle_guard&) = delete;
-	turbojpeg_handle_guard& operator=(const turbojpeg_handle_guard&) = delete;
+	TurboJpegHandleGuard(const TurboJpegHandleGuard&) = delete;
+	TurboJpegHandleGuard& operator=(const TurboJpegHandleGuard&) = delete;
 
 	[[nodiscard]] tjhandle get() const noexcept { return handle_; }
 
@@ -51,13 +51,6 @@ bool sv_dtype_is_integral(DataType sv_dtype) noexcept {
 	default:
 		return false;
 	}
-}
-
-void set_codec_error(codec_error& out_error, codec_status_code code,
-    std::string_view stage, std::string detail) {
-	out_error.code = code;
-	out_error.stage = std::string(stage);
-	out_error.detail = std::move(detail);
 }
 
 template <typename... Args>
@@ -312,12 +305,12 @@ void validate_decoded_header(const pixel::PixelDataInfo& info, std::size_t rows,
 } // namespace
 
 bool decode_jpeg_into(const pixel::PixelDataInfo& info,
-    const decode_value_transform& value_transform,
+    const DecodeValueTransform& value_transform,
     std::span<std::uint8_t> dst,
     const DecodeStrides& dst_strides, const DecodeOptions& opt,
-    codec_error& out_error, std::span<const std::uint8_t> prepared_source) noexcept {
-	out_error = codec_error{};
-	auto fail = [&](codec_status_code code, std::string_view stage,
+    CodecError& out_error, std::span<const std::uint8_t> prepared_source) noexcept {
+	out_error = CodecError{};
+	auto fail = [&](CodecStatusCode code, std::string_view stage,
 	                std::string detail) noexcept -> bool {
 		set_codec_error(out_error, code, stage, std::move(detail));
 		return false;
@@ -325,42 +318,42 @@ bool decode_jpeg_into(const pixel::PixelDataInfo& info,
 
 	try {
 		if (!info.has_pixel_data) {
-			return fail(codec_status_code::invalid_argument, "validate",
+			return fail(CodecStatusCode::invalid_argument, "validate",
 			    "sv_dtype is unknown");
 		}
 		if (!info.ts.is_jpeg_family() || info.ts.is_jpegls() || info.ts.is_jpeg2000() ||
 		    info.ts.is_jpegxl()) {
-			return fail(codec_status_code::unsupported, "validate",
+			return fail(CodecStatusCode::unsupported, "validate",
 			    "transfer syntax is not supported by libjpeg-turbo path");
 		}
 		if (info.rows <= 0 || info.cols <= 0 || info.samples_per_pixel <= 0) {
-			return fail(codec_status_code::invalid_argument, "validate",
+			return fail(CodecStatusCode::invalid_argument, "validate",
 			    "invalid Rows/Columns/SamplesPerPixel");
 		}
 		if (info.frames <= 0) {
-			return fail(codec_status_code::invalid_argument, "validate",
+			return fail(CodecStatusCode::invalid_argument, "validate",
 			    "invalid NumberOfFrames");
 		}
 
 		const auto samples_per_pixel_value = info.samples_per_pixel;
 		if (samples_per_pixel_value != 1 && samples_per_pixel_value != 3 &&
 		    samples_per_pixel_value != 4) {
-			return fail(codec_status_code::unsupported, "validate",
+			return fail(CodecStatusCode::unsupported, "validate",
 			    "only SamplesPerPixel=1/3/4 is supported in current JPEG path");
 		}
 		const auto samples_per_pixel = static_cast<std::size_t>(samples_per_pixel_value);
 		if (opt.scaled && samples_per_pixel != 1) {
-			return fail(codec_status_code::invalid_argument, "validate",
+			return fail(CodecStatusCode::invalid_argument, "validate",
 			    "scaled output supports SamplesPerPixel=1 only");
 		}
 		if (!sv_dtype_is_integral(info.sv_dtype)) {
-			return fail(codec_status_code::unsupported, "validate",
+			return fail(CodecStatusCode::unsupported, "validate",
 			    "JPEG supports integral sv_dtype only");
 		}
 
 		const auto src_bytes_per_sample = sv_dtype_bytes(info.sv_dtype);
 		if (src_bytes_per_sample == 0 || src_bytes_per_sample > 2) {
-			return fail(codec_status_code::unsupported, "validate",
+			return fail(CodecStatusCode::unsupported, "validate",
 			    "JPEG supports integral sv_dtype up to 16-bit only");
 		}
 
@@ -372,18 +365,18 @@ bool decode_jpeg_into(const pixel::PixelDataInfo& info,
 			validate_destination(dst, dst_strides, opt.planar_out, rows, cols,
 			    samples_per_pixel, dst_bytes_per_sample);
 		} catch (const std::bad_alloc&) {
-			return fail(codec_status_code::internal_error, "allocate",
+			return fail(CodecStatusCode::internal_error, "allocate",
 			    "memory allocation failed");
 		} catch (const std::exception& e) {
-			return fail(codec_status_code::invalid_argument, "validate", e.what());
+			return fail(CodecStatusCode::invalid_argument, "validate", e.what());
 		} catch (...) {
-			return fail(codec_status_code::backend_error, "validate",
+			return fail(CodecStatusCode::backend_error, "validate",
 			    "non-standard exception");
 		}
 
 			const auto frame_source = prepared_source;
 			if (frame_source.empty()) {
-				return fail(codec_status_code::invalid_argument, "load_frame_source",
+				return fail(CodecStatusCode::invalid_argument, "load_frame_source",
 				    "JPEG frame has empty codestream");
 			}
 			std::span<const std::uint8_t> decode_source = frame_source;
@@ -395,9 +388,9 @@ bool decode_jpeg_into(const pixel::PixelDataInfo& info,
 				decode_source = std::span<const std::uint8_t>(patched_source);
 			}
 
-		turbojpeg_handle_guard handle(tj3Init(TJINIT_DECOMPRESS));
+		TurboJpegHandleGuard handle(tj3Init(TJINIT_DECOMPRESS));
 		if (!handle.get()) {
-			return fail(codec_status_code::backend_error, "decode_frame",
+			return fail(CodecStatusCode::backend_error, "decode_frame",
 			    "failed to initialize libjpeg-turbo decompressor");
 		}
 
@@ -418,7 +411,7 @@ bool decode_jpeg_into(const pixel::PixelDataInfo& info,
 
 		const int pixel_format = pixel_format_for_samples(samples_per_pixel);
 		if (pixel_format == TJPF_UNKNOWN) {
-			return fail(codec_status_code::unsupported, "validate",
+			return fail(CodecStatusCode::unsupported, "validate",
 			    "unsupported JPEG pixel format for SamplesPerPixel");
 		}
 
@@ -433,7 +426,7 @@ bool decode_jpeg_into(const pixel::PixelDataInfo& info,
 
 		if (can_decode_directly) {
 			if (dst_strides.row % src_bytes_per_sample != 0) {
-				return fail(codec_status_code::invalid_argument, "validate",
+				return fail(CodecStatusCode::invalid_argument, "validate",
 				    "destination row stride is not aligned to sample size");
 			}
 			const int destination_pitch_samples = checked_int_stride(
@@ -486,18 +479,18 @@ bool decode_jpeg_into(const pixel::PixelDataInfo& info,
 		    dst.data(), rows, cols, samples_per_pixel, src_row_bytes, dst_strides.row);
 		return true;
 	} catch (const std::bad_alloc&) {
-		return fail(codec_status_code::internal_error, "allocate",
+		return fail(CodecStatusCode::internal_error, "allocate",
 		    "memory allocation failed");
 	} catch (const std::exception& e) {
-		if (out_error.code != codec_status_code::ok) {
+		if (out_error.code != CodecStatusCode::ok) {
 			return false;
 		}
-		return fail(codec_status_code::backend_error, "decode_frame", e.what());
+		return fail(CodecStatusCode::backend_error, "decode_frame", e.what());
 	} catch (...) {
-		if (out_error.code != codec_status_code::ok) {
+		if (out_error.code != CodecStatusCode::ok) {
 			return false;
 		}
-		return fail(codec_status_code::backend_error, "decode_frame",
+		return fail(CodecStatusCode::backend_error, "decode_frame",
 		    "non-standard exception");
 	}
 }

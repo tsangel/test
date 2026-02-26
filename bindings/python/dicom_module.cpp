@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstring>
 #include <cstdint>
+#include <iomanip>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -38,6 +39,7 @@ using dicom::Tag;
 using dicom::VR;
 using dicom::uid::WellKnown;
 using Uid = dicom::uid::WellKnown;
+using EncoderContext = dicom::pixel::EncoderContext;
 namespace diag = dicom::diag;
 
 namespace {
@@ -135,7 +137,7 @@ std::string normalize_htj2k_decoder_name(std::string decoder) {
 	return normalized;
 }
 
-std::string normalize_codec_option_name(std::string option) {
+std::string normalize_encoder_option_name(std::string option) {
 	std::string normalized{};
 	normalized.reserve(option.size());
 	for (const unsigned char ch : option) {
@@ -147,25 +149,53 @@ std::string normalize_codec_option_name(std::string option) {
 	return normalized;
 }
 
-dicom::pixel::CodecOptions parse_codec_options(
-    nb::handle codec_opt_obj,
-    std::optional<dicom::uid::WellKnown> transfer_syntax = std::nullopt) {
-	using dicom::pixel::AutoCodecOptions;
-	using dicom::pixel::CodecOptions;
-	using dicom::pixel::Htj2kOptions;
-	using dicom::pixel::J2kOptions;
-	using dicom::pixel::JpegLsOptions;
-	using dicom::pixel::JpegOptions;
-	using dicom::pixel::JpegXlOptions;
-	using dicom::pixel::NoCompression;
-	using dicom::pixel::RleOptions;
-	using namespace dicom::literals;
+struct CodecOptionTextStorage {
+	bool auto_mode{false};
+	struct Entry {
+		std::string key;
+		std::string value;
+	};
+	std::vector<Entry> entries{};
+	std::vector<dicom::pixel::CodecOptionTextKv> items{};
 
-	if (!codec_opt_obj || codec_opt_obj.is_none()) {
-		return CodecOptions{AutoCodecOptions{}};
+	void add(std::string_view key, std::string value) {
+		entries.push_back(Entry{std::string(key), std::move(value)});
 	}
 
-	struct codec_option_fields {
+	void finalize() {
+		items.clear();
+		items.reserve(entries.size());
+		for (const auto& entry : entries) {
+			items.push_back(dicom::pixel::CodecOptionTextKv{
+			    .key = entry.key,
+			    .value = entry.value,
+			});
+		}
+	}
+
+	[[nodiscard]] std::span<const dicom::pixel::CodecOptionTextKv> span() const {
+		return std::span<const dicom::pixel::CodecOptionTextKv>(
+		    items.data(), items.size());
+	}
+};
+
+[[nodiscard]] std::string format_encoder_option_double(double value) {
+	std::ostringstream stream;
+	stream << std::setprecision(17) << value;
+	return stream.str();
+}
+
+[[nodiscard]] CodecOptionTextStorage parse_encoder_options_to_text_storage(
+    nb::handle options_obj,
+    std::optional<dicom::uid::WellKnown> transfer_syntax = std::nullopt) {
+	using namespace dicom::literals;
+	CodecOptionTextStorage storage{};
+	if (!options_obj || options_obj.is_none()) {
+		storage.auto_mode = true;
+		return storage;
+	}
+
+	struct CodecOptionFields {
 		bool has_type{false};
 		std::string type_name{"auto"};
 		bool has_target_bpp{false};
@@ -186,9 +216,21 @@ dicom::pixel::CodecOptions parse_codec_options(
 		int near_lossless_error{0};
 	};
 
-	const auto parse_from_name = [&](std::string option_name, const codec_option_fields& fields)
-	    -> CodecOptions {
-		const auto normalized = normalize_codec_option_name(std::move(option_name));
+	const auto throw_incompatible = [&](std::string_view codec_name) {
+		if (!transfer_syntax) {
+			return;
+		}
+		throw nb::value_error(
+		    (std::string("options type '") + std::string(codec_name) +
+		        "' is incompatible with transfer syntax '" +
+		        std::string(transfer_syntax->value()) + "'")
+		        .c_str());
+	};
+
+	const auto parse_from_name = [&](std::string option_name,
+	                                 const CodecOptionFields& fields) -> CodecOptionTextStorage {
+		CodecOptionTextStorage out{};
+		const auto normalized = normalize_encoder_option_name(std::move(option_name));
 		const bool has_j2k_fields =
 		    fields.has_target_bpp || fields.has_target_psnr || fields.has_color_transform;
 		const bool has_thread_field = fields.has_threads;
@@ -201,112 +243,145 @@ dicom::pixel::CodecOptions parse_codec_options(
 			    has_jpeg_fields || has_jpegls_fields) {
 				throw nb::value_error(
 				    (std::string(codec_name) +
-				        " codec_opt does not accept extra option fields").c_str());
+				        " options does not accept extra option fields").c_str());
 			}
 		};
 
 		if (normalized.empty() || normalized == "auto") {
-			ensure_no_fields("AutoCodecOptions");
-			return CodecOptions{AutoCodecOptions{}};
+			ensure_no_fields("auto");
+			out.auto_mode = true;
+			return out;
 		}
 		if (normalized == "none" || normalized == "nocompression" ||
 		    normalized == "native" || normalized == "uncompressed") {
-			ensure_no_fields("NoCompression");
-			return CodecOptions{NoCompression{}};
+			ensure_no_fields("none");
+			if (transfer_syntax && !transfer_syntax->is_uncompressed()) {
+				throw_incompatible("none");
+			}
+			out.finalize();
+			return out;
 		}
 		if (normalized == "rle" || normalized == "rlelossless") {
-			ensure_no_fields("RleOptions");
-			return CodecOptions{RleOptions{}};
-		}
-		if (normalized == "j2k" || normalized == "jpeg2000" || normalized == "j2koptions") {
-			if (has_jpeg_fields || has_jpegls_fields || has_jpegxl_fields) {
-				throw nb::value_error(
-				    "J2kOptions codec_opt does not accept quality/near_lossless_error/distance/effort");
+			ensure_no_fields("rle");
+			if (transfer_syntax && !transfer_syntax->is_rle()) {
+				throw_incompatible("rle");
 			}
+			out.finalize();
+			return out;
+		}
+			if (normalized == "j2k" || normalized == "jpeg2000" || normalized == "j2koptions") {
+				if (has_jpeg_fields || has_jpegls_fields || has_jpegxl_fields) {
+					throw nb::value_error(
+					    "j2k options do not accept quality/near_lossless_error/distance/effort");
+				}
 			if (fields.target_bpp < 0.0 || fields.target_psnr < 0.0) {
-				throw nb::value_error("codec_opt target_bpp/target_psnr must be >= 0");
+				throw nb::value_error("options target_bpp/target_psnr must be >= 0");
 			}
 			if (fields.threads < -1) {
-				throw nb::value_error("codec_opt threads must be -1, 0, or positive");
+				throw nb::value_error("options threads must be -1, 0, or positive");
 			}
-			J2kOptions options{};
-			options.target_bpp = fields.target_bpp;
-			options.target_psnr = fields.target_psnr;
-			options.threads = fields.threads;
-			options.use_color_transform = fields.color_transform;
-			return CodecOptions{options};
+			if (transfer_syntax && !transfer_syntax->is_jpeg2000()) {
+				throw_incompatible("j2k");
+			}
+			out.entries.reserve(4);
+			out.add("target_bpp", format_encoder_option_double(fields.target_bpp));
+			out.add("target_psnr", format_encoder_option_double(fields.target_psnr));
+			out.add("threads", std::to_string(fields.threads));
+			out.add("color_transform", fields.color_transform ? "true" : "false");
+			out.finalize();
+			return out;
 		}
-		if (normalized == "htj2k" || normalized == "htj2koptions") {
-			if (has_jpeg_fields || has_jpegls_fields || has_jpegxl_fields) {
-				throw nb::value_error(
-				    "Htj2kOptions codec_opt does not accept quality/near_lossless_error/distance/effort");
-			}
+			if (normalized == "htj2k" || normalized == "htj2koptions") {
+				if (has_jpeg_fields || has_jpegls_fields || has_jpegxl_fields) {
+					throw nb::value_error(
+					    "htj2k options do not accept quality/near_lossless_error/distance/effort");
+				}
 			if (fields.target_bpp < 0.0 || fields.target_psnr < 0.0) {
-				throw nb::value_error("codec_opt target_bpp/target_psnr must be >= 0");
+				throw nb::value_error("options target_bpp/target_psnr must be >= 0");
 			}
 			if (fields.threads < -1) {
-				throw nb::value_error("codec_opt threads must be -1, 0, or positive");
+				throw nb::value_error("options threads must be -1, 0, or positive");
 			}
-			Htj2kOptions options{};
-			options.target_bpp = fields.target_bpp;
-			options.target_psnr = fields.target_psnr;
-			options.threads = fields.threads;
-			options.use_color_transform = fields.color_transform;
-			return CodecOptions{options};
+			if (transfer_syntax && !transfer_syntax->is_htj2k()) {
+				throw_incompatible("htj2k");
+			}
+			out.entries.reserve(4);
+			out.add("target_bpp", format_encoder_option_double(fields.target_bpp));
+			out.add("target_psnr", format_encoder_option_double(fields.target_psnr));
+			out.add("threads", std::to_string(fields.threads));
+			out.add("color_transform", fields.color_transform ? "true" : "false");
+			out.finalize();
+			return out;
 		}
-		if (normalized == "jpegls" || normalized == "jls" ||
-		    normalized == "jpeglsoptions") {
-			if (has_j2k_fields || has_thread_field || has_jpeg_fields || has_jpegxl_fields) {
-				throw nb::value_error(
-				    "JpegLsOptions codec_opt does not accept target_bpp/target_psnr/threads/color_transform/quality/distance/effort");
-			}
+			if (normalized == "jpegls" || normalized == "jls" ||
+			    normalized == "jpeglsoptions") {
+				if (has_j2k_fields || has_thread_field || has_jpeg_fields || has_jpegxl_fields) {
+					throw nb::value_error(
+					    "jpegls options do not accept target_bpp/target_psnr/threads/color_transform/quality/distance/effort");
+				}
 			if (fields.near_lossless_error < 0 || fields.near_lossless_error > 255) {
 				throw nb::value_error(
-				    "codec_opt near_lossless_error must be in [0, 255]");
+				    "options near_lossless_error must be in [0, 255]");
 			}
-			JpegLsOptions options{};
-			options.near_lossless_error = fields.near_lossless_error;
-			return CodecOptions{options};
-		}
-		if (normalized == "jpeg" || normalized == "jpegbaseline" ||
-		    normalized == "jpeglossless" || normalized == "jpegoptions") {
-			if (has_j2k_fields || has_thread_field || has_jpegls_fields || has_jpegxl_fields) {
+			if (transfer_syntax && !transfer_syntax->is_jpegls()) {
+				throw_incompatible("jpegls");
+			}
+			if (transfer_syntax && transfer_syntax->is_lossless() &&
+			    fields.near_lossless_error != 0) {
 				throw nb::value_error(
-				    "JpegOptions codec_opt does not accept target_bpp/target_psnr/threads/color_transform/near_lossless_error/distance/effort");
+				    "JPEG-LS lossless transfer syntax requires options near_lossless_error=0");
 			}
+			if (transfer_syntax && transfer_syntax->is_lossy() &&
+			    fields.near_lossless_error <= 0) {
+				throw nb::value_error(
+				    "JPEG-LS lossy transfer syntax requires options near_lossless_error>0");
+			}
+			out.entries.reserve(1);
+			out.add("near_lossless_error", std::to_string(fields.near_lossless_error));
+			out.finalize();
+			return out;
+		}
+			if (normalized == "jpeg" || normalized == "jpegbaseline" ||
+			    normalized == "jpeglossless" || normalized == "jpegoptions") {
+				if (has_j2k_fields || has_thread_field || has_jpegls_fields || has_jpegxl_fields) {
+					throw nb::value_error(
+					    "jpeg options do not accept target_bpp/target_psnr/threads/color_transform/near_lossless_error/distance/effort");
+				}
 			if (fields.quality < 1 || fields.quality > 100) {
-				throw nb::value_error("codec_opt quality must be in [1, 100]");
+				throw nb::value_error("options quality must be in [1, 100]");
 			}
-			JpegOptions options{};
-			options.quality = fields.quality;
-			return CodecOptions{options};
+			if (transfer_syntax && !transfer_syntax->is_jpeg_family()) {
+				throw_incompatible("jpeg");
+			}
+			out.entries.reserve(1);
+			out.add("quality", std::to_string(fields.quality));
+			out.finalize();
+			return out;
 		}
-		if (normalized == "jpegxl" || normalized == "jxl" ||
-		    normalized == "jpegxloptions") {
-			if (has_j2k_fields || has_jpeg_fields || has_jpegls_fields) {
-				throw nb::value_error(
-				    "JpegXlOptions codec_opt does not accept target_bpp/target_psnr/color_transform/quality/near_lossless_error");
-			}
+			if (normalized == "jpegxl" || normalized == "jxl" ||
+			    normalized == "jpegxloptions") {
+				if (has_j2k_fields || has_jpeg_fields || has_jpegls_fields) {
+					throw nb::value_error(
+					    "jpegxl options do not accept target_bpp/target_psnr/color_transform/quality/near_lossless_error");
+				}
 			if (fields.threads < -1) {
-				throw nb::value_error("codec_opt threads must be -1, 0, or positive");
+				throw nb::value_error("options threads must be -1, 0, or positive");
 			}
 			if (fields.effort < 1 || fields.effort > 10) {
-				throw nb::value_error("codec_opt effort must be in [1, 10]");
+				throw nb::value_error("options effort must be in [1, 10]");
 			}
 			if (!std::isfinite(fields.distance) || fields.distance < 0.0 ||
 			    fields.distance > 25.0) {
-				throw nb::value_error("codec_opt distance must be in [0, 25]");
+				throw nb::value_error("options distance must be in [0, 25]");
 			}
-			JpegXlOptions options{};
+			if (transfer_syntax && !transfer_syntax->is_jpegxl()) {
+				throw_incompatible("jpegxl");
+			}
+			double distance = fields.distance;
 			if (!fields.has_distance && transfer_syntax &&
 			    *transfer_syntax == "JPEGXLLossless"_uid) {
-				options.distance = 0.0;
+				distance = 0.0;
 			}
-			if (fields.has_distance) {
-				options.distance = fields.distance;
-			}
-			options.effort = fields.effort;
-			options.threads = fields.threads;
 			if (transfer_syntax &&
 			    *transfer_syntax == "JPEGXLJPEGRecompression"_uid) {
 				throw nb::value_error(
@@ -314,50 +389,56 @@ dicom::pixel::CodecOptions parse_codec_options(
 			}
 			if (transfer_syntax &&
 			    *transfer_syntax == "JPEGXLLossless"_uid &&
-			    options.distance != 0.0) {
+			    distance != 0.0) {
 				throw nb::value_error(
-				    "JPEGXLLossless transfer syntax requires codec_opt distance=0");
+				    "JPEGXLLossless transfer syntax requires options distance=0");
 			}
 			if (transfer_syntax &&
 			    *transfer_syntax == "JPEGXL"_uid &&
-			    options.distance <= 0.0) {
+			    distance <= 0.0) {
 				throw nb::value_error(
-				    "JPEGXL transfer syntax requires codec_opt distance > 0");
+				    "JPEGXL transfer syntax requires options distance > 0");
 			}
-			return CodecOptions{options};
+
+			out.entries.reserve(3);
+			out.add("distance", format_encoder_option_double(distance));
+			out.add("effort", std::to_string(fields.effort));
+			out.add("threads", std::to_string(fields.threads));
+			out.finalize();
+			return out;
 		}
 
 		throw nb::value_error(
-		    "codec_opt must be one of: auto, none, rle, j2k, htj2k, jpegls, jpeg, jpegxl");
-		};
+		    "options must be one of: auto, none, rle, j2k, htj2k, jpegls, jpeg, jpegxl");
+	};
 
-	if (nb::isinstance<nb::str>(codec_opt_obj)) {
-		const codec_option_fields fields{};
-		return parse_from_name(nb::cast<std::string>(codec_opt_obj), fields);
+	if (nb::isinstance<nb::str>(options_obj)) {
+		const CodecOptionFields fields{};
+		return parse_from_name(nb::cast<std::string>(options_obj), fields);
 	}
 
-	if (!PyDict_Check(codec_opt_obj.ptr())) {
-		throw nb::type_error("codec_opt must be None, str, or dict");
+	if (!PyDict_Check(options_obj.ptr())) {
+		throw nb::type_error("options must be None, str, or dict");
 	}
 
-		nb::dict codec_dict = nb::borrow<nb::dict>(codec_opt_obj);
-		static const std::unordered_set<std::string> allowed_keys{
-		    "type", "target_bpp", "target_psnr", "threads", "color_transform", "use_mct",
-		    "mct", "quality", "near_lossless_error", "distance", "effort"};
+	nb::dict codec_dict = nb::borrow<nb::dict>(options_obj);
+	static const std::unordered_set<std::string> allowed_keys{
+	    "type", "target_bpp", "target_psnr", "threads", "color_transform", "use_mct",
+	    "mct", "quality", "near_lossless_error", "distance", "effort"};
 	PyObject* key_obj = nullptr;
 	PyObject* value_obj = nullptr;
 	Py_ssize_t pos = 0;
 	while (PyDict_Next(codec_dict.ptr(), &pos, &key_obj, &value_obj)) {
 		if (!PyUnicode_Check(key_obj)) {
-			throw nb::type_error("codec_opt dict keys must be str");
+			throw nb::type_error("options dict keys must be str");
 		}
 		const auto key = nb::cast<std::string>(nb::handle(key_obj));
 		if (allowed_keys.find(key) == allowed_keys.end()) {
-			throw nb::value_error(("codec_opt has unknown key: " + key).c_str());
+			throw nb::value_error(("options has unknown key: " + key).c_str());
 		}
 	}
 
-	codec_option_fields fields{};
+	CodecOptionFields fields{};
 	if (PyObject* type_obj = PyDict_GetItemString(codec_dict.ptr(), "type")) {
 		fields.has_type = true;
 		fields.type_name = nb::cast<std::string>(nb::handle(type_obj));
@@ -382,7 +463,7 @@ dicom::pixel::CodecOptions parse_codec_options(
 		const bool parsed = nb::cast<bool>(nb::handle(value));
 		if (fields.has_color_transform && fields.color_transform != parsed) {
 			throw nb::value_error(
-			    "codec_opt color_transform and use_mct must match when both are provided");
+			    "options color_transform and use_mct must match when both are provided");
 		}
 		fields.has_color_transform = true;
 		fields.color_transform = parsed;
@@ -391,7 +472,7 @@ dicom::pixel::CodecOptions parse_codec_options(
 		const bool parsed = nb::cast<bool>(nb::handle(value));
 		if (fields.has_color_transform && fields.color_transform != parsed) {
 			throw nb::value_error(
-			    "codec_opt color_transform and mct must match when both are provided");
+			    "options color_transform and mct must match when both are provided");
 		}
 		fields.has_color_transform = true;
 		fields.color_transform = parsed;
@@ -424,11 +505,57 @@ dicom::pixel::CodecOptions parse_codec_options(
 			fields.type_name = "jpegls";
 		} else if (fields.has_color_transform) {
 			throw nb::value_error(
-			    "codec_opt with color_transform/use_mct requires explicit type ('j2k' or 'htj2k')");
+			    "options with color_transform/use_mct requires explicit type ('j2k' or 'htj2k')");
 		}
 	}
 
 	return parse_from_name(fields.type_name, fields);
+}
+
+[[nodiscard]] Uid parse_transfer_syntax_text_or_throw(
+    const std::string& transfer_syntax_text) {
+	const auto uid = dicom::uid::lookup(transfer_syntax_text);
+	if (!uid) {
+		throw nb::value_error(("Unknown DICOM UID: " + transfer_syntax_text).c_str());
+	}
+	if (uid->uid_type() != dicom::UidType::TransferSyntax) {
+		throw nb::value_error(
+		    ("UID is not a Transfer Syntax UID: " + transfer_syntax_text).c_str());
+	}
+	return *uid;
+}
+
+void set_transfer_syntax_with_options(
+    DicomFile& self, Uid transfer_syntax, nb::handle options) {
+	const auto text_options =
+	    parse_encoder_options_to_text_storage(options, transfer_syntax);
+	if (text_options.auto_mode) {
+		self.set_transfer_syntax(transfer_syntax);
+		return;
+	}
+	self.set_transfer_syntax(transfer_syntax, text_options.span());
+}
+
+[[nodiscard]] EncoderContext create_encoder_context_with_options(
+    Uid transfer_syntax, nb::handle options) {
+	const auto text_options =
+	    parse_encoder_options_to_text_storage(options, transfer_syntax);
+	if (text_options.auto_mode) {
+		return dicom::pixel::create_encoder_context(transfer_syntax);
+	}
+	return dicom::pixel::create_encoder_context(
+	    transfer_syntax, text_options.span());
+}
+
+void configure_encoder_context_with_options(EncoderContext& context,
+    Uid transfer_syntax, nb::handle options) {
+	const auto text_options =
+	    parse_encoder_options_to_text_storage(options, transfer_syntax);
+	if (text_options.auto_mode) {
+		context.configure(transfer_syntax);
+		return;
+	}
+	context.configure(transfer_syntax, text_options.span());
 }
 
 dicom::pixel::Htj2kDecoder parse_htj2k_decoder(std::string decoder) {
@@ -1400,6 +1527,51 @@ NB_MODULE(_dicomsdl, m) {
 		    },
 		    nb::keep_alive<0, 1>(), "Iterate over DataElements in tag order");
 
+	nb::class_<EncoderContext>(m, "EncoderContext",
+	    "Reusable encoder option context bound to one transfer syntax.")
+		.def(nb::init<>())
+		.def("__enter__",
+		    [](EncoderContext& self) -> EncoderContext& { return self; },
+		    nb::rv_policy::reference_internal)
+		.def("__exit__",
+		    [](EncoderContext&, nb::handle, nb::handle, nb::handle) {
+			    return false;
+		    },
+		    nb::arg("exc_type").none(), nb::arg("exc_value").none(),
+		    nb::arg("traceback").none())
+		.def("configure",
+		    [](EncoderContext& self, const Uid& transfer_syntax, nb::handle options) {
+			    configure_encoder_context_with_options(
+			        self, transfer_syntax, options);
+		    },
+		    nb::arg("transfer_syntax"),
+		    nb::kw_only(),
+		    nb::arg("options") = nb::none(),
+		    "Configure this context from transfer syntax and optional codec options.")
+		.def("configure",
+		    [](EncoderContext& self, const std::string& transfer_syntax_text,
+		        nb::handle options) {
+			    const auto transfer_syntax =
+			        parse_transfer_syntax_text_or_throw(transfer_syntax_text);
+			    configure_encoder_context_with_options(
+			        self, transfer_syntax, options);
+		    },
+		    nb::arg("transfer_syntax"),
+		    nb::kw_only(),
+		    nb::arg("options") = nb::none(),
+		    "Configure this context from transfer syntax text and optional codec options.")
+		.def_prop_ro("configured", &EncoderContext::configured,
+		    "True when this context has been configured.")
+		.def_prop_ro("transfer_syntax_uid",
+		    [](const EncoderContext& self) -> nb::object {
+			    const auto uid = self.transfer_syntax_uid();
+			    if (!uid.valid()) {
+				    return nb::none();
+			    }
+			    return nb::cast(uid);
+		    },
+		    "Configured transfer syntax UID, or None when not configured.");
+
 	nb::class_<DicomFile>(m, "DicomFile",
 	    "DICOM file/session object that owns the root DataSet.")
 		.def_prop_ro("path", &DicomFile::path,
@@ -1438,15 +1610,14 @@ NB_MODULE(_dicomsdl, m) {
 		    [](DicomFile& self) { self.rebuild_file_meta(); },
 		    "Rebuild file meta group (0002,eeee) with standard minimum fields.")
 		.def("set_transfer_syntax",
-		    [](DicomFile& self, const Uid& transfer_syntax, nb::handle codec_opt) {
-			    self.set_transfer_syntax(
-			        transfer_syntax, parse_codec_options(codec_opt, transfer_syntax));
+		    [](DicomFile& self, const Uid& transfer_syntax, nb::handle options) {
+			    set_transfer_syntax_with_options(self, transfer_syntax, options);
 		    },
 		    nb::arg("transfer_syntax"),
 		    nb::kw_only(),
-		    nb::arg("codec_opt") = nb::none(),
+		    nb::arg("options") = nb::none(),
 		    "Set transfer syntax using a Uid object and update file meta TransferSyntaxUID.\n"
-		    "`codec_opt` accepts None/'auto', 'none', 'rle', 'j2k', 'htj2k', 'jpegls', 'jpeg', 'jpegxl',\n"
+		    "`options` accepts None/'auto', 'none', 'rle', 'j2k', 'htj2k', 'jpegls', 'jpeg', 'jpegxl',\n"
 		    "or dict form such as:\n"
 		    "{'type': 'j2k', 'target_psnr': 45.0, 'target_bpp': 0.0, 'threads': -1, 'color_transform': True},\n"
 		    "{'type': 'htj2k', 'target_psnr': 45.0, 'color_transform': False},\n"
@@ -1454,29 +1625,43 @@ NB_MODULE(_dicomsdl, m) {
 		    "{'type': 'jpeg', 'quality': 90},\n"
 		    "{'type': 'jpegxl', 'distance': 1.5, 'effort': 7, 'threads': -1}.")
 		.def("set_transfer_syntax",
-		    [](DicomFile& self, const std::string& transfer_syntax_text, nb::handle codec_opt) {
-			    const auto uid = dicom::uid::lookup(transfer_syntax_text);
-			    if (!uid) {
-				    throw nb::value_error(
-				        ("Unknown DICOM UID: " + transfer_syntax_text).c_str());
-			    }
-			    if (uid->uid_type() != dicom::UidType::TransferSyntax) {
-				    throw nb::value_error(
-				        ("UID is not a Transfer Syntax UID: " + transfer_syntax_text).c_str());
-			    }
-				    self.set_transfer_syntax(*uid, parse_codec_options(codec_opt, *uid));
-			    },
+		    [](DicomFile& self, const std::string& transfer_syntax_text,
+		        nb::handle options) {
+			    set_transfer_syntax_with_options(
+			        self, parse_transfer_syntax_text_or_throw(transfer_syntax_text),
+			        options);
+		    },
 		    nb::arg("transfer_syntax"),
 		    nb::kw_only(),
-		    nb::arg("codec_opt") = nb::none(),
+		    nb::arg("options") = nb::none(),
 		    "Set transfer syntax using a UID keyword or dotted UID string.\n"
-		    "`codec_opt` accepts None/'auto', 'none', 'rle', 'j2k', 'htj2k', 'jpegls', 'jpeg', 'jpegxl',\n"
+		    "`options` accepts None/'auto', 'none', 'rle', 'j2k', 'htj2k', 'jpegls', 'jpeg', 'jpegxl',\n"
 		    "or dict form such as:\n"
 		    "{'type': 'j2k', 'target_psnr': 45.0, 'target_bpp': 0.0, 'threads': -1, 'color_transform': True},\n"
 		    "{'type': 'htj2k', 'target_psnr': 45.0, 'color_transform': False},\n"
 		    "{'type': 'jpegls', 'near_lossless_error': 2},\n"
 		    "{'type': 'jpeg', 'quality': 90},\n"
 		    "{'type': 'jpegxl', 'distance': 1.5, 'effort': 7, 'threads': -1}.")
+		.def("set_transfer_syntax",
+		    [](DicomFile& self, const Uid& transfer_syntax,
+		        const EncoderContext& encoder_context) {
+			    self.set_transfer_syntax(transfer_syntax, encoder_context);
+		    },
+		    nb::arg("transfer_syntax"),
+		    nb::kw_only(),
+		    nb::arg("encoder_context"),
+		    "Set transfer syntax using a preconfigured EncoderContext.")
+		.def("set_transfer_syntax",
+		    [](DicomFile& self, const std::string& transfer_syntax_text,
+		        const EncoderContext& encoder_context) {
+			    self.set_transfer_syntax(
+			        parse_transfer_syntax_text_or_throw(transfer_syntax_text),
+			        encoder_context);
+		    },
+		    nb::arg("transfer_syntax"),
+		    nb::kw_only(),
+		    nb::arg("encoder_context"),
+		    "Set transfer syntax using transfer syntax text and a preconfigured EncoderContext.")
 		.def("write_file",
 		    [](DicomFile& self, const std::string& path, bool include_preamble,
 		        bool write_file_meta, bool keep_existing_meta) {
@@ -1655,7 +1840,27 @@ NB_MODULE(_dicomsdl, m) {
 			    return oss.str();
 		    });
 
-m.def("read_file",
+	m.def("create_encoder_context",
+	    [](const Uid& transfer_syntax, nb::handle options) {
+		    return create_encoder_context_with_options(
+		        transfer_syntax, options);
+	    },
+	    nb::arg("transfer_syntax"),
+	    nb::kw_only(),
+	    nb::arg("options") = nb::none(),
+	    "Create an EncoderContext from a Uid transfer syntax and optional codec options.");
+
+	m.def("create_encoder_context",
+	    [](const std::string& transfer_syntax_text, nb::handle options) {
+		    return create_encoder_context_with_options(
+		        parse_transfer_syntax_text_or_throw(transfer_syntax_text), options);
+	    },
+	    nb::arg("transfer_syntax"),
+	    nb::kw_only(),
+	    nb::arg("options") = nb::none(),
+	    "Create an EncoderContext from transfer syntax text and optional codec options.");
+
+	m.def("read_file",
     [](const std::string& path, std::optional<Tag> load_until, std::optional<bool> keep_on_error) {
 	    dicom::ReadOptions opts;
 	    if (load_until) {
@@ -2173,6 +2378,8 @@ m.def("generate_study_instance_uid",
 	    "set_default_reporter",
 	    "set_thread_reporter",
 	    "set_log_level",
+	    "EncoderContext",
+	    "create_encoder_context",
 	    "DicomFile",
 	    "DataSet",
 	    "Tag",

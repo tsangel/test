@@ -8,17 +8,11 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <variant>
 #include <vector>
 
 namespace dicom::pixel::detail {
 
-enum class codec_direction : std::uint8_t {
-	encode = 0,
-	decode = 1,
-};
-
-enum class codec_status_code : std::uint8_t {
+enum class CodecStatusCode : std::uint8_t {
 	ok = 0,
 	invalid_argument,
 	unsupported,
@@ -26,26 +20,33 @@ enum class codec_status_code : std::uint8_t {
 	internal_error,
 };
 
-struct codec_error {
-	codec_status_code code{codec_status_code::ok};
+struct CodecError {
+	CodecStatusCode code{CodecStatusCode::ok};
 	std::string stage{};
 	std::string detail{};
 };
 
+inline void set_codec_error(CodecError& out_error, CodecStatusCode code,
+    std::string_view stage, std::string_view detail) {
+	out_error.code = code;
+	out_error.stage = std::string(stage);
+	out_error.detail = std::string(detail);
+}
+
 template <typename T>
-struct codec_result {
+struct CodecResult {
 	bool ok{false};
 	std::optional<T> value{};
-	codec_error error{};
+	CodecError error{};
 };
 
 template <>
-struct codec_result<void> {
+struct CodecResult<void> {
 	bool ok{false};
-	codec_error error{};
+	CodecError error{};
 };
 
-enum class codec_profile : std::uint8_t {
+enum class CodecProfile : std::uint8_t {
 	unknown = 0,
 	native_uncompressed,
 	encapsulated_uncompressed,
@@ -64,7 +65,7 @@ enum class codec_profile : std::uint8_t {
 	jpegxl_jpeg_recompression,
 };
 
-struct decode_value_transform {
+struct DecodeValueTransform {
 	bool enabled{false};
 	std::optional<pixel::ModalityLut> modality_lut{};
 	double rescale_slope{1.0};
@@ -87,109 +88,103 @@ struct CodecEncodeFrameInput {
 	std::size_t row_payload_bytes{0};
 	std::size_t source_row_stride{0};
 	std::size_t source_plane_stride{0};
-	std::size_t source_frame_payload{0};
+	std::size_t source_frame_size_bytes{0};
 	std::size_t destination_frame_payload{0};
-	codec_profile profile{codec_profile::unknown};
+	CodecProfile profile{CodecProfile::unknown};
 };
 
 struct CodecDecodeFrameInput {
 	pixel::PixelDataInfo info{};
-	decode_value_transform value_transform{};
+	DecodeValueTransform value_transform{};
 	std::span<const std::uint8_t> prepared_source{};
 	std::span<std::uint8_t> destination{};
 	DecodeStrides destination_strides{};
 	DecodeOptions options{};
 };
 
-struct codec_option_schema {
+struct CodecOptionSchema {
 	std::string_view name{};
 	std::string_view value_type{};
 	std::string_view valid_range{};
 	std::string_view recommendation{};
 };
 
-using codec_option_value = std::variant<std::int64_t, double, bool>;
+using codec_option_value = pixel::CodecOptionValue;
+using CodecOptionKv = pixel::CodecOptionKv;
+using codec_option_pairs = std::vector<pixel::CodecOptionKv>;
 
-struct codec_option_kv {
-	std::string_view key{};
-	codec_option_value value{};
-};
-
-using codec_option_pairs = std::vector<codec_option_kv>;
-
-using codec_default_options_fn = std::optional<CodecOptions> (*)(
-    uid::WellKnown transfer_syntax);
-using codec_validate_options_fn = std::optional<std::string> (*)(
-    uid::WellKnown transfer_syntax, const CodecOptions& codec_opt);
-using codec_export_options_fn = std::optional<std::string> (*)(
-    uid::WellKnown transfer_syntax, const CodecOptions& codec_opt,
-    codec_option_pairs& out_pairs);
-using codec_parse_options_fn = std::optional<std::string> (*)(
-    uid::WellKnown transfer_syntax, std::span<const codec_option_kv> in_pairs,
-    CodecOptions& out_codec_opt);
-// Plugin frame encode hook. The caller parses options once and passes the parsed variant.
+using codec_default_options_fn = std::optional<std::string> (*)(
+    uid::WellKnown transfer_syntax, codec_option_pairs& out_pairs);
+// Plugin frame encode hook. The caller provides exported option key/value pairs.
 using codec_encode_frame_fn = bool (*)(
-    const CodecEncodeFrameInput& input, const CodecOptions& parsed_options,
+    const CodecEncodeFrameInput& input, std::span<const CodecOptionKv> encode_options,
     std::vector<std::uint8_t>& out_encoded_frame,
-    codec_error& out_error) noexcept;
+    CodecError& out_error) noexcept;
 // Plugin frame decode hook. The plugin must not throw across the boundary.
 // On failure, return false and fill out_error.
 using codec_decode_frame_fn = bool (*)(
-    const CodecDecodeFrameInput& input, codec_error& out_error) noexcept;
+    const CodecDecodeFrameInput& input, CodecError& out_error) noexcept;
 
-struct codec_plugin {
+struct CodecPlugin {
 	std::string_view key{};
 	std::string_view display_name{};
-	std::span<const codec_option_schema> option_schema{};
+	std::span<const CodecOptionSchema> option_schema{};
 	codec_default_options_fn default_options{nullptr};
-	codec_validate_options_fn validate_options{nullptr};
-	codec_export_options_fn export_options{nullptr};
-	codec_parse_options_fn parse_options{nullptr};
 	codec_encode_frame_fn encode_frame{nullptr};
 	codec_decode_frame_fn decode_frame{nullptr};
 };
 
-struct transfer_syntax_plugin_binding {
+struct TransferSyntaxPluginBinding {
 	uid::WellKnown transfer_syntax{};
 	std::string_view plugin_key{};
-	// Cached plugin slot in codec_registry::plugins_ for O(1) access after TS binding lookup.
+	// Cached plugin slot in CodecRegistry::plugins_ for O(1) access after TS binding lookup.
 	std::size_t plugin_index{std::numeric_limits<std::size_t>::max()};
-	codec_profile profile{codec_profile::unknown};
+	CodecProfile profile{CodecProfile::unknown};
 	bool encode_supported{false};
 	bool decode_supported{false};
 };
 
 [[nodiscard]] std::string_view codec_status_code_name(
-    codec_status_code code) noexcept;
+    CodecStatusCode code) noexcept;
 
 [[nodiscard]] std::string format_codec_error_context(
     std::string_view function_name, std::string_view file_path,
     uid::WellKnown transfer_syntax, std::string_view plugin_key,
-    std::optional<std::size_t> frame_index, const codec_error& error);
+    std::optional<std::size_t> frame_index, const CodecError& error);
 
 [[noreturn]] void throw_codec_error_with_context(
     std::string_view function_name, std::string_view file_path,
     uid::WellKnown transfer_syntax, std::string_view plugin_key,
-    std::optional<std::size_t> frame_index, const codec_error& error);
+    std::optional<std::size_t> frame_index, const CodecError& error);
 
-class codec_registry {
+class CodecRegistry {
 public:
-	bool register_plugin(const codec_plugin& plugin);
-	bool register_binding(const transfer_syntax_plugin_binding& binding);
+	bool register_plugin(const CodecPlugin& plugin);
+	bool register_binding(const TransferSyntaxPluginBinding& binding);
 
-	[[nodiscard]] const codec_plugin* find_plugin(
+	[[nodiscard]] const CodecPlugin* find_plugin(
 	    std::string_view plugin_key) const noexcept;
-	[[nodiscard]] const transfer_syntax_plugin_binding* find_binding(
+	[[nodiscard]] const TransferSyntaxPluginBinding* find_binding(
 	    uid::WellKnown transfer_syntax) const noexcept;
-	[[nodiscard]] const codec_plugin* resolve_plugin(
-	    uid::WellKnown transfer_syntax, codec_direction direction) const noexcept;
+	[[nodiscard]] const CodecPlugin* select_encoder(
+	    const TransferSyntaxPluginBinding& binding) const noexcept;
+	[[nodiscard]] const CodecPlugin* select_decoder(
+	    const TransferSyntaxPluginBinding& binding) const noexcept;
+	[[nodiscard]] const CodecPlugin* select_encoder(
+	    uid::WellKnown transfer_syntax) const noexcept;
+	[[nodiscard]] const CodecPlugin* select_decoder(
+	    uid::WellKnown transfer_syntax) const noexcept;
+	bool update_plugin_dispatch(
+	    std::string_view plugin_key, codec_encode_frame_fn encode_frame,
+	    bool update_encode, codec_decode_frame_fn decode_frame,
+	    bool update_decode) noexcept;
 
 	void clear();
 
-	[[nodiscard]] std::span<const codec_plugin> plugins() const noexcept {
+	[[nodiscard]] std::span<const CodecPlugin> plugins() const noexcept {
 		return plugins_;
 	}
-	[[nodiscard]] std::span<const transfer_syntax_plugin_binding> bindings() const noexcept {
+	[[nodiscard]] std::span<const TransferSyntaxPluginBinding> bindings() const noexcept {
 		return bindings_;
 	}
 
@@ -198,13 +193,13 @@ private:
 	    std::numeric_limits<std::size_t>::max();
 	[[nodiscard]] std::size_t find_plugin_index(
 	    std::string_view plugin_key) const noexcept;
-	std::vector<codec_plugin> plugins_{};
-	std::vector<transfer_syntax_plugin_binding> bindings_{};
+	std::vector<CodecPlugin> plugins_{};
+	std::vector<TransferSyntaxPluginBinding> bindings_{};
 };
 
-[[nodiscard]] codec_registry& global_codec_registry();
+[[nodiscard]] CodecRegistry& global_codec_registry();
 
-void register_default_codec_plugins(codec_registry& registry);
-void register_default_transfer_syntax_bindings(codec_registry& registry);
+void register_default_codec_plugins(CodecRegistry& registry);
+void register_default_transfer_syntax_bindings(CodecRegistry& registry);
 
 } // namespace dicom::pixel::detail

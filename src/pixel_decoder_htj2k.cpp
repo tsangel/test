@@ -26,7 +26,7 @@ namespace pixel::detail {
 
 namespace {
 
-struct htj2k_frame_source {
+struct Htj2kFrameSource {
 	const PixelFrame* frame{nullptr};
 	const InStream* stream{nullptr};
 	std::span<const std::uint8_t> contiguous{};
@@ -66,13 +66,6 @@ std::string trimmed_message(std::string message) {
 		message.pop_back();
 	}
 	return message;
-}
-
-void set_codec_error(codec_error& out_error, codec_status_code code,
-    std::string_view stage, std::string detail) {
-	out_error.code = code;
-	out_error.stage = std::string(stage);
-	out_error.detail = std::move(detail);
 }
 
 const char* htj2k_backend_name(Htj2kDecoder backend) noexcept {
@@ -122,7 +115,7 @@ inline void store_htj2k_value(std::uint8_t* dst, DstT value) {
 }
 
 std::span<const std::uint8_t> materialize_frame_codestream_for_openjph(
-    const htj2k_frame_source& source, std::vector<std::uint8_t>& owned) {
+    const Htj2kFrameSource& source, std::vector<std::uint8_t>& owned) {
 	if (!source.contiguous.empty()) {
 		return source.contiguous;
 	}
@@ -244,7 +237,7 @@ void copy_openjph_line_to_interleaved(const ojph::line_buf* line, std::size_t ro
 }
 
 std::vector<std::int32_t> decode_openjph_to_interleaved(const pixel::PixelDataInfo& info,
-    const htj2k_frame_source& source, std::size_t rows, std::size_t cols,
+    const Htj2kFrameSource& source, std::size_t rows, std::size_t cols,
     std::size_t samples_per_pixel) {
 	std::vector<std::uint8_t> contiguous_storage{};
 	const auto codestream_bytes =
@@ -337,7 +330,7 @@ void write_openjph_line_unscaled_to_dst(const std::int32_t* samples,
 
 template <typename DstT>
 void decode_openjph_unscaled_into(const pixel::PixelDataInfo& info,
-    const htj2k_frame_source& source, std::span<std::uint8_t> dst,
+    const Htj2kFrameSource& source, std::span<std::uint8_t> dst,
     const DecodeStrides& dst_strides, Planar dst_planar, std::size_t rows,
     std::size_t cols, std::size_t samples_per_pixel) {
 	std::vector<std::uint8_t> contiguous_storage{};
@@ -396,7 +389,7 @@ void decode_openjph_unscaled_into(const pixel::PixelDataInfo& info,
 }
 
 template <typename SampleT>
-void write_openjph_scaled_mono_to_dst(const decode_value_transform& value_transform,
+void write_openjph_scaled_mono_to_dst(const DecodeValueTransform& value_transform,
     const std::vector<std::int32_t>& decoded, std::span<std::uint8_t> dst,
     const DecodeStrides& dst_strides, std::size_t rows, std::size_t cols) {
 	if (!value_transform.enabled) {
@@ -444,7 +437,7 @@ void write_openjph_scaled_mono_to_dst(const decode_value_transform& value_transf
 }
 
 bool try_decode_openjph_into(const pixel::PixelDataInfo& info,
-    const decode_value_transform& value_transform, const htj2k_frame_source& source,
+    const DecodeValueTransform& value_transform, const Htj2kFrameSource& source,
     std::span<std::uint8_t> dst, const DecodeStrides& dst_strides,
     const DecodeOptions& opt, std::size_t rows, std::size_t cols,
     std::size_t samples_per_pixel, std::string& failure) {
@@ -542,12 +535,12 @@ bool try_decode_openjph_into(const pixel::PixelDataInfo& info,
 } // namespace
 
 bool decode_htj2k_into(const pixel::PixelDataInfo& info,
-    const decode_value_transform& value_transform,
+    const DecodeValueTransform& value_transform,
     std::span<std::uint8_t> dst,
     const DecodeStrides& dst_strides, const DecodeOptions& opt,
-    codec_error& out_error, std::span<const std::uint8_t> prepared_source) noexcept {
-	out_error = codec_error{};
-	auto fail = [&](codec_status_code code, std::string_view stage,
+    CodecError& out_error, std::span<const std::uint8_t> prepared_source) noexcept {
+	out_error = CodecError{};
+	auto fail = [&](CodecStatusCode code, std::string_view stage,
 	                std::string detail) noexcept -> bool {
 		set_codec_error(out_error, code, stage, std::move(detail));
 		return false;
@@ -555,41 +548,41 @@ bool decode_htj2k_into(const pixel::PixelDataInfo& info,
 
 	try {
 		if (!info.has_pixel_data) {
-			return fail(codec_status_code::invalid_argument, "validate",
+			return fail(CodecStatusCode::invalid_argument, "validate",
 			    "sv_dtype is unknown");
 		}
 		if (!info.ts.is_htj2k()) {
-			return fail(codec_status_code::unsupported, "validate",
+			return fail(CodecStatusCode::unsupported, "validate",
 			    "transfer syntax is not HTJ2K");
 		}
 		if (info.rows <= 0 || info.cols <= 0 || info.samples_per_pixel <= 0) {
-			return fail(codec_status_code::invalid_argument, "validate",
+			return fail(CodecStatusCode::invalid_argument, "validate",
 			    "invalid Rows/Columns/SamplesPerPixel");
 		}
 		if (info.frames <= 0) {
-			return fail(codec_status_code::invalid_argument, "validate",
+			return fail(CodecStatusCode::invalid_argument, "validate",
 			    "invalid NumberOfFrames");
 		}
 
 		const auto samples_per_pixel_value = info.samples_per_pixel;
 		if (samples_per_pixel_value != 1 && samples_per_pixel_value != 3 &&
 		    samples_per_pixel_value != 4) {
-			return fail(codec_status_code::unsupported, "validate",
+			return fail(CodecStatusCode::unsupported, "validate",
 			    "only SamplesPerPixel=1/3/4 is supported in current HTJ2K path");
 		}
 		const auto samples_per_pixel = static_cast<std::size_t>(samples_per_pixel_value);
 		if (opt.scaled && samples_per_pixel != 1) {
-			return fail(codec_status_code::invalid_argument, "validate",
+			return fail(CodecStatusCode::invalid_argument, "validate",
 			    "scaled output supports SamplesPerPixel=1 only");
 		}
 		if (!sv_dtype_is_integral(info.sv_dtype)) {
-			return fail(codec_status_code::unsupported, "validate",
+			return fail(CodecStatusCode::unsupported, "validate",
 			    "HTJ2K supports integral sv_dtype only");
 		}
 
 		const auto src_bytes_per_sample = sv_dtype_bytes(info.sv_dtype);
 		if (src_bytes_per_sample == 0 || src_bytes_per_sample > 4) {
-			return fail(codec_status_code::unsupported, "validate",
+			return fail(CodecStatusCode::unsupported, "validate",
 			    "HTJ2K supports integral sv_dtype up to 32-bit only");
 		}
 
@@ -601,25 +594,25 @@ bool decode_htj2k_into(const pixel::PixelDataInfo& info,
 				validate_destination(dst, dst_strides, opt.planar_out, rows, cols,
 				    samples_per_pixel, dst_bytes_per_sample);
 			} catch (const std::bad_alloc&) {
-			return fail(codec_status_code::internal_error, "allocate",
+			return fail(CodecStatusCode::internal_error, "allocate",
 			    "memory allocation failed");
 		} catch (const std::exception& e) {
-			return fail(codec_status_code::invalid_argument, "validate", e.what());
+			return fail(CodecStatusCode::invalid_argument, "validate", e.what());
 		} catch (...) {
-			return fail(codec_status_code::backend_error, "validate",
+			return fail(CodecStatusCode::backend_error, "validate",
 			    "non-standard exception");
 		}
 
-			htj2k_frame_source frame_source{};
+			Htj2kFrameSource frame_source{};
 			frame_source.contiguous = prepared_source;
 			frame_source.total_size = prepared_source.size();
 			if (frame_source.total_size == 0) {
-				return fail(codec_status_code::invalid_argument, "load_frame_source",
+				return fail(CodecStatusCode::invalid_argument, "load_frame_source",
 				    "HTJ2K frame has empty codestream");
 			}
 
 			if (opt.htj2k_decoder_backend == Htj2kDecoder::openjpeg) {
-				codec_error jpeg2k_error{};
+				CodecError jpeg2k_error{};
 				if (decode_jpeg2k_into(
 				        info, value_transform, dst, dst_strides, opt,
 				        jpeg2k_error,
@@ -630,8 +623,8 @@ bool decode_htj2k_into(const pixel::PixelDataInfo& info,
 				if (reason.empty()) {
 					reason = "OpenJPEG decode failed";
 				}
-				const auto code = (jpeg2k_error.code == codec_status_code::ok)
-				    ? codec_status_code::backend_error
+				const auto code = (jpeg2k_error.code == CodecStatusCode::ok)
+				    ? CodecStatusCode::backend_error
 				    : jpeg2k_error.code;
 				const auto stage = jpeg2k_error.stage.empty()
 				    ? std::string_view{"decode_frame"}
@@ -647,13 +640,13 @@ bool decode_htj2k_into(const pixel::PixelDataInfo& info,
 					return true;
 				}
 			const auto failure_reason = trimmed_message(openjph_failure);
-			return fail(codec_status_code::backend_error, "decode_frame",
+			return fail(CodecStatusCode::backend_error, "decode_frame",
 			    fmt::format("HTJ2K decode failed (backend={}): {}",
 			        htj2k_backend_name(opt.htj2k_decoder_backend),
 			        failure_reason.empty() ? "OpenJPH decode failed" : failure_reason));
 		}
 
-			codec_error openjpeg_error{};
+			CodecError openjpeg_error{};
 			if (decode_jpeg2k_into(
 			        info, value_transform, dst, dst_strides, opt,
 			        openjpeg_error,
@@ -671,23 +664,23 @@ bool decode_htj2k_into(const pixel::PixelDataInfo& info,
 				return true;
 			}
 		const auto openjph_reason = trimmed_message(openjph_failure);
-		return fail(codec_status_code::backend_error, "decode_frame",
+		return fail(CodecStatusCode::backend_error, "decode_frame",
 		    fmt::format("HTJ2K decode failed (OpenJPEG: {}; OpenJPH: {})",
 		        openjpeg_failure,
 		        openjph_reason.empty() ? "OpenJPH decode failed" : openjph_reason));
 	} catch (const std::bad_alloc&) {
-		return fail(codec_status_code::internal_error, "allocate",
+		return fail(CodecStatusCode::internal_error, "allocate",
 		    "memory allocation failed");
 	} catch (const std::exception& e) {
-		if (out_error.code != codec_status_code::ok) {
+		if (out_error.code != CodecStatusCode::ok) {
 			return false;
 		}
-		return fail(codec_status_code::backend_error, "decode_frame", e.what());
+		return fail(CodecStatusCode::backend_error, "decode_frame", e.what());
 	} catch (...) {
-		if (out_error.code != codec_status_code::ok) {
+		if (out_error.code != CodecStatusCode::ok) {
 			return false;
 		}
-		return fail(codec_status_code::backend_error, "decode_frame",
+		return fail(CodecStatusCode::backend_error, "decode_frame",
 		    "non-standard exception");
 	}
 }

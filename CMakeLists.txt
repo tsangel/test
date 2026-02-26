@@ -81,13 +81,20 @@ add_library(dicomsdl STATIC
 	src/pixelsequence.cpp
 	src/pixel_codec_registry.cpp
 	src/pixel_codec_dispatch.cpp
+	src/pixel_codec_option_bridge.cpp
+	src/pixel_codec_plugin_external.cpp
+	src/pixel_codec_plugin_jpeg2k_builtin.cpp
+	src/pixel_codec_plugin_htj2k_builtin.cpp
+	src/pixel_codec_plugin_jpegls_builtin.cpp
+	src/pixel_codec_plugin_jpegxl_builtin.cpp
+	src/pixel_codec_plugin_loader.cpp
+	src/pixel_codec_plugin_jpeg_builtin.cpp
+	src/pixel_codec_plugin_rle_builtin.cpp
 	src/pixel_decoder.cpp
 	src/pixel_decoder_raw.cpp
 	src/pixel_decoder_encapsulated.cpp
-	src/pixel_decoder_rle.cpp
 	src/pixel_encoder.cpp
 	src/pixel_encoder_encapsulated.cpp
-	src/pixel_encoder_rle.cpp
 	src/pixel_encoder_jpeg2k.cpp
 	src/pixel_encoder_htj2k.cpp
 	src/pixel_encoder_jpegls.cpp
@@ -631,4 +638,44 @@ if(BUILD_TESTING)
 		tests/codec_cycle_realdata.cpp
 	)
 	target_link_libraries(dicomsdl_codec_cycle_realdata PRIVATE dicomsdl)
+
+	add_executable(dicomsdl_codec_plugin_abi_adapter
+		tests/codec_plugin_abi_adapter.cpp
+	)
+	target_link_libraries(dicomsdl_codec_plugin_abi_adapter PRIVATE dicomsdl)
+	add_test(NAME codec_plugin_abi_adapter COMMAND dicomsdl_codec_plugin_abi_adapter)
+	set_tests_properties(codec_plugin_abi_adapter PROPERTIES LABELS "dicomsdl")
+
+	add_executable(dicomsdl_codec_plugin_loader
+		tests/codec_plugin_loader.cpp
+	)
+	target_link_libraries(dicomsdl_codec_plugin_loader PRIVATE dicomsdl)
+	add_test(NAME codec_plugin_loader COMMAND dicomsdl_codec_plugin_loader)
+	set_tests_properties(codec_plugin_loader PROPERTIES LABELS "dicomsdl")
+
+	add_library(dicomsdl_test_codec_plugin SHARED
+		tests/codec_plugin_dynamic_fixture.cpp
+	)
+	target_include_directories(dicomsdl_test_codec_plugin
+		PRIVATE
+			${DICOM_INCLUDE_DIR}
+			${GENERATED_INCLUDE_DIR}
+	)
+
+	add_executable(dicomsdl_codec_plugin_dynamic_load
+		tests/codec_plugin_dynamic_load.cpp
+	)
+	target_link_libraries(dicomsdl_codec_plugin_dynamic_load PRIVATE dicomsdl)
+	add_dependencies(dicomsdl_codec_plugin_dynamic_load dicomsdl_test_codec_plugin)
+	add_test(NAME codec_plugin_dynamic_load
+		COMMAND dicomsdl_codec_plugin_dynamic_load
+		$<TARGET_FILE:dicomsdl_test_codec_plugin>)
+	set_tests_properties(codec_plugin_dynamic_load PROPERTIES LABELS "dicomsdl")
+
+	add_executable(dicomsdl_codec_plugin_registration
+		tests/codec_plugin_registration.cpp
+	)
+	target_link_libraries(dicomsdl_codec_plugin_registration PRIVATE dicomsdl)
+	add_test(NAME codec_plugin_registration COMMAND dicomsdl_codec_plugin_registration)
+	set_tests_properties(codec_plugin_registration PROPERTIES LABELS "dicomsdl")
 endif()

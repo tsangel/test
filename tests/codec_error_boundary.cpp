@@ -50,14 +50,14 @@ void configure_minimal_integral_pixel_metadata(dicom::DicomFile& df) {
 	set_long_element(df, "NumberOfFrames"_tag, dicom::VR::IS, 1, "NumberOfFrames");
 }
 
-struct registry_snapshot {
-	std::vector<dicom::pixel::detail::codec_plugin> plugins{};
-	std::vector<dicom::pixel::detail::transfer_syntax_plugin_binding> bindings{};
+struct RegistrySnapshot {
+	std::vector<dicom::pixel::detail::CodecPlugin> plugins{};
+	std::vector<dicom::pixel::detail::TransferSyntaxPluginBinding> bindings{};
 };
 
-registry_snapshot snapshot_registry(
-    const dicom::pixel::detail::codec_registry& registry) {
-	registry_snapshot snapshot{};
+RegistrySnapshot snapshot_registry(
+    const dicom::pixel::detail::CodecRegistry& registry) {
+	RegistrySnapshot snapshot{};
 	const auto plugins = registry.plugins();
 	snapshot.plugins.assign(plugins.begin(), plugins.end());
 	const auto bindings = registry.bindings();
@@ -65,8 +65,8 @@ registry_snapshot snapshot_registry(
 	return snapshot;
 }
 
-void restore_registry(dicom::pixel::detail::codec_registry& registry,
-    const registry_snapshot& snapshot) {
+void restore_registry(dicom::pixel::detail::CodecRegistry& registry,
+    const RegistrySnapshot& snapshot) {
 	registry.clear();
 	for (const auto& plugin : snapshot.plugins) {
 		if (!registry.register_plugin(plugin)) {
@@ -83,16 +83,16 @@ void restore_registry(dicom::pixel::detail::codec_registry& registry,
 } // namespace
 
 int main() {
-	using dicom::pixel::detail::codec_error;
+	using dicom::pixel::detail::CodecError;
 	using dicom::pixel::detail::CodecDecodeFrameInput;
-	using dicom::pixel::detail::codec_status_code;
+	using dicom::pixel::detail::CodecStatusCode;
 	using dicom::pixel::detail::format_codec_error_context;
 	using dicom::pixel::detail::global_codec_registry;
 	using dicom::pixel::detail::throw_codec_error_with_context;
-	const dicom::pixel::detail::decode_value_transform decode_transform{};
+	const dicom::pixel::detail::DecodeValueTransform decode_transform{};
 
-	const codec_error frame_error{
-	    .code = codec_status_code::backend_error,
+	const CodecError frame_error{
+	    .code = CodecStatusCode::backend_error,
 	    .stage = "encode_frame",
 	    .detail = "CharLS encode failed (simulated)",
 	};
@@ -112,8 +112,8 @@ int main() {
 	expect_contains(frame_message, "reason=CharLS encode failed (simulated)", "frame message");
 
 	try {
-		const codec_error lookup_error{
-		    .code = codec_status_code::unsupported,
+		const CodecError lookup_error{
+		    .code = CodecStatusCode::unsupported,
 		    .stage = "plugin_lookup",
 		    .detail = "plugin is not registered in codec registry",
 		};
@@ -150,12 +150,12 @@ int main() {
 		    .destination_strides = dicom::pixel::DecodeStrides{},
 		    .options = dicom::pixel::DecodeOptions{},
 		};
-		codec_error decode_error{};
+		CodecError decode_error{};
 		const bool ok = native_plugin->decode_frame(decode_input, decode_error);
 		if (ok) {
 			fail("native decode_frame plugin should fail for empty DicomFile");
 		}
-		if (decode_error.code != codec_status_code::invalid_argument) {
+		if (decode_error.code != CodecStatusCode::invalid_argument) {
 			fail("native decode_frame plugin should report invalid_argument");
 		}
 		if (decode_error.stage != "validate") {
@@ -172,12 +172,12 @@ int main() {
 			fail("native decode_frame plugin is not registered");
 		}
 		CodecDecodeFrameInput decode_input{};
-		codec_error decode_error{};
+		CodecError decode_error{};
 		const bool ok = native_plugin->decode_frame(decode_input, decode_error);
 		if (ok) {
 			fail("native decode_frame plugin should fail for invalid input");
 		}
-		if (decode_error.code != codec_status_code::invalid_argument) {
+		if (decode_error.code != CodecStatusCode::invalid_argument) {
 			fail("native decode_frame plugin should report invalid_argument on bad input");
 		}
 		if (decode_error.stage != "validate") {
@@ -202,12 +202,12 @@ int main() {
 		    .destination_strides = dicom::pixel::DecodeStrides{},
 		    .options = dicom::pixel::DecodeOptions{},
 		};
-		codec_error decode_error{};
+		CodecError decode_error{};
 		const bool ok = native_plugin->decode_frame(decode_input, decode_error);
 		if (ok) {
 			fail("native decode_frame plugin should fail for empty DicomFile");
 		}
-		if (decode_error.code != codec_status_code::invalid_argument) {
+		if (decode_error.code != CodecStatusCode::invalid_argument) {
 			fail("native decode_frame plugin should report invalid_argument");
 		}
 		if (decode_error.stage != "validate") {
@@ -232,12 +232,12 @@ int main() {
 		    .destination_strides = dicom::pixel::DecodeStrides{},
 		    .options = dicom::pixel::DecodeOptions{},
 		};
-		codec_error decode_error{};
+		CodecError decode_error{};
 		const bool ok = rle_plugin->decode_frame(decode_input, decode_error);
 		if (ok) {
 			fail("rle decode_frame plugin should fail for empty DicomFile");
 		}
-		if (decode_error.code != codec_status_code::invalid_argument) {
+		if (decode_error.code != CodecStatusCode::invalid_argument) {
 			fail("rle decode_frame plugin should report invalid_argument");
 		}
 		if (decode_error.stage != "validate") {
@@ -262,12 +262,12 @@ int main() {
 		    .destination_strides = dicom::pixel::DecodeStrides{},
 		    .options = dicom::pixel::DecodeOptions{},
 		};
-		codec_error decode_error{};
+		CodecError decode_error{};
 		const bool ok = jpeg_plugin->decode_frame(decode_input, decode_error);
 		if (ok) {
 			fail("jpeg decode_frame plugin should fail for empty DicomFile");
 		}
-		if (decode_error.code != codec_status_code::invalid_argument) {
+		if (decode_error.code != CodecStatusCode::invalid_argument) {
 			fail("jpeg decode_frame plugin should report invalid_argument");
 		}
 		if (decode_error.stage != "validate") {
@@ -292,12 +292,12 @@ int main() {
 		    .destination_strides = dicom::pixel::DecodeStrides{},
 		    .options = dicom::pixel::DecodeOptions{},
 		};
-		codec_error decode_error{};
+		CodecError decode_error{};
 		const bool ok = jpegls_plugin->decode_frame(decode_input, decode_error);
 		if (ok) {
 			fail("jpegls decode_frame plugin should fail for empty DicomFile");
 		}
-		if (decode_error.code != codec_status_code::invalid_argument) {
+		if (decode_error.code != CodecStatusCode::invalid_argument) {
 			fail("jpegls decode_frame plugin should report invalid_argument");
 		}
 		if (decode_error.stage != "validate") {
@@ -322,12 +322,12 @@ int main() {
 		    .destination_strides = dicom::pixel::DecodeStrides{},
 		    .options = dicom::pixel::DecodeOptions{},
 		};
-		codec_error decode_error{};
+		CodecError decode_error{};
 		const bool ok = jpegxl_plugin->decode_frame(decode_input, decode_error);
 		if (ok) {
 			fail("jpegxl decode_frame plugin should fail for empty DicomFile");
 		}
-		if (decode_error.code != codec_status_code::invalid_argument) {
+		if (decode_error.code != CodecStatusCode::invalid_argument) {
 			fail("jpegxl decode_frame plugin should report invalid_argument");
 		}
 		if (decode_error.stage != "validate") {
@@ -352,12 +352,12 @@ int main() {
 		    .destination_strides = dicom::pixel::DecodeStrides{},
 		    .options = dicom::pixel::DecodeOptions{},
 		};
-		codec_error decode_error{};
+		CodecError decode_error{};
 		const bool ok = jpeg2k_plugin->decode_frame(decode_input, decode_error);
 		if (ok) {
 			fail("jpeg2k decode_frame plugin should fail for empty DicomFile");
 		}
-		if (decode_error.code != codec_status_code::invalid_argument) {
+		if (decode_error.code != CodecStatusCode::invalid_argument) {
 			fail("jpeg2k decode_frame plugin should report invalid_argument");
 		}
 		if (decode_error.stage != "validate") {
@@ -382,12 +382,12 @@ int main() {
 		    .destination_strides = dicom::pixel::DecodeStrides{},
 		    .options = dicom::pixel::DecodeOptions{},
 		};
-		codec_error decode_error{};
+		CodecError decode_error{};
 		const bool ok = htj2k_plugin->decode_frame(decode_input, decode_error);
 		if (ok) {
 			fail("htj2k decode_frame plugin should fail for empty DicomFile");
 		}
-		if (decode_error.code != codec_status_code::invalid_argument) {
+		if (decode_error.code != CodecStatusCode::invalid_argument) {
 			fail("htj2k decode_frame plugin should report invalid_argument");
 		}
 		if (decode_error.stage != "validate") {
@@ -914,10 +914,10 @@ int main() {
 		const auto snapshot = snapshot_registry(registry);
 		registry.clear();
 		const bool binding_registered =
-		    registry.register_binding(dicom::pixel::detail::transfer_syntax_plugin_binding{
+		    registry.register_binding(dicom::pixel::detail::TransferSyntaxPluginBinding{
 		        .transfer_syntax = "ExplicitVRLittleEndian"_uid,
 		        .plugin_key = "missing-decode-plugin",
-		        .profile = dicom::pixel::detail::codec_profile::native_uncompressed,
+		        .profile = dicom::pixel::detail::CodecProfile::native_uncompressed,
 		        .encode_supported = false,
 		        .decode_supported = true,
 		    });
@@ -954,7 +954,7 @@ int main() {
 		const auto snapshot = snapshot_registry(registry);
 		registry.clear();
 		const bool plugin_registered =
-		    registry.register_plugin(dicom::pixel::detail::codec_plugin{
+		    registry.register_plugin(dicom::pixel::detail::CodecPlugin{
 		        .key = "dummy-no-decode",
 		        .display_name = "Dummy no decode",
 		    });
@@ -962,10 +962,10 @@ int main() {
 			fail("failed to register no-dispatch decode plugin fixture");
 		}
 		const bool binding_registered =
-		    registry.register_binding(dicom::pixel::detail::transfer_syntax_plugin_binding{
+		    registry.register_binding(dicom::pixel::detail::TransferSyntaxPluginBinding{
 		        .transfer_syntax = "ExplicitVRLittleEndian"_uid,
 		        .plugin_key = "dummy-no-decode",
-		        .profile = dicom::pixel::detail::codec_profile::native_uncompressed,
+		        .profile = dicom::pixel::detail::CodecProfile::native_uncompressed,
 		        .encode_supported = false,
 		        .decode_supported = true,
 		    });
@@ -998,29 +998,37 @@ int main() {
 	}
 
 	{
-		std::vector<std::uint8_t> encoded{};
-		codec_error encode_error{};
-		const bool ok = dicom::pixel::detail::try_encode_rle_frame(
-		    std::span<const std::uint8_t>{}, 0, 0, 0, 0,
-		    dicom::pixel::Planar::interleaved, 0, encoded,
-		    encode_error);
-		if (ok) {
-			fail("try_encode_rle_frame should fail for invalid arguments");
+		const auto& registry = global_codec_registry();
+		const auto* rle_plugin = registry.find_plugin("rle");
+		if (!rle_plugin || !rle_plugin->encode_frame) {
+			fail("rle encode_frame plugin is not registered");
 		}
-		if (encode_error.code != codec_status_code::invalid_argument) {
-			fail("try_encode_rle_frame should report invalid_argument");
+		dicom::pixel::detail::CodecEncodeFrameInput encode_input{};
+		encode_input.transfer_syntax = "RLELossless"_uid;
+		encode_input.source_planar = dicom::pixel::Planar::interleaved;
+		encode_input.bytes_per_sample = 1;
+		std::vector<std::uint8_t> encoded{};
+		CodecError encode_error{};
+		const std::span<const dicom::pixel::detail::CodecOptionKv> encode_options{};
+		const bool ok = rle_plugin->encode_frame(
+		    encode_input, encode_options, encoded, encode_error);
+		if (ok) {
+			fail("rle encode_frame plugin should fail for invalid arguments");
+		}
+		if (encode_error.code != CodecStatusCode::invalid_argument) {
+			fail("rle encode_frame plugin should report invalid_argument");
 		}
 		if (encode_error.stage != "validate") {
-			fail("try_encode_rle_frame should report validate stage");
+			fail("rle encode_frame plugin should report validate stage");
 		}
-		expect_contains(encode_error.detail, "unsupported RLE segment layout",
-		    "try_encode_rle_frame error");
+		expect_contains(encode_error.detail, "request numeric field is invalid",
+		    "rle encode_frame plugin error");
 	}
 
 	{
 		std::vector<std::uint8_t> frame(2, std::uint8_t{0});
 		std::vector<std::uint8_t> encoded{};
-		codec_error encode_error{};
+		CodecError encode_error{};
 		dicom::pixel::J2kOptions options{};
 		const bool ok = dicom::pixel::detail::try_encode_jpeg2k_frame(
 		    std::span<const std::uint8_t>(frame.data(), frame.size()),
@@ -1029,7 +1037,7 @@ int main() {
 		if (ok) {
 			fail("try_encode_jpeg2k_frame should fail without lossy target");
 		}
-		if (encode_error.code != codec_status_code::invalid_argument) {
+		if (encode_error.code != CodecStatusCode::invalid_argument) {
 			fail("try_encode_jpeg2k_frame should report invalid_argument");
 		}
 		if (encode_error.stage != "validate") {
@@ -1042,7 +1050,7 @@ int main() {
 	{
 		std::vector<std::uint8_t> frame(2, std::uint8_t{0});
 		std::vector<std::uint8_t> encoded{};
-		codec_error encode_error{};
+		CodecError encode_error{};
 		dicom::pixel::Htj2kOptions options{};
 		const bool ok = dicom::pixel::detail::try_encode_htj2k_frame(
 		    std::span<const std::uint8_t>(frame.data(), frame.size()),
@@ -1051,7 +1059,7 @@ int main() {
 		if (ok) {
 			fail("try_encode_htj2k_frame should fail for invalid bits_allocated");
 		}
-		if (encode_error.code != codec_status_code::invalid_argument) {
+		if (encode_error.code != CodecStatusCode::invalid_argument) {
 			fail("try_encode_htj2k_frame should report invalid_argument");
 		}
 		if (encode_error.stage != "validate") {
@@ -1064,7 +1072,7 @@ int main() {
 	{
 		std::vector<std::uint8_t> frame(2, std::uint8_t{0});
 		std::vector<std::uint8_t> encoded{};
-		codec_error encode_error{};
+		CodecError encode_error{};
 		dicom::pixel::JpegOptions options{};
 		const bool ok = dicom::pixel::detail::try_encode_jpeg_frame(
 		    std::span<const std::uint8_t>(frame.data(), frame.size()),
@@ -1073,7 +1081,7 @@ int main() {
 		if (ok) {
 			fail("try_encode_jpeg_frame should fail for invalid bits_allocated");
 		}
-		if (encode_error.code != codec_status_code::invalid_argument) {
+		if (encode_error.code != CodecStatusCode::invalid_argument) {
 			fail("try_encode_jpeg_frame should report invalid_argument");
 		}
 		if (encode_error.stage != "validate") {
@@ -1086,7 +1094,7 @@ int main() {
 	{
 		std::vector<std::uint8_t> frame(2, std::uint8_t{0});
 		std::vector<std::uint8_t> encoded{};
-		codec_error encode_error{};
+		CodecError encode_error{};
 		dicom::pixel::JpegXlOptions options{};
 		const bool ok = dicom::pixel::detail::try_encode_jpegxl_frame(
 		    std::span<const std::uint8_t>(frame.data(), frame.size()),
@@ -1095,7 +1103,7 @@ int main() {
 		if (ok) {
 			fail("try_encode_jpegxl_frame should fail for invalid lossless distance");
 		}
-		if (encode_error.code != codec_status_code::invalid_argument) {
+		if (encode_error.code != CodecStatusCode::invalid_argument) {
 			fail("try_encode_jpegxl_frame should report invalid_argument");
 		}
 		if (encode_error.stage != "validate") {

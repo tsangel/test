@@ -157,13 +157,13 @@ std::size_t bytes_per_sample_of(pixel::DataType dtype) noexcept {
 	return std::nullopt;
 }
 
-struct decoded_native_pixel_buffer {
+struct DecodedNativePixelBuffer {
 	std::vector<std::uint8_t> bytes;
 	pixel::DecodeStrides strides{};
 	std::size_t frame_count{0};
 };
 
-[[nodiscard]] decoded_native_pixel_buffer decode_all_frames_to_native(DicomFile& file,
+[[nodiscard]] DecodedNativePixelBuffer decode_all_frames_to_native(DicomFile& file,
     const pixel::PixelDataInfo& info, std::string_view context) {
 	if (!info.has_pixel_data) {
 		diag::error_and_throw(
@@ -189,7 +189,7 @@ struct decoded_native_pixel_buffer {
 		    context, file.path());
 	}
 
-	decoded_native_pixel_buffer decoded{};
+	DecodedNativePixelBuffer decoded{};
 	decoded.frame_count = static_cast<std::size_t>(info.frames);
 	decoded.strides = decode_strides;
 	if (decoded.frame_count != 0 &&
@@ -361,23 +361,90 @@ void convert_encapsulated_pixel_data_to_native(DicomFile& file) {
 	    native_pixel_vr_from_bits_allocated(storage_bits));
 }
 
+enum class ApplyTransferSyntaxEncodeMode : std::uint8_t {
+	use_plugin_defaults = 0,
+	use_explicit_options,
+	use_encoder_context,
+};
+
 void transcode_encapsulated_pixel_data_to_encapsulated(DicomFile& file,
     uid::WellKnown target_transfer_syntax,
-    const pixel::CodecOptions& codec_opt_override) {
+    ApplyTransferSyntaxEncodeMode encode_mode,
+    std::span<const pixel::CodecOptionTextKv> codec_opt_override,
+    const pixel::EncoderContext* encoder_ctx) {
 	convert_encapsulated_pixel_data_to_native(file);
 	auto source =
 	    build_set_pixel_source_from_native_pixel_data(file, target_transfer_syntax);
+	if (encode_mode == ApplyTransferSyntaxEncodeMode::use_plugin_defaults) {
+		file.set_pixel_data(target_transfer_syntax, source);
+		return;
+	}
+	if (encode_mode == ApplyTransferSyntaxEncodeMode::use_encoder_context) {
+		file.set_pixel_data(target_transfer_syntax, source, *encoder_ctx);
+		return;
+	}
 	file.set_pixel_data(target_transfer_syntax, source, codec_opt_override);
 }
 
-struct lut_descriptor_values {
+[[nodiscard]] bool apply_transfer_syntax_impl(DicomFile& file,
+    uid::WellKnown transfer_syntax,
+    ApplyTransferSyntaxEncodeMode encode_mode,
+    std::span<const pixel::CodecOptionTextKv> codec_opt_override,
+    const pixel::EncoderContext* encoder_ctx) {
+	const auto source_transfer_syntax = file.transfer_syntax_uid();
+	DataSet& dataset = file.dataset();
+	dataset.ensure_loaded(Tag(0xFFFFu, 0xFFFFu));
+	const auto* pixel_data = dataset.get_dataelement("PixelData"_tag);
+	const bool has_pixel_data_element = !pixel_data->is_missing();
+	const bool has_encapsulated_pixel_data = pixel_data->vr().is_pixel_sequence();
+	const bool target_uses_encapsulated_pixel_data = transfer_syntax.is_encapsulated();
+
+	if (target_uses_encapsulated_pixel_data && has_pixel_data_element) {
+		const bool already_target_transfer_syntax = has_encapsulated_pixel_data &&
+		    source_transfer_syntax.valid() && source_transfer_syntax == transfer_syntax;
+		if (already_target_transfer_syntax) {
+			// Keep existing encoded PixelData as-is.
+		} else if (!has_encapsulated_pixel_data) {
+			if (!transfer_syntax.supports_pixel_encode()) {
+				diag::error_and_throw(
+				    "DicomFile::set_transfer_syntax file={} source_ts={} target_ts={} reason=target encapsulated transfer syntax does not support native pixel encoding",
+				    file.path(), source_transfer_syntax.value(), transfer_syntax.value());
+			}
+				auto source =
+				    build_set_pixel_source_from_native_pixel_data(file, transfer_syntax);
+				if (encode_mode == ApplyTransferSyntaxEncodeMode::use_plugin_defaults) {
+					file.set_pixel_data(transfer_syntax, source);
+				} else if (encode_mode == ApplyTransferSyntaxEncodeMode::use_encoder_context) {
+					file.set_pixel_data(transfer_syntax, source, *encoder_ctx);
+				} else {
+					file.set_pixel_data(transfer_syntax, source, codec_opt_override);
+				}
+			return false;
+		} else if (!transfer_syntax.supports_pixel_encode()) {
+			diag::error_and_throw(
+			    "DicomFile::set_transfer_syntax file={} source_ts={} target_ts={} reason=target encapsulated transfer syntax does not support encapsulated-to-encapsulated transcoding",
+			    file.path(), source_transfer_syntax.value(), transfer_syntax.value());
+			} else {
+				transcode_encapsulated_pixel_data_to_encapsulated(
+				    file, transfer_syntax, encode_mode, codec_opt_override,
+				    encoder_ctx);
+				return false;
+			}
+		} else if (has_encapsulated_pixel_data && !target_uses_encapsulated_pixel_data) {
+		convert_encapsulated_pixel_data_to_native(file);
+	}
+
+	return true;
+}
+
+struct LutDescriptorValues {
 	std::size_t entry_count{0};
 	std::int64_t first_mapped{0};
 	std::uint32_t bits_per_entry{0};
 };
 
 bool try_parse_lut_descriptor(const DataElement& descriptor_elem,
-    lut_descriptor_values& out) noexcept {
+    LutDescriptorValues& out) noexcept {
 	const auto span = descriptor_elem.value_span();
 	if (span.size() < 6) {
 		return false;
@@ -729,7 +796,7 @@ std::optional<pixel::ModalityLut> DicomFile::modality_lut() const {
 		    path());
 	}
 
-	lut_descriptor_values descriptor{};
+	LutDescriptorValues descriptor{};
 	if (!try_parse_lut_descriptor(descriptor_elem, descriptor)) {
 		diag::error_and_throw(
 		    "DicomFile::modality_lut file={} reason=invalid LUTDescriptor",
@@ -942,45 +1009,12 @@ void DicomFile::set_transfer_syntax_state_only(uid::WellKnown transfer_syntax) {
 	}
 }
 
-void DicomFile::apply_transfer_syntax(uid::WellKnown transfer_syntax,
-    const pixel::CodecOptions& codec_opt_override) {
-	const auto source_transfer_syntax = transfer_syntax_uid_;
-	if (root_dataset_) {
-		root_dataset_->ensure_loaded(Tag(0xFFFFu, 0xFFFFu));
-		const auto* pixel_data = root_dataset_->get_dataelement("PixelData"_tag);
-		const bool has_pixel_data_element = !pixel_data->is_missing();
-		const bool has_encapsulated_pixel_data = pixel_data->vr().is_pixel_sequence();
-		const bool target_uses_encapsulated_pixel_data = transfer_syntax.is_encapsulated();
-
-		if (target_uses_encapsulated_pixel_data && has_pixel_data_element) {
-			const bool already_target_transfer_syntax = has_encapsulated_pixel_data &&
-			    source_transfer_syntax.valid() && source_transfer_syntax == transfer_syntax;
-			if (already_target_transfer_syntax) {
-				// Keep existing encoded PixelData as-is.
-			} else if (!has_encapsulated_pixel_data) {
-				if (!transfer_syntax.supports_pixel_encode()) {
-					diag::error_and_throw(
-					    "DicomFile::set_transfer_syntax file={} source_ts={} target_ts={} reason=target encapsulated transfer syntax does not support native pixel encoding",
-					    path(), source_transfer_syntax.value(), transfer_syntax.value());
-				}
-				auto source =
-				    build_set_pixel_source_from_native_pixel_data(*this, transfer_syntax);
-				set_pixel_data(transfer_syntax, source, codec_opt_override);
-				return;
-			} else if (!transfer_syntax.supports_pixel_encode()) {
-				diag::error_and_throw(
-				    "DicomFile::set_transfer_syntax file={} source_ts={} target_ts={} reason=target encapsulated transfer syntax does not support encapsulated-to-encapsulated transcoding",
-				    path(), source_transfer_syntax.value(), transfer_syntax.value());
-			} else {
-				transcode_encapsulated_pixel_data_to_encapsulated(
-				    *this, transfer_syntax, codec_opt_override);
-				return;
-			}
-		} else if (has_encapsulated_pixel_data && !target_uses_encapsulated_pixel_data) {
-			convert_encapsulated_pixel_data_to_native(*this);
-		}
+void DicomFile::apply_transfer_syntax(uid::WellKnown transfer_syntax) {
+	if (!apply_transfer_syntax_impl(*this, transfer_syntax,
+	        ApplyTransferSyntaxEncodeMode::use_plugin_defaults,
+	        std::span<const pixel::CodecOptionTextKv>{}, nullptr)) {
+		return;
 	}
-
 	set_transfer_syntax_state_only(transfer_syntax);
 	DataElement* transfer_syntax_element = add_dataelement("(0002,0010)"_tag, VR::UI);
 	if (!transfer_syntax_element || !transfer_syntax_element->from_transfer_syntax_uid(transfer_syntax)) {
@@ -989,8 +1023,66 @@ void DicomFile::apply_transfer_syntax(uid::WellKnown transfer_syntax,
 	}
 }
 
+void DicomFile::apply_transfer_syntax(uid::WellKnown transfer_syntax,
+    const pixel::EncoderContext& encoder_ctx) {
+	if (!apply_transfer_syntax_impl(*this, transfer_syntax,
+	        ApplyTransferSyntaxEncodeMode::use_encoder_context,
+	        std::span<const pixel::CodecOptionTextKv>{}, &encoder_ctx)) {
+		return;
+	}
+	set_transfer_syntax_state_only(transfer_syntax);
+	DataElement* transfer_syntax_element = add_dataelement("(0002,0010)"_tag, VR::UI);
+	if (!transfer_syntax_element || !transfer_syntax_element->from_transfer_syntax_uid(transfer_syntax)) {
+		diag::error_and_throw(
+		    "DicomFile::apply_transfer_syntax reason=failed to update (0002,0010) TransferSyntaxUID");
+	}
+}
+
+void DicomFile::apply_transfer_syntax(uid::WellKnown transfer_syntax,
+    std::span<const pixel::CodecOptionTextKv> codec_opt_override) {
+	if (!apply_transfer_syntax_impl(*this, transfer_syntax,
+	        ApplyTransferSyntaxEncodeMode::use_explicit_options,
+	        codec_opt_override, nullptr)) {
+		return;
+	}
+	set_transfer_syntax_state_only(transfer_syntax);
+	DataElement* transfer_syntax_element = add_dataelement("(0002,0010)"_tag, VR::UI);
+	if (!transfer_syntax_element || !transfer_syntax_element->from_transfer_syntax_uid(transfer_syntax)) {
+		diag::error_and_throw(
+		    "DicomFile::apply_transfer_syntax reason=failed to update (0002,0010) TransferSyntaxUID");
+	}
+}
+
+void DicomFile::set_transfer_syntax(uid::WellKnown transfer_syntax) {
+	if (!transfer_syntax.valid() || transfer_syntax.uid_type() != UidType::TransferSyntax) {
+		diag::error_and_throw(
+		    "DicomFile::set_transfer_syntax reason=uid must be a valid Transfer Syntax UID");
+	}
+	apply_transfer_syntax(transfer_syntax);
+}
+
 void DicomFile::set_transfer_syntax(uid::WellKnown transfer_syntax,
-    pixel::CodecOptions codec_opt) {
+    const pixel::EncoderContext& encoder_ctx) {
+	if (!transfer_syntax.valid() || transfer_syntax.uid_type() != UidType::TransferSyntax) {
+		diag::error_and_throw(
+		    "DicomFile::set_transfer_syntax reason=uid must be a valid Transfer Syntax UID");
+	}
+	if (!encoder_ctx.configured()) {
+		diag::error_and_throw(
+		    "DicomFile::set_transfer_syntax file={} ts={} reason=encoder context is not configured",
+		    path(), transfer_syntax.value());
+	}
+	if (!encoder_ctx.transfer_syntax_uid().valid() ||
+	    encoder_ctx.transfer_syntax_uid() != transfer_syntax) {
+		diag::error_and_throw(
+		    "DicomFile::set_transfer_syntax file={} ts={} ctx_ts={} reason=encoder context transfer syntax mismatch",
+		    path(), transfer_syntax.value(), encoder_ctx.transfer_syntax_uid().value());
+	}
+	apply_transfer_syntax(transfer_syntax, encoder_ctx);
+}
+
+void DicomFile::set_transfer_syntax(uid::WellKnown transfer_syntax,
+    std::span<const pixel::CodecOptionTextKv> codec_opt) {
 	if (!transfer_syntax.valid() || transfer_syntax.uid_type() != UidType::TransferSyntax) {
 		diag::error_and_throw(
 		    "DicomFile::set_transfer_syntax reason=uid must be a valid Transfer Syntax UID");

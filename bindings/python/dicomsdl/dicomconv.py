@@ -249,7 +249,7 @@ def resolve_transfer_syntax_uid(text: str) -> dicom.Uid:
     return uid
 
 
-def build_codec_opt(args: argparse.Namespace, transfer_syntax: dicom.Uid) -> dict | None:
+def build_encoder_options(args: argparse.Namespace, transfer_syntax: dicom.Uid) -> dict | None:
     has_j2k_fields = (
         args.target_bpp is not None
         or args.target_psnr is not None
@@ -325,35 +325,35 @@ def build_codec_opt(args: argparse.Namespace, transfer_syntax: dicom.Uid) -> dic
         if has_j2k_fields or has_jpeg_fields or has_jpegls_fields:
             raise ValueError("codec jpegxl does not accept j2k/jpeg/jpegls option fields")
 
-    codec_opt: dict[str, object] = {"type": codec_type}
+    options: dict[str, object] = {"type": codec_type}
 
     if codec_type in {"j2k", "htj2k"}:
         if args.target_psnr is not None:
-            codec_opt["target_psnr"] = args.target_psnr
+            options["target_psnr"] = args.target_psnr
         if args.target_bpp is not None:
-            codec_opt["target_bpp"] = args.target_bpp
+            options["target_bpp"] = args.target_bpp
         if args.threads is not None:
-            codec_opt["threads"] = args.threads
+            options["threads"] = args.threads
         if args.color_transform is not None:
-            codec_opt["color_transform"] = args.color_transform
+            options["color_transform"] = args.color_transform
     elif codec_type == "jpeg":
         if args.quality is not None:
-            codec_opt["quality"] = args.quality
+            options["quality"] = args.quality
     elif codec_type == "jpegls":
         if args.near_lossless_error is not None:
-            codec_opt["near_lossless_error"] = args.near_lossless_error
+            options["near_lossless_error"] = args.near_lossless_error
     elif codec_type == "jpegxl":
         distance = args.distance
         if distance is None and is_jpegxl_lossless_transfer_syntax(transfer_syntax):
             distance = 0.0
         if distance is not None:
-            codec_opt["distance"] = distance
+            options["distance"] = distance
         if args.effort is not None:
-            codec_opt["effort"] = args.effort
+            options["effort"] = args.effort
         if args.threads is not None:
-            codec_opt["threads"] = args.threads
+            options["threads"] = args.threads
 
-    return codec_opt
+    return options
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -363,11 +363,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         transfer_syntax = resolve_transfer_syntax_uid(args.transfer_syntax)
         df = dicom.read_file(args.input)
-        codec_opt = build_codec_opt(args, transfer_syntax)
-        if codec_opt is None:
+        options = build_encoder_options(args, transfer_syntax)
+        if options is None:
             df.set_transfer_syntax(transfer_syntax)
         else:
-            df.set_transfer_syntax(transfer_syntax, codec_opt=codec_opt)
+            df.set_transfer_syntax(transfer_syntax, options=options)
         df.write_file(args.output)
         return 0
     except Exception as exc:

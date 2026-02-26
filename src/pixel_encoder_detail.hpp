@@ -2,6 +2,7 @@
 
 #include "dicom.h"
 #include "dicom_endian.h"
+#include "pixel_codec_typed_options.hpp"
 #include "pixel_codec_registry.hpp"
 
 #include <cstddef>
@@ -26,7 +27,7 @@ struct EncapsulatedEncodeInput {
 	const std::uint8_t* source_base{nullptr};
 	std::size_t frame_count{0};
 	std::size_t source_frame_stride{0};
-	std::size_t source_frame_payload{0};
+	std::size_t source_frame_size_bytes{0};
 	bool source_aliases_current_native_pixel_data{false};
 };
 
@@ -35,7 +36,7 @@ struct CodecEncodeFnInput {
 	DicomFile& file;
 	uid::WellKnown transfer_syntax{};
 	const EncapsulatedEncodeInput& encode_input;
-	std::span<const codec_option_kv> codec_options{};
+	std::span<const CodecOptionKv> codec_options{};
 	std::size_t rows{0};
 	std::size_t cols{0};
 	std::size_t samples_per_pixel{0};
@@ -49,9 +50,9 @@ struct CodecEncodeFnInput {
 	std::size_t row_payload_bytes{0};
 	std::size_t source_row_stride{0};
 	std::size_t source_plane_stride{0};
-	std::size_t source_frame_payload{0};
+	std::size_t source_frame_size_bytes{0};
 	std::size_t destination_frame_payload{0};
-	codec_profile profile{codec_profile::unknown};
+	CodecProfile profile{CodecProfile::unknown};
 	std::string_view plugin_key{};
 };
 
@@ -165,11 +166,6 @@ struct SourceFrameLayout {
 	return layout;
 }
 
-bool try_encode_rle_frame(std::span<const std::uint8_t> frame_data,
-    std::size_t rows, std::size_t cols, std::size_t samples_per_pixel,
-    std::size_t bytes_per_sample, Planar source_planar, std::size_t row_stride,
-    std::vector<std::uint8_t>& out_encoded, codec_error& out_error) noexcept;
-
 // Encodes one native frame into JPEG 2000 codestream (J2K) for encapsulated PixelData.
 std::vector<std::uint8_t> encode_jpeg2k_frame(std::span<const std::uint8_t> frame_data,
     std::size_t rows, std::size_t cols, std::size_t samples_per_pixel,
@@ -184,7 +180,7 @@ bool try_encode_jpeg2k_frame(std::span<const std::uint8_t> frame_data,
     int pixel_representation, Planar source_planar, std::size_t row_stride,
     bool use_multicomponent_transform, bool lossless,
     const J2kOptions& options, std::vector<std::uint8_t>& out_encoded,
-    codec_error& out_error) noexcept;
+    CodecError& out_error) noexcept;
 
 // Encodes one native frame into HTJ2K codestream (J2C) for encapsulated PixelData.
 std::vector<std::uint8_t> encode_htj2k_frame(std::span<const std::uint8_t> frame_data,
@@ -200,13 +196,13 @@ bool try_encode_htj2k_frame(std::span<const std::uint8_t> frame_data,
     int pixel_representation, Planar source_planar, std::size_t row_stride,
     bool use_multicomponent_transform, bool lossless, bool rpcl_progression,
     const Htj2kOptions& options, std::vector<std::uint8_t>& out_encoded,
-    codec_error& out_error) noexcept;
+    CodecError& out_error) noexcept;
 
 bool try_encode_jpegls_frame(std::span<const std::uint8_t> frame_data,
     std::size_t rows, std::size_t cols, std::size_t samples_per_pixel,
     std::size_t bytes_per_sample, int bits_allocated, int bits_stored, Planar source_planar,
     std::size_t row_stride, int near_lossless_error, std::vector<std::uint8_t>& out_encoded,
-    codec_error& out_error) noexcept;
+    CodecError& out_error) noexcept;
 
 // Encodes one native frame into classic JPEG codestream for encapsulated PixelData.
 std::vector<std::uint8_t> encode_jpeg_frame(std::span<const std::uint8_t> frame_data,
@@ -220,7 +216,7 @@ bool try_encode_jpeg_frame(std::span<const std::uint8_t> frame_data,
     std::size_t bytes_per_sample, int bits_allocated, int bits_stored,
     Planar source_planar, std::size_t row_stride, bool lossless,
     const JpegOptions& options, std::vector<std::uint8_t>& out_encoded,
-    codec_error& out_error) noexcept;
+    CodecError& out_error) noexcept;
 
 // Encodes one native frame into JPEG-XL codestream for encapsulated PixelData.
 std::vector<std::uint8_t> encode_jpegxl_frame(std::span<const std::uint8_t> frame_data,
@@ -234,7 +230,7 @@ bool try_encode_jpegxl_frame(std::span<const std::uint8_t> frame_data,
     std::size_t bytes_per_sample, int bits_allocated, int bits_stored,
     int pixel_representation, Planar source_planar, std::size_t row_stride,
     bool lossless, const JpegXlOptions& options, std::vector<std::uint8_t>& out_encoded,
-    codec_error& out_error) noexcept;
+    CodecError& out_error) noexcept;
 
 void encode_encapsulated_pixel_data(const CodecEncodeFnInput& input);
 

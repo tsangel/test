@@ -1,4 +1,5 @@
 #include "pixel_decoder_detail.hpp"
+#include "pixel_codec_plugin_abi_adapter.hpp"
 #include "pixel_codec_registry.hpp"
 
 #include "dicom_endian.h"
@@ -20,15 +21,15 @@ namespace diag = dicom::diag;
 namespace dicom {
 namespace pixel::detail {
 
-planar_transform select_planar_transform(Planar src_planar, Planar dst_planar) noexcept {
+PlanarTransform select_planar_transform(Planar src_planar, Planar dst_planar) noexcept {
 	if (src_planar == Planar::interleaved) {
 		return (dst_planar == Planar::interleaved)
-		           ? planar_transform::interleaved_to_interleaved
-		           : planar_transform::interleaved_to_planar;
+		           ? PlanarTransform::interleaved_to_interleaved
+		           : PlanarTransform::interleaved_to_planar;
 	}
 	return (dst_planar == Planar::interleaved)
-	           ? planar_transform::planar_to_interleaved
-	           : planar_transform::planar_to_planar;
+	           ? PlanarTransform::planar_to_interleaved
+	           : PlanarTransform::planar_to_planar;
 }
 
 std::size_t sv_dtype_bytes(DataType sv_dtype) noexcept {
@@ -50,7 +51,7 @@ std::size_t sv_dtype_bytes(DataType sv_dtype) noexcept {
 	}
 }
 
-encapsulated_frame_source load_encapsulated_frame_source(const DataSet& ds,
+EncapsulatedFrameSource load_encapsulated_frame_source(const DataSet& ds,
     std::string_view file_path, std::size_t frame_index, std::string_view codec_name) {
 	const auto& pixel_data = ds["PixelData"_tag];
 	if (!pixel_data || !pixel_data.vr().is_pixel_sequence()) {
@@ -80,7 +81,7 @@ encapsulated_frame_source load_encapsulated_frame_source(const DataSet& ds,
 		    file_path, frame_index, codec_name);
 	}
 
-	encapsulated_frame_source source{};
+	EncapsulatedFrameSource source{};
 	source.frame = frame;
 	if (frame->encoded_data_size() != 0) {
 		source.contiguous = frame->encoded_data_view();
@@ -140,20 +141,20 @@ encapsulated_frame_source load_encapsulated_frame_source(const DataSet& ds,
 
 namespace {
 
-struct native_source_element {
+struct NativeSourceElement {
 	const DataElement* element{nullptr};
 	std::string_view name{"PixelData"};
 };
 
-native_source_element select_native_source_element(
+NativeSourceElement select_native_source_element(
     const DataSet& ds, DataType sv_dtype) {
 	switch (sv_dtype) {
 	case DataType::f32:
-		return native_source_element{&ds["FloatPixelData"_tag], "FloatPixelData"};
+		return NativeSourceElement{&ds["FloatPixelData"_tag], "FloatPixelData"};
 	case DataType::f64:
-		return native_source_element{&ds["DoubleFloatPixelData"_tag], "DoubleFloatPixelData"};
+		return NativeSourceElement{&ds["DoubleFloatPixelData"_tag], "DoubleFloatPixelData"};
 	default:
-		return native_source_element{&ds["PixelData"_tag], "PixelData"};
+		return NativeSourceElement{&ds["PixelData"_tag], "PixelData"};
 	}
 }
 
@@ -172,7 +173,7 @@ native_source_element select_native_source_element(
 
 } // namespace
 
-native_frame_source load_native_frame_source(
+NativeFrameSource load_native_frame_source(
     const DataSet& ds, std::string_view file_path,
     const pixel::PixelDataInfo& info, std::size_t frame_index) {
 	const auto sv_dtype = info.sv_dtype;
@@ -237,7 +238,7 @@ native_frame_source load_native_frame_source(
 		    file_path);
 	}
 
-	native_frame_source native_source{};
+	NativeFrameSource native_source{};
 	native_source.contiguous = source.element->value_span();
 	native_source.name = source.name;
 	std::size_t src_frame_offset = 0;
@@ -259,7 +260,7 @@ native_frame_source load_native_frame_source(
 
 std::span<const std::uint8_t> materialize_encapsulated_frame_source(
     std::string_view file_path, std::size_t frame_index, std::string_view codec_name,
-    const encapsulated_frame_source& source, std::vector<std::uint8_t>& out_owned) {
+    const EncapsulatedFrameSource& source, std::vector<std::uint8_t>& out_owned) {
 	if (!source.contiguous.empty()) {
 		return source.contiguous;
 	}
@@ -613,24 +614,24 @@ void copy_planar_to_planar(const std::uint8_t* src_frame, std::uint8_t* dst_base
 }
 
 template <std::size_t Bytes>
-void dispatch_planar_transform_copy(planar_transform transform,
+void dispatch_planar_transform_copy(PlanarTransform transform,
     const std::uint8_t* src_frame, std::uint8_t* dst_base,
     std::size_t rows, std::size_t cols, std::size_t samples_per_pixel,
     std::size_t src_row_bytes, std::size_t dst_row_bytes) noexcept {
 	switch (transform) {
-	case planar_transform::interleaved_to_interleaved:
+	case PlanarTransform::interleaved_to_interleaved:
 		copy_interleaved_to_interleaved<Bytes>(
 		    src_frame, dst_base, rows, cols, samples_per_pixel, src_row_bytes, dst_row_bytes);
 		return;
-	case planar_transform::interleaved_to_planar:
+	case PlanarTransform::interleaved_to_planar:
 		copy_interleaved_to_planar<Bytes>(
 		    src_frame, dst_base, rows, cols, samples_per_pixel, src_row_bytes, dst_row_bytes);
 		return;
-	case planar_transform::planar_to_interleaved:
+	case PlanarTransform::planar_to_interleaved:
 		copy_planar_to_interleaved<Bytes>(
 		    src_frame, dst_base, rows, cols, samples_per_pixel, src_row_bytes, dst_row_bytes);
 		return;
-	case planar_transform::planar_to_planar:
+	case PlanarTransform::planar_to_planar:
 		copy_planar_to_planar<Bytes>(
 		    src_frame, dst_base, rows, cols, samples_per_pixel, src_row_bytes, dst_row_bytes);
 		return;
@@ -665,7 +666,7 @@ void copy_interleaved_to_interleaved_by_bytes(std::size_t bytes_per_sample,
 	}
 }
 
-void dispatch_planar_transform_copy_by_bytes(planar_transform transform, std::size_t bytes_per_sample,
+void dispatch_planar_transform_copy_by_bytes(PlanarTransform transform, std::size_t bytes_per_sample,
     const std::uint8_t* src_frame, std::uint8_t* dst_base,
     std::size_t rows, std::size_t cols, std::size_t samples_per_pixel,
     std::size_t src_row_bytes, std::size_t dst_row_bytes) {
@@ -695,7 +696,7 @@ void dispatch_planar_transform_copy_by_bytes(planar_transform transform, std::si
 
 } // namespace
 
-void decode_mono_scaled_into_f32(const decode_value_transform& value_transform,
+void decode_mono_scaled_into_f32(const DecodeValueTransform& value_transform,
     const pixel::PixelDataInfo& info,
     const std::uint8_t* src_frame, std::span<std::uint8_t> dst,
     const DecodeStrides& dst_strides, std::size_t rows, std::size_t cols,
@@ -806,7 +807,7 @@ void decode_mono_scaled_into_f32(const decode_value_transform& value_transform,
 	}
 }
 
-void run_planar_transform_copy(planar_transform transform, std::size_t bytes_per_sample,
+void run_planar_transform_copy(PlanarTransform transform, std::size_t bytes_per_sample,
     const std::uint8_t* src_frame, std::uint8_t* dst_base,
     std::size_t rows, std::size_t cols, std::size_t samples_per_pixel,
     std::size_t src_row_bytes, std::size_t dst_row_bytes) {
@@ -820,7 +821,7 @@ void run_planar_transform_copy(planar_transform transform, std::size_t bytes_per
 
 	if ((bytes_per_sample == 1 || bytes_per_sample == 2) &&
 	    (samples_per_pixel == 3 || samples_per_pixel == 4)) {
-		if (transform == planar_transform::interleaved_to_planar) {
+		if (transform == PlanarTransform::interleaved_to_planar) {
 			if (bytes_per_sample == 1) {
 				if (samples_per_pixel == 3) {
 						copy_interleaved_to_planar_fast<1, 3>(
@@ -840,7 +841,7 @@ void run_planar_transform_copy(planar_transform transform, std::size_t bytes_per
 			}
 			return;
 		}
-		if (transform == planar_transform::planar_to_interleaved) {
+		if (transform == PlanarTransform::planar_to_interleaved) {
 			if (bytes_per_sample == 1) {
 				if (samples_per_pixel == 3) {
 						copy_planar_to_interleaved_fast<1, 3>(
@@ -927,10 +928,10 @@ std::optional<pixel::ModalityLut> load_modality_lut_for_scaled_output(
 	return df.modality_lut();
 }
 
-detail::decode_value_transform prepare_decode_value_transform(
+detail::DecodeValueTransform prepare_decode_value_transform(
     const DataSet& ds, const pixel::PixelDataInfo& info, const DecodeOptions& opt,
     std::optional<pixel::ModalityLut> modality_lut) {
-	detail::decode_value_transform value_transform{};
+	detail::DecodeValueTransform value_transform{};
 	if (!can_apply_scaled_output(info, opt)) {
 		return value_transform;
 	}
@@ -952,40 +953,30 @@ detail::decode_value_transform prepare_decode_value_transform(
 }
 
 void decode_frame_into_with_prepared_transform(const DicomFile& df, const DataSet& ds,
-    const pixel::PixelDataInfo& info, const detail::decode_value_transform& value_transform,
+    const pixel::PixelDataInfo& info, const detail::DecodeValueTransform& value_transform,
     std::size_t frame_index, std::span<std::uint8_t> dst,
     const DecodeStrides& dst_strides, const DecodeOptions& effective_opt) {
-	const auto& codec_registry = detail::global_codec_registry();
-	const auto* binding = codec_registry.find_binding(info.ts);
-	detail::codec_error decode_error{};
+	const auto& CodecRegistry = detail::global_codec_registry();
+	const auto* binding = CodecRegistry.find_binding(info.ts);
+	detail::CodecError decode_error{};
 	if (!binding || !binding->decode_supported) {
-		decode_error.code = detail::codec_status_code::unsupported;
+		decode_error.code = detail::CodecStatusCode::unsupported;
 		decode_error.stage = "plugin_lookup";
 		decode_error.detail =
 		    "transfer syntax is not supported for decode by codec registry binding";
 		detail::throw_codec_error_with_context("pixel::decode_frame_into",
 		    df.path(), info.ts, "<none>", frame_index, decode_error);
 	}
-	const auto plugin_list = codec_registry.plugins();
-	const detail::codec_plugin* plugin = nullptr;
-	if (binding->plugin_index < plugin_list.size()) {
-		const auto& candidate = plugin_list[binding->plugin_index];
-		if (candidate.key == binding->plugin_key) {
-			plugin = &candidate;
-		}
-	}
+	const auto* plugin = CodecRegistry.select_decoder(*binding);
 	if (!plugin) {
-		plugin = codec_registry.find_plugin(binding->plugin_key);
-	}
-	if (!plugin) {
-		decode_error.code = detail::codec_status_code::internal_error;
+		decode_error.code = detail::CodecStatusCode::internal_error;
 		decode_error.stage = "plugin_lookup";
 		decode_error.detail = "registry binding references a missing plugin";
 		detail::throw_codec_error_with_context("pixel::decode_frame_into",
 		    df.path(), info.ts, binding->plugin_key, frame_index, decode_error);
 	}
 	if (!plugin->decode_frame) {
-		decode_error.code = detail::codec_status_code::internal_error;
+		decode_error.code = detail::CodecStatusCode::internal_error;
 		decode_error.stage = "plugin_lookup";
 		decode_error.detail = "registered decode plugin has no dispatcher";
 		detail::throw_codec_error_with_context("pixel::decode_frame_into",
@@ -995,26 +986,26 @@ void decode_frame_into_with_prepared_transform(const DicomFile& df, const DataSe
 	std::vector<std::uint8_t> prepared_source_owned{};
 	try {
 		switch (binding->profile) {
-		case detail::codec_profile::native_uncompressed: {
+		case detail::CodecProfile::native_uncompressed: {
 			const auto native_source = detail::load_native_frame_source(
 			    ds, df.path(), info, frame_index);
 			prepared_source = native_source.contiguous;
 			break;
 		}
-		case detail::codec_profile::encapsulated_uncompressed:
-		case detail::codec_profile::rle_lossless:
-		case detail::codec_profile::jpeg_lossless:
-		case detail::codec_profile::jpeg_lossy:
-		case detail::codec_profile::jpegls_lossless:
-		case detail::codec_profile::jpegls_near_lossless:
-		case detail::codec_profile::jpeg2000_lossless:
-		case detail::codec_profile::jpeg2000_lossy:
-		case detail::codec_profile::htj2k_lossless:
-		case detail::codec_profile::htj2k_lossless_rpcl:
-		case detail::codec_profile::htj2k_lossy:
-		case detail::codec_profile::jpegxl_lossless:
-		case detail::codec_profile::jpegxl_lossy:
-		case detail::codec_profile::jpegxl_jpeg_recompression: {
+		case detail::CodecProfile::encapsulated_uncompressed:
+		case detail::CodecProfile::rle_lossless:
+		case detail::CodecProfile::jpeg_lossless:
+		case detail::CodecProfile::jpeg_lossy:
+		case detail::CodecProfile::jpegls_lossless:
+		case detail::CodecProfile::jpegls_near_lossless:
+		case detail::CodecProfile::jpeg2000_lossless:
+		case detail::CodecProfile::jpeg2000_lossy:
+		case detail::CodecProfile::htj2k_lossless:
+		case detail::CodecProfile::htj2k_lossless_rpcl:
+		case detail::CodecProfile::htj2k_lossy:
+		case detail::CodecProfile::jpegxl_lossless:
+		case detail::CodecProfile::jpegxl_lossy:
+		case detail::CodecProfile::jpegxl_jpeg_recompression: {
 			const auto source = detail::load_encapsulated_frame_source(
 			    ds, df.path(), frame_index, binding->plugin_key);
 			prepared_source = detail::materialize_encapsulated_frame_source(
@@ -1022,24 +1013,24 @@ void decode_frame_into_with_prepared_transform(const DicomFile& df, const DataSe
 			    prepared_source_owned);
 			break;
 		}
-		case detail::codec_profile::unknown:
+		case detail::CodecProfile::unknown:
 		default:
 			break;
 		}
 	} catch (const std::bad_alloc&) {
-		decode_error.code = detail::codec_status_code::internal_error;
+		decode_error.code = detail::CodecStatusCode::internal_error;
 		decode_error.stage = "allocate";
 		decode_error.detail = "memory allocation failed";
 		detail::throw_codec_error_with_context("pixel::decode_frame_into",
 		    df.path(), info.ts, binding->plugin_key, frame_index, decode_error);
 	} catch (const std::exception& e) {
-		decode_error.code = detail::codec_status_code::invalid_argument;
+		decode_error.code = detail::CodecStatusCode::invalid_argument;
 		decode_error.stage = "load_frame_source";
 		decode_error.detail = e.what();
 		detail::throw_codec_error_with_context("pixel::decode_frame_into",
 		    df.path(), info.ts, binding->plugin_key, frame_index, decode_error);
 	} catch (...) {
-		decode_error.code = detail::codec_status_code::backend_error;
+		decode_error.code = detail::CodecStatusCode::backend_error;
 		decode_error.stage = "load_frame_source";
 		decode_error.detail = "non-standard exception";
 		detail::throw_codec_error_with_context("pixel::decode_frame_into",
@@ -1053,11 +1044,29 @@ void decode_frame_into_with_prepared_transform(const DicomFile& df, const DataSe
 	    .destination_strides = dst_strides,
 	    .options = effective_opt,
 	};
+	dicomsdl_decoder_request_v1 abi_request{};
+	detail::abi::build_decoder_request_v1(decode_input, abi_request);
+	if (abi_request.frame.transfer_syntax_code ==
+	    DICOMSDL_TRANSFER_SYNTAX_CODE_INVALID) {
+		decode_error.code = detail::CodecStatusCode::invalid_argument;
+		decode_error.stage = "validate";
+		decode_error.detail = "invalid transfer syntax code for decoder ABI request";
+		detail::throw_codec_error_with_context("pixel::decode_frame_into",
+		    df.path(), info.ts, binding->plugin_key, frame_index, decode_error);
+	}
+	if (abi_request.frame.source_dtype == DICOMSDL_DTYPE_UNKNOWN &&
+	    info.sv_dtype != DataType::unknown) {
+		decode_error.code = detail::CodecStatusCode::invalid_argument;
+		decode_error.stage = "validate";
+		decode_error.detail = "source dtype is not representable in decoder ABI request";
+		detail::throw_codec_error_with_context("pixel::decode_frame_into",
+		    df.path(), info.ts, binding->plugin_key, frame_index, decode_error);
+	}
 	const bool decode_ok = plugin->decode_frame(decode_input, decode_error);
 
 	if (!decode_ok) {
-		if (decode_error.code == detail::codec_status_code::ok) {
-			decode_error.code = detail::codec_status_code::backend_error;
+		if (decode_error.code == detail::CodecStatusCode::ok) {
+			decode_error.code = detail::CodecStatusCode::backend_error;
 		}
 		if (decode_error.stage.empty()) {
 			decode_error.stage = "decode_frame";

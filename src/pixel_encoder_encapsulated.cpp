@@ -1,7 +1,7 @@
 #include "pixel_encoder_detail.hpp"
+#include "pixel_codec_plugin_abi_adapter.hpp"
 
 #include <cctype>
-#include <exception>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -35,7 +35,7 @@ void encode_encapsulated_pixel_data(const CodecEncodeFnInput& input) {
 	const auto& registry = global_codec_registry();
 	const auto* binding = registry.find_binding(input.transfer_syntax);
 	const auto plugin_list = registry.plugins();
-	const codec_plugin* plugin = nullptr;
+	const CodecPlugin* plugin = nullptr;
 	if (binding && binding->plugin_key == input.plugin_key &&
 	    binding->plugin_index < plugin_list.size()) {
 		const auto& candidate = plugin_list[binding->plugin_index];
@@ -49,8 +49,8 @@ void encode_encapsulated_pixel_data(const CodecEncodeFnInput& input) {
 	if (!plugin) {
 		throw_codec_error_with_context(kFunctionName, file_path,
 		    input.transfer_syntax, input.plugin_key, std::nullopt,
-		    codec_error{
-		        .code = codec_status_code::unsupported,
+		    CodecError{
+		        .code = CodecStatusCode::unsupported,
 		        .stage = "plugin_lookup",
 		        .detail = "plugin is not registered in codec registry",
 		    });
@@ -58,56 +58,16 @@ void encode_encapsulated_pixel_data(const CodecEncodeFnInput& input) {
 	if (!plugin->encode_frame) {
 		throw_codec_error_with_context(kFunctionName, file_path,
 		    input.transfer_syntax, input.plugin_key, std::nullopt,
-		    codec_error{
-		        .code = codec_status_code::unsupported,
+		    CodecError{
+		        .code = CodecStatusCode::unsupported,
 		        .stage = "plugin_lookup",
 		        .detail = "plugin does not provide encode_frame dispatch",
 		    });
 	}
-	if (!plugin->parse_options) {
-		throw_codec_error_with_context(kFunctionName, file_path,
-		    input.transfer_syntax, input.plugin_key, std::nullopt,
-		    codec_error{
-		        .code = codec_status_code::unsupported,
-		        .stage = "parse_options",
-		        .detail = "plugin does not provide parse_options hook",
-		    });
-	}
-
-	CodecOptions parsed_codec_options{};
-	try {
-		if (const auto parse_error = plugin->parse_options(
-		        input.transfer_syntax, input.codec_options, parsed_codec_options)) {
-			throw_codec_error_with_context(kFunctionName, file_path,
-			    input.transfer_syntax, input.plugin_key, std::nullopt,
-			    codec_error{
-			        .code = codec_status_code::invalid_argument,
-			        .stage = "parse_options",
-			        .detail = *parse_error,
-			    });
-		}
-	} catch (const std::exception& e) {
-		throw_codec_error_with_context(kFunctionName, file_path,
-		    input.transfer_syntax, input.plugin_key, std::nullopt,
-		    codec_error{
-		        .code = codec_status_code::backend_error,
-		        .stage = "parse_options",
-		        .detail = e.what(),
-		    });
-	} catch (...) {
-		throw_codec_error_with_context(kFunctionName, file_path,
-		    input.transfer_syntax, input.plugin_key, std::nullopt,
-		    codec_error{
-		        .code = codec_status_code::backend_error,
-		        .stage = "parse_options",
-		        .detail = "non-standard exception from parse_options",
-		    });
-	}
-
 	const auto encode_frame_or_throw = [&](std::size_t frame_index,
 	                                   std::span<const std::uint8_t> source_frame_view) {
-		CodecEncodeFrameInput frame_input{
-		    .source_frame = source_frame_view,
+			CodecEncodeFrameInput frame_input{
+			    .source_frame = source_frame_view,
 		    .transfer_syntax = input.transfer_syntax,
 		    .rows = input.rows,
 		    .cols = input.cols,
@@ -122,18 +82,50 @@ void encode_encapsulated_pixel_data(const CodecEncodeFnInput& input) {
 		    .row_payload_bytes = input.row_payload_bytes,
 		    .source_row_stride = input.source_row_stride,
 		    .source_plane_stride = input.source_plane_stride,
-		    .source_frame_payload = input.source_frame_payload,
+		    .source_frame_size_bytes = input.source_frame_size_bytes,
 		    .destination_frame_payload = input.destination_frame_payload,
-		    .profile = input.profile,
-		};
+			    .profile = input.profile,
+			};
+			dicomsdl_encoder_request_v1 abi_request{};
+			detail::abi::build_encoder_request_v1(
+			    frame_input, std::span<std::uint8_t>{}, 0, abi_request);
+			if (abi_request.frame.transfer_syntax_code ==
+			    DICOMSDL_TRANSFER_SYNTAX_CODE_INVALID) {
+				throw_codec_error_with_context(kFunctionName, file_path,
+				    input.transfer_syntax, input.plugin_key, frame_index,
+				    CodecError{
+				        .code = CodecStatusCode::invalid_argument,
+				        .stage = "validate",
+				        .detail = "invalid transfer syntax code for encoder ABI request",
+				    });
+			}
+			if (abi_request.frame.source_dtype == DICOMSDL_DTYPE_UNKNOWN) {
+				throw_codec_error_with_context(kFunctionName, file_path,
+				    input.transfer_syntax, input.plugin_key, frame_index,
+				    CodecError{
+				        .code = CodecStatusCode::invalid_argument,
+				        .stage = "validate",
+				        .detail = "source dtype is not representable in encoder ABI request",
+				    });
+			}
+			if (abi_request.frame.codec_profile_code ==
+			    DICOMSDL_CODEC_PROFILE_UNKNOWN) {
+				throw_codec_error_with_context(kFunctionName, file_path,
+				    input.transfer_syntax, input.plugin_key, frame_index,
+				    CodecError{
+				        .code = CodecStatusCode::invalid_argument,
+				        .stage = "validate",
+				        .detail = "codec profile is not representable in encoder ABI request",
+				    });
+			}
 
 		std::vector<std::uint8_t> encoded_frame{};
-		codec_error error{};
+		CodecError error{};
 		const bool ok =
-		    plugin->encode_frame(frame_input, parsed_codec_options, encoded_frame, error);
+		    plugin->encode_frame(frame_input, input.codec_options, encoded_frame, error);
 		if (!ok) {
-			if (error.code == codec_status_code::ok) {
-				error.code = codec_status_code::backend_error;
+			if (error.code == CodecStatusCode::ok) {
+				error.code = CodecStatusCode::backend_error;
 			}
 			if (error.stage.empty()) {
 				error.stage = "encode_frame";
@@ -154,7 +146,7 @@ void encode_encapsulated_pixel_data(const CodecEncodeFnInput& input) {
 			const auto* source_frame =
 			    encode_input.source_base + frame_index * encode_input.source_frame_stride;
 			const auto source_frame_view = std::span<const std::uint8_t>(
-			    source_frame, encode_input.source_frame_payload);
+			    source_frame, encode_input.source_frame_size_bytes);
 			encoded_frames.push_back(
 			    encode_frame_or_throw(frame_index, source_frame_view));
 		}
@@ -173,7 +165,7 @@ void encode_encapsulated_pixel_data(const CodecEncodeFnInput& input) {
 		const auto* source_frame =
 		    encode_input.source_base + frame_index * encode_input.source_frame_stride;
 		const auto source_frame_view = std::span<const std::uint8_t>(
-		    source_frame, encode_input.source_frame_payload);
+		    source_frame, encode_input.source_frame_size_bytes);
 		auto encoded_frame = encode_frame_or_throw(frame_index, source_frame_view);
 		input.file.set_encoded_pixel_frame(frame_index, std::move(encoded_frame));
 	}

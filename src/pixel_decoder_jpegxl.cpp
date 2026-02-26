@@ -40,13 +40,6 @@ bool sv_dtype_is_integral(DataType sv_dtype) noexcept {
 	}
 }
 
-void set_codec_error(codec_error& out_error, codec_status_code code,
-    std::string_view stage, std::string detail) {
-	out_error.code = code;
-	out_error.stage = std::string(stage);
-	out_error.detail = std::move(detail);
-}
-
 template <typename... Args>
 [[noreturn]] void throw_decode_error(fmt::format_string<Args...> format, Args... args) {
 	throw std::runtime_error(fmt::vformat(format, fmt::make_format_args(args...)));
@@ -82,17 +75,17 @@ void validate_destination(std::span<std::uint8_t> dst,
 
 #if DICOMSDL_HAS_JPEGXL
 
-class jxl_decoder_guard {
+class JxlDecoderGuard {
 public:
-	explicit jxl_decoder_guard(JxlDecoder* decoder) noexcept : decoder_(decoder) {}
-	~jxl_decoder_guard() {
+	explicit JxlDecoderGuard(JxlDecoder* decoder) noexcept : decoder_(decoder) {}
+	~JxlDecoderGuard() {
 		if (decoder_) {
 			JxlDecoderDestroy(decoder_);
 		}
 	}
 
-	jxl_decoder_guard(const jxl_decoder_guard&) = delete;
-	jxl_decoder_guard& operator=(const jxl_decoder_guard&) = delete;
+	JxlDecoderGuard(const JxlDecoderGuard&) = delete;
+	JxlDecoderGuard& operator=(const JxlDecoderGuard&) = delete;
 
 	[[nodiscard]] JxlDecoder* get() const noexcept { return decoder_; }
 
@@ -100,17 +93,17 @@ private:
 	JxlDecoder* decoder_{nullptr};
 };
 
-class jxl_runner_guard {
+class JxlRunnerGuard {
 public:
-	jxl_runner_guard() = default;
-	~jxl_runner_guard() {
+	JxlRunnerGuard() = default;
+	~JxlRunnerGuard() {
 		if (runner_) {
 			JxlThreadParallelRunnerDestroy(runner_);
 		}
 	}
 
-	jxl_runner_guard(const jxl_runner_guard&) = delete;
-	jxl_runner_guard& operator=(const jxl_runner_guard&) = delete;
+	JxlRunnerGuard(const JxlRunnerGuard&) = delete;
+	JxlRunnerGuard& operator=(const JxlRunnerGuard&) = delete;
 
 	void reset(void* runner) {
 		if (runner_) {
@@ -223,12 +216,12 @@ void validate_basic_info(const pixel::PixelDataInfo& info, const JxlBasicInfo& b
 	}
 }
 
-struct jpegxl_decode_result {
+struct JpegXlDecodeResult {
 	std::vector<std::uint8_t> pixels{};
 	std::size_t row_bytes{0};
 };
 
-jpegxl_decode_result decode_jpegxl_frame(const pixel::PixelDataInfo& info,
+JpegXlDecodeResult decode_jpegxl_frame(const pixel::PixelDataInfo& info,
     std::span<const std::uint8_t> encoded,
     std::size_t rows, std::size_t cols, std::size_t samples_per_pixel,
     std::size_t src_bytes_per_sample, const DecodeOptions& opt) {
@@ -243,7 +236,7 @@ jpegxl_decode_result decode_jpegxl_frame(const pixel::PixelDataInfo& info,
 		    "invalid JPEG-XL signature");
 	}
 
-	jxl_decoder_guard decoder(JxlDecoderCreate(nullptr));
+	JxlDecoderGuard decoder(JxlDecoderCreate(nullptr));
 	if (!decoder.get()) {
 		throw_decode_error(
 		    "failed to initialize JPEG-XL decoder");
@@ -263,7 +256,7 @@ jpegxl_decode_result decode_jpegxl_frame(const pixel::PixelDataInfo& info,
 	}
 
 	const auto worker_threads = resolve_jpegxl_worker_threads(opt);
-	jxl_runner_guard runner{};
+	JxlRunnerGuard runner{};
 	if (worker_threads > 0) {
 		runner.reset(JxlThreadParallelRunnerCreate(nullptr, worker_threads));
 		if (!runner.get()) {
@@ -364,13 +357,13 @@ jpegxl_decode_result decode_jpegxl_frame(const pixel::PixelDataInfo& info,
 		}
 		case JXL_DEC_FULL_IMAGE:
 			saw_full_image = true;
-			return jpegxl_decode_result{std::move(decoded), decoded_row_bytes};
+			return JpegXlDecodeResult{std::move(decoded), decoded_row_bytes};
 		case JXL_DEC_SUCCESS:
 			if (!saw_full_image) {
 				throw_decode_error(
 				    "JPEG-XL decode finished before full image event");
 			}
-			return jpegxl_decode_result{std::move(decoded), decoded_row_bytes};
+			return JpegXlDecodeResult{std::move(decoded), decoded_row_bytes};
 		case JXL_DEC_NEED_MORE_INPUT:
 			throw_decode_error(
 			    "truncated JPEG-XL codestream");
@@ -388,12 +381,12 @@ jpegxl_decode_result decode_jpegxl_frame(const pixel::PixelDataInfo& info,
 } // namespace
 
 bool decode_jpegxl_into(const pixel::PixelDataInfo& info,
-    const decode_value_transform& value_transform,
+    const DecodeValueTransform& value_transform,
     std::span<std::uint8_t> dst,
     const DecodeStrides& dst_strides, const DecodeOptions& opt,
-    codec_error& out_error, std::span<const std::uint8_t> prepared_source) noexcept {
-	out_error = codec_error{};
-	auto fail = [&](codec_status_code code, std::string_view stage,
+    CodecError& out_error, std::span<const std::uint8_t> prepared_source) noexcept {
+	out_error = CodecError{};
+	auto fail = [&](CodecStatusCode code, std::string_view stage,
 	                std::string detail) noexcept -> bool {
 		set_codec_error(out_error, code, stage, std::move(detail));
 		return false;
@@ -401,41 +394,41 @@ bool decode_jpegxl_into(const pixel::PixelDataInfo& info,
 
 	try {
 		if (!info.has_pixel_data) {
-			return fail(codec_status_code::invalid_argument, "validate",
+			return fail(CodecStatusCode::invalid_argument, "validate",
 			    "sv_dtype is unknown");
 		}
 		if (!info.ts.is_jpegxl()) {
-			return fail(codec_status_code::unsupported, "validate",
+			return fail(CodecStatusCode::unsupported, "validate",
 			    "transfer syntax is not JPEG-XL");
 		}
 		if (info.rows <= 0 || info.cols <= 0 || info.samples_per_pixel <= 0) {
-			return fail(codec_status_code::invalid_argument, "validate",
+			return fail(CodecStatusCode::invalid_argument, "validate",
 			    "invalid Rows/Columns/SamplesPerPixel");
 		}
 		if (info.frames <= 0) {
-			return fail(codec_status_code::invalid_argument, "validate",
+			return fail(CodecStatusCode::invalid_argument, "validate",
 			    "invalid NumberOfFrames");
 		}
 
 		const auto samples_per_pixel_value = info.samples_per_pixel;
 		if (samples_per_pixel_value != 1 && samples_per_pixel_value != 3 &&
 		    samples_per_pixel_value != 4) {
-			return fail(codec_status_code::unsupported, "validate",
+			return fail(CodecStatusCode::unsupported, "validate",
 			    "only SamplesPerPixel=1/3/4 is supported in current JPEG-XL path");
 		}
 		const auto samples_per_pixel = static_cast<std::size_t>(samples_per_pixel_value);
 		if (opt.scaled && samples_per_pixel != 1) {
-			return fail(codec_status_code::invalid_argument, "validate",
+			return fail(CodecStatusCode::invalid_argument, "validate",
 			    "scaled output supports SamplesPerPixel=1 only");
 		}
 		if (!sv_dtype_is_integral(info.sv_dtype)) {
-			return fail(codec_status_code::unsupported, "validate",
+			return fail(CodecStatusCode::unsupported, "validate",
 			    "JPEG-XL supports integral sv_dtype only");
 		}
 
 		const auto src_bytes_per_sample = sv_dtype_bytes(info.sv_dtype);
 		if (src_bytes_per_sample == 0 || src_bytes_per_sample > 2) {
-			return fail(codec_status_code::unsupported, "validate",
+			return fail(CodecStatusCode::unsupported, "validate",
 			    "JPEG-XL supports integral sv_dtype up to 16-bit only");
 		}
 
@@ -447,18 +440,18 @@ bool decode_jpegxl_into(const pixel::PixelDataInfo& info,
 			validate_destination(dst, dst_strides, opt.planar_out, rows, cols,
 			    samples_per_pixel, dst_bytes_per_sample);
 		} catch (const std::bad_alloc&) {
-			return fail(codec_status_code::internal_error, "allocate",
+			return fail(CodecStatusCode::internal_error, "allocate",
 			    "memory allocation failed");
 		} catch (const std::exception& e) {
-			return fail(codec_status_code::invalid_argument, "validate", e.what());
+			return fail(CodecStatusCode::invalid_argument, "validate", e.what());
 		} catch (...) {
-			return fail(codec_status_code::backend_error, "validate",
+			return fail(CodecStatusCode::backend_error, "validate",
 			    "non-standard exception");
 		}
 
 			const auto frame_source = prepared_source;
 			if (frame_source.empty()) {
-				return fail(codec_status_code::invalid_argument, "load_frame_source",
+				return fail(CodecStatusCode::invalid_argument, "load_frame_source",
 				    "JPEG-XL frame has empty codestream");
 			}
 
@@ -466,7 +459,7 @@ bool decode_jpegxl_into(const pixel::PixelDataInfo& info,
 			auto decoded = decode_jpegxl_frame(info, frame_source,
 			    rows, cols, samples_per_pixel, src_bytes_per_sample, opt);
 		if (decoded.pixels.empty()) {
-			return fail(codec_status_code::backend_error, "decode_frame",
+			return fail(CodecStatusCode::backend_error, "decode_frame",
 			    "JPEG-XL decoded component has no data");
 		}
 
@@ -483,22 +476,22 @@ bool decode_jpegxl_into(const pixel::PixelDataInfo& info,
 		    decoded.row_bytes, dst_strides.row);
 		return true;
 	#else
-			return fail(codec_status_code::unsupported, "decode_frame",
+			return fail(CodecStatusCode::unsupported, "decode_frame",
 			    "JPEG-XL backend is disabled; configure with DICOMSDL_ENABLE_JPEGXL=ON");
 #endif
 	} catch (const std::bad_alloc&) {
-		return fail(codec_status_code::internal_error, "allocate",
+		return fail(CodecStatusCode::internal_error, "allocate",
 		    "memory allocation failed");
 	} catch (const std::exception& e) {
-		if (out_error.code != codec_status_code::ok) {
+		if (out_error.code != CodecStatusCode::ok) {
 			return false;
 		}
-		return fail(codec_status_code::backend_error, "decode_frame", e.what());
+		return fail(CodecStatusCode::backend_error, "decode_frame", e.what());
 	} catch (...) {
-		if (out_error.code != codec_status_code::ok) {
+		if (out_error.code != CodecStatusCode::ok) {
 			return false;
 		}
-		return fail(codec_status_code::backend_error, "decode_frame",
+		return fail(CodecStatusCode::backend_error, "decode_frame",
 		    "non-standard exception");
 	}
 }

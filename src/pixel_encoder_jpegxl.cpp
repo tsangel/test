@@ -21,26 +21,19 @@
 namespace dicom::pixel::detail {
 namespace {
 
-void set_codec_error(codec_error& out_error, codec_status_code code,
-    std::string_view stage, std::string detail) {
-	out_error.code = code;
-	out_error.stage = std::string(stage);
-	out_error.detail = std::move(detail);
-}
-
 #if DICOMSDL_HAS_JPEGXL
 
-class jxl_encoder_guard {
+class JxlEncoderGuard {
 public:
-	explicit jxl_encoder_guard(JxlEncoder* encoder) noexcept : encoder_(encoder) {}
-	~jxl_encoder_guard() {
+	explicit JxlEncoderGuard(JxlEncoder* encoder) noexcept : encoder_(encoder) {}
+	~JxlEncoderGuard() {
 		if (encoder_) {
 			JxlEncoderDestroy(encoder_);
 		}
 	}
 
-	jxl_encoder_guard(const jxl_encoder_guard&) = delete;
-	jxl_encoder_guard& operator=(const jxl_encoder_guard&) = delete;
+	JxlEncoderGuard(const JxlEncoderGuard&) = delete;
+	JxlEncoderGuard& operator=(const JxlEncoderGuard&) = delete;
 
 	[[nodiscard]] JxlEncoder* get() const noexcept { return encoder_; }
 
@@ -48,17 +41,17 @@ private:
 	JxlEncoder* encoder_{nullptr};
 };
 
-class jxl_runner_guard {
+class JxlRunnerGuard {
 public:
-	jxl_runner_guard() = default;
-	~jxl_runner_guard() {
+	JxlRunnerGuard() = default;
+	~JxlRunnerGuard() {
 		if (runner_) {
 			JxlThreadParallelRunnerDestroy(runner_);
 		}
 	}
 
-	jxl_runner_guard(const jxl_runner_guard&) = delete;
-	jxl_runner_guard& operator=(const jxl_runner_guard&) = delete;
+	JxlRunnerGuard(const JxlRunnerGuard&) = delete;
+	JxlRunnerGuard& operator=(const JxlRunnerGuard&) = delete;
 
 	void reset(void* runner) {
 		if (runner_) {
@@ -205,64 +198,64 @@ bool try_encode_jpegxl_frame(std::span<const std::uint8_t> frame_data,
     std::size_t bytes_per_sample, int bits_allocated, int bits_stored,
     int pixel_representation, Planar source_planar, std::size_t row_stride,
     bool lossless, const JpegXlOptions& options,
-    std::vector<std::uint8_t>& out_encoded, codec_error& out_error) noexcept {
+    std::vector<std::uint8_t>& out_encoded, CodecError& out_error) noexcept {
 	out_encoded.clear();
-	out_error = codec_error{};
+	out_error = CodecError{};
 
 	if (rows == 0 || cols == 0 || samples_per_pixel == 0 || bytes_per_sample == 0) {
-		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		set_codec_error(out_error, CodecStatusCode::invalid_argument, "validate",
 		    "rows/cols/samples_per_pixel/bytes_per_sample must be positive");
 		return false;
 	}
 	if (samples_per_pixel != 1 && samples_per_pixel != 3 && samples_per_pixel != 4) {
-		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		set_codec_error(out_error, CodecStatusCode::invalid_argument, "validate",
 		    "only samples_per_pixel=1/3/4 are supported in current JPEG-XL encoder path");
 		return false;
 	}
 	if (bits_allocated <= 0 || bits_allocated > 16 || (bits_allocated % 8) != 0) {
-		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		set_codec_error(out_error, CodecStatusCode::invalid_argument, "validate",
 		    "bits_allocated must be 8 or 16");
 		return false;
 	}
 	if (bits_stored <= 0 || bits_stored > bits_allocated) {
-		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		set_codec_error(out_error, CodecStatusCode::invalid_argument, "validate",
 		    "bits_stored must be in [1,bits_allocated]");
 		return false;
 	}
 	if (pixel_representation != 0 && pixel_representation != 1) {
-		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		set_codec_error(out_error, CodecStatusCode::invalid_argument, "validate",
 		    "pixel_representation must be 0 or 1");
 		return false;
 	}
 	if (options.effort < 1 || options.effort > 10) {
-		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		set_codec_error(out_error, CodecStatusCode::invalid_argument, "validate",
 		    "JpegXlOptions.effort must be in [1,10]");
 		return false;
 	}
 	if (options.threads < -1) {
-		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		set_codec_error(out_error, CodecStatusCode::invalid_argument, "validate",
 		    "JpegXlOptions.threads must be -1, 0, or positive");
 		return false;
 	}
 	if (!lossless && (!std::isfinite(options.distance) || options.distance <= 0.0 ||
 	        options.distance > 25.0)) {
-		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		set_codec_error(out_error, CodecStatusCode::invalid_argument, "validate",
 		    "JpegXlOptions.distance must be in (0,25] for lossy JPEG-XL");
 		return false;
 	}
 	if (lossless && options.distance != 0.0) {
-		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		set_codec_error(out_error, CodecStatusCode::invalid_argument, "validate",
 		    "lossless JPEG-XL requires distance=0");
 		return false;
 	}
 	if (bytes_per_sample != 1 && bytes_per_sample != 2) {
-		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		set_codec_error(out_error, CodecStatusCode::invalid_argument, "validate",
 		    "bytes_per_sample must be 1 or 2");
 		return false;
 	}
 	if ((bits_stored <= 8 && bytes_per_sample != 1) ||
 	    (bits_stored > 8 && bytes_per_sample != 2)) {
-		set_codec_error(out_error, codec_status_code::invalid_argument, "validate",
+		set_codec_error(out_error, CodecStatusCode::invalid_argument, "validate",
 		    "bytes_per_sample is incompatible with bits_stored");
 		return false;
 	}
@@ -271,16 +264,16 @@ bool try_encode_jpegxl_frame(std::span<const std::uint8_t> frame_data,
 		out_encoded = encode_jpegxl_frame(frame_data, rows, cols, samples_per_pixel,
 		    bytes_per_sample, bits_allocated, bits_stored, pixel_representation,
 		    source_planar, row_stride, lossless, options);
-		out_error = codec_error{};
+		out_error = CodecError{};
 		return true;
 	} catch (const std::bad_alloc&) {
-		set_codec_error(out_error, codec_status_code::internal_error, "allocate",
+		set_codec_error(out_error, CodecStatusCode::internal_error, "allocate",
 		    "memory allocation failed");
 	} catch (const std::exception& e) {
-		set_codec_error(out_error, codec_status_code::backend_error, "encode",
+		set_codec_error(out_error, CodecStatusCode::backend_error, "encode",
 		    e.what());
 	} catch (...) {
-		set_codec_error(out_error, codec_status_code::backend_error, "encode",
+		set_codec_error(out_error, CodecStatusCode::backend_error, "encode",
 		    "non-standard exception");
 	}
 	out_encoded.clear();
@@ -348,7 +341,7 @@ std::vector<std::uint8_t> encode_jpegxl_frame(std::span<const std::uint8_t> fram
 	auto interleaved = build_normalized_interleaved_buffer(frame_data, source_layout, rows, cols,
 	    samples_per_pixel, bytes_per_sample, row_stride, bits_stored, kFunctionName);
 
-	jxl_encoder_guard encoder(JxlEncoderCreate(nullptr));
+	JxlEncoderGuard encoder(JxlEncoderCreate(nullptr));
 	if (!encoder.get()) {
 		throw_encode_error(
 		    "{} reason=failed to initialize JPEG-XL encoder",
@@ -356,7 +349,7 @@ std::vector<std::uint8_t> encode_jpegxl_frame(std::span<const std::uint8_t> fram
 	}
 
 	const auto worker_threads = resolve_jpegxl_worker_threads(options, kFunctionName);
-	jxl_runner_guard runner{};
+	JxlRunnerGuard runner{};
 	if (worker_threads > 0) {
 		runner.reset(JxlThreadParallelRunnerCreate(nullptr, worker_threads));
 		if (!runner.get()) {

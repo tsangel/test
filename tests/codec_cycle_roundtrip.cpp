@@ -63,7 +63,7 @@ void verify_three_cycle_roundtrip(std::string_view codec_name, dicom::uid::WellK
 	source.row_stride = 8;
 	source.frame_stride = 20;
 	source.photometric = dicom::pixel::Photometric::monochrome2;
-	file.set_pixel_data("ExplicitVRLittleEndian"_uid, source, dicom::pixel::NoCompression{});
+	file.set_pixel_data("ExplicitVRLittleEndian"_uid, source);
 
 	for (int cycle = 1; cycle <= 3; ++cycle) {
 		file.set_transfer_syntax(transfer_syntax);

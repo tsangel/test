@@ -7,8 +7,12 @@
 #include <iostream>
 #include <sstream>
 #include <exception>
+#include <stdexcept>
 #include <cstdlib>
 #include <cstdio>
+#include <atomic>
+#include <mutex>
+#include <thread>
 
 #include <dicom.h>
 #include <instream.h>
@@ -793,7 +797,7 @@ int main() {
 		source.frame_stride = 20;
 		source.photometric = dicom::pixel::Photometric::monochrome2;
 		set_pixel_data_file.set_pixel_data(
-		    "ExplicitVRLittleEndian"_uid, source, dicom::pixel::NoCompression{});
+		    "ExplicitVRLittleEndian"_uid, source);
 
 		const auto* pixel_data = set_pixel_data_file.get_dataelement("PixelData"_tag);
 		if (!pixel_data || pixel_data->is_missing()) {
@@ -872,18 +876,22 @@ int main() {
 
 			bool unsupported_codec_threw = false;
 			try {
+				const std::array<dicom::pixel::CodecOptionTextKv, 1> invalid_codec_options{{
+				    {"", "1"},
+				}};
 				set_pixel_data_file.set_pixel_data(
-				    "ExplicitVRLittleEndian"_uid, source, dicom::pixel::RleOptions{});
+				    "ExplicitVRLittleEndian"_uid, source,
+				    std::span<const dicom::pixel::CodecOptionTextKv>(invalid_codec_options));
 			} catch (const std::exception&) {
 				unsupported_codec_threw = true;
 			}
 			if (!unsupported_codec_threw) {
-				fail("set_pixel_data should reject unsupported codec options for now");
+				fail("set_pixel_data should reject empty codec option key");
 			}
 	}
-	dicom::DicomFile set_pixel_data_rle_file;
-	{
-		std::vector<std::uint8_t> source_bytes(40, 0xEEu);
+		dicom::DicomFile set_pixel_data_rle_file;
+		{
+			std::vector<std::uint8_t> source_bytes(40, 0xEEu);
 		const auto write_row = [&](std::size_t frame, std::size_t row,
 		                       std::array<std::uint8_t, 6> payload) {
 			const std::size_t frame_stride = 20;
@@ -909,7 +917,7 @@ int main() {
 		source.frame_stride = 20;
 		source.photometric = dicom::pixel::Photometric::monochrome2;
 		set_pixel_data_rle_file.set_pixel_data(
-		    "RLELossless"_uid, source, dicom::pixel::RleOptions{});
+		    "RLELossless"_uid, source);
 
 		const auto* pixel_data = set_pixel_data_rle_file.get_dataelement("PixelData"_tag);
 		if (!pixel_data || pixel_data->is_missing()) {
@@ -940,15 +948,80 @@ int main() {
 		const std::vector<std::uint8_t> expected_frame1{
 		    0x11u, 0x00u, 0x12u, 0x00u, 0x13u, 0x00u,
 		    0x14u, 0x00u, 0x15u, 0x00u, 0x16u, 0x00u};
-		const auto decoded_frame0 = set_pixel_data_rle_file.pixel_data(0);
-		const auto decoded_frame1 = set_pixel_data_rle_file.pixel_data(1);
-		if (decoded_frame0 != expected_frame0) {
-			fail("RLE set_pixel_data frame #0 roundtrip mismatch");
+			const auto decoded_frame0 = set_pixel_data_rle_file.pixel_data(0);
+			const auto decoded_frame1 = set_pixel_data_rle_file.pixel_data(1);
+			if (decoded_frame0 != expected_frame0) {
+				fail("RLE set_pixel_data frame #0 roundtrip mismatch");
+			}
+			if (decoded_frame1 != expected_frame1) {
+				fail("RLE set_pixel_data frame #1 roundtrip mismatch");
+			}
+
+			const auto rle_encoder_context =
+			    dicom::pixel::create_encoder_context("RLELossless"_uid);
+			dicom::DicomFile set_pixel_data_with_context_file;
+			set_pixel_data_with_context_file.set_pixel_data(
+			    "RLELossless"_uid, source, rle_encoder_context);
+			if (set_pixel_data_with_context_file.pixel_data(0) != expected_frame0) {
+				fail("set_pixel_data with reusable encoder context frame #0 mismatch");
+			}
+			if (set_pixel_data_with_context_file.pixel_data(1) != expected_frame1) {
+				fail("set_pixel_data with reusable encoder context frame #1 mismatch");
+			}
+
+			dicom::DicomFile transcode_with_context_file;
+			transcode_with_context_file.set_pixel_data(
+			    "ExplicitVRLittleEndian"_uid, source);
+			transcode_with_context_file.set_transfer_syntax(
+			    "RLELossless"_uid, rle_encoder_context);
+			const auto* transcoded_pixel_data =
+			    transcode_with_context_file.get_dataelement("PixelData"_tag);
+			if (!transcoded_pixel_data || !transcoded_pixel_data->vr().is_pixel_sequence()) {
+				fail("set_transfer_syntax with encoder context should produce encapsulated PixelData");
+			}
+
+			bool context_mismatch_threw = false;
+			try {
+				transcode_with_context_file.set_transfer_syntax(
+				    "JPEG2000Lossless"_uid, rle_encoder_context);
+			} catch (const std::exception&) {
+				context_mismatch_threw = true;
+			}
+			if (!context_mismatch_threw) {
+				fail("set_transfer_syntax should reject encoder context transfer syntax mismatch");
+			}
+
+			std::atomic<bool> worker_failed{false};
+			std::string worker_failure_message{};
+			std::mutex worker_failure_mutex{};
+			const auto worker_run = [&]() {
+				try {
+					auto worker_context =
+					    dicom::pixel::create_encoder_context("RLELossless"_uid);
+					for (int iteration = 0; iteration < 4; ++iteration) {
+						dicom::DicomFile worker_file;
+						worker_file.set_pixel_data("RLELossless"_uid, source, worker_context);
+						if (worker_file.pixel_data(0) != expected_frame0 ||
+						    worker_file.pixel_data(1) != expected_frame1) {
+							throw std::runtime_error(
+							    "worker context reuse roundtrip mismatch");
+						}
+					}
+				} catch (const std::exception& e) {
+					worker_failed.store(true);
+					std::scoped_lock lock(worker_failure_mutex);
+					worker_failure_message = e.what();
+				}
+			};
+
+			std::thread worker0(worker_run);
+			std::thread worker1(worker_run);
+			worker0.join();
+			worker1.join();
+			if (worker_failed.load()) {
+				fail("worker-local encoder context reuse failed: " + worker_failure_message);
+			}
 		}
-		if (decoded_frame1 != expected_frame1) {
-			fail("RLE set_pixel_data frame #1 roundtrip mismatch");
-		}
-	}
 	dicom::DicomFile set_pixel_data_encap_uncompressed_file;
 	{
 		std::vector<std::uint8_t> source_bytes(40, 0xEEu);
@@ -977,8 +1050,7 @@ int main() {
 		source.frame_stride = 20;
 		source.photometric = dicom::pixel::Photometric::monochrome2;
 		set_pixel_data_encap_uncompressed_file.set_pixel_data(
-		    "EncapsulatedUncompressedExplicitVRLittleEndian"_uid, source,
-		    dicom::pixel::NoCompression{});
+		    "EncapsulatedUncompressedExplicitVRLittleEndian"_uid, source);
 
 		auto* pixel_data = set_pixel_data_encap_uncompressed_file.get_dataelement("PixelData"_tag);
 		if (!pixel_data || pixel_data->is_missing()) {
@@ -1057,7 +1129,7 @@ int main() {
 		source.frame_stride = 20;
 		source.photometric = dicom::pixel::Photometric::monochrome2;
 		set_pixel_data_j2k_file.set_pixel_data(
-		    "JPEG2000Lossless"_uid, source, dicom::pixel::J2kOptions{});
+		    "JPEG2000Lossless"_uid, source);
 
 		const auto* pixel_data = set_pixel_data_j2k_file.get_dataelement("PixelData"_tag);
 		if (!pixel_data || pixel_data->is_missing()) {
@@ -1125,7 +1197,7 @@ int main() {
 		source.frame_stride = 20;
 		source.photometric = dicom::pixel::Photometric::monochrome2;
 		set_pixel_data_htj2k_file.set_pixel_data(
-		    "HTJ2KLossless"_uid, source, dicom::pixel::Htj2kOptions{});
+		    "HTJ2KLossless"_uid, source);
 
 		const auto* pixel_data = set_pixel_data_htj2k_file.get_dataelement("PixelData"_tag);
 		if (!pixel_data || pixel_data->is_missing()) {
@@ -1182,37 +1254,50 @@ int main() {
 
 		dicom::DicomFile j2k_default_mct;
 		j2k_default_mct.set_pixel_data(
-		    "JPEG2000Lossless"_uid, color_source, dicom::pixel::J2kOptions{});
+		    "JPEG2000Lossless"_uid, color_source);
 		if (j2k_default_mct["PhotometricInterpretation"_tag].to_string_view().value_or("") !=
 		    std::string_view("YBR_RCT")) {
 			fail("J2K default color transform should update PhotometricInterpretation to YBR_RCT");
 		}
 
-		dicom::pixel::J2kOptions j2k_without_mct{};
-		j2k_without_mct.use_color_transform = false;
-		dicom::DicomFile j2k_no_mct;
-		j2k_no_mct.set_pixel_data("JPEG2000Lossless"_uid, color_source, j2k_without_mct);
-		if (j2k_no_mct["PhotometricInterpretation"_tag].to_string_view().value_or("") !=
+			const std::array<dicom::pixel::CodecOptionTextKv, 1> j2k_without_mct_text_options{{
+			    {"color_transform", "false"},
+			}};
+			dicom::DicomFile j2k_no_mct;
+			j2k_no_mct.set_pixel_data("JPEG2000Lossless"_uid, color_source,
+			    std::span<const dicom::pixel::CodecOptionTextKv>(j2k_without_mct_text_options));
+			if (j2k_no_mct["PhotometricInterpretation"_tag].to_string_view().value_or("") !=
+			    std::string_view("RGB")) {
+				fail("J2K disabled color transform should keep PhotometricInterpretation as RGB");
+			}
+			dicom::DicomFile j2k_no_mct_text;
+			j2k_no_mct_text.set_pixel_data(
+		    "JPEG2000Lossless"_uid, color_source,
+		    std::span<const dicom::pixel::CodecOptionTextKv>(j2k_without_mct_text_options));
+		if (j2k_no_mct_text["PhotometricInterpretation"_tag].to_string_view().value_or("") !=
 		    std::string_view("RGB")) {
-			fail("J2K disabled color transform should keep PhotometricInterpretation as RGB");
+			fail("J2K text options should keep PhotometricInterpretation as RGB");
 		}
 
 		bool rejected_j2k_mc_without_mct = false;
-		try {
-			dicom::DicomFile j2k_mc_no_mct;
-			j2k_mc_no_mct.set_pixel_data(
-			    "JPEG2000MCLossless"_uid, color_source, j2k_without_mct);
-		} catch (const std::exception&) {
-			rejected_j2k_mc_without_mct = true;
-		}
+			try {
+				dicom::DicomFile j2k_mc_no_mct;
+				j2k_mc_no_mct.set_pixel_data(
+				    "JPEG2000MCLossless"_uid, color_source,
+				    std::span<const dicom::pixel::CodecOptionTextKv>(j2k_without_mct_text_options));
+			} catch (const std::exception&) {
+				rejected_j2k_mc_without_mct = true;
+			}
 		if (!rejected_j2k_mc_without_mct) {
 			fail("JPEG2000MCLossless should reject use_color_transform=false");
 		}
 
-			dicom::pixel::J2kOptions j2k_lossy_options{};
-			j2k_lossy_options.target_psnr = 45.0;
-			dicom::DicomFile j2k_lossy_mct;
-			j2k_lossy_mct.set_pixel_data("JPEG2000"_uid, color_source, j2k_lossy_options);
+				const std::array<dicom::pixel::CodecOptionTextKv, 1> j2k_lossy_options{{
+				    {"target_psnr", "45"},
+				}};
+				dicom::DicomFile j2k_lossy_mct;
+				j2k_lossy_mct.set_pixel_data("JPEG2000"_uid, color_source,
+				    std::span<const dicom::pixel::CodecOptionTextKv>(j2k_lossy_options));
 			if (j2k_lossy_mct["PhotometricInterpretation"_tag].to_string_view().value_or("") !=
 			    std::string_view("YBR_ICT")) {
 				fail("J2K lossy color transform should update PhotometricInterpretation to YBR_ICT");
@@ -1254,27 +1339,50 @@ int main() {
 				fail("Repeated J2K lossy encode should append positive LossyImageCompressionRatio values");
 			}
 
+			dicom::DicomFile j2k_lossy_text_ts;
+			j2k_lossy_text_ts.set_pixel_data(
+			    "ExplicitVRLittleEndian"_uid, color_source);
+			const std::array<dicom::pixel::CodecOptionTextKv, 2> j2k_lossy_text_options{{
+			    {"target_psnr", "45"},
+			    {"color_transform", "true"},
+			}};
+			j2k_lossy_text_ts.set_transfer_syntax(
+			    "JPEG2000"_uid,
+			    std::span<const dicom::pixel::CodecOptionTextKv>(j2k_lossy_text_options));
+			if (j2k_lossy_text_ts["PhotometricInterpretation"_tag].to_string_view().value_or("") !=
+			    std::string_view("YBR_ICT")) {
+				fail("J2K text options via set_transfer_syntax should update PhotometricInterpretation to YBR_ICT");
+			}
+			if (j2k_lossy_text_ts["LossyImageCompression"_tag].to_string_view().value_or("") !=
+			    std::string_view("01")) {
+				fail("J2K text options via set_transfer_syntax should set LossyImageCompression to 01");
+			}
+
 		dicom::DicomFile htj2k_default_mct;
 		htj2k_default_mct.set_pixel_data(
-		    "HTJ2KLossless"_uid, color_source, dicom::pixel::Htj2kOptions{});
+		    "HTJ2KLossless"_uid, color_source);
 		if (htj2k_default_mct["PhotometricInterpretation"_tag].to_string_view().value_or("") !=
 		    std::string_view("YBR_RCT")) {
 			fail("HTJ2K default color transform should update PhotometricInterpretation to YBR_RCT");
 		}
 
-		dicom::pixel::Htj2kOptions htj2k_without_mct{};
-		htj2k_without_mct.use_color_transform = false;
-		dicom::DicomFile htj2k_no_mct;
-		htj2k_no_mct.set_pixel_data("HTJ2KLossless"_uid, color_source, htj2k_without_mct);
-		if (htj2k_no_mct["PhotometricInterpretation"_tag].to_string_view().value_or("") !=
-		    std::string_view("RGB")) {
-			fail("HTJ2K disabled color transform should keep PhotometricInterpretation as RGB");
-		}
+			const std::array<dicom::pixel::CodecOptionTextKv, 1> htj2k_without_mct_options{{
+			    {"color_transform", "false"},
+			}};
+			dicom::DicomFile htj2k_no_mct;
+			htj2k_no_mct.set_pixel_data("HTJ2KLossless"_uid, color_source,
+			    std::span<const dicom::pixel::CodecOptionTextKv>(htj2k_without_mct_options));
+			if (htj2k_no_mct["PhotometricInterpretation"_tag].to_string_view().value_or("") !=
+			    std::string_view("RGB")) {
+				fail("HTJ2K disabled color transform should keep PhotometricInterpretation as RGB");
+			}
 
-			dicom::pixel::Htj2kOptions htj2k_lossy_options{};
-			htj2k_lossy_options.target_psnr = 45.0;
-			dicom::DicomFile htj2k_lossy_mct;
-			htj2k_lossy_mct.set_pixel_data("HTJ2K"_uid, color_source, htj2k_lossy_options);
+				const std::array<dicom::pixel::CodecOptionTextKv, 1> htj2k_lossy_options{{
+				    {"target_psnr", "45"},
+				}};
+				dicom::DicomFile htj2k_lossy_mct;
+				htj2k_lossy_mct.set_pixel_data("HTJ2K"_uid, color_source,
+				    std::span<const dicom::pixel::CodecOptionTextKv>(htj2k_lossy_options));
 			if (htj2k_lossy_mct["PhotometricInterpretation"_tag].to_string_view().value_or("") !=
 			    std::string_view("YBR_ICT")) {
 				fail("HTJ2K lossy color transform should update PhotometricInterpretation to YBR_ICT");
@@ -1324,7 +1432,7 @@ int main() {
 		source.frame_stride = 20;
 		source.photometric = dicom::pixel::Photometric::monochrome2;
 		set_pixel_data_jpegls_file.set_pixel_data(
-		    "JPEGLSLossless"_uid, source, dicom::pixel::JpegLsOptions{});
+		    "JPEGLSLossless"_uid, source);
 
 		const auto* pixel_data = set_pixel_data_jpegls_file.get_dataelement("PixelData"_tag);
 		if (!pixel_data || pixel_data->is_missing()) {
@@ -1392,7 +1500,7 @@ int main() {
 		source.frame_stride = 20;
 		source.photometric = dicom::pixel::Photometric::monochrome2;
 		set_pixel_data_jpeg_file.set_pixel_data(
-		    "JPEGLosslessSV1"_uid, source, dicom::pixel::JpegOptions{});
+		    "JPEGLosslessSV1"_uid, source);
 
 		const auto* pixel_data = set_pixel_data_jpeg_file.get_dataelement("PixelData"_tag);
 		if (!pixel_data || pixel_data->is_missing()) {
@@ -1444,10 +1552,12 @@ int main() {
 			source.frames = 1;
 			source.samples_per_pixel = 1;
 			source.photometric = dicom::pixel::Photometric::monochrome2;
-			dicom::pixel::JpegLsOptions options{};
-			options.near_lossless_error = 2;
+			const std::array<dicom::pixel::CodecOptionTextKv, 1> options{{
+			    {"near_lossless_error", "2"},
+			}};
 			set_pixel_data_jpegls_near_lossless_file.set_pixel_data(
-			    "JPEGLSNearLossless"_uid, source, options);
+			    "JPEGLSNearLossless"_uid, source,
+			    std::span<const dicom::pixel::CodecOptionTextKv>(options));
 			if (set_pixel_data_jpegls_near_lossless_file["LossyImageCompression"_tag]
 			        .to_string_view()
 			        .value_or("") != std::string_view("01")) {
@@ -1479,10 +1589,12 @@ int main() {
 			source.frames = 1;
 			source.samples_per_pixel = 1;
 			source.photometric = dicom::pixel::Photometric::monochrome2;
-			dicom::pixel::JpegOptions options{};
-			options.quality = 90;
+			const std::array<dicom::pixel::CodecOptionTextKv, 1> options{{
+			    {"quality", "90"},
+			}};
 			set_pixel_data_jpeg_lossy_file.set_pixel_data(
-			    "JPEGBaseline8Bit"_uid, source, options);
+			    "JPEGBaseline8Bit"_uid, source,
+			    std::span<const dicom::pixel::CodecOptionTextKv>(options));
 			if (set_pixel_data_jpeg_lossy_file["LossyImageCompression"_tag]
 			        .to_string_view()
 			        .value_or("") != std::string_view("01")) {

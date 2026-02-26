@@ -122,16 +122,16 @@ void swap_lane_bytes(std::span<const std::uint8_t> src, std::span<std::uint8_t> 
 	}
 }
 
-class dataset_endian_converter {
+class DatasetEndianConverter {
 public:
-	enum class direction : std::uint8_t {
+	enum class Direction : std::uint8_t {
 		be_to_le = 0,
 		le_to_be = 1,
 	};
 
-	dataset_endian_converter(std::span<const std::uint8_t> src,
+	DatasetEndianConverter(std::span<const std::uint8_t> src,
 	    std::span<std::uint8_t> dst, const std::string& file_path,
-	    direction conversion_direction) noexcept
+	    Direction conversion_direction) noexcept
 	    : src_(src), dst_(dst), file_path_(file_path), direction_(conversion_direction) {}
 
 	void convert(std::size_t offset, std::size_t end) {
@@ -140,13 +140,13 @@ public:
 	}
 
 private:
-	enum class stop_reason {
+	enum class StopReason {
 		reached_end,
 		item_delim,
 		sequence_delim,
 	};
 
-	struct element_header {
+	struct ElementHeader {
 		std::uint16_t group{0};
 		std::uint16_t element{0};
 		VR vr{VR::None};
@@ -164,21 +164,21 @@ private:
 	}
 
 	[[nodiscard]] std::uint16_t load_u16(const std::uint8_t* ptr) const noexcept {
-		if (direction_ == direction::be_to_le) {
+		if (direction_ == Direction::be_to_le) {
 			return load_u16_be(ptr);
 		}
 		return load_u16_le(ptr);
 	}
 
 	[[nodiscard]] std::uint32_t load_u32(const std::uint8_t* ptr) const noexcept {
-		if (direction_ == direction::be_to_le) {
+		if (direction_ == Direction::be_to_le) {
 			return load_u32_be(ptr);
 		}
 		return load_u32_le(ptr);
 	}
 
 	void store_u16(std::uint8_t* ptr, std::uint16_t value) const noexcept {
-		if (direction_ == direction::be_to_le) {
+		if (direction_ == Direction::be_to_le) {
 			store_u16_le(ptr, value);
 			return;
 		}
@@ -186,18 +186,18 @@ private:
 	}
 
 	void store_u32(std::uint8_t* ptr, std::uint32_t value) const noexcept {
-		if (direction_ == direction::be_to_le) {
+		if (direction_ == Direction::be_to_le) {
 			store_u32_le(ptr, value);
 			return;
 		}
 		store_u32_be(ptr, value);
 	}
 
-	[[nodiscard]] element_header parse_and_convert_element_header(std::size_t offset,
+	[[nodiscard]] ElementHeader parse_and_convert_element_header(std::size_t offset,
 	    std::size_t end) {
 		ensure_available(offset, 8);
 
-		element_header header{};
+		ElementHeader header{};
 		header.group = load_u16(src_.data() + offset);
 		header.element = load_u16(src_.data() + offset + 2);
 
@@ -250,12 +250,12 @@ private:
 		return header;
 	}
 
-	stop_reason normalize_dataset_elements(std::size_t& pos, std::size_t end,
+	StopReason normalize_dataset_elements(std::size_t& pos, std::size_t end,
 	    bool stop_on_item_delim) {
 		while (pos < end) {
 			if (end - pos < 8 || eight_bytes_are_zero(src_, pos)) {
 				pos = end;
-				return stop_reason::reached_end;
+				return StopReason::reached_end;
 			}
 
 			const auto header = parse_and_convert_element_header(pos, end);
@@ -265,13 +265,13 @@ private:
 			if (header.group == kGroupItem) {
 				if (header.element == kElemItemDelim) {
 					if (stop_on_item_delim) {
-						return stop_reason::item_delim;
+						return StopReason::item_delim;
 					}
 					continue;
 				}
 				if (header.element == kElemSequenceDelim) {
 					if (stop_on_item_delim) {
-						return stop_reason::sequence_delim;
+						return StopReason::sequence_delim;
 					}
 					continue;
 				}
@@ -317,14 +317,14 @@ private:
 			    dst_.subspan(value_offset, header.length), lane_width, file_path_, value_offset);
 			pos = value_end;
 		}
-		return stop_reason::reached_end;
+		return StopReason::reached_end;
 	}
 
 	void normalize_sequence_item_payload(std::size_t& pos, std::size_t end,
 	    std::uint32_t item_length) {
 		if (item_length == 0xFFFFFFFFu) {
 			const auto stop = normalize_dataset_elements(pos, end, true);
-			if (stop == stop_reason::sequence_delim) {
+			if (stop == StopReason::sequence_delim) {
 				// Missing Item Delimitation; tolerate and let parent consume the sequence end.
 				return;
 			}
@@ -426,7 +426,7 @@ private:
 	std::span<const std::uint8_t> src_;
 	std::span<std::uint8_t> dst_;
 	const std::string& file_path_;
-	direction direction_{direction::be_to_le};
+	Direction direction_{Direction::be_to_le};
 };
 
 } // namespace
@@ -444,8 +444,8 @@ std::vector<std::uint8_t> normalize_big_endian_dataset(
 		return output;
 	}
 
-	dataset_endian_converter normalizer(full_input, std::span<std::uint8_t>(output),
-	    file_path, dataset_endian_converter::direction::be_to_le);
+	DatasetEndianConverter normalizer(full_input, std::span<std::uint8_t>(output),
+	    file_path, DatasetEndianConverter::Direction::be_to_le);
 	normalizer.convert(dataset_start_offset, full_input.size());
 	return output;
 }
@@ -463,8 +463,8 @@ std::vector<std::uint8_t> convert_little_endian_dataset_to_big_endian(
 		return output;
 	}
 
-	dataset_endian_converter converter(full_input, std::span<std::uint8_t>(output),
-	    file_path, dataset_endian_converter::direction::le_to_be);
+	DatasetEndianConverter converter(full_input, std::span<std::uint8_t>(output),
+	    file_path, DatasetEndianConverter::Direction::le_to_be);
 	converter.convert(dataset_start_offset, full_input.size());
 	return output;
 }

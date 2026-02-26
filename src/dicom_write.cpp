@@ -41,7 +41,7 @@ constexpr Tag kImplementationVersionNameTag{0x0002u, 0x0013u};
 constexpr Tag kSopClassUidTag{0x0008u, 0x0016u};
 constexpr Tag kSopInstanceUidTag{0x0008u, 0x0018u};
 
-struct dataset_encoding {
+struct DatasetEncoding {
 	bool explicit_vr{true};
 	bool convert_body_to_big_endian{false};
 	bool deflate_body{false};
@@ -178,7 +178,7 @@ void write_item_header(Writer& writer, Tag tag, std::uint32_t value_length) {
 	return raw_length + (raw_length & 1u);
 }
 
-struct pixel_sequence_offset_tables {
+struct PixelSequenceOffsetTables {
 	std::vector<std::uint32_t> basic_offsets{};
 	std::vector<std::uint64_t> extended_offsets{};
 	std::vector<std::uint64_t> extended_lengths{};
@@ -201,10 +201,10 @@ struct pixel_sequence_offset_tables {
 	return bytes;
 }
 
-[[nodiscard]] pixel_sequence_offset_tables compute_pixel_sequence_offset_tables(
+[[nodiscard]] PixelSequenceOffsetTables compute_pixel_sequence_offset_tables(
     const PixelSequence& pixel_sequence, const InStream* seq_stream) {
 	constexpr std::size_t kItemHeaderBytes = 8u;
-	pixel_sequence_offset_tables tables{};
+	PixelSequenceOffsetTables tables{};
 	std::size_t next_frame_offset = 0u;
 	bool basic_offset_table_overflow = false;
 	bool eot_eligible = true;
@@ -485,9 +485,9 @@ void write_dataset(const DataSet& dataset, Writer& writer, bool explicit_vr,
 	    : "ImplicitVRLittleEndian"_uid;
 }
 
-[[nodiscard]] dataset_encoding determine_dataset_encoding(uid::WellKnown transfer_syntax,
+[[nodiscard]] DatasetEncoding determine_dataset_encoding(uid::WellKnown transfer_syntax,
     const DataSet& dataset) {
-	dataset_encoding encoding{};
+	DatasetEncoding encoding{};
 	if (!transfer_syntax.valid()) {
 		encoding.explicit_vr = dataset.is_explicit_vr();
 		return encoding;
@@ -606,7 +606,7 @@ void write_preamble(Writer& writer) {
 
 template <typename Writer>
 void write_dataset_body(Writer& writer, const DataSet& dataset,
-    const dataset_encoding& encoding, const std::string& file_path) {
+    const DatasetEncoding& encoding, const std::string& file_path) {
 	std::vector<std::uint8_t> body;
 	body.reserve(4096);
 	VectorWriter body_writer(body);
