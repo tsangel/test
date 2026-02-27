@@ -84,7 +84,9 @@ typedef struct dicomsdl_encoder_plugin_api_v1 {
   dicomsdl_encoder_encode_frame_fn encode_frame;
 } dicomsdl_encoder_plugin_api_v1;
 
+#ifndef DICOMSDL_ENCODER_PLUGIN_API_NO_ENTRYPOINT_DECL
 int dicomsdl_get_encoder_plugin_api_v1(dicomsdl_encoder_plugin_api_v1* out_api);
+#endif
 
 #ifdef __cplusplus
 }

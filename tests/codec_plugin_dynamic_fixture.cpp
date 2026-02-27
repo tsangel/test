@@ -5,9 +5,9 @@
 #include "pixel_encoder_plugin_abi.h"
 
 #if defined(_WIN32)
-#define DICOMSDL_TEST_PLUGIN_EXPORT extern "C" __declspec(dllexport)
+#define DICOMSDL_TEST_PLUGIN_EXPORT __declspec(dllexport)
 #else
-#define DICOMSDL_TEST_PLUGIN_EXPORT extern "C"
+#define DICOMSDL_TEST_PLUGIN_EXPORT __attribute__((visibility("default")))
 #endif
 
 namespace {
@@ -147,6 +147,8 @@ int encoder_encode_frame(void* ctx, const dicomsdl_encoder_request_v1* request,
 
 }  // namespace
 
+extern "C" {
+
 DICOMSDL_TEST_PLUGIN_EXPORT int dicomsdl_get_decoder_plugin_api_v1(
     dicomsdl_decoder_plugin_api_v1* out_api) {
   if (!out_api) {
@@ -194,3 +196,5 @@ DICOMSDL_TEST_PLUGIN_EXPORT int dicomsdl_get_encoder_plugin_api_v1(
   *out_api = api;
   return 1;
 }
+
+}  // extern "C"
