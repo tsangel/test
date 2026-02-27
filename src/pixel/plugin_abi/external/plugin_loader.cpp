@@ -1,5 +1,7 @@
 #include "pixel/plugin_abi/external/plugin_loader.hpp"
 
+#include <cstring>
+#include <exception>
 #include <utility>
 
 #if defined(_WIN32)
@@ -126,6 +128,39 @@ bool validate_encoder_api(const dicomsdl_encoder_plugin_api_v1& api,
   return true;
 }
 
+void set_error_from_exception(dicomsdl_codec_error_v1* error,
+    std::uint32_t stage_code, std::string_view detail) noexcept {
+  if (error == nullptr) {
+    return;
+  }
+  error->status_code = DICOMSDL_CODEC_INTERNAL_ERROR;
+  error->stage_code = stage_code;
+  error->detail_length = 0;
+  if (error->detail == nullptr || error->detail_capacity == 0) {
+    return;
+  }
+  const std::size_t max_copy = static_cast<std::size_t>(error->detail_capacity - 1);
+  const std::size_t copy_size = detail.size() < max_copy ? detail.size() : max_copy;
+  if (copy_size > 0) {
+    std::memcpy(error->detail, detail.data(), copy_size);
+  }
+  error->detail[copy_size] = '\0';
+  error->detail_length = static_cast<std::uint32_t>(copy_size);
+}
+
+[[nodiscard]] std::string exception_detail_for_call(
+    std::string_view operation, const std::exception* ex) {
+  if (ex != nullptr && ex->what() != nullptr && ex->what()[0] != '\0') {
+    std::string detail(operation);
+    detail += " threw exception: ";
+    detail += ex->what();
+    return detail;
+  }
+  std::string detail(operation);
+  detail += " threw non-standard exception";
+  return detail;
+}
+
 }  // namespace
 
 bool load_external_decoder_plugin(std::string_view library_path,
@@ -149,7 +184,21 @@ bool load_external_decoder_plugin(std::string_view library_path,
   out_plugin.api = {};
   out_plugin.api.struct_size = sizeof(dicomsdl_decoder_plugin_api_v1);
   out_plugin.api.abi_version = DICOMSDL_DECODER_PLUGIN_ABI_V1;
-  if (get_api(&out_plugin.api) == 0) {
+  int handshake_ok = 0;
+  try {
+    handshake_ok = get_api(&out_plugin.api);
+  } catch (const std::exception& e) {
+    out_error = exception_detail_for_call("decoder plugin API handshake", &e);
+    close_shared_library(out_plugin.library);
+    reset_decoder_plugin(out_plugin);
+    return false;
+  } catch (...) {
+    out_error = exception_detail_for_call("decoder plugin API handshake", nullptr);
+    close_shared_library(out_plugin.library);
+    reset_decoder_plugin(out_plugin);
+    return false;
+  }
+  if (handshake_ok == 0) {
     out_error = "decoder plugin API handshake failed";
     close_shared_library(out_plugin.library);
     reset_decoder_plugin(out_plugin);
@@ -161,7 +210,19 @@ bool load_external_decoder_plugin(std::string_view library_path,
     return false;
   }
 
-  out_plugin.context = out_plugin.api.create();
+  try {
+    out_plugin.context = out_plugin.api.create();
+  } catch (const std::exception& e) {
+    out_error = exception_detail_for_call("decoder plugin create()", &e);
+    close_shared_library(out_plugin.library);
+    reset_decoder_plugin(out_plugin);
+    return false;
+  } catch (...) {
+    out_error = exception_detail_for_call("decoder plugin create()", nullptr);
+    close_shared_library(out_plugin.library);
+    reset_decoder_plugin(out_plugin);
+    return false;
+  }
   if (out_plugin.context == nullptr) {
     out_error = "decoder plugin create() returned null context";
     close_shared_library(out_plugin.library);
@@ -195,7 +256,21 @@ bool load_external_encoder_plugin(std::string_view library_path,
   out_plugin.api = {};
   out_plugin.api.struct_size = sizeof(dicomsdl_encoder_plugin_api_v1);
   out_plugin.api.abi_version = DICOMSDL_ENCODER_PLUGIN_ABI_V1;
-  if (get_api(&out_plugin.api) == 0) {
+  int handshake_ok = 0;
+  try {
+    handshake_ok = get_api(&out_plugin.api);
+  } catch (const std::exception& e) {
+    out_error = exception_detail_for_call("encoder plugin API handshake", &e);
+    close_shared_library(out_plugin.library);
+    reset_encoder_plugin(out_plugin);
+    return false;
+  } catch (...) {
+    out_error = exception_detail_for_call("encoder plugin API handshake", nullptr);
+    close_shared_library(out_plugin.library);
+    reset_encoder_plugin(out_plugin);
+    return false;
+  }
+  if (handshake_ok == 0) {
     out_error = "encoder plugin API handshake failed";
     close_shared_library(out_plugin.library);
     reset_encoder_plugin(out_plugin);
@@ -207,7 +282,19 @@ bool load_external_encoder_plugin(std::string_view library_path,
     return false;
   }
 
-  out_plugin.context = out_plugin.api.create();
+  try {
+    out_plugin.context = out_plugin.api.create();
+  } catch (const std::exception& e) {
+    out_error = exception_detail_for_call("encoder plugin create()", &e);
+    close_shared_library(out_plugin.library);
+    reset_encoder_plugin(out_plugin);
+    return false;
+  } catch (...) {
+    out_error = exception_detail_for_call("encoder plugin create()", nullptr);
+    close_shared_library(out_plugin.library);
+    reset_encoder_plugin(out_plugin);
+    return false;
+  }
   if (out_plugin.context == nullptr) {
     out_error = "encoder plugin create() returned null context";
     close_shared_library(out_plugin.library);
@@ -231,7 +318,17 @@ bool init_external_decoder_plugin_from_api(
     reset_decoder_plugin(out_plugin);
     return false;
   }
-  out_plugin.context = out_plugin.api.create();
+  try {
+    out_plugin.context = out_plugin.api.create();
+  } catch (const std::exception& e) {
+    out_error = exception_detail_for_call("decoder plugin create()", &e);
+    reset_decoder_plugin(out_plugin);
+    return false;
+  } catch (...) {
+    out_error = exception_detail_for_call("decoder plugin create()", nullptr);
+    reset_decoder_plugin(out_plugin);
+    return false;
+  }
   if (out_plugin.context == nullptr) {
     out_error = "decoder plugin create() returned null context";
     reset_decoder_plugin(out_plugin);
@@ -253,7 +350,17 @@ bool init_external_encoder_plugin_from_api(
     reset_encoder_plugin(out_plugin);
     return false;
   }
-  out_plugin.context = out_plugin.api.create();
+  try {
+    out_plugin.context = out_plugin.api.create();
+  } catch (const std::exception& e) {
+    out_error = exception_detail_for_call("encoder plugin create()", &e);
+    reset_encoder_plugin(out_plugin);
+    return false;
+  } catch (...) {
+    out_error = exception_detail_for_call("encoder plugin create()", nullptr);
+    reset_encoder_plugin(out_plugin);
+    return false;
+  }
   if (out_plugin.context == nullptr) {
     out_error = "encoder plugin create() returned null context";
     reset_encoder_plugin(out_plugin);
@@ -295,7 +402,19 @@ bool release_external_decoder_plugin(ExternalDecoderPlugin& plugin,
   }
 
   if (plugin.api.destroy != nullptr && plugin.context != nullptr) {
-    plugin.api.destroy(plugin.context);
+    try {
+      plugin.api.destroy(plugin.context);
+    } catch (const std::exception& e) {
+      out_error = exception_detail_for_call("decoder plugin destroy()", &e);
+      close_shared_library(plugin.library);
+      reset_decoder_plugin(plugin);
+      return false;
+    } catch (...) {
+      out_error = exception_detail_for_call("decoder plugin destroy()", nullptr);
+      close_shared_library(plugin.library);
+      reset_decoder_plugin(plugin);
+      return false;
+    }
   }
   close_shared_library(plugin.library);
   reset_decoder_plugin(plugin);
@@ -321,7 +440,19 @@ bool release_external_encoder_plugin(ExternalEncoderPlugin& plugin,
   }
 
   if (plugin.api.destroy != nullptr && plugin.context != nullptr) {
-    plugin.api.destroy(plugin.context);
+    try {
+      plugin.api.destroy(plugin.context);
+    } catch (const std::exception& e) {
+      out_error = exception_detail_for_call("encoder plugin destroy()", &e);
+      close_shared_library(plugin.library);
+      reset_encoder_plugin(plugin);
+      return false;
+    } catch (...) {
+      out_error = exception_detail_for_call("encoder plugin destroy()", nullptr);
+      close_shared_library(plugin.library);
+      reset_encoder_plugin(plugin);
+      return false;
+    }
   }
   close_shared_library(plugin.library);
   reset_encoder_plugin(plugin);
@@ -340,8 +471,22 @@ bool configure_external_decoder_plugin(ExternalDecoderPlugin& plugin,
   if (!begin_inflight(plugin.retain_count, plugin.in_flight_calls, out_error)) {
     return false;
   }
-  const int ok =
-      plugin.api.configure(plugin.context, transfer_syntax_code, options, error);
+  int ok = 0;
+  try {
+    ok = plugin.api.configure(plugin.context, transfer_syntax_code, options, error);
+  } catch (const std::exception& e) {
+    end_inflight(plugin.in_flight_calls);
+    out_error = exception_detail_for_call("decoder plugin configure()", &e);
+    set_error_from_exception(
+        error, DICOMSDL_CODEC_STAGE_PARSE_OPTIONS, out_error);
+    return false;
+  } catch (...) {
+    end_inflight(plugin.in_flight_calls);
+    out_error = exception_detail_for_call("decoder plugin configure()", nullptr);
+    set_error_from_exception(
+        error, DICOMSDL_CODEC_STAGE_PARSE_OPTIONS, out_error);
+    return false;
+  }
   end_inflight(plugin.in_flight_calls);
   return ok != 0;
 }
@@ -358,8 +503,22 @@ bool configure_external_encoder_plugin(ExternalEncoderPlugin& plugin,
   if (!begin_inflight(plugin.retain_count, plugin.in_flight_calls, out_error)) {
     return false;
   }
-  const int ok =
-      plugin.api.configure(plugin.context, transfer_syntax_code, options, error);
+  int ok = 0;
+  try {
+    ok = plugin.api.configure(plugin.context, transfer_syntax_code, options, error);
+  } catch (const std::exception& e) {
+    end_inflight(plugin.in_flight_calls);
+    out_error = exception_detail_for_call("encoder plugin configure()", &e);
+    set_error_from_exception(
+        error, DICOMSDL_CODEC_STAGE_PARSE_OPTIONS, out_error);
+    return false;
+  } catch (...) {
+    end_inflight(plugin.in_flight_calls);
+    out_error = exception_detail_for_call("encoder plugin configure()", nullptr);
+    set_error_from_exception(
+        error, DICOMSDL_CODEC_STAGE_PARSE_OPTIONS, out_error);
+    return false;
+  }
   end_inflight(plugin.in_flight_calls);
   return ok != 0;
 }
@@ -375,7 +534,22 @@ bool decode_external_frame(ExternalDecoderPlugin& plugin,
   if (!begin_inflight(plugin.retain_count, plugin.in_flight_calls, out_error)) {
     return false;
   }
-  const int ok = plugin.api.decode_frame(plugin.context, request, error);
+  int ok = 0;
+  try {
+    ok = plugin.api.decode_frame(plugin.context, request, error);
+  } catch (const std::exception& e) {
+    end_inflight(plugin.in_flight_calls);
+    out_error = exception_detail_for_call("decoder plugin decode_frame()", &e);
+    set_error_from_exception(
+        error, DICOMSDL_CODEC_STAGE_DECODE_FRAME, out_error);
+    return false;
+  } catch (...) {
+    end_inflight(plugin.in_flight_calls);
+    out_error = exception_detail_for_call("decoder plugin decode_frame()", nullptr);
+    set_error_from_exception(
+        error, DICOMSDL_CODEC_STAGE_DECODE_FRAME, out_error);
+    return false;
+  }
   end_inflight(plugin.in_flight_calls);
   return ok != 0;
 }
@@ -391,7 +565,22 @@ bool encode_external_frame(ExternalEncoderPlugin& plugin,
   if (!begin_inflight(plugin.retain_count, plugin.in_flight_calls, out_error)) {
     return false;
   }
-  const int ok = plugin.api.encode_frame(plugin.context, request, error);
+  int ok = 0;
+  try {
+    ok = plugin.api.encode_frame(plugin.context, request, error);
+  } catch (const std::exception& e) {
+    end_inflight(plugin.in_flight_calls);
+    out_error = exception_detail_for_call("encoder plugin encode_frame()", &e);
+    set_error_from_exception(
+        error, DICOMSDL_CODEC_STAGE_ENCODE_FRAME, out_error);
+    return false;
+  } catch (...) {
+    end_inflight(plugin.in_flight_calls);
+    out_error = exception_detail_for_call("encoder plugin encode_frame()", nullptr);
+    set_error_from_exception(
+        error, DICOMSDL_CODEC_STAGE_ENCODE_FRAME, out_error);
+    return false;
+  }
   end_inflight(plugin.in_flight_calls);
   return ok != 0;
 }

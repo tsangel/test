@@ -52,7 +52,7 @@ private:
 class ThreadReporterGuard {
 public:
 	explicit ThreadReporterGuard(std::shared_ptr<diag::Reporter> reporter)
-	    : previous_(diag::tls_reporter) {
+	    : previous_(diag::thread_reporter_slot()) {
 		diag::set_thread_reporter(std::move(reporter));
 	}
 
@@ -604,7 +604,7 @@ void DicomFile::set_error_state(std::string message) {
 void DicomFile::read_attached_stream(const ReadOptions& options) {
 	clear_error_state();
 
-	std::shared_ptr<diag::Reporter> downstream = diag::tls_reporter;
+	std::shared_ptr<diag::Reporter> downstream = diag::thread_reporter_slot();
 	if (!downstream) {
 		downstream = diag::default_reporter();
 	}

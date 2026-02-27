@@ -1,4 +1,4 @@
- cmake_minimum_required(VERSION 3.16)
+  cmake_minimum_required(VERSION 3.16)
 
 if(APPLE)
     if(DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
@@ -69,6 +69,7 @@ include(ExternalProject)
 
 add_library(dicomsdl STATIC
 	src/dataset.cpp
+	src/diagnostics.cpp
 	src/dataset_deflate_codec.cpp
 	src/dataset_endian_converter.cpp
 	src/dumpdataset.cpp

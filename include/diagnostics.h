@@ -188,7 +188,9 @@ inline void set_default_reporter(std::shared_ptr<Reporter> rep) {
 	default_reporter() = rep ? std::move(rep) : std::make_shared<StderrReporter>();
 }
 
-inline thread_local std::shared_ptr<Reporter> tls_reporter{nullptr};
+// Accessor for the current thread reporter slot.
+// Kept as a function to avoid exporting a TLS variable symbol across static/shared boundaries.
+std::shared_ptr<Reporter>& thread_reporter_slot() noexcept;
 
 // Install a reporter that applies only to the current thread.
 // Example:
@@ -198,7 +200,9 @@ inline thread_local std::shared_ptr<Reporter> tls_reporter{nullptr};
 //   });
 //   t.join();
 //   dicom::diag::warn("main thread");  // uses default reporter
-inline void set_thread_reporter(std::shared_ptr<Reporter> rep) { tls_reporter = std::move(rep); }
+inline void set_thread_reporter(std::shared_ptr<Reporter> rep) {
+	thread_reporter_slot() = std::move(rep);
+}
 
 // Log level management (drop logs below the current level).
 inline LogLevel& default_log_level() {
@@ -224,7 +228,8 @@ inline bool meets_log_level(LogLevel level) {
 //   dicom::diag::get(custom).error("custom for this call only");
 inline Reporter& get(const std::shared_ptr<Reporter>& candidate = nullptr) {
 	if (candidate) return *candidate;
-	if (tls_reporter) return *tls_reporter;
+	auto& thread_reporter = thread_reporter_slot();
+	if (thread_reporter) return *thread_reporter;
 	return *default_reporter();
 }
 
