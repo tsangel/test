@@ -1,3 +1,6 @@
+#define DICOMSDL_DECODER_PLUGIN_API_NO_ENTRYPOINT_DECL 1
+#define DICOMSDL_ENCODER_PLUGIN_API_NO_ENTRYPOINT_DECL 1
+
 #include <cstdint>
 #include <cstring>
 

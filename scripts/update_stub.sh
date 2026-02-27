@@ -69,14 +69,34 @@ if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
 	exit 1
 fi
 
-STUBGEN_SCRIPT="${ROOT_DIR}/extern/nanobind/src/stubgen.py"
-if [[ ! -f "$STUBGEN_SCRIPT" ]]; then
-	echo "Error: nanobind stubgen script not found: ${STUBGEN_SCRIPT}" >&2
+if [[ ! -d "$BUILD_DIR" ]]; then
+	echo "Error: build directory not found: ${BUILD_DIR}" >&2
 	exit 1
 fi
 
-if [[ ! -d "$BUILD_DIR" ]]; then
-	echo "Error: build directory not found: ${BUILD_DIR}" >&2
+if [[ "$BUILD_DIR" != /* ]]; then
+	BUILD_DIR="${ROOT_DIR}/${BUILD_DIR#./}"
+fi
+
+STUBGEN_SCRIPT="${NANOBIND_STUBGEN_SCRIPT:-}"
+if [[ -z "$STUBGEN_SCRIPT" ]]; then
+	# Support both legacy submodule layout and FetchContent layout.
+	for candidate in \
+		"${ROOT_DIR}/extern/nanobind/src/stubgen.py" \
+		"${BUILD_DIR}/_deps/dicomsdl_nanobind-src/src/stubgen.py"; do
+		if [[ -f "$candidate" ]]; then
+			STUBGEN_SCRIPT="$candidate"
+			break
+		fi
+	done
+fi
+
+if [[ ! -f "$STUBGEN_SCRIPT" ]]; then
+	echo "Error: nanobind stubgen script not found." >&2
+	echo "Checked paths:" >&2
+	echo "  - ${ROOT_DIR}/extern/nanobind/src/stubgen.py" >&2
+	echo "  - ${BUILD_DIR}/_deps/dicomsdl_nanobind-src/src/stubgen.py" >&2
+	echo "You can override with NANOBIND_STUBGEN_SCRIPT=/path/to/stubgen.py" >&2
 	exit 1
 fi
 
