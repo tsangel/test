@@ -97,40 +97,67 @@ if /I "%DICOMSDL_WINDOWS_TOOLCHAIN%"=="auto" (
 )
 
 set "TOOLCHAIN_CMAKE_ARGS="
+set "EXPECTED_C_COMPILER_NAME="
 if /I "%SELECTED_TOOLCHAIN%"=="msvc" (
 	where cl >nul 2>&1
 	if errorlevel 1 (
 		echo Error: cl.exe not found. Run this from a Visual Studio Developer Command Prompt or call vcvarsall.bat first.>&2
 		exit /b 1
 	)
+	set "EXPECTED_C_COMPILER_NAME=cl.exe"
+	set "CC="
+	set "CXX="
 ) else (
 	if /I "%SELECTED_TOOLCHAIN%"=="clangcl" (
-		where clang-cl >nul 2>&1
-		if errorlevel 1 (
+		set "CLANGCL_COMPILER_PATH="
+		for /f "delims=" %%I in ('where clang-cl') do (
+			if not defined CLANGCL_COMPILER_PATH set "CLANGCL_COMPILER_PATH=%%~fI"
+		)
+		if not defined CLANGCL_COMPILER_PATH (
 			echo Error: clang-cl.exe not found on PATH for clangcl toolchain.>&2
 			exit /b 1
 		)
-		set "TOOLCHAIN_CMAKE_ARGS=-DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl"
+		set TOOLCHAIN_CMAKE_ARGS=-DCMAKE_C_COMPILER:FILEPATH="%CLANGCL_COMPILER_PATH%" -DCMAKE_CXX_COMPILER:FILEPATH="%CLANGCL_COMPILER_PATH%"
 		where llvm-rc >nul 2>&1
 		if not errorlevel 1 (
-			set "TOOLCHAIN_CMAKE_ARGS=%TOOLCHAIN_CMAKE_ARGS% -DCMAKE_RC_COMPILER=llvm-rc"
+			set "LLVM_RC_COMPILER_PATH="
+			for /f "delims=" %%I in ('where llvm-rc') do (
+				if not defined LLVM_RC_COMPILER_PATH set "LLVM_RC_COMPILER_PATH=%%~fI"
+			)
+			if defined LLVM_RC_COMPILER_PATH set TOOLCHAIN_CMAKE_ARGS=%TOOLCHAIN_CMAKE_ARGS% -DCMAKE_RC_COMPILER:FILEPATH="%LLVM_RC_COMPILER_PATH%"
 		)
+		set "EXPECTED_C_COMPILER_NAME=clang-cl.exe"
+		set "CC=%CLANGCL_COMPILER_PATH%"
+		set "CXX=%CLANGCL_COMPILER_PATH%"
 	) else (
-		where clang >nul 2>&1
-		if errorlevel 1 (
+		set "CLANG_COMPILER_PATH="
+		for /f "delims=" %%I in ('where clang') do (
+			if not defined CLANG_COMPILER_PATH set "CLANG_COMPILER_PATH=%%~fI"
+		)
+		if not defined CLANG_COMPILER_PATH (
 			echo Error: clang.exe not found on PATH for clang64 toolchain.>&2
 			exit /b 1
 		)
-		where clang++ >nul 2>&1
-		if errorlevel 1 (
+		set "CLANGXX_COMPILER_PATH="
+		for /f "delims=" %%I in ('where clang++') do (
+			if not defined CLANGXX_COMPILER_PATH set "CLANGXX_COMPILER_PATH=%%~fI"
+		)
+		if not defined CLANGXX_COMPILER_PATH (
 			echo Error: clang++.exe not found on PATH for clang64 toolchain.>&2
 			exit /b 1
 		)
-		set "TOOLCHAIN_CMAKE_ARGS=-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++"
+		set TOOLCHAIN_CMAKE_ARGS=-DCMAKE_C_COMPILER:FILEPATH="%CLANG_COMPILER_PATH%" -DCMAKE_CXX_COMPILER:FILEPATH="%CLANGXX_COMPILER_PATH%"
 		where llvm-rc >nul 2>&1
 		if not errorlevel 1 (
-			set "TOOLCHAIN_CMAKE_ARGS=%TOOLCHAIN_CMAKE_ARGS% -DCMAKE_RC_COMPILER=llvm-rc"
+			set "LLVM_RC_COMPILER_PATH="
+			for /f "delims=" %%I in ('where llvm-rc') do (
+				if not defined LLVM_RC_COMPILER_PATH set "LLVM_RC_COMPILER_PATH=%%~fI"
+			)
+			if defined LLVM_RC_COMPILER_PATH set TOOLCHAIN_CMAKE_ARGS=%TOOLCHAIN_CMAKE_ARGS% -DCMAKE_RC_COMPILER:FILEPATH="%LLVM_RC_COMPILER_PATH%"
 		)
+		set "EXPECTED_C_COMPILER_NAME=clang.exe"
+		set "CC=%CLANG_COMPILER_PATH%"
+		set "CXX=%CLANGXX_COMPILER_PATH%"
 	)
 )
 
@@ -168,7 +195,6 @@ if exist "%CMAKE_CACHE_FILE%" (
 	set "EXISTING_GENERATOR="
 	set "EXISTING_C_COMPILER="
 	set "EXISTING_C_COMPILER_NAME="
-	set "EXPECTED_C_COMPILER_NAME="
 	set "MISMATCH_REASON="
 	for /f "tokens=1,* delims==" %%A in ('findstr /B /C:"CMAKE_GENERATOR:INTERNAL=" "%CMAKE_CACHE_FILE%"') do (
 		set "EXISTING_GENERATOR=%%B"
@@ -179,15 +205,6 @@ if exist "%CMAKE_CACHE_FILE%" (
 	if defined EXISTING_C_COMPILER (
 		for %%I in ("!EXISTING_C_COMPILER!") do (
 			set "EXISTING_C_COMPILER_NAME=%%~nxI"
-		)
-	)
-	if /I "%SELECTED_TOOLCHAIN%"=="msvc" (
-		set "EXPECTED_C_COMPILER_NAME=cl.exe"
-	) else (
-		if /I "%SELECTED_TOOLCHAIN%"=="clangcl" (
-			set "EXPECTED_C_COMPILER_NAME=clang-cl.exe"
-		) else (
-			set "EXPECTED_C_COMPILER_NAME=clang.exe"
 		)
 	)
 	if defined EXISTING_GENERATOR (
@@ -226,8 +243,25 @@ if exist "%CMAKE_CACHE_FILE%" (
 echo Selected Windows toolchain: %SELECTED_TOOLCHAIN%
 echo Codec modes: jpeg=%CODEC_MODE_JPEG% jpegls=%CODEC_MODE_JPEGLS% jpeg2k=%CODEC_MODE_JPEG2K% htj2k=%CODEC_MODE_HTJ2K% jpegxl=%CODEC_MODE_JPEGXL%
 echo Configuring dicomsdl (%BUILD_TYPE%) in %BUILD_DIR%
+echo Toolchain CMake args: %TOOLCHAIN_CMAKE_ARGS%
 cmake -S "%ROOT_DIR%" -B "%BUILD_DIR%" -DBUILD_TESTING=%BUILD_TESTING% -DDICOM_BUILD_EXAMPLES=%DICOM_BUILD_EXAMPLES% -DCMAKE_BUILD_TYPE=%BUILD_TYPE% -G "%GENERATOR%" %TOOLCHAIN_CMAKE_ARGS% %CODEC_CMAKE_ARGS% %CMAKE_EXTRA_ARGS%
 if errorlevel 1 exit /b %errorlevel%
+
+set "CONFIGURED_C_COMPILER="
+set "CONFIGURED_C_COMPILER_NAME="
+for /f "tokens=1,* delims==" %%A in ('findstr /B /C:"CMAKE_C_COMPILER:FILEPATH=" "%CMAKE_CACHE_FILE%"') do (
+	set "CONFIGURED_C_COMPILER=%%B"
+)
+if defined CONFIGURED_C_COMPILER (
+	for %%I in ("!CONFIGURED_C_COMPILER!") do (
+		set "CONFIGURED_C_COMPILER_NAME=%%~nxI"
+	)
+	if /I not "!CONFIGURED_C_COMPILER_NAME!"=="!EXPECTED_C_COMPILER_NAME!" (
+		echo Error: expected %SELECTED_TOOLCHAIN% compiler '!EXPECTED_C_COMPILER_NAME!' but CMake configured '!CONFIGURED_C_COMPILER!'.>&2
+		echo        Verify PATH order and clear %BUILD_DIR% ^(or set RESET_CMAKE_CACHE=1^).>&2
+		exit /b 1
+	)
+)
 
 set "PARALLEL_SWITCH=--parallel"
 if defined BUILD_PARALLELISM set "PARALLEL_SWITCH=--parallel %BUILD_PARALLELISM%"
