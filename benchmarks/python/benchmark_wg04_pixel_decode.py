@@ -217,7 +217,6 @@ def _prepare_reuse_outputs(
     backend: str,
     *,
     scaled: bool,
-    dicomsdl_htj2k_decoder: str,
 ) -> list[Any] | None:
     if backend != "dicomsdl":
         return None
@@ -228,7 +227,7 @@ def _prepare_reuse_outputs(
 
     outputs: list[Any] = []
     for _, ds in inputs:
-        probe = ds.to_array(frame=-1, scaled=scaled, htj2k_decoder=dicomsdl_htj2k_decoder)
+        probe = ds.to_array(frame=-1, scaled=scaled)
         outputs.append(np.empty_like(probe))
     return outputs
 
@@ -270,7 +269,7 @@ def _prepare_pydicom_reuse_context(inputs: list[tuple[Path, Any]]) -> PydicomReu
 
 
 def _prepare_dicomsdl_view_copyto_context(
-    inputs: list[tuple[Path, Any]], *, scaled: bool, dicomsdl_htj2k_decoder: str
+    inputs: list[tuple[Path, Any]], *, scaled: bool
 ) -> DicomsdlViewCopytoContext:
     try:
         import numpy as np
@@ -286,7 +285,7 @@ def _prepare_dicomsdl_view_copyto_context(
             outputs.append(np.empty_like(view))
             use_view.append(True)
         except Exception:
-            probe = ds.to_array(frame=-1, scaled=scaled, htj2k_decoder=dicomsdl_htj2k_decoder)
+            probe = ds.to_array(frame=-1, scaled=scaled)
             outputs.append(np.empty_like(probe))
             use_view.append(False)
 
@@ -302,7 +301,6 @@ def _benchmark_codec(
     repeat: int,
     scaled: bool,
     dicomsdl_mode: str,
-    dicomsdl_htj2k_decoder: str,
     pydicom_mode: str,
     verbose: bool,
     decoder_threads: int = -1,
@@ -315,12 +313,9 @@ def _benchmark_codec(
             inputs,
             backend,
             scaled=scaled,
-            dicomsdl_htj2k_decoder=dicomsdl_htj2k_decoder,
         )
     if backend == "dicomsdl" and dicomsdl_mode == "to_array_view_copyto":
-        dicomsdl_view_copyto = _prepare_dicomsdl_view_copyto_context(
-            inputs, scaled=scaled, dicomsdl_htj2k_decoder=dicomsdl_htj2k_decoder
-        )
+        dicomsdl_view_copyto = _prepare_dicomsdl_view_copyto_context(inputs, scaled=scaled)
         fallback_count = sum(1 for enabled in dicomsdl_view_copyto.use_view if not enabled)
         if fallback_count > 0:
             print(
@@ -345,7 +340,6 @@ def _benchmark_codec(
                         frame=-1,
                         scaled=scaled,
                         threads=decoder_threads,
-                        htj2k_decoder=dicomsdl_htj2k_decoder,
                     )
                 elif dicomsdl_mode == "to_array_view_copyto" and dicomsdl_view_copyto is not None:
                     if dicomsdl_view_copyto.use_view[index]:
@@ -358,14 +352,11 @@ def _benchmark_codec(
                             frame=-1,
                             scaled=scaled,
                             threads=decoder_threads,
-                            htj2k_decoder=dicomsdl_htj2k_decoder,
                         )
                 elif dicomsdl_mode == "to_array_view":
                     _ = ds.to_array_view(frame=-1)
                 else:
-                    _ = ds.to_array(
-                        frame=-1, scaled=scaled, htj2k_decoder=dicomsdl_htj2k_decoder
-                    )
+                    _ = ds.to_array(frame=-1, scaled=scaled)
             elif pydicom_reuse is not None:
                 if pydicom_reuse.use_numpy_handler[index]:
                     flat = pydicom_reuse.get_pixeldata(ds, read_only=True)
@@ -392,7 +383,6 @@ def _benchmark_codec(
                         frame=-1,
                         scaled=scaled,
                         threads=decoder_threads,
-                        htj2k_decoder=dicomsdl_htj2k_decoder,
                     )
                 elif dicomsdl_mode == "to_array_view_copyto" and dicomsdl_view_copyto is not None:
                     if dicomsdl_view_copyto.use_view[index]:
@@ -405,15 +395,12 @@ def _benchmark_codec(
                             frame=-1,
                             scaled=scaled,
                             threads=decoder_threads,
-                            htj2k_decoder=dicomsdl_htj2k_decoder,
                         )
                     arr = dicomsdl_view_copyto.outputs[index]
                 elif dicomsdl_mode == "to_array_view":
                     arr = ds.to_array_view(frame=-1)
                 else:
-                    arr = ds.to_array(
-                        frame=-1, scaled=scaled, htj2k_decoder=dicomsdl_htj2k_decoder
-                    )
+                    arr = ds.to_array(frame=-1, scaled=scaled)
             elif pydicom_reuse is not None:
                 if pydicom_reuse.use_numpy_handler[index]:
                     flat = pydicom_reuse.get_pixeldata(ds, read_only=True)
@@ -873,6 +860,15 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _configure_dicomsdl_htj2k_decoder(module: Any, backend: str) -> None:
+    setter = getattr(module, "set_htj2k_decoder_backend", None)
+    if setter is None:
+        raise RuntimeError(
+            "dicomsdl module does not expose set_htj2k_decoder_backend required by this benchmark"
+        )
+    setter(backend)
+
+
 def main(argv: list[str]) -> int:
     args = _parse_args(argv)
 
@@ -933,6 +929,18 @@ def main(argv: list[str]) -> int:
         except Exception as exc:
             print(f"failed to import {backend}: {exc}", file=sys.stderr)
             return 1
+
+        if backend == "dicomsdl":
+            try:
+                _configure_dicomsdl_htj2k_decoder(module, dicomsdl_htj2k_decoder)
+            except Exception as exc:
+                print(
+                    f"failed to configure dicomsdl HTJ2K decoder backend "
+                    f"({dicomsdl_htj2k_decoder}): {exc}",
+                    file=sys.stderr,
+                )
+                return 1
+
         modules_by_backend[backend] = module
 
         backend_stats: list[CodecStats] = []
@@ -953,7 +961,6 @@ def main(argv: list[str]) -> int:
                     repeat=args.repeat,
                     scaled=args.scaled,
                     dicomsdl_mode=codec_dicomsdl_mode,
-                    dicomsdl_htj2k_decoder=dicomsdl_htj2k_decoder,
                     pydicom_mode=pydicom_mode,
                     verbose=args.verbose,
                     decoder_threads=-1,
@@ -1012,7 +1019,6 @@ def main(argv: list[str]) -> int:
                 repeat=args.repeat,
                 scaled=args.scaled,
                 dicomsdl_mode=_RAW_BEST_DICOMSDL_MODE,
-                dicomsdl_htj2k_decoder=dicomsdl_htj2k_decoder,
                 pydicom_mode=pydicom_mode,
                 verbose=args.verbose,
                 decoder_threads=-1,
@@ -1027,7 +1033,6 @@ def main(argv: list[str]) -> int:
                 repeat=args.repeat,
                 scaled=args.scaled,
                 dicomsdl_mode=dicomsdl_mode,
-                dicomsdl_htj2k_decoder=dicomsdl_htj2k_decoder,
                 pydicom_mode=_RAW_BEST_PYDICOM_MODE,
                 verbose=args.verbose,
                 decoder_threads=-1,
@@ -1061,7 +1066,6 @@ def main(argv: list[str]) -> int:
                 repeat=args.repeat,
                 scaled=args.scaled,
                 dicomsdl_mode="decode_into",
-                dicomsdl_htj2k_decoder=dicomsdl_htj2k_decoder,
                 pydicom_mode=pydicom_mode,
                 verbose=args.verbose,
                 decoder_threads=args.j2k_multicpu_threads,
