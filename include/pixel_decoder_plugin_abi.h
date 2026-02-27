@@ -105,7 +105,9 @@ typedef struct dicomsdl_decoder_plugin_api_v1 {
   dicomsdl_decoder_decode_frame_fn decode_frame;
 } dicomsdl_decoder_plugin_api_v1;
 
+#ifndef DICOMSDL_DECODER_PLUGIN_API_NO_ENTRYPOINT_DECL
 int dicomsdl_get_decoder_plugin_api_v1(dicomsdl_decoder_plugin_api_v1* out_api);
+#endif
 
 #ifdef __cplusplus
 }
