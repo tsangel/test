@@ -37,7 +37,7 @@ configure_file(
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-if(MSVC)
+if(MSVC AND NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     set(_dicom_release_flags /Ox /Ob2 /Oi /Ot /GL /DNDEBUG)
     foreach(flag IN LISTS _dicom_release_flags)
         add_compile_options($<$<CONFIG:Release>:${flag}>)
@@ -47,6 +47,12 @@ if(MSVC)
         $<$<CONFIG:Release>:/LTCG>
         $<$<CONFIG:RelWithDebInfo>:/LTCG>
     )
+elseif(MSVC)
+    set(_dicom_release_flags /Ox /Ob2 /Oi /Ot /DNDEBUG)
+    foreach(flag IN LISTS _dicom_release_flags)
+        add_compile_options($<$<CONFIG:Release>:${flag}>)
+        add_compile_options($<$<CONFIG:RelWithDebInfo>:${flag}>)
+    endforeach()
 else()
     set(_dicom_release_flags -O3 -fstrict-aliasing -funroll-loops)
     foreach(flag IN LISTS _dicom_release_flags)
@@ -336,13 +342,20 @@ if(DICOMSDL_ENABLE_OPENJPH)
 
 	set(BUILD_SHARED_LIBS OFF)
 	set(BUILD_SHARED_LIBS OFF CACHE BOOL "Force static OpenJPH build in dicomsdl superbuild" FORCE)
-	set(OJPH_ENABLE_TIFF_SUPPORT OFF CACHE BOOL "Disable OpenJPH TIFF support" FORCE)
-	set(OJPH_BUILD_TESTS OFF CACHE BOOL "Disable OpenJPH tests" FORCE)
-	set(OJPH_BUILD_EXECUTABLES OFF CACHE BOOL "Disable OpenJPH executables" FORCE)
-	set(OJPH_BUILD_STREAM_EXPAND OFF CACHE BOOL "Disable OpenJPH stream expand executable" FORCE)
-	set(OJPH_BUILD_FUZZER OFF CACHE BOOL "Disable OpenJPH fuzzer target" FORCE)
-	FetchContent_Declare(dicomsdl_openjph
-		GIT_REPOSITORY "${DICOMSDL_OPENJPH_GIT_REPOSITORY}"
+		set(OJPH_ENABLE_TIFF_SUPPORT OFF CACHE BOOL "Disable OpenJPH TIFF support" FORCE)
+		set(OJPH_BUILD_TESTS OFF CACHE BOOL "Disable OpenJPH tests" FORCE)
+		set(OJPH_BUILD_EXECUTABLES OFF CACHE BOOL "Disable OpenJPH executables" FORCE)
+		set(OJPH_BUILD_STREAM_EXPAND OFF CACHE BOOL "Disable OpenJPH stream expand executable" FORCE)
+		set(OJPH_BUILD_FUZZER OFF CACHE BOOL "Disable OpenJPH fuzzer target" FORCE)
+		if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
+			# TODO: Temporary workaround for clang-cl builds.
+			# OpenJPH's SSSE3 translation unit currently fails because the required SSSE3 target
+			# feature flags are not applied in this toolchain path. Re-enable when OpenJPH
+			# provides proper clang-cl SIMD flag handling (or when we carry a local upstream fix).
+			set(OJPH_DISABLE_SSSE3 ON CACHE BOOL "Disable OpenJPH SSSE3 path for clang-cl compatibility" FORCE)
+		endif()
+		FetchContent_Declare(dicomsdl_openjph
+			GIT_REPOSITORY "${DICOMSDL_OPENJPH_GIT_REPOSITORY}"
 		GIT_TAG "${DICOMSDL_OPENJPH_GIT_TAG}"
 		GIT_PROGRESS TRUE
 	)
