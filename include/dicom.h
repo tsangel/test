@@ -709,11 +709,11 @@ constexpr std::uint16_t tag_to_vr(std::uint32_t tag_value) {
 
 namespace literals {
 
-consteval Tag operator"" _tag(const char* text, std::size_t len) {
+consteval Tag operator""_tag(const char* text, std::size_t len) {
 	return Tag(std::string_view{text, len});
 }
 
-consteval uid::WellKnown operator"" _uid(const char* text, std::size_t len) {
+consteval uid::WellKnown operator""_uid(const char* text, std::size_t len) {
 	const auto index = uid_lookup::uid_index_from_text(std::string_view{text, len});
 	if (index == uid_lookup::kInvalidUidIndex) {
 		throw "Unknown DICOM UID literal";

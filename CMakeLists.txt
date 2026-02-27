@@ -66,6 +66,55 @@ set(DICOM_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 include(CTest)
 include(ExternalProject)
+include(FetchContent)
+
+set(DICOMSDL_FMT_GIT_REPOSITORY "https://github.com/fmtlib/fmt.git"
+	CACHE STRING "fmt upstream git repository used by FetchContent.")
+# Release: fmt 12.1.0 (GitHub latest release, checked 2026-02-27)
+set(DICOMSDL_FMT_GIT_TAG "12.1.0"
+	CACHE STRING "fmt git ref used by FetchContent (use branch/tag/SHA).")
+
+set(DICOMSDL_OPENJPEG_GIT_REPOSITORY "https://github.com/uclouvain/openjpeg.git"
+	CACHE STRING "openjpeg upstream git repository used by FetchContent.")
+# Release: openjpeg v2.5.4 (GitHub latest release, checked 2026-02-27)
+set(DICOMSDL_OPENJPEG_GIT_TAG "v2.5.4"
+	CACHE STRING "openjpeg git ref used by FetchContent (use branch/tag/SHA).")
+
+set(DICOMSDL_LIBJPEG_TURBO_GIT_REPOSITORY "https://github.com/libjpeg-turbo/libjpeg-turbo.git"
+	CACHE STRING "libjpeg-turbo upstream git repository used by FetchContent.")
+# Release: libjpeg-turbo 3.1.3 (GitHub latest release, checked 2026-02-27)
+set(DICOMSDL_LIBJPEG_TURBO_GIT_TAG "3.1.3"
+	CACHE STRING "libjpeg-turbo git ref used by FetchContent (use branch/tag/SHA).")
+
+set(DICOMSDL_LIBDEFLATE_GIT_REPOSITORY "https://github.com/ebiggers/libdeflate.git"
+	CACHE STRING "libdeflate upstream git repository used by FetchContent.")
+# Release: libdeflate v1.25 (GitHub latest release, checked 2026-02-27)
+set(DICOMSDL_LIBDEFLATE_GIT_TAG "v1.25"
+	CACHE STRING "libdeflate git ref used by FetchContent (use branch/tag/SHA).")
+
+set(DICOMSDL_CHARLS_GIT_REPOSITORY "https://github.com/team-charls/charls.git"
+	CACHE STRING "CharLS upstream git repository used by FetchContent.")
+# Release: CharLS 2.4.2 (GitHub latest release, checked 2026-02-27)
+set(DICOMSDL_CHARLS_GIT_TAG "2.4.2"
+	CACHE STRING "CharLS git ref used by FetchContent (use branch/tag/SHA).")
+
+set(DICOMSDL_OPENJPH_GIT_REPOSITORY "https://github.com/aous72/OpenJPH.git"
+	CACHE STRING "OpenJPH upstream git repository used by FetchContent.")
+# Release: OpenJPH 0.26.3 (GitHub latest release, checked 2026-02-27)
+set(DICOMSDL_OPENJPH_GIT_TAG "0.26.3"
+	CACHE STRING "OpenJPH git ref used by FetchContent (use branch/tag/SHA).")
+
+set(DICOMSDL_LIBJXL_GIT_REPOSITORY "https://github.com/libjxl/libjxl.git"
+	CACHE STRING "libjxl upstream git repository used by FetchContent.")
+# Release: libjxl v0.11.2 (GitHub latest release, checked 2026-02-27)
+set(DICOMSDL_LIBJXL_GIT_TAG "v0.11.2"
+	CACHE STRING "libjxl git ref used by FetchContent (use branch/tag/SHA).")
+
+set(DICOMSDL_NANOBIND_GIT_REPOSITORY "https://github.com/wjakob/nanobind.git"
+	CACHE STRING "nanobind upstream git repository used by FetchContent.")
+# Release note: nanobind has no GitHub Releases page; using latest version tag v2.12.0 (checked 2026-02-27)
+set(DICOMSDL_NANOBIND_GIT_TAG "v2.12.0"
+	CACHE STRING "nanobind git ref used by FetchContent (use branch/tag/SHA).")
 
 add_library(dicomsdl STATIC
 	src/dataset.cpp
@@ -134,63 +183,17 @@ target_include_directories(dicomsdl
 	PRIVATE
 		${CMAKE_CURRENT_SOURCE_DIR}/src
 )
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/fmt EXCLUDE_FROM_ALL)
+FetchContent_Declare(dicomsdl_fmt
+	GIT_REPOSITORY "${DICOMSDL_FMT_GIT_REPOSITORY}"
+	GIT_TAG "${DICOMSDL_FMT_GIT_TAG}"
+	GIT_PROGRESS TRUE
+)
+FetchContent_MakeAvailable(dicomsdl_fmt)
 target_link_libraries(dicomsdl PUBLIC fmt::fmt-header-only)
 
-if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/openjpeg/CMakeLists.txt")
-	message(FATAL_ERROR
-		"openjpeg not found at ${CMAKE_CURRENT_SOURCE_DIR}/extern/openjpeg. "
-		"Initialize submodules (git submodule update --init --recursive).")
-endif()
-if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/charls/CMakeLists.txt")
-	message(FATAL_ERROR
-		"charls not found at ${CMAKE_CURRENT_SOURCE_DIR}/extern/charls. "
-		"Initialize submodules (git submodule update --init --recursive).")
-endif()
-if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/libjpeg-turbo/CMakeLists.txt")
-	message(FATAL_ERROR
-		"libjpeg-turbo not found at ${CMAKE_CURRENT_SOURCE_DIR}/extern/libjpeg-turbo. "
-		"Initialize submodules (git submodule update --init --recursive).")
-endif()
-if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/libdeflate/CMakeLists.txt")
-	message(FATAL_ERROR
-		"libdeflate not found at ${CMAKE_CURRENT_SOURCE_DIR}/extern/libdeflate. "
-		"Initialize submodules (git submodule update --init --recursive).")
-endif()
-
 option(DICOMSDL_ENABLE_OPENJPH "Enable OpenJPH backend for HTJ2K decoding" ON)
-if(DICOMSDL_ENABLE_OPENJPH)
-	if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/openjph/CMakeLists.txt")
-		message(FATAL_ERROR
-			"openjph not found at ${CMAKE_CURRENT_SOURCE_DIR}/extern/openjph. "
-			"Initialize submodules (git submodule update --init --recursive).")
-	endif()
-endif()
 
 option(DICOMSDL_ENABLE_JPEGXL "Enable JPEG XL backend dependencies (libjxl) for codec development" OFF)
-if(DICOMSDL_ENABLE_JPEGXL)
-	if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/libjxl/CMakeLists.txt")
-		message(FATAL_ERROR
-			"libjxl not found at ${CMAKE_CURRENT_SOURCE_DIR}/extern/libjxl. "
-			"Initialize submodules (git submodule update --init --recursive) "
-			"or run scripts/setup_libjxl_minimal.sh (.bat on Windows).")
-	endif()
-	if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/libjxl/third_party/highway/CMakeLists.txt")
-		message(FATAL_ERROR
-			"libjxl third_party/highway is missing. "
-			"Run scripts/setup_libjxl_minimal.sh (.bat on Windows).")
-	endif()
-	if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/libjxl/third_party/brotli/c/include/brotli/decode.h")
-		message(FATAL_ERROR
-			"libjxl third_party/brotli is missing. "
-			"Run scripts/setup_libjxl_minimal.sh (.bat on Windows).")
-	endif()
-	if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/libjxl/third_party/skcms/skcms.h")
-		message(FATAL_ERROR
-			"libjxl third_party/skcms is missing. "
-			"Run scripts/setup_libjxl_minimal.sh (.bat on Windows).")
-	endif()
-endif()
 
 option(DICOMSDL_CODEC_JPEG_BUILTIN
 	"Enable builtin JPEG codec dispatch in CodecRegistry." ON)
@@ -238,35 +241,6 @@ dicomsdl_resolve_codec_mode(JPEG2K "jpeg2k")
 dicomsdl_resolve_codec_mode(HTJ2K "htj2k")
 dicomsdl_resolve_codec_mode(JPEGXL "jpegxl")
 
-# Keep CharLS pinned while upstream regression remains unresolved.
-# The known-good submodule revision corresponds to tag 2.2.1.
-option(DICOMSDL_ALLOW_UNPINNED_CHARLS
-	"Allow building with a CharLS revision other than the pinned known-good commit." OFF)
-set(DICOMSDL_CHARLS_PINNED_SHA "0ae38a5e106a788d6895b0d2db1cfcc845c5759c")
-if(NOT DICOMSDL_ALLOW_UNPINNED_CHARLS)
-	find_package(Git QUIET)
-	if(Git_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/charls/.git")
-		execute_process(
-			COMMAND "${GIT_EXECUTABLE}" -C "${CMAKE_CURRENT_SOURCE_DIR}/extern/charls" rev-parse HEAD
-			OUTPUT_VARIABLE _dicomsdl_charls_head
-			OUTPUT_STRIP_TRAILING_WHITESPACE
-			ERROR_QUIET
-		)
-		if(NOT _dicomsdl_charls_head STREQUAL DICOMSDL_CHARLS_PINNED_SHA)
-			message(FATAL_ERROR
-				"extern/charls is not pinned to known-good revision ${DICOMSDL_CHARLS_PINNED_SHA} (tag 2.2.1).\n"
-				"Current revision: ${_dicomsdl_charls_head}\n"
-				"This pin is temporary due to a JPEG-LS regression with WG04 MR1 samples in newer CharLS tags.\n"
-				"If you intentionally want to build with another revision, set -DDICOMSDL_ALLOW_UNPINNED_CHARLS=ON.")
-		endif()
-	else()
-		message(WARNING
-			"Could not verify CharLS pinned revision (git metadata unavailable). "
-			"Expected known-good tag: 2.2.1. "
-			"Set -DDICOMSDL_ALLOW_UNPINNED_CHARLS=ON to silence this warning.")
-	endif()
-endif()
-
 if(DEFINED BUILD_SHARED_LIBS)
 	set(_dicomsdl_build_shared_libs_defined TRUE)
 	set(_dicomsdl_build_shared_libs "${BUILD_SHARED_LIBS}")
@@ -286,7 +260,12 @@ set(_dicomsdl_build_testing "${BUILD_TESTING}")
 # hundreds of OpenJPEG cases while EXCLUDE_FROM_ALL prevents their binaries
 # from being built, which causes mass "Not Run" failures.
 set(BUILD_TESTING OFF)
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/openjpeg EXCLUDE_FROM_ALL)
+FetchContent_Declare(dicomsdl_openjpeg
+	GIT_REPOSITORY "${DICOMSDL_OPENJPEG_GIT_REPOSITORY}"
+	GIT_TAG "${DICOMSDL_OPENJPEG_GIT_TAG}"
+	GIT_PROGRESS TRUE
+)
+FetchContent_MakeAvailable(dicomsdl_openjpeg)
 set(BUILD_TESTING "${_dicomsdl_build_testing}")
 unset(_dicomsdl_build_testing)
 
@@ -306,7 +285,13 @@ else()
 endif()
 
 set(BUILD_SHARED_LIBS OFF)
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/charls EXCLUDE_FROM_ALL)
+FetchContent_Declare(dicomsdl_charls
+	GIT_REPOSITORY "${DICOMSDL_CHARLS_GIT_REPOSITORY}"
+	GIT_TAG "${DICOMSDL_CHARLS_GIT_TAG}"
+	GIT_SHALLOW TRUE
+	GIT_PROGRESS TRUE
+)
+FetchContent_MakeAvailable(dicomsdl_charls)
 
 if(_dicomsdl_charls_build_shared_libs_defined)
 	set(BUILD_SHARED_LIBS "${_dicomsdl_charls_build_shared_libs}")
@@ -323,7 +308,12 @@ set(LIBDEFLATE_BUILD_TESTS OFF CACHE BOOL "Disable libdeflate tests" FORCE)
 set(LIBDEFLATE_INSTALL OFF CACHE BOOL "Disable libdeflate install targets" FORCE)
 set(LIBDEFLATE_COMPRESSION_SUPPORT ON CACHE BOOL "Enable libdeflate compression codepaths" FORCE)
 set(LIBDEFLATE_DECOMPRESSION_SUPPORT ON CACHE BOOL "Enable libdeflate decompression codepaths" FORCE)
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/libdeflate EXCLUDE_FROM_ALL)
+FetchContent_Declare(dicomsdl_libdeflate
+	GIT_REPOSITORY "${DICOMSDL_LIBDEFLATE_GIT_REPOSITORY}"
+	GIT_TAG "${DICOMSDL_LIBDEFLATE_GIT_TAG}"
+	GIT_PROGRESS TRUE
+)
+FetchContent_MakeAvailable(dicomsdl_libdeflate)
 
 if(DICOMSDL_ENABLE_OPENJPH)
 	if(DEFINED BUILD_SHARED_LIBS)
@@ -351,7 +341,12 @@ if(DICOMSDL_ENABLE_OPENJPH)
 	set(OJPH_BUILD_EXECUTABLES OFF CACHE BOOL "Disable OpenJPH executables" FORCE)
 	set(OJPH_BUILD_STREAM_EXPAND OFF CACHE BOOL "Disable OpenJPH stream expand executable" FORCE)
 	set(OJPH_BUILD_FUZZER OFF CACHE BOOL "Disable OpenJPH fuzzer target" FORCE)
-	add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/openjph EXCLUDE_FROM_ALL)
+	FetchContent_Declare(dicomsdl_openjph
+		GIT_REPOSITORY "${DICOMSDL_OPENJPH_GIT_REPOSITORY}"
+		GIT_TAG "${DICOMSDL_OPENJPH_GIT_TAG}"
+		GIT_PROGRESS TRUE
+	)
+	FetchContent_MakeAvailable(dicomsdl_openjph)
 
 	if(_dicomsdl_openjph_build_shared_libs_defined)
 		set(BUILD_SHARED_LIBS "${_dicomsdl_openjph_build_shared_libs}")
@@ -427,7 +422,14 @@ if(DICOMSDL_ENABLE_JPEGXL)
 	set(JPEGXL_BUNDLE_LIBPNG OFF CACHE BOOL "Disable libjxl bundled libpng in dicomsdl superbuild" FORCE)
 	set(JPEGXL_ENABLE_SKCMS ON CACHE BOOL "Enable skcms for libjxl in dicomsdl superbuild" FORCE)
 
-	add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/libjxl EXCLUDE_FROM_ALL)
+	FetchContent_Declare(dicomsdl_libjxl
+		GIT_REPOSITORY "${DICOMSDL_LIBJXL_GIT_REPOSITORY}"
+		GIT_TAG "${DICOMSDL_LIBJXL_GIT_TAG}"
+		GIT_PROGRESS TRUE
+		GIT_SUBMODULES "third_party/highway;third_party/brotli;third_party/skcms"
+		GIT_SUBMODULES_RECURSE FALSE
+	)
+	FetchContent_MakeAvailable(dicomsdl_libjxl)
 
 	if(_dicomsdl_jpegxl_build_shared_libs_defined)
 		set(BUILD_SHARED_LIBS "${_dicomsdl_jpegxl_build_shared_libs}")
@@ -458,6 +460,23 @@ if(DICOMSDL_ENABLE_JPEGXL)
 	unset(_dicomsdl_jpegxl_build_testing)
 	unset(_dicomsdl_jpegxl_build_testing_cache_defined)
 	unset(_dicomsdl_jpegxl_build_testing_cache)
+endif()
+
+FetchContent_Declare(dicomsdl_libjpeg_turbo
+	GIT_REPOSITORY "${DICOMSDL_LIBJPEG_TURBO_GIT_REPOSITORY}"
+	GIT_TAG "${DICOMSDL_LIBJPEG_TURBO_GIT_TAG}"
+	GIT_PROGRESS TRUE
+)
+if(POLICY CMP0169)
+	cmake_policy(PUSH)
+	cmake_policy(SET CMP0169 OLD)
+endif()
+FetchContent_GetProperties(dicomsdl_libjpeg_turbo)
+if(NOT dicomsdl_libjpeg_turbo_POPULATED)
+	FetchContent_Populate(dicomsdl_libjpeg_turbo)
+endif()
+if(POLICY CMP0169)
+	cmake_policy(POP)
 endif()
 
 set(_dicomsdl_libturbojpeg_prefix "${CMAKE_CURRENT_BINARY_DIR}/extern/libjpeg-turbo")
@@ -508,7 +527,7 @@ set(_dicomsdl_libturbojpeg_archive
 	"${_dicomsdl_libturbojpeg_install_dir}/lib/${_dicomsdl_libturbojpeg_filename}")
 
 ExternalProject_Add(dicomsdl_libturbojpeg
-	SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/extern/libjpeg-turbo"
+	SOURCE_DIR "${dicomsdl_libjpeg_turbo_SOURCE_DIR}"
 	BINARY_DIR "${_dicomsdl_libturbojpeg_build_dir}"
 	PREFIX "${_dicomsdl_libturbojpeg_prefix}"
 	CMAKE_ARGS ${_dicomsdl_libturbojpeg_cmake_args}
@@ -528,9 +547,10 @@ unset(LIBRARY_OUTPUT_PATH)
 unset(LIBRARY_OUTPUT_PATH CACHE)
 
 target_include_directories(dicomsdl PRIVATE
-	${CMAKE_CURRENT_SOURCE_DIR}/extern/openjpeg/src/lib/openjp2
-	${CMAKE_CURRENT_BINARY_DIR}/extern/openjpeg/src/lib/openjp2
-	${CMAKE_CURRENT_SOURCE_DIR}/extern/libjpeg-turbo/src
+	${dicomsdl_openjpeg_SOURCE_DIR}/src/lib/openjp2
+	${dicomsdl_openjpeg_BINARY_DIR}/src/lib/openjp2
+	${dicomsdl_libjpeg_turbo_SOURCE_DIR}/src
+	${dicomsdl_libjpeg_turbo_BINARY_DIR}
 )
 if(TARGET openjp2_static)
 	target_link_libraries(dicomsdl PRIVATE openjp2_static)
@@ -691,14 +711,15 @@ option(DICOM_BUILD_PYTHON "Build Python bindings with nanobind" ON)
 option(DICOM_PYTHON_STABLE_ABI "Build Python bindings with nanobind STABLE_ABI (abi3, CPython>=3.12)" OFF)
 
 if(DICOM_BUILD_PYTHON)
-	set(NANOBIND_DIR ${CMAKE_CURRENT_SOURCE_DIR}/extern/nanobind)
-	if(NOT EXISTS "${NANOBIND_DIR}/CMakeLists.txt")
-		message(FATAL_ERROR
-			"nanobind not found at ${NANOBIND_DIR}. "
-			"Initialize submodules (git submodule update --init --recursive).")
-	endif()
 	find_package(Python REQUIRED COMPONENTS Interpreter Development.Module OPTIONAL_COMPONENTS Development.SABIModule)
-	add_subdirectory(${NANOBIND_DIR} EXCLUDE_FROM_ALL)
+	FetchContent_Declare(dicomsdl_nanobind
+		GIT_REPOSITORY "${DICOMSDL_NANOBIND_GIT_REPOSITORY}"
+		GIT_TAG "${DICOMSDL_NANOBIND_GIT_TAG}"
+		GIT_PROGRESS TRUE
+		GIT_SUBMODULES "ext/robin_map"
+		GIT_SUBMODULES_RECURSE FALSE
+	)
+	FetchContent_MakeAvailable(dicomsdl_nanobind)
 	if(DICOM_PYTHON_STABLE_ABI)
 		nanobind_add_module(_dicomsdl STABLE_ABI NOMINSIZE
 			bindings/python/dicom_module.cpp
