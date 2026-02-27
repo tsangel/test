@@ -1,7 +1,7 @@
 #define DICOMSDL_DECODER_PLUGIN_API_NO_ENTRYPOINT_DECL 1
 #define DICOMSDL_ENCODER_PLUGIN_API_NO_ENTRYPOINT_DECL 1
 
-#include "pixel/plugin_abi/builtin/htj2k_builtin_plugin.hpp"
+#include "pixel/plugin_abi/shared/shared_plugin_runtime_api.hpp"
 
 #if defined(_WIN32)
 #define DICOMSDL_CODEC_PLUGIN_EXPORT __declspec(dllexport)
