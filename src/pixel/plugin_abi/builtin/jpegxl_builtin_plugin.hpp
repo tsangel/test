@@ -18,9 +18,9 @@ bool encode_frame_plugin_jpegxl_via_abi(const CodecEncodeFrameInput& input,
     std::vector<std::uint8_t>& out_encoded_frame,
     CodecError& out_error) noexcept;
 
-[[nodiscard]] const dicomsdl_decoder_plugin_api_v1&
-DICOMSDL_CODEC_RUNTIME_API jpegxl_decoder_plugin_api_for_shared() noexcept;
-[[nodiscard]] const dicomsdl_encoder_plugin_api_v1&
-DICOMSDL_CODEC_RUNTIME_API jpegxl_encoder_plugin_api_for_shared() noexcept;
+DICOMSDL_CODEC_RUNTIME_API const dicomsdl_decoder_plugin_api_v1&
+jpegxl_decoder_plugin_api_for_shared() noexcept;
+DICOMSDL_CODEC_RUNTIME_API const dicomsdl_encoder_plugin_api_v1&
+jpegxl_encoder_plugin_api_for_shared() noexcept;
 
 }  // namespace dicom::pixel::detail
