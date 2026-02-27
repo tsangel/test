@@ -6,6 +6,7 @@ BUILD_DIR="${BUILD_DIR:-${ROOT_DIR}/build}"
 BUILD_TYPE="${BUILD_TYPE:-Release}"
 BUILD_TESTING="${BUILD_TESTING:-ON}"
 DICOM_BUILD_EXAMPLES="${DICOM_BUILD_EXAMPLES:-ON}"
+DICOMSDL_CODEC_DEFAULT_MODE="${DICOMSDL_CODEC_DEFAULT_MODE:-builtin}"
 BUILD_WHEEL="${BUILD_WHEEL:-1}"
 CTEST_LABEL="${CTEST_LABEL:-dicomsdl}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
@@ -15,6 +16,47 @@ if ! command -v cmake >/dev/null 2>&1; then
 	echo "Error: cmake is not installed or not on PATH" >&2
 	exit 1
 fi
+
+default_mode_lc="$(printf '%s' "$DICOMSDL_CODEC_DEFAULT_MODE" | tr '[:upper:]' '[:lower:]')"
+case "$default_mode_lc" in
+	builtin|shared|none) ;;
+	*)
+		echo "Error: DICOMSDL_CODEC_DEFAULT_MODE must be one of builtin|shared|none (got: ${DICOMSDL_CODEC_DEFAULT_MODE})" >&2
+		exit 1
+		;;
+esac
+
+CODEC_LIST=(JPEG JPEGLS JPEG2K HTJ2K JPEGXL)
+codec_mode_args=()
+codec_mode_log_parts=()
+
+for codec in "${CODEC_LIST[@]}"; do
+	mode_var="DICOMSDL_CODEC_${codec}_MODE"
+	mode_value="${!mode_var:-$default_mode_lc}"
+	mode_value_lc="$(printf '%s' "$mode_value" | tr '[:upper:]' '[:lower:]')"
+
+	case "$mode_value_lc" in
+		builtin)
+			codec_mode_args+=("-DDICOMSDL_CODEC_${codec}_BUILTIN=ON")
+			codec_mode_args+=("-DDICOMSDL_CODEC_${codec}_SHARED=OFF")
+			;;
+		shared)
+			codec_mode_args+=("-DDICOMSDL_CODEC_${codec}_BUILTIN=OFF")
+			codec_mode_args+=("-DDICOMSDL_CODEC_${codec}_SHARED=ON")
+			;;
+		none)
+			codec_mode_args+=("-DDICOMSDL_CODEC_${codec}_BUILTIN=OFF")
+			codec_mode_args+=("-DDICOMSDL_CODEC_${codec}_SHARED=OFF")
+			;;
+		*)
+			echo "Error: ${mode_var} must be one of builtin|shared|none (got: ${mode_value})" >&2
+			exit 1
+			;;
+	esac
+
+	codec_label_lc="$(printf '%s' "$codec" | tr '[:upper:]' '[:lower:]')"
+	codec_mode_log_parts+=("${codec_label_lc}=${mode_value_lc}")
+done
 
 if [[ -n "${CMAKE_GENERATOR:-}" ]]; then
 	REQUESTED_GENERATOR="$CMAKE_GENERATOR"
@@ -53,11 +95,20 @@ cmake_args=(-S "$ROOT_DIR" -B "$BUILD_DIR" \
 	-DDICOM_BUILD_EXAMPLES="${DICOM_BUILD_EXAMPLES}" \
 	-DCMAKE_BUILD_TYPE="${BUILD_TYPE}")
 
+cmake_args+=("${codec_mode_args[@]}")
+
+if [[ -n "${CMAKE_EXTRA_ARGS:-}" ]]; then
+	# shellcheck disable=SC2206
+	extra_cmake_args=(${CMAKE_EXTRA_ARGS})
+	cmake_args+=("${extra_cmake_args[@]}")
+fi
+
 if [[ -n "$REQUESTED_GENERATOR" ]]; then
 	cmake_args+=(-G "$REQUESTED_GENERATOR")
 fi
 
 echo "Configuring dicomsdl (${BUILD_TYPE}) in $BUILD_DIR"
+echo "Codec modes: ${codec_mode_log_parts[*]}"
 cmake "${cmake_args[@]}"
 
 if [[ -z "${BUILD_PARALLELISM:-}" ]]; then

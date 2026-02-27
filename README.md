@@ -66,6 +66,107 @@ cmake -S . -B build -DDICOM_BUILD_EXAMPLES=ON -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
+### Windows `build.bat` toolchain selection
+
+`build.bat` supports both `MSVC` and `MSYS2 clang64` via
+`DICOMSDL_WINDOWS_TOOLCHAIN`.
+
+```cmd
+:: auto (default): prefer MSVC when cl.exe exists, otherwise clang64
+set DICOMSDL_WINDOWS_TOOLCHAIN=auto
+build
+
+:: force MSVC (Developer Command Prompt or vcvarsall.bat environment)
+set DICOMSDL_WINDOWS_TOOLCHAIN=msvc
+set BUILD_DIR=build-msvc
+build
+
+:: force MSYS2 clang64 (clang/clang++/ninja on PATH)
+set DICOMSDL_WINDOWS_TOOLCHAIN=clang64
+set BUILD_DIR=build-clang64
+build
+```
+
+If you switch generator/toolchain while reusing the same `BUILD_DIR`, set:
+
+```cmd
+set RESET_CMAKE_CACHE=1
+```
+
+### MSYS2 clang64 prerequisites
+
+Run the following in an `MSYS2 clang64` shell:
+
+```bash
+pacman -Syu
+# reopen the clang64 shell once after the first full upgrade, then:
+pacman -Su --noconfirm
+pacman -S --needed --noconfirm \
+  mingw-w64-clang-x86_64-clang \
+  mingw-w64-clang-x86_64-llvm \
+  mingw-w64-clang-x86_64-cmake \
+  mingw-w64-clang-x86_64-ninja \
+  mingw-w64-clang-x86_64-python \
+  mingw-w64-clang-x86_64-python-pip \
+  mingw-w64-clang-x86_64-pkgconf \
+  mingw-w64-clang-x86_64-zlib \
+  mingw-w64-clang-x86_64-libtiff \
+  mingw-w64-clang-x86_64-lcms2 \
+  git
+```
+
+Then in `cmd.exe` (or PowerShell), put clang64 tool binaries on `PATH` before running
+`build.bat`:
+
+```cmd
+set PATH=C:\msys64\clang64\bin;%PATH%
+set DICOMSDL_WINDOWS_TOOLCHAIN=clang64
+set BUILD_DIR=build-clang64
+build
+```
+
+### Codec mode overrides (`build.sh` / `build.bat`)
+
+Both scripts support per-codec mode selection with:
+
+- `DICOMSDL_CODEC_DEFAULT_MODE` (`builtin|shared|none`, default: `builtin`)
+- `DICOMSDL_CODEC_JPEG_MODE`
+- `DICOMSDL_CODEC_JPEGLS_MODE`
+- `DICOMSDL_CODEC_JPEG2K_MODE`
+- `DICOMSDL_CODEC_HTJ2K_MODE`
+- `DICOMSDL_CODEC_JPEGXL_MODE`
+
+Examples:
+
+```bash
+# build.sh: disable all codecs, then enable JPEG2K as shared plugin only
+DICOMSDL_CODEC_DEFAULT_MODE=none \
+DICOMSDL_CODEC_JPEG2K_MODE=shared \
+BUILD_DIR=build-codec-shared \
+BUILD_WHEEL=0 RUN_TESTS=0 \
+./build.sh
+```
+
+```cmd
+:: build.bat: builtin JPEG2K, shared JPEGXL, disable HTJ2K
+set DICOMSDL_CODEC_JPEG2K_MODE=builtin
+set DICOMSDL_CODEC_JPEGXL_MODE=shared
+set DICOMSDL_CODEC_HTJ2K_MODE=none
+set BUILD_DIR=build-codec-mix
+build
+```
+
+Optional extra CMake configure flags can be appended with:
+
+```cmd
+set CMAKE_EXTRA_ARGS=-DDICOMSDL_CODEC_JPEG2K_BUILTIN=ON -DDICOMSDL_CODEC_JPEG2K_SHARED=OFF -DDICOMSDL_CODEC_JPEGXL_BUILTIN=OFF -DDICOMSDL_CODEC_JPEGXL_SHARED=ON
+build
+```
+
+```bash
+CMAKE_EXTRA_ARGS="-DDICOMSDL_CODEC_JPEG2K_BUILTIN=ON -DDICOMSDL_CODEC_JPEG2K_SHARED=OFF" ./build.sh
+```
+
 ### Run C++ examples
 
 ```
