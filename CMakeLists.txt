@@ -122,7 +122,33 @@ set(DICOMSDL_NANOBIND_GIT_REPOSITORY "https://github.com/wjakob/nanobind.git"
 set(DICOMSDL_NANOBIND_GIT_TAG "v2.12.0"
 	CACHE STRING "nanobind git ref used by FetchContent (use branch/tag/SHA).")
 
-add_library(dicomsdl STATIC
+set(_dicomsdl_any_codec_shared_from_cache OFF)
+foreach(_dicomsdl_codec IN ITEMS JPEG JPEGLS JPEG2K HTJ2K JPEGXL)
+	if(DEFINED DICOMSDL_CODEC_${_dicomsdl_codec}_SHARED AND DICOMSDL_CODEC_${_dicomsdl_codec}_SHARED)
+		set(_dicomsdl_any_codec_shared_from_cache ON)
+		break()
+	endif()
+endforeach()
+option(DICOMSDL_BUILD_SHARED_CORE
+	"Build dicomsdl core as a shared library. This should be ON when any codec plugin mode is shared."
+	${_dicomsdl_any_codec_shared_from_cache})
+if(_dicomsdl_any_codec_shared_from_cache AND NOT DICOMSDL_BUILD_SHARED_CORE)
+	message(STATUS "Enabling DICOMSDL_BUILD_SHARED_CORE because shared codec plugin mode is active.")
+	set(DICOMSDL_BUILD_SHARED_CORE ON CACHE BOOL
+		"Build dicomsdl core as a shared library. This should be ON when any codec plugin mode is shared."
+		FORCE)
+endif()
+unset(_dicomsdl_any_codec_shared_from_cache)
+unset(_dicomsdl_codec)
+
+if(DICOMSDL_BUILD_SHARED_CORE)
+	set(_dicomsdl_core_library_type SHARED)
+else()
+	set(_dicomsdl_core_library_type STATIC)
+endif()
+message(STATUS "DICOMSDL core linkage: ${_dicomsdl_core_library_type}")
+
+add_library(dicomsdl ${_dicomsdl_core_library_type}
 	src/dataset.cpp
 	src/diagnostics.cpp
 	src/dataset_deflate_codec.cpp
@@ -177,11 +203,18 @@ add_library(dicomsdl STATIC
 	src/pixel/decode/codecs/jpegls_decode.cpp
 	src/pixel/decode/codecs/jpegxl_decode.cpp
 	src/pixel/decode/codecs/jpeg_decode.cpp
-)
+	)
 set_target_properties(dicomsdl PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(dicomsdl PROPERTIES
 	ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+	LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+	RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
+if(WIN32 AND DICOMSDL_BUILD_SHARED_CORE)
+	# dicom.h does not annotate all public C++ symbols with __declspec(dllexport),
+	# so enable broad export for Windows shared-core builds.
+	set_target_properties(dicomsdl PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+endif()
 target_include_directories(dicomsdl
 	PUBLIC
 		${DICOM_INCLUDE_DIR}
