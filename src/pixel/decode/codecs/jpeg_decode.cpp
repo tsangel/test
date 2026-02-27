@@ -284,7 +284,11 @@ void validate_decoded_header(const pixel::PixelDataInfo& info, std::size_t rows,
 		    "JPEG decoded precision {} exceeds output {} bits",
 		    decoded_precision, max_output_bits);
 	}
-	if (info.bits_stored > 0 && decoded_precision > info.bits_stored) {
+	// DICOM metadata and codestream header can disagree in practice.
+	// Reject only when the decoded precision requires a wider storage width.
+	if (info.bits_stored > 0 && decoded_precision > info.bits_stored &&
+	    (static_cast<unsigned int>(decoded_precision) + 7u) / 8u >
+	        (static_cast<unsigned int>(info.bits_stored) + 7u) / 8u) {
 		throw_decode_error(
 		    "JPEG decoded precision {} exceeds BitsStored {}",
 		    decoded_precision, info.bits_stored);

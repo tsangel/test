@@ -209,7 +209,12 @@ void validate_basic_info(const pixel::PixelDataInfo& info, const JxlBasicInfo& b
 		    "JPEG-XL decoded precision {} exceeds output {} bits",
 		    basic_info.bits_per_sample, max_output_bits);
 	}
-	if (info.bits_stored > 0 && basic_info.bits_per_sample > info.bits_stored) {
+	// DICOM metadata and codestream header can disagree in practice.
+	// Reject only when the decoded precision requires a wider storage width.
+	if (info.bits_stored > 0 &&
+	    basic_info.bits_per_sample > static_cast<std::uint32_t>(info.bits_stored) &&
+	    (basic_info.bits_per_sample + 7u) / 8u >
+	        (static_cast<std::uint32_t>(info.bits_stored) + 7u) / 8u) {
 		throw_decode_error(
 		    "JPEG-XL decoded precision {} exceeds BitsStored {}",
 		    basic_info.bits_per_sample, info.bits_stored);

@@ -95,7 +95,11 @@ void validate_decoded_header(const pixel::PixelDataInfo& info,
 		    frame_info.bits_per_sample, max_output_bits);
 	}
 
-	if (info.bits_stored > 0 && frame_info.bits_per_sample > info.bits_stored) {
+	// DICOM metadata and codestream header can disagree in practice.
+	// Reject only when the decoded precision requires a wider storage width.
+	if (info.bits_stored > 0 && frame_info.bits_per_sample > info.bits_stored &&
+	    (static_cast<unsigned int>(frame_info.bits_per_sample) + 7u) / 8u >
+	        (static_cast<unsigned int>(info.bits_stored) + 7u) / 8u) {
 		throw_decode_error(
 		    "JPEG-LS decoded precision {} exceeds BitsStored {}",
 		    frame_info.bits_per_sample, info.bits_stored);
