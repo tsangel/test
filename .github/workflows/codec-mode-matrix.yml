@@ -36,7 +36,7 @@ jobs:
   codec_mode_matrix:
     runs-on: ubuntu-latest
     env:
-      BUILD_ROOT: ${{ runner.temp }}/build_codec_matrix
+      BUILD_ROOT: ${{ github.workspace }}/build_codec_matrix
       BUILD_TYPE: Release
       JOBS: 3
     steps:
