@@ -5,6 +5,27 @@ This document summarizes the current constraints for the pixel encode path:
 - `DicomFile::set_pixel_data(...)`
 - `DicomFile::set_transfer_syntax(...)` when it triggers native -> encapsulated encoding
 
+## Layer/Code Map Pointers
+
+- Entry point:
+  - `src/pixel/entrypoint/encode_entrypoint.cpp`
+- Core resolver/runner:
+  - `src/pixel/encode/core/*`
+- Codec implementations:
+  - `src/pixel/encode/codecs/*_encode.cpp`
+- Registry and option schema:
+  - `src/pixel/registry/codec_registry.cpp`
+- Plugin ABI glue:
+  - `src/pixel/plugin_abi/builtin/*_builtin_plugin.cpp`
+  - `src/pixel/plugin_abi/common/codec_plugin_common.hpp`
+
+Naming conventions aligned with the refactor:
+
+- resolver layer: `resolve_*`
+- runner layer: `run_*`
+- dispatch layer: `dispatch_*`
+- codec implementation: `encode_<codec>_frame`
+
 ## Plugin Boundary Contract (Encoder Migration)
 
 - Plugin encode entrypoints operate on frame bytes + primitive metadata + codec options.

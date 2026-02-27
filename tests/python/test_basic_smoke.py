@@ -2,6 +2,7 @@ import pathlib
 import struct
 
 import dicomsdl as dicom
+import pytest
 
 def _test_file(name: str = "test_le.dcm") -> str:
 	return str(pathlib.Path(__file__).resolve().parent.parent / name)
@@ -379,3 +380,35 @@ def test_set_transfer_syntax_options_keyword():
 	assert df.transfer_syntax_uid.keyword == "JPEG2000Lossless"
 	assert df.get_dataelement("PixelData").is_pixel_sequence
 	assert df.pixel_data(0) == baseline_frame
+
+
+def test_set_transfer_syntax_rejects_invalid_options_type():
+	df = dicom.read_file(_test_file())
+	with pytest.raises(TypeError, match="options must be None, str, or dict"):
+		df.set_transfer_syntax("RLELossless", options=123)
+
+
+def test_set_transfer_syntax_rejects_unknown_option_key():
+	df = dicom.read_file(_test_file())
+	with pytest.raises(ValueError, match="options has unknown key"):
+		df.set_transfer_syntax("RLELossless", options={"foo": 1})
+
+
+def test_set_transfer_syntax_rejects_incompatible_option_type():
+	df = dicom.read_file(_test_file())
+	with pytest.raises(ValueError, match="incompatible with transfer syntax"):
+		df.set_transfer_syntax("RLELossless", options="j2k")
+
+
+def test_set_transfer_syntax_requires_configured_encoder_context():
+	df = dicom.read_file(_test_file())
+	ctx = dicom.EncoderContext()
+	with pytest.raises(RuntimeError, match="encoder context is not configured"):
+		df.set_transfer_syntax("RLELossless", encoder_context=ctx)
+
+
+def test_set_transfer_syntax_rejects_encoder_context_transfer_syntax_mismatch():
+	df = dicom.read_file(_test_file())
+	ctx = dicom.create_encoder_context("RLELossless")
+	with pytest.raises(RuntimeError, match="encoder context transfer syntax mismatch"):
+		df.set_transfer_syntax("ExplicitVRLittleEndian", encoder_context=ctx)

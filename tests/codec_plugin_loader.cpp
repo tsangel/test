@@ -3,7 +3,7 @@
 #include <string>
 #include <string_view>
 
-#include "../src/pixel_codec_plugin_loader.hpp"
+#include "../src/pixel/plugin_abi/external/plugin_loader.hpp"
 
 namespace {
 

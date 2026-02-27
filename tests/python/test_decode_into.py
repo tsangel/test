@@ -77,3 +77,11 @@ def test_decode_into_requires_writable_c_contiguous_buffer():
     non_contiguous = np.empty((4, 4), dtype=np.int16)[:, ::2]
     with pytest.raises(TypeError):
         dicom_file.decode_into(non_contiguous, frame=0, scaled=False)
+
+
+def test_decode_into_frame_minus_one_single_frame_matches_frame_zero():
+    dicom_file = dicom.read_file(_test_file())
+    out = np.empty((4, 4), dtype=np.int16)
+    returned = dicom_file.decode_into(out, frame=-1, scaled=False)
+    assert returned is out
+    assert np.array_equal(out, dicom_file.to_array(frame=0, scaled=False))

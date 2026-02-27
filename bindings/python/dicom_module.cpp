@@ -179,6 +179,211 @@ struct CodecOptionTextStorage {
 	}
 };
 
+class PyReadOnlyBufferView {
+public:
+	explicit PyReadOnlyBufferView(nb::handle obj) {
+		const int flags = PyBUF_C_CONTIGUOUS | PyBUF_FORMAT | PyBUF_ND;
+		if (PyObject_GetBuffer(obj.ptr(), &view_, flags) != 0) {
+			throw nb::type_error(
+			    "set_pixel_data expects a C-contiguous buffer object");
+		}
+	}
+
+	~PyReadOnlyBufferView() { PyBuffer_Release(&view_); }
+
+	PyReadOnlyBufferView(const PyReadOnlyBufferView&) = delete;
+	PyReadOnlyBufferView& operator=(const PyReadOnlyBufferView&) = delete;
+
+	[[nodiscard]] const Py_buffer& view() const noexcept { return view_; }
+
+private:
+	Py_buffer view_{};
+};
+
+[[nodiscard]] std::string_view strip_pep3118_endianness_prefix(
+    std::string_view format) noexcept {
+	if (format.empty()) {
+		return format;
+	}
+	switch (format.front()) {
+	case '@':
+	case '=':
+	case '<':
+	case '>':
+	case '!':
+		return format.substr(1);
+	default:
+		return format;
+	}
+}
+
+[[nodiscard]] dicom::pixel::DataType parse_pixel_source_data_type_or_throw(
+    std::string_view format, std::size_t itemsize) {
+	const auto core = strip_pep3118_endianness_prefix(format);
+	if (core.size() != 1) {
+		throw nb::value_error(
+		    "set_pixel_data supports only primitive numeric source dtypes");
+	}
+
+	const auto ensure_itemsize = [itemsize](std::size_t expected) {
+		if (itemsize != expected) {
+			throw nb::value_error(
+			    "set_pixel_data source itemsize does not match source dtype format");
+		}
+	};
+
+	switch (core.front()) {
+	case 'B':
+		ensure_itemsize(1);
+		return dicom::pixel::DataType::u8;
+	case 'b':
+		ensure_itemsize(1);
+		return dicom::pixel::DataType::s8;
+	case 'H':
+		ensure_itemsize(2);
+		return dicom::pixel::DataType::u16;
+	case 'h':
+		ensure_itemsize(2);
+		return dicom::pixel::DataType::s16;
+	case 'I':
+		ensure_itemsize(4);
+		return dicom::pixel::DataType::u32;
+	case 'i':
+		ensure_itemsize(4);
+		return dicom::pixel::DataType::s32;
+	case 'f':
+		ensure_itemsize(4);
+		return dicom::pixel::DataType::f32;
+	case 'd':
+		ensure_itemsize(8);
+		return dicom::pixel::DataType::f64;
+	default:
+		break;
+	}
+
+	throw nb::value_error("set_pixel_data unsupported source dtype format");
+}
+
+[[nodiscard]] dicom::pixel::PixelSource build_pixel_source_or_throw(
+    const Py_buffer& view) {
+	if (view.ndim < 2 || view.ndim > 4) {
+		throw nb::value_error("set_pixel_data source must have ndim 2, 3, or 4");
+	}
+	if (view.itemsize <= 0) {
+		throw nb::value_error("set_pixel_data source must have a positive itemsize");
+	}
+	if (view.len < 0) {
+		throw nb::value_error("set_pixel_data source buffer length is invalid");
+	}
+	if (view.len > 0 && view.buf == nullptr) {
+		throw nb::value_error("set_pixel_data source buffer is null");
+	}
+	if (view.shape == nullptr) {
+		throw nb::value_error("set_pixel_data source must expose shape metadata");
+	}
+	if (view.format == nullptr || view.format[0] == '\0') {
+		throw nb::value_error("set_pixel_data source must expose dtype format metadata");
+	}
+
+	const auto format = std::string_view(view.format);
+	if (!format.empty() && format.front() == '>') {
+		throw nb::value_error("set_pixel_data does not support big-endian source dtype");
+	}
+
+	const auto bytes_per_sample = static_cast<std::size_t>(view.itemsize);
+	const auto data_type =
+	    parse_pixel_source_data_type_or_throw(format, bytes_per_sample);
+
+	const auto read_dim = [&](int axis) -> std::size_t {
+		const auto value = view.shape[axis];
+		if (value <= 0) {
+			throw nb::value_error("set_pixel_data source shape values must be positive");
+		}
+		return static_cast<std::size_t>(value);
+	};
+
+	std::size_t frames = 1;
+	std::size_t rows = 0;
+	std::size_t cols = 0;
+	std::size_t samples_per_pixel = 1;
+
+	if (view.ndim == 2) {
+		rows = read_dim(0);
+		cols = read_dim(1);
+	} else if (view.ndim == 3) {
+		const auto d0 = read_dim(0);
+		const auto d1 = read_dim(1);
+		const auto d2 = read_dim(2);
+		if (d2 == 1 || d2 == 3) {
+			rows = d0;
+			cols = d1;
+			samples_per_pixel = d2;
+		} else {
+			frames = d0;
+			rows = d1;
+			cols = d2;
+		}
+	} else {
+		frames = read_dim(0);
+		rows = read_dim(1);
+		cols = read_dim(2);
+		samples_per_pixel = read_dim(3);
+	}
+
+	if (samples_per_pixel != 1 && samples_per_pixel != 3) {
+		throw nb::value_error(
+		    "set_pixel_data currently supports samples_per_pixel 1 or 3");
+	}
+
+	if (rows > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
+	    cols > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
+	    frames > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
+	    samples_per_pixel > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+		throw nb::value_error("set_pixel_data source dimensions exceed int range");
+	}
+
+	const auto max_size = std::numeric_limits<std::size_t>::max();
+	if (samples_per_pixel != 0 &&
+	    cols > (max_size / samples_per_pixel)) {
+		throw nb::value_error("set_pixel_data row size overflow");
+	}
+	const auto row_components = cols * samples_per_pixel;
+	if (bytes_per_sample != 0 &&
+	    row_components > (max_size / bytes_per_sample)) {
+		throw nb::value_error("set_pixel_data row stride overflow");
+	}
+	const auto row_stride = row_components * bytes_per_sample;
+	if (rows != 0 && row_stride > (max_size / rows)) {
+		throw nb::value_error("set_pixel_data frame stride overflow");
+	}
+	const auto frame_stride = row_stride * rows;
+	if (frames != 0 && frame_stride > (max_size / frames)) {
+		throw nb::value_error("set_pixel_data total byte size overflow");
+	}
+	const auto required_bytes = frame_stride * frames;
+	const auto actual_bytes = static_cast<std::size_t>(view.len);
+	if (actual_bytes != required_bytes) {
+		throw nb::value_error(
+		    "set_pixel_data source buffer size does not match inferred shape and dtype");
+	}
+
+	dicom::pixel::PixelSource source{};
+	source.bytes = std::span<const std::uint8_t>(
+	    reinterpret_cast<const std::uint8_t*>(view.buf), actual_bytes);
+	source.data_type = data_type;
+	source.rows = static_cast<int>(rows);
+	source.cols = static_cast<int>(cols);
+	source.row_stride = row_stride;
+	source.frames = static_cast<int>(frames);
+	source.frame_stride = frame_stride;
+	source.samples_per_pixel = static_cast<int>(samples_per_pixel);
+	source.planar = dicom::pixel::Planar::interleaved;
+	source.photometric = samples_per_pixel == 1
+	                         ? dicom::pixel::Photometric::monochrome2
+	                         : dicom::pixel::Photometric::rgb;
+	return source;
+}
+
 [[nodiscard]] std::string format_encoder_option_double(double value) {
 	std::ostringstream stream;
 	stream << std::setprecision(17) << value;
@@ -534,6 +739,26 @@ void set_transfer_syntax_with_options(
 		return;
 	}
 	self.set_transfer_syntax(transfer_syntax, text_options.span());
+}
+
+void set_pixel_data_with_options(DicomFile& self, Uid transfer_syntax,
+    nb::handle source_obj, nb::handle options) {
+	PyReadOnlyBufferView source_view(source_obj);
+	const auto source = build_pixel_source_or_throw(source_view.view());
+	const auto text_options =
+	    parse_encoder_options_to_text_storage(options, transfer_syntax);
+	if (text_options.auto_mode) {
+		self.set_pixel_data(transfer_syntax, source);
+		return;
+	}
+	self.set_pixel_data(transfer_syntax, source, text_options.span());
+}
+
+void set_pixel_data_with_encoder_context(DicomFile& self, Uid transfer_syntax,
+    nb::handle source_obj, const EncoderContext& encoder_context) {
+	PyReadOnlyBufferView source_view(source_obj);
+	const auto source = build_pixel_source_or_throw(source_view.view());
+	self.set_pixel_data(transfer_syntax, source, encoder_context);
 }
 
 [[nodiscard]] EncoderContext create_encoder_context_with_options(
@@ -1668,6 +1893,59 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::kw_only(),
 		    nb::arg("encoder_context"),
 		    "Set transfer syntax using transfer syntax text and a preconfigured EncoderContext.")
+		.def("set_pixel_data",
+		    [](DicomFile& self, const Uid& transfer_syntax, nb::handle source,
+		        nb::handle options) {
+			    set_pixel_data_with_options(self, transfer_syntax, source, options);
+		    },
+		    nb::arg("transfer_syntax"),
+		    nb::arg("source"),
+		    nb::kw_only(),
+		    nb::arg("options") = nb::none(),
+		    "Set PixelData from a C-contiguous numeric buffer.\n"
+		    "\n"
+		    "Supported source shapes:\n"
+		    "- (rows, cols)                        -> single-frame monochrome\n"
+		    "- (rows, cols, samples[1|3])         -> single-frame interleaved\n"
+		    "- (frames, rows, cols)               -> multi-frame monochrome\n"
+		    "- (frames, rows, cols, samples[1|3]) -> multi-frame interleaved\n"
+		    "\n"
+		    "Supported dtypes: int8/uint8/int16/uint16/int32/uint32/float32/float64.")
+		.def("set_pixel_data",
+		    [](DicomFile& self, const std::string& transfer_syntax_text,
+		        nb::handle source, nb::handle options) {
+			    set_pixel_data_with_options(self,
+			        parse_transfer_syntax_text_or_throw(transfer_syntax_text),
+			        source, options);
+		    },
+		    nb::arg("transfer_syntax"),
+		    nb::arg("source"),
+		    nb::kw_only(),
+		    nb::arg("options") = nb::none(),
+		    "Set PixelData from transfer syntax text and a C-contiguous numeric buffer.")
+		.def("set_pixel_data",
+		    [](DicomFile& self, const Uid& transfer_syntax, nb::handle source,
+		        const EncoderContext& encoder_context) {
+			    set_pixel_data_with_encoder_context(
+			        self, transfer_syntax, source, encoder_context);
+		    },
+		    nb::arg("transfer_syntax"),
+		    nb::arg("source"),
+		    nb::kw_only(),
+		    nb::arg("encoder_context"),
+		    "Set PixelData using a preconfigured EncoderContext.")
+		.def("set_pixel_data",
+		    [](DicomFile& self, const std::string& transfer_syntax_text,
+		        nb::handle source, const EncoderContext& encoder_context) {
+			    set_pixel_data_with_encoder_context(self,
+			        parse_transfer_syntax_text_or_throw(transfer_syntax_text),
+			        source, encoder_context);
+		    },
+		    nb::arg("transfer_syntax"),
+		    nb::arg("source"),
+		    nb::kw_only(),
+		    nb::arg("encoder_context"),
+		    "Set PixelData from transfer syntax text using a preconfigured EncoderContext.")
 		.def("write_file",
 		    [](DicomFile& self, const std::string& path, bool include_preamble,
 		        bool write_file_meta, bool keep_existing_meta) {

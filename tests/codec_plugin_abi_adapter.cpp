@@ -6,7 +6,7 @@
 #include <vector>
 
 #include <dicom.h>
-#include "../src/pixel_codec_plugin_abi_adapter.hpp"
+#include "../src/pixel/bridge/codec_plugin_abi_adapter.hpp"
 
 namespace {
 using namespace dicom::literals;

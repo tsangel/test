@@ -10,7 +10,8 @@
 #include <vector>
 
 #include <dicom.h>
-#include "../src/pixel_codec_registry.hpp"
+#include "codec_builtin_flags.hpp"
+#include "../src/pixel/registry/codec_registry.hpp"
 
 namespace {
 using namespace dicom::literals;
@@ -555,42 +556,50 @@ int main() {
   using dicom::pixel::detail::global_codec_registry;
 
   auto& registry = global_codec_registry();
-  const auto* htj2k_plugin = registry.find_plugin("htj2k");
-  expect_true(htj2k_plugin != nullptr, "htj2k plugin is not registered");
-  const auto original_htj2k_decode = htj2k_plugin->decode_frame;
-  const auto original_htj2k_backend = dicom::pixel::get_htj2k_decoder_backend();
   std::string backend_error{};
-  expect_true(dicom::pixel::set_htj2k_decoder_backend(
-                  dicom::pixel::Htj2kDecoder::openjpeg, &backend_error),
-      "set htj2k backend openjpeg");
-  expect_eq(dicom::pixel::get_htj2k_decoder_backend(),
-      dicom::pixel::Htj2kDecoder::openjpeg,
-      "get htj2k backend openjpeg");
-  expect_true(dicom::pixel::set_htj2k_decoder_backend(
-                  dicom::pixel::Htj2kDecoder::openjph, &backend_error),
-      "set htj2k backend openjph");
-  expect_eq(dicom::pixel::get_htj2k_decoder_backend(),
-      dicom::pixel::Htj2kDecoder::openjph,
-      "get htj2k backend openjph");
-  expect_true(registry.update_plugin_dispatch(
-                  "htj2k", nullptr, false, &stub_external_htj2k_decode_dispatch, true),
-      "override htj2k decode dispatch for external simulation");
-  backend_error.clear();
-  expect_false(dicom::pixel::set_htj2k_decoder_backend(
-                   dicom::pixel::Htj2kDecoder::auto_select, &backend_error),
-      "set htj2k backend should fail on external override");
-  expect_contains(backend_error, "externally overridden",
-      "set htj2k backend external override error");
-  htj2k_plugin = registry.find_plugin("htj2k");
-  expect_true(htj2k_plugin != nullptr, "htj2k plugin exists after override");
-  expect_true(htj2k_plugin->decode_frame == &stub_external_htj2k_decode_dispatch,
-      "set htj2k backend should preserve external override dispatch");
-  expect_true(registry.update_plugin_dispatch(
-                  "htj2k", nullptr, false, original_htj2k_decode, true),
-      "restore htj2k decode dispatch");
-  expect_true(dicom::pixel::set_htj2k_decoder_backend(
-                  original_htj2k_backend, &backend_error),
-      "restore htj2k backend");
+  if (dicom::test::kHtj2kBuiltin) {
+    const auto* htj2k_plugin = registry.find_plugin("htj2k");
+    expect_true(htj2k_plugin != nullptr, "htj2k plugin is not registered");
+    const auto original_htj2k_decode = htj2k_plugin->decode_frame;
+    const auto original_htj2k_backend = dicom::pixel::get_htj2k_decoder_backend();
+    expect_true(dicom::pixel::set_htj2k_decoder_backend(
+                    dicom::pixel::Htj2kDecoder::openjpeg, &backend_error),
+        "set htj2k backend openjpeg");
+    expect_eq(dicom::pixel::get_htj2k_decoder_backend(),
+        dicom::pixel::Htj2kDecoder::openjpeg,
+        "get htj2k backend openjpeg");
+    expect_true(dicom::pixel::set_htj2k_decoder_backend(
+                    dicom::pixel::Htj2kDecoder::openjph, &backend_error),
+        "set htj2k backend openjph");
+    expect_eq(dicom::pixel::get_htj2k_decoder_backend(),
+        dicom::pixel::Htj2kDecoder::openjph,
+        "get htj2k backend openjph");
+    expect_true(registry.update_plugin_dispatch(
+                    "htj2k", nullptr, false, &stub_external_htj2k_decode_dispatch, true),
+        "override htj2k decode dispatch for external simulation");
+    backend_error.clear();
+    expect_false(dicom::pixel::set_htj2k_decoder_backend(
+                     dicom::pixel::Htj2kDecoder::auto_select, &backend_error),
+        "set htj2k backend should fail on external override");
+    expect_contains(backend_error, "externally overridden",
+        "set htj2k backend external override error");
+    htj2k_plugin = registry.find_plugin("htj2k");
+    expect_true(htj2k_plugin != nullptr, "htj2k plugin exists after override");
+    expect_true(htj2k_plugin->decode_frame == &stub_external_htj2k_decode_dispatch,
+        "set htj2k backend should preserve external override dispatch");
+    expect_true(registry.update_plugin_dispatch(
+                    "htj2k", nullptr, false, original_htj2k_decode, true),
+        "restore htj2k decode dispatch");
+    expect_true(dicom::pixel::set_htj2k_decoder_backend(
+                    original_htj2k_backend, &backend_error),
+        "restore htj2k backend");
+  } else {
+    expect_false(dicom::pixel::set_htj2k_decoder_backend(
+                     dicom::pixel::Htj2kDecoder::openjpeg, &backend_error),
+        "set htj2k backend should fail when builtin is disabled");
+    expect_contains(backend_error, "disabled by CMake",
+        "set htj2k backend disabled message");
+  }
 
   const auto* jpeg_plugin = registry.find_plugin("jpeg");
   if (!jpeg_plugin) {
@@ -598,6 +607,59 @@ int main() {
   }
   const auto original_decode = jpeg_plugin->decode_frame;
   const auto original_encode = jpeg_plugin->encode_frame;
+  const bool expected_encode_supported_before_clear = (original_encode != nullptr);
+  const bool expected_decode_supported_before_clear = (original_decode != nullptr);
+  const auto* jpeg_binding_before = registry.find_binding("JPEGBaseline8Bit"_uid);
+  expect_true(jpeg_binding_before != nullptr, "jpeg baseline binding exists");
+  expect_eq(jpeg_binding_before->encode_supported,
+      expected_encode_supported_before_clear,
+      "jpeg baseline binding encode_supported before dispatch clear");
+  expect_eq(jpeg_binding_before->decode_supported,
+      expected_decode_supported_before_clear,
+      "jpeg baseline binding decode_supported before dispatch clear");
+
+  dicom::pixel::detail::codec_encode_frame_fn previous_jpeg_encode = nullptr;
+  dicom::pixel::detail::codec_decode_frame_fn previous_jpeg_decode = nullptr;
+  expect_true(registry.update_plugin_dispatch(
+                  "jpeg", nullptr, true, nullptr, true,
+                  &previous_jpeg_encode, &previous_jpeg_decode),
+      "clear jpeg plugin dispatch");
+  expect_true(previous_jpeg_encode == original_encode,
+      "previous jpeg encode dispatch matches original");
+  expect_true(previous_jpeg_decode == original_decode,
+      "previous jpeg decode dispatch matches original");
+
+  const auto* jpeg_binding_without_dispatch =
+      registry.find_binding("JPEGBaseline8Bit"_uid);
+  expect_true(jpeg_binding_without_dispatch != nullptr,
+      "jpeg baseline binding exists after dispatch clear");
+  expect_false(jpeg_binding_without_dispatch->encode_supported,
+      "jpeg baseline binding encode_supported after dispatch clear");
+  expect_false(jpeg_binding_without_dispatch->decode_supported,
+      "jpeg baseline binding decode_supported after dispatch clear");
+  expect_true(registry.resolve_encoder_plugin("JPEGBaseline8Bit"_uid) == nullptr,
+      "resolve_encoder_plugin returns null when jpeg dispatch is cleared");
+  expect_true(registry.resolve_decoder_plugin("JPEGBaseline8Bit"_uid) == nullptr,
+      "resolve_decoder_plugin returns null when jpeg dispatch is cleared");
+
+  expect_true(registry.update_plugin_dispatch(
+                  "jpeg", previous_jpeg_encode, true, previous_jpeg_decode, true),
+      "restore jpeg plugin dispatch");
+  const auto* jpeg_binding_restored = registry.find_binding("JPEGBaseline8Bit"_uid);
+  expect_true(jpeg_binding_restored != nullptr,
+      "jpeg baseline binding exists after dispatch restore");
+  expect_eq(jpeg_binding_restored->encode_supported,
+      expected_encode_supported_before_clear,
+      "jpeg baseline binding encode_supported after dispatch restore");
+  expect_eq(jpeg_binding_restored->decode_supported,
+      expected_decode_supported_before_clear,
+      "jpeg baseline binding decode_supported after dispatch restore");
+  expect_eq(registry.resolve_encoder_plugin("JPEGBaseline8Bit"_uid) != nullptr,
+      expected_encode_supported_before_clear,
+      "resolve_encoder_plugin result after jpeg dispatch restore");
+  expect_eq(registry.resolve_decoder_plugin("JPEGBaseline8Bit"_uid) != nullptr,
+      expected_decode_supported_before_clear,
+      "resolve_decoder_plugin result after jpeg dispatch restore");
 
   auto invalid_decoder_api = make_stub_decoder_api();
   invalid_decoder_api.abi_version = 0;
@@ -1041,9 +1103,14 @@ int main() {
   expect_true(jpeg_plugin->encode_frame == original_encode,
       "encode dispatch restored");
 
-  CodecError restored_decode_error{};
-  expect_false(jpeg_plugin->decode_frame(decode_input, restored_decode_error),
-      "restored decode should not use stub and should fail for fake codestream");
+  if (original_decode != nullptr) {
+    CodecError restored_decode_error{};
+    expect_false(jpeg_plugin->decode_frame(decode_input, restored_decode_error),
+        "restored decode should not use stub and should fail for fake codestream");
+  } else {
+    expect_true(jpeg_plugin->decode_frame == nullptr,
+        "restored decode dispatch remains null when builtin dispatch is disabled");
+  }
 
   return 0;
 }

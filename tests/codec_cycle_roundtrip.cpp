@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <dicom.h>
+#include "codec_builtin_flags.hpp"
 
 namespace {
 using namespace dicom::literals;
@@ -96,8 +97,20 @@ int main() {
 	using namespace dicom::literals;
 	verify_three_cycle_roundtrip("EncapsulatedUncompressedExplicitVRLittleEndian",
 	    "EncapsulatedUncompressedExplicitVRLittleEndian"_uid);
-	verify_three_cycle_roundtrip("HTJ2KLossless", "HTJ2KLossless"_uid);
-	verify_three_cycle_roundtrip("JPEGLSLossless", "JPEGLSLossless"_uid);
-	verify_three_cycle_roundtrip("JPEGLosslessSV1", "JPEGLosslessSV1"_uid);
+	if (dicom::test::kHtj2kBuiltin && dicom::test::kHasOpenJphBackend) {
+		verify_three_cycle_roundtrip("HTJ2KLossless", "HTJ2KLossless"_uid);
+	}
+	if (dicom::test::kJpeg2kBuiltin) {
+		verify_three_cycle_roundtrip("JPEG2000Lossless", "JPEG2000Lossless"_uid);
+	}
+	if (dicom::test::kJpegLsBuiltin) {
+		verify_three_cycle_roundtrip("JPEGLSLossless", "JPEGLSLossless"_uid);
+	}
+	if (dicom::test::kJpegBuiltin) {
+		verify_three_cycle_roundtrip("JPEGLosslessSV1", "JPEGLosslessSV1"_uid);
+	}
+	if (dicom::test::kJpegXlBuiltin && dicom::test::kHasJpegXlBackend) {
+		verify_three_cycle_roundtrip("JPEGXLLossless", "JPEGXLLossless"_uid);
+	}
 	return 0;
 }

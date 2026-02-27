@@ -1059,6 +1059,9 @@ public:
 
 private:
 	friend class ::dicom::DicomFile;
+	void set_configured_state(uid::WellKnown transfer_syntax, std::string plugin_key,
+	    std::vector<std::string> option_keys,
+	    std::vector<CodecOptionKv> codec_options);
 
 	uid::WellKnown transfer_syntax_uid_{};
 	std::string plugin_key_{};
@@ -1802,6 +1805,7 @@ private:
 	    const pixel::EncoderContext& encoder_ctx);
 	void apply_transfer_syntax(uid::WellKnown transfer_syntax,
 	    std::span<const pixel::CodecOptionTextKv> codec_opt_override);
+	void finalize_set_pixel_data_transfer_syntax(uid::WellKnown transfer_syntax);
 	void clear_error_state() noexcept;
 	void set_error_state(std::string message);
 

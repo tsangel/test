@@ -16,6 +16,7 @@
 
 #include <dicom.h>
 #include <instream.h>
+#include "codec_builtin_flags.hpp"
 
 int main() {
 	using dicom::lookup::keyword_to_tag_vr;
@@ -1101,8 +1102,9 @@ int main() {
 			fail("EncapsulatedUncompressed set_pixel_data frame #1 roundtrip mismatch");
 		}
 	}
-	dicom::DicomFile set_pixel_data_j2k_file;
-	{
+	if (dicom::test::kJpeg2kBuiltin) {
+		dicom::DicomFile set_pixel_data_j2k_file;
+		{
 		std::vector<std::uint8_t> source_bytes(40, 0xEEu);
 		const auto write_row = [&](std::size_t frame, std::size_t row,
 		                       std::array<std::uint8_t, 6> payload) {
@@ -1168,9 +1170,11 @@ int main() {
 		if (decoded_frame1 != expected_frame1) {
 			fail("J2K set_pixel_data frame #1 roundtrip mismatch");
 		}
+		}
 	}
-	dicom::DicomFile set_pixel_data_htj2k_file;
-	{
+	if (dicom::test::kHtj2kBuiltin) {
+		dicom::DicomFile set_pixel_data_htj2k_file;
+		{
 		std::vector<std::uint8_t> source_bytes(40, 0xEEu);
 		const auto write_row = [&](std::size_t frame, std::size_t row,
 		                       std::array<std::uint8_t, 6> payload) {
@@ -1236,6 +1240,7 @@ int main() {
 		if (decoded_frame1 != expected_frame1) {
 			fail("HTJ2K set_pixel_data frame #1 roundtrip mismatch");
 		}
+		}
 	}
 	{
 		const std::vector<std::uint8_t> rgb_source{
@@ -1252,13 +1257,14 @@ int main() {
 		color_source.planar = dicom::pixel::Planar::interleaved;
 		color_source.photometric = dicom::pixel::Photometric::rgb;
 
-		dicom::DicomFile j2k_default_mct;
-		j2k_default_mct.set_pixel_data(
-		    "JPEG2000Lossless"_uid, color_source);
-		if (j2k_default_mct["PhotometricInterpretation"_tag].to_string_view().value_or("") !=
-		    std::string_view("YBR_RCT")) {
-			fail("J2K default color transform should update PhotometricInterpretation to YBR_RCT");
-		}
+		if (dicom::test::kJpeg2kBuiltin) {
+			dicom::DicomFile j2k_default_mct;
+			j2k_default_mct.set_pixel_data(
+			    "JPEG2000Lossless"_uid, color_source);
+			if (j2k_default_mct["PhotometricInterpretation"_tag].to_string_view().value_or("") !=
+			    std::string_view("YBR_RCT")) {
+				fail("J2K default color transform should update PhotometricInterpretation to YBR_RCT");
+			}
 
 			const std::array<dicom::pixel::CodecOptionTextKv, 1> j2k_without_mct_text_options{{
 			    {"color_transform", "false"},
@@ -1357,14 +1363,16 @@ int main() {
 			    std::string_view("01")) {
 				fail("J2K text options via set_transfer_syntax should set LossyImageCompression to 01");
 			}
-
-		dicom::DicomFile htj2k_default_mct;
-		htj2k_default_mct.set_pixel_data(
-		    "HTJ2KLossless"_uid, color_source);
-		if (htj2k_default_mct["PhotometricInterpretation"_tag].to_string_view().value_or("") !=
-		    std::string_view("YBR_RCT")) {
-			fail("HTJ2K default color transform should update PhotometricInterpretation to YBR_RCT");
 		}
+
+		if (dicom::test::kHtj2kBuiltin) {
+			dicom::DicomFile htj2k_default_mct;
+			htj2k_default_mct.set_pixel_data(
+			    "HTJ2KLossless"_uid, color_source);
+			if (htj2k_default_mct["PhotometricInterpretation"_tag].to_string_view().value_or("") !=
+			    std::string_view("YBR_RCT")) {
+				fail("HTJ2K default color transform should update PhotometricInterpretation to YBR_RCT");
+			}
 
 			const std::array<dicom::pixel::CodecOptionTextKv, 1> htj2k_without_mct_options{{
 			    {"color_transform", "false"},
@@ -1404,8 +1412,10 @@ int main() {
 				fail("HTJ2K lossy set_pixel_data should set a positive LossyImageCompressionRatio");
 			}
 		}
+	}
+	if (dicom::test::kJpegLsBuiltin) {
 		dicom::DicomFile set_pixel_data_jpegls_file;
-	{
+		{
 		std::vector<std::uint8_t> source_bytes(40, 0xEEu);
 		const auto write_row = [&](std::size_t frame, std::size_t row,
 		                       std::array<std::uint8_t, 6> payload) {
@@ -1471,9 +1481,11 @@ int main() {
 		if (decoded_frame1 != expected_frame1) {
 			fail("JPEG-LS set_pixel_data frame #1 roundtrip mismatch");
 		}
+		}
 	}
-	dicom::DicomFile set_pixel_data_jpeg_file;
-	{
+	if (dicom::test::kJpegBuiltin) {
+		dicom::DicomFile set_pixel_data_jpeg_file;
+		{
 		std::vector<std::uint8_t> source_bytes(40, 0xEEu);
 		const auto write_row = [&](std::size_t frame, std::size_t row,
 		                       std::array<std::uint8_t, 6> payload) {
@@ -1540,6 +1552,8 @@ int main() {
 				fail("JPEG set_pixel_data frame #1 roundtrip mismatch");
 			}
 		}
+	}
+	if (dicom::test::kJpegLsBuiltin) {
 		dicom::DicomFile set_pixel_data_jpegls_near_lossless_file;
 		{
 			const std::vector<std::uint8_t> source_bytes{
@@ -1577,6 +1591,8 @@ int main() {
 				fail("JPEG-LS near-lossless should set a positive LossyImageCompressionRatio");
 			}
 		}
+	}
+	if (dicom::test::kJpegBuiltin) {
 		dicom::DicomFile set_pixel_data_jpeg_lossy_file;
 		{
 			const std::vector<std::uint8_t> source_bytes{
@@ -1612,6 +1628,7 @@ int main() {
 				fail("JPEG lossy should set a positive LossyImageCompressionRatio");
 			}
 		}
+	}
 
 		dicom::DicomFile generated;
 	auto add_text_element = [&](dicom::Tag tag, dicom::VR vr, std::string_view value) {

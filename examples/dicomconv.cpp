@@ -15,7 +15,7 @@
 #include <vector>
 
 #include <dicom.h>
-#include "pixel_codec_registry.hpp"
+#include "pixel/registry/codec_registry.hpp"
 
 namespace {
 

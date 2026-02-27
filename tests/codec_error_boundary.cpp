@@ -7,8 +7,9 @@
 #include <vector>
 
 #include <dicom.h>
-#include "../src/pixel_codec_registry.hpp"
-#include "../src/pixel_encoder_detail.hpp"
+#include "codec_builtin_flags.hpp"
+#include "../src/pixel/registry/codec_registry.hpp"
+#include "../src/pixel/encode/core/encode_codec_impl_detail.hpp"
 
 namespace {
 using namespace dicom::literals;
@@ -80,6 +81,50 @@ void restore_registry(dicom::pixel::detail::CodecRegistry& registry,
 	}
 }
 
+bool always_fail_encode_dispatch(
+    const dicom::pixel::detail::CodecEncodeFrameInput&,
+    std::span<const dicom::pixel::detail::CodecOptionKv>,
+    std::vector<std::uint8_t>&, dicom::pixel::detail::CodecError& out_error) noexcept {
+	out_error = {};
+	return false;
+}
+
+void encode_with_plugin_or_throw(std::string_view plugin_key) {
+	std::vector<std::uint8_t> source_frame{0x00u, 0x00u};
+	dicom::DicomFile df{};
+	const dicom::pixel::detail::EncapsulatedEncodeInput encode_input{
+	    .source_base = source_frame.data(),
+	    .frame_count = 1,
+	    .source_frame_stride = 2,
+	    .source_frame_size_bytes = 2,
+	    .source_aliases_current_native_pixel_data = false,
+	};
+	const dicom::pixel::detail::CodecEncodeFnInput encode_fn_input{
+	    .file = df,
+	    .transfer_syntax = "JPEG2000Lossless"_uid,
+	    .encode_input = encode_input,
+	    .codec_options = std::span<const dicom::pixel::detail::CodecOptionKv>{},
+	    .rows = 1,
+	    .cols = 1,
+	    .samples_per_pixel = 1,
+	    .bytes_per_sample = 2,
+	    .bits_allocated = 16,
+	    .bits_stored = 16,
+	    .pixel_representation = 0,
+	    .use_multicomponent_transform = false,
+	    .source_planar = dicom::pixel::Planar::interleaved,
+	    .planar_source = false,
+	    .row_payload_bytes = 2,
+	    .source_row_stride = 2,
+	    .source_plane_stride = 2,
+	    .source_frame_size_bytes = 2,
+	    .destination_frame_payload = 2,
+	    .profile = dicom::pixel::detail::CodecProfile::jpeg2000_lossless,
+	    .plugin_key = plugin_key,
+	};
+	dicom::pixel::detail::encode_encapsulated_pixel_data(encode_fn_input);
+}
+
 } // namespace
 
 int main() {
@@ -90,6 +135,14 @@ int main() {
 	using dicom::pixel::detail::global_codec_registry;
 	using dicom::pixel::detail::throw_codec_error_with_context;
 	const dicom::pixel::detail::DecodeValueTransform decode_transform{};
+
+	if (!(dicom::test::kJpegBuiltin &&
+	        dicom::test::kJpegLsBuiltin &&
+	        dicom::test::kJpeg2kBuiltin &&
+	        dicom::test::kHtj2kBuiltin &&
+	        dicom::test::kJpegXlBuiltin)) {
+		return 0;
+	}
 
 	const CodecError frame_error{
 	    .code = CodecStatusCode::backend_error,
@@ -877,9 +930,10 @@ int main() {
 				    "jpeg2k option throw message");
 				expect_contains(what, expected_ts, "jpeg2k option throw message");
 				expect_contains(what, "plugin=jpeg2k", "jpeg2k option throw message");
-				expect_contains(what, "status=backend_error", "jpeg2k option throw message");
-				expect_contains(what, "stage=decode_frame", "jpeg2k option throw message");
-				expect_contains(what, "invalid decoder_threads -2",
+				expect_contains(
+				    what, "status=invalid_argument", "jpeg2k option throw message");
+				expect_contains(what, "stage=parse_options", "jpeg2k option throw message");
+				expect_contains(what, "DecodeOptions.decoder_threads must be -1, 0, or positive",
 				    "jpeg2k option throw message");
 				expect_contains(what, "reason=file=", "jpeg2k option throw message");
 				expect_not_contains(what, "reason=pixel::decode_frame_into ",
@@ -937,13 +991,14 @@ int main() {
 			expect_contains(what, "pixel::decode_frame_into",
 			    "missing plugin decode throw message");
 			expect_contains(what, expected_ts, "missing plugin decode throw message");
+			expect_contains(what, "plugin=<none>",
+			    "missing plugin decode throw message");
 			expect_contains(
-			    what, "plugin=missing-decode-plugin", "missing plugin decode throw message");
-			expect_contains(
-			    what, "status=internal_error", "missing plugin decode throw message");
+			    what, "status=unsupported", "missing plugin decode throw message");
 			expect_contains(
 			    what, "stage=plugin_lookup", "missing plugin decode throw message");
-			expect_contains(what, "reason=registry binding references a missing plugin",
+			expect_contains(what,
+			    "reason=transfer syntax is not supported for decode by codec registry binding",
 			    "missing plugin decode throw message");
 		}
 		restore_registry(registry, snapshot);
@@ -985,14 +1040,107 @@ int main() {
 			expect_contains(what, "pixel::decode_frame_into",
 			    "no-dispatch decode throw message");
 			expect_contains(what, expected_ts, "no-dispatch decode throw message");
+			expect_contains(what, "plugin=<none>",
+			    "no-dispatch decode throw message");
 			expect_contains(
-			    what, "plugin=dummy-no-decode", "no-dispatch decode throw message");
-			expect_contains(
-			    what, "status=internal_error", "no-dispatch decode throw message");
+			    what, "status=unsupported", "no-dispatch decode throw message");
 			expect_contains(
 			    what, "stage=plugin_lookup", "no-dispatch decode throw message");
-			expect_contains(what, "reason=registered decode plugin has no dispatcher",
+			expect_contains(what,
+			    "reason=transfer syntax is not supported for decode by codec registry binding",
 			    "no-dispatch decode throw message");
+		}
+		restore_registry(registry, snapshot);
+	}
+
+	{
+		try {
+			encode_with_plugin_or_throw("missing-encode-plugin");
+			fail("encode_encapsulated_pixel_data should throw when plugin is missing");
+		} catch (const std::exception& e) {
+			const std::string what = e.what();
+			const auto expected_ts =
+			    std::string("ts=") + std::string("JPEG2000Lossless"_uid.value());
+			expect_contains(what, "DicomFile::set_pixel_data",
+			    "missing plugin encode throw message");
+			expect_contains(what, expected_ts, "missing plugin encode throw message");
+			expect_contains(what, "plugin=missing-encode-plugin",
+			    "missing plugin encode throw message");
+			expect_contains(
+			    what, "status=unsupported", "missing plugin encode throw message");
+			expect_contains(
+			    what, "stage=plugin_lookup", "missing plugin encode throw message");
+			expect_contains(what, "reason=plugin is not registered in codec registry",
+			    "missing plugin encode throw message");
+		}
+	}
+
+	{
+		auto& registry = global_codec_registry();
+		const auto snapshot = snapshot_registry(registry);
+		registry.clear();
+		const bool plugin_registered =
+		    registry.register_plugin(dicom::pixel::detail::CodecPlugin{
+		        .key = "dummy-no-encode",
+		        .display_name = "Dummy no encode",
+		    });
+		if (!plugin_registered) {
+			fail("failed to register no-dispatch encode plugin fixture");
+		}
+		try {
+			encode_with_plugin_or_throw("dummy-no-encode");
+			fail("encode_encapsulated_pixel_data should throw when encode dispatch is missing");
+		} catch (const std::exception& e) {
+			const std::string what = e.what();
+			const auto expected_ts =
+			    std::string("ts=") + std::string("JPEG2000Lossless"_uid.value());
+			expect_contains(what, "DicomFile::set_pixel_data",
+			    "no-dispatch encode throw message");
+			expect_contains(what, expected_ts, "no-dispatch encode throw message");
+			expect_contains(what, "plugin=dummy-no-encode",
+			    "no-dispatch encode throw message");
+			expect_contains(
+			    what, "status=unsupported", "no-dispatch encode throw message");
+			expect_contains(
+			    what, "stage=plugin_lookup", "no-dispatch encode throw message");
+			expect_contains(what, "reason=plugin does not provide encode_frame dispatch",
+			    "no-dispatch encode throw message");
+		}
+		restore_registry(registry, snapshot);
+	}
+
+	{
+		auto& registry = global_codec_registry();
+		const auto snapshot = snapshot_registry(registry);
+		registry.clear();
+		const bool plugin_registered =
+		    registry.register_plugin(dicom::pixel::detail::CodecPlugin{
+		        .key = "dummy-fail-encode",
+		        .display_name = "Dummy fail encode",
+		        .encode_frame = &always_fail_encode_dispatch,
+		    });
+		if (!plugin_registered) {
+			fail("failed to register failing encode plugin fixture");
+		}
+		try {
+			encode_with_plugin_or_throw("dummy-fail-encode");
+			fail("encode_encapsulated_pixel_data should throw for failed encode dispatch");
+		} catch (const std::exception& e) {
+			const std::string what = e.what();
+			const auto expected_ts =
+			    std::string("ts=") + std::string("JPEG2000Lossless"_uid.value());
+			expect_contains(
+			    what, "DicomFile::set_pixel_data", "backend encode throw message");
+			expect_contains(what, expected_ts, "backend encode throw message");
+			expect_contains(what, "plugin=dummy-fail-encode",
+			    "backend encode throw message");
+			expect_contains(what, "frame=0", "backend encode throw message");
+			expect_contains(what, "status=backend_error",
+			    "backend encode throw message");
+			expect_contains(
+			    what, "stage=encode_frame", "backend encode throw message");
+			expect_contains(
+			    what, "reason=encoder plugin failed", "backend encode throw message");
 		}
 		restore_registry(registry, snapshot);
 	}

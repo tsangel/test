@@ -60,3 +60,11 @@ def test_to_array_pixel_array_alias():
     via_to_array = dicom_file.to_array(frame=0)
     via_alias = dicom_file.pixel_array(frame=0)
     assert np.array_equal(via_to_array, via_alias)
+
+
+def test_to_array_frame_minus_one_single_frame_matches_frame_zero():
+    dicom_file = dicom.read_file(_test_file())
+    arr_all = dicom_file.to_array(frame=-1, scaled=False)
+    arr_zero = dicom_file.to_array(frame=0, scaled=False)
+    assert arr_all.shape == (4, 4)
+    assert np.array_equal(arr_all, arr_zero)
