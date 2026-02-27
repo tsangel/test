@@ -1,5 +1,6 @@
 #pragma once
 
+#include "pixel/plugin_abi/builtin/shared_plugin_export.hpp"
 #include "pixel/registry/codec_registry.hpp"
 #include "pixel_decoder_plugin_abi.h"
 #include "pixel_encoder_plugin_abi.h"
@@ -31,8 +32,8 @@ bool encode_frame_plugin_htj2k_via_abi(const CodecEncodeFrameInput& input,
     CodecError& out_error) noexcept;
 
 [[nodiscard]] const dicomsdl_decoder_plugin_api_v1&
-htj2k_decoder_plugin_api_for_shared() noexcept;
+DICOMSDL_CODEC_RUNTIME_API htj2k_decoder_plugin_api_for_shared() noexcept;
 [[nodiscard]] const dicomsdl_encoder_plugin_api_v1&
-htj2k_encoder_plugin_api_for_shared() noexcept;
+DICOMSDL_CODEC_RUNTIME_API htj2k_encoder_plugin_api_for_shared() noexcept;
 
 }  // namespace dicom::pixel::detail

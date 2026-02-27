@@ -160,11 +160,12 @@ Both scripts support per-codec mode selection with:
 - `DICOMSDL_CODEC_HTJ2K_MODE`
 - `DICOMSDL_CODEC_JPEGXL_MODE`
 
-When one or more codec modes are set to `shared`, CMake also enables
-`DICOMSDL_BUILD_SHARED_CORE=ON` so that:
+When one or more codec modes are set to `shared`, CMake builds an additional
+shared codec runtime (`dicomsdl_codec_runtime.dll` / `libdicomsdl_codec_runtime.so` /
+`libdicomsdl_codec_runtime.dylib`) so that:
 
-- a single shared core (`dicomsdl.dll` / `libdicomsdl.so` / `libdicomsdl.dylib`) contains common code
-- each `dicomsdl_codec_*_plugin` shared library stays thin and avoids duplicating the whole core
+- codec implementation code is centralized in one runtime library
+- each `dicomsdl_codec_*_plugin` shared library stays thin and avoids duplicating codec/object code
 
 If you are experimenting with shared codec plugins, prefer `BUILD_WHEEL=0`
 unless you also package runtime shared libraries explicitly.

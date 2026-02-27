@@ -122,33 +122,7 @@ set(DICOMSDL_NANOBIND_GIT_REPOSITORY "https://github.com/wjakob/nanobind.git"
 set(DICOMSDL_NANOBIND_GIT_TAG "v2.12.0"
 	CACHE STRING "nanobind git ref used by FetchContent (use branch/tag/SHA).")
 
-set(_dicomsdl_any_codec_shared_from_cache OFF)
-foreach(_dicomsdl_codec IN ITEMS JPEG JPEGLS JPEG2K HTJ2K JPEGXL)
-	if(DEFINED DICOMSDL_CODEC_${_dicomsdl_codec}_SHARED AND DICOMSDL_CODEC_${_dicomsdl_codec}_SHARED)
-		set(_dicomsdl_any_codec_shared_from_cache ON)
-		break()
-	endif()
-endforeach()
-option(DICOMSDL_BUILD_SHARED_CORE
-	"Build dicomsdl core as a shared library. This should be ON when any codec plugin mode is shared."
-	${_dicomsdl_any_codec_shared_from_cache})
-if(_dicomsdl_any_codec_shared_from_cache AND NOT DICOMSDL_BUILD_SHARED_CORE)
-	message(STATUS "Enabling DICOMSDL_BUILD_SHARED_CORE because shared codec plugin mode is active.")
-	set(DICOMSDL_BUILD_SHARED_CORE ON CACHE BOOL
-		"Build dicomsdl core as a shared library. This should be ON when any codec plugin mode is shared."
-		FORCE)
-endif()
-unset(_dicomsdl_any_codec_shared_from_cache)
-unset(_dicomsdl_codec)
-
-if(DICOMSDL_BUILD_SHARED_CORE)
-	set(_dicomsdl_core_library_type SHARED)
-else()
-	set(_dicomsdl_core_library_type STATIC)
-endif()
-message(STATUS "DICOMSDL core linkage: ${_dicomsdl_core_library_type}")
-
-add_library(dicomsdl ${_dicomsdl_core_library_type}
+add_library(dicomsdl STATIC
 	src/dataset.cpp
 	src/diagnostics.cpp
 	src/dataset_deflate_codec.cpp
@@ -210,11 +184,6 @@ set_target_properties(dicomsdl PROPERTIES
 	LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 	RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
-if(WIN32 AND DICOMSDL_BUILD_SHARED_CORE)
-	# dicom.h does not annotate all public C++ symbols with __declspec(dllexport),
-	# so enable broad export for Windows shared-core builds.
-	set_target_properties(dicomsdl PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
-endif()
 target_include_directories(dicomsdl
 	PUBLIC
 		${DICOM_INCLUDE_DIR}
@@ -279,6 +248,15 @@ dicomsdl_resolve_codec_mode(JPEGLS "jpegls")
 dicomsdl_resolve_codec_mode(JPEG2K "jpeg2k")
 dicomsdl_resolve_codec_mode(HTJ2K "htj2k")
 dicomsdl_resolve_codec_mode(JPEGXL "jpegxl")
+
+set(_dicomsdl_any_codec_shared OFF)
+foreach(_dicomsdl_codec IN ITEMS JPEG JPEGLS JPEG2K HTJ2K JPEGXL)
+	if(DICOMSDL_CODEC_${_dicomsdl_codec}_SHARED)
+		set(_dicomsdl_any_codec_shared ON)
+		break()
+	endif()
+endforeach()
+unset(_dicomsdl_codec)
 
 if(DEFINED BUILD_SHARED_LIBS)
 	set(_dicomsdl_build_shared_libs_defined TRUE)
@@ -661,6 +639,101 @@ else()
 endif()
 target_compile_features(dicomsdl PUBLIC cxx_std_20)
 
+if(_dicomsdl_any_codec_shared)
+	add_library(dicomsdl_codec_runtime SHARED
+		src/diagnostics.cpp
+		src/instream.cpp
+		src/pixel/bridge/codec_option_bridge.cpp
+		src/pixel/decode/core/decode_plugin_runtime_support.cpp
+		src/pixel/decode/core/decode_planar_copy.cpp
+	)
+	target_include_directories(dicomsdl_codec_runtime
+		PUBLIC
+			${DICOM_INCLUDE_DIR}
+			${GENERATED_INCLUDE_DIR}
+		PRIVATE
+			${CMAKE_CURRENT_SOURCE_DIR}/src
+			${dicomsdl_openjpeg_SOURCE_DIR}/src/lib/openjp2
+			${dicomsdl_openjpeg_BINARY_DIR}/src/lib/openjp2
+			${dicomsdl_libjpeg_turbo_SOURCE_DIR}/src
+			${dicomsdl_libjpeg_turbo_BINARY_DIR}
+	)
+	set_target_properties(dicomsdl_codec_runtime PROPERTIES
+		ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+		LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+		RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+		OUTPUT_NAME "dicomsdl_codec_runtime"
+	)
+	target_compile_features(dicomsdl_codec_runtime PUBLIC cxx_std_20)
+	target_compile_definitions(dicomsdl_codec_runtime
+		PRIVATE
+			DICOMSDL_CODEC_RUNTIME_EXPORTS=1
+			DICOMSDL_HAS_LIBDEFLATE=1
+	)
+	dicomsdl_apply_codec_builtin_defines(dicomsdl_codec_runtime)
+	target_link_libraries(dicomsdl_codec_runtime PRIVATE fmt::fmt-header-only)
+	if(TARGET openjp2_static)
+		target_link_libraries(dicomsdl_codec_runtime PRIVATE openjp2_static)
+	else()
+		target_link_libraries(dicomsdl_codec_runtime PRIVATE openjp2)
+	endif()
+	if(DICOMSDL_ENABLE_OPENJPH)
+		target_link_libraries(dicomsdl_codec_runtime PRIVATE openjph)
+	endif()
+	if(DICOMSDL_ENABLE_JPEGXL)
+		target_link_libraries(dicomsdl_codec_runtime PRIVATE jxl jxl_threads jxl_cms)
+	endif()
+	target_link_libraries(dicomsdl_codec_runtime PRIVATE charls dicomsdl_turbojpeg)
+	if(TARGET libdeflate::libdeflate_static)
+		target_link_libraries(dicomsdl_codec_runtime PRIVATE libdeflate::libdeflate_static)
+	elseif(TARGET libdeflate_static)
+		target_link_libraries(dicomsdl_codec_runtime PRIVATE libdeflate_static)
+	else()
+		message(FATAL_ERROR "libdeflate static target was not generated")
+	endif()
+	if(DICOMSDL_ENABLE_INFO_LOGS)
+		target_compile_definitions(dicomsdl_codec_runtime PUBLIC DICOMSDL_ENABLE_INFO_LOGS=1)
+	else()
+		target_compile_definitions(dicomsdl_codec_runtime PUBLIC DICOMSDL_ENABLE_INFO_LOGS=0)
+	endif()
+
+	if(DICOMSDL_CODEC_JPEG_SHARED)
+		target_sources(dicomsdl_codec_runtime PRIVATE
+			src/pixel/plugin_abi/builtin/jpeg_builtin_plugin.cpp
+			src/pixel/decode/codecs/jpeg_decode.cpp
+			src/pixel/encode/codecs/jpeg_encode.cpp
+		)
+	endif()
+	if(DICOMSDL_CODEC_JPEGLS_SHARED)
+		target_sources(dicomsdl_codec_runtime PRIVATE
+			src/pixel/plugin_abi/builtin/jpegls_builtin_plugin.cpp
+			src/pixel/decode/codecs/jpegls_decode.cpp
+			src/pixel/encode/codecs/jpegls_encode.cpp
+		)
+	endif()
+	if(DICOMSDL_CODEC_JPEG2K_SHARED)
+		target_sources(dicomsdl_codec_runtime PRIVATE
+			src/pixel/plugin_abi/builtin/jpeg2k_builtin_plugin.cpp
+			src/pixel/decode/codecs/jpeg2k_decode.cpp
+			src/pixel/encode/codecs/jpeg2k_encode.cpp
+		)
+	endif()
+	if(DICOMSDL_CODEC_HTJ2K_SHARED)
+		target_sources(dicomsdl_codec_runtime PRIVATE
+			src/pixel/plugin_abi/builtin/htj2k_builtin_plugin.cpp
+			src/pixel/decode/codecs/htj2k_decode.cpp
+			src/pixel/encode/codecs/htj2k_encode.cpp
+		)
+	endif()
+	if(DICOMSDL_CODEC_JPEGXL_SHARED)
+		target_sources(dicomsdl_codec_runtime PRIVATE
+			src/pixel/plugin_abi/builtin/jpegxl_builtin_plugin.cpp
+			src/pixel/decode/codecs/jpegxl_decode.cpp
+			src/pixel/encode/codecs/jpegxl_encode.cpp
+		)
+	endif()
+endif()
+
 function(dicomsdl_add_shared_codec_plugin TARGET_SUFFIX WRAPPER_SOURCE)
 	set(TARGET_NAME "dicomsdl_codec_plugin_${TARGET_SUFFIX}")
 	add_library(${TARGET_NAME} SHARED
@@ -672,7 +745,12 @@ function(dicomsdl_add_shared_codec_plugin TARGET_SUFFIX WRAPPER_SOURCE)
 			${GENERATED_INCLUDE_DIR}
 			${CMAKE_CURRENT_SOURCE_DIR}/src
 	)
-	target_link_libraries(${TARGET_NAME} PRIVATE dicomsdl)
+	if(TARGET dicomsdl_codec_runtime)
+		target_link_libraries(${TARGET_NAME} PRIVATE dicomsdl_codec_runtime)
+		target_compile_definitions(${TARGET_NAME} PRIVATE DICOMSDL_CODEC_RUNTIME_IMPORTS=1)
+	else()
+		target_link_libraries(${TARGET_NAME} PRIVATE dicomsdl)
+	endif()
 	target_compile_features(${TARGET_NAME} PRIVATE cxx_std_20)
 	set_target_properties(${TARGET_NAME} PROPERTIES
 		LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
