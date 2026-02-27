@@ -59,18 +59,23 @@ set "SELECTED_TOOLCHAIN="
 if /I "%DICOMSDL_WINDOWS_TOOLCHAIN%"=="auto" (
 	where cl >nul 2>&1
 	if errorlevel 1 (
-		where clang >nul 2>&1
-		if errorlevel 1 (
-			echo Error: neither cl.exe nor clang.exe was found on PATH.>&2
-			echo Set DICOMSDL_WINDOWS_TOOLCHAIN=msvc or clang64 and ensure compiler toolchain is initialized.>&2
-			exit /b 1
+		where clang-cl >nul 2>&1
+		if not errorlevel 1 (
+			set "SELECTED_TOOLCHAIN=clangcl"
+		) else (
+			where clang >nul 2>&1
+			if errorlevel 1 (
+				echo Error: neither cl.exe, clang-cl.exe, nor clang.exe was found on PATH.>&2
+				echo Set DICOMSDL_WINDOWS_TOOLCHAIN=msvc^|clangcl^|clang64 and ensure compiler toolchain is initialized.>&2
+				exit /b 1
+			)
+			where clang++ >nul 2>&1
+			if errorlevel 1 (
+				echo Error: clang++.exe not found on PATH.>&2
+				exit /b 1
+			)
+			set "SELECTED_TOOLCHAIN=clang64"
 		)
-		where clang++ >nul 2>&1
-		if errorlevel 1 (
-			echo Error: clang++.exe not found on PATH.>&2
-			exit /b 1
-		)
-		set "SELECTED_TOOLCHAIN=clang64"
 	) else (
 		set "SELECTED_TOOLCHAIN=msvc"
 	)
@@ -78,11 +83,15 @@ if /I "%DICOMSDL_WINDOWS_TOOLCHAIN%"=="auto" (
 	if /I "%DICOMSDL_WINDOWS_TOOLCHAIN%"=="msvc" (
 		set "SELECTED_TOOLCHAIN=msvc"
 	) else (
-		if /I "%DICOMSDL_WINDOWS_TOOLCHAIN%"=="clang64" (
-			set "SELECTED_TOOLCHAIN=clang64"
+		if /I "%DICOMSDL_WINDOWS_TOOLCHAIN%"=="clangcl" (
+			set "SELECTED_TOOLCHAIN=clangcl"
 		) else (
-			echo Error: unsupported DICOMSDL_WINDOWS_TOOLCHAIN=%DICOMSDL_WINDOWS_TOOLCHAIN%. Use auto^|msvc^|clang64.>&2
-			exit /b 1
+			if /I "%DICOMSDL_WINDOWS_TOOLCHAIN%"=="clang64" (
+				set "SELECTED_TOOLCHAIN=clang64"
+			) else (
+				echo Error: unsupported DICOMSDL_WINDOWS_TOOLCHAIN=%DICOMSDL_WINDOWS_TOOLCHAIN%. Use auto^|msvc^|clangcl^|clang64.>&2
+				exit /b 1
+			)
 		)
 	)
 )
@@ -95,20 +104,33 @@ if /I "%SELECTED_TOOLCHAIN%"=="msvc" (
 		exit /b 1
 	)
 ) else (
-	where clang >nul 2>&1
-	if errorlevel 1 (
-		echo Error: clang.exe not found on PATH for clang64 toolchain.>&2
-		exit /b 1
-	)
-	where clang++ >nul 2>&1
-	if errorlevel 1 (
-		echo Error: clang++.exe not found on PATH for clang64 toolchain.>&2
-		exit /b 1
-	)
-	set "TOOLCHAIN_CMAKE_ARGS=-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++"
-	where llvm-rc >nul 2>&1
-	if not errorlevel 1 (
-		set "TOOLCHAIN_CMAKE_ARGS=%TOOLCHAIN_CMAKE_ARGS% -DCMAKE_RC_COMPILER=llvm-rc"
+	if /I "%SELECTED_TOOLCHAIN%"=="clangcl" (
+		where clang-cl >nul 2>&1
+		if errorlevel 1 (
+			echo Error: clang-cl.exe not found on PATH for clangcl toolchain.>&2
+			exit /b 1
+		)
+		set "TOOLCHAIN_CMAKE_ARGS=-DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl"
+		where llvm-rc >nul 2>&1
+		if not errorlevel 1 (
+			set "TOOLCHAIN_CMAKE_ARGS=%TOOLCHAIN_CMAKE_ARGS% -DCMAKE_RC_COMPILER=llvm-rc"
+		)
+	) else (
+		where clang >nul 2>&1
+		if errorlevel 1 (
+			echo Error: clang.exe not found on PATH for clang64 toolchain.>&2
+			exit /b 1
+		)
+		where clang++ >nul 2>&1
+		if errorlevel 1 (
+			echo Error: clang++.exe not found on PATH for clang64 toolchain.>&2
+			exit /b 1
+		)
+		set "TOOLCHAIN_CMAKE_ARGS=-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++"
+		where llvm-rc >nul 2>&1
+		if not errorlevel 1 (
+			set "TOOLCHAIN_CMAKE_ARGS=%TOOLCHAIN_CMAKE_ARGS% -DCMAKE_RC_COMPILER=llvm-rc"
+		)
 	)
 )
 
@@ -123,12 +145,21 @@ if defined CMAKE_GENERATOR (
 			set "GENERATOR=Ninja"
 		)
 	) else (
-		where ninja >nul 2>&1
-		if errorlevel 1 (
-			echo Error: ninja is required for clang64 builds. Install it in MSYS2 clang64 environment.>&2
-			exit /b 1
+		if /I "%SELECTED_TOOLCHAIN%"=="clangcl" (
+			where ninja >nul 2>&1
+			if errorlevel 1 (
+				echo Error: ninja is required for clangcl builds. Install Ninja or add it to PATH.>&2
+				exit /b 1
+			)
+			set "GENERATOR=Ninja"
+		) else (
+			where ninja >nul 2>&1
+			if errorlevel 1 (
+				echo Error: ninja is required for clang64 builds. Install it in MSYS2 clang64 environment.>&2
+				exit /b 1
+			)
+			set "GENERATOR=Ninja"
 		)
-		set "GENERATOR=Ninja"
 	)
 )
 

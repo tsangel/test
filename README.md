@@ -68,17 +68,23 @@ cmake --build build
 
 ### Windows `build.bat` toolchain selection
 
-`build.bat` supports both `MSVC` and `MSYS2 clang64` via
+`build.bat` supports `MSVC`, `clang-cl (MSVC runtime)`, and `MSYS2 clang64` via
 `DICOMSDL_WINDOWS_TOOLCHAIN`.
 
 ```cmd
-:: auto (default): prefer MSVC when cl.exe exists, otherwise clang64
+:: auto (default): prefer MSVC when cl.exe exists, then clang-cl, then clang64
 set DICOMSDL_WINDOWS_TOOLCHAIN=auto
 build
 
 :: force MSVC (Developer Command Prompt or vcvarsall.bat environment)
 set DICOMSDL_WINDOWS_TOOLCHAIN=msvc
 set BUILD_DIR=build-msvc
+build
+
+:: force clang-cl (Developer Command Prompt + Ninja)
+set DICOMSDL_WINDOWS_TOOLCHAIN=clangcl
+set CMAKE_GENERATOR=Ninja
+set BUILD_DIR=build-clangcl
 build
 
 :: force MSYS2 clang64 (clang/clang++/ninja on PATH)
@@ -124,6 +130,24 @@ set DICOMSDL_WINDOWS_TOOLCHAIN=clang64
 set BUILD_DIR=build-clang64
 build
 ```
+
+### Visual Studio clang-cl prerequisites
+
+Install Visual Studio C++ workload and clang-cl tools, then run from a
+Developer Command Prompt (`x64 Native Tools Command Prompt`):
+
+```cmd
+where clang-cl
+where cl
+where link
+
+set DICOMSDL_WINDOWS_TOOLCHAIN=clangcl
+set CMAKE_GENERATOR=Ninja
+set BUILD_DIR=build-clangcl
+build
+```
+
+`clangcl` mode uses `clang-cl` as compiler with the MSVC toolchain/runtime.
 
 ### Codec mode overrides (`build.sh` / `build.bat`)
 
