@@ -166,20 +166,59 @@ if defined CMAKE_GENERATOR (
 set "CMAKE_CACHE_FILE=%BUILD_DIR%\CMakeCache.txt"
 if exist "%CMAKE_CACHE_FILE%" (
 	set "EXISTING_GENERATOR="
+	set "EXISTING_C_COMPILER="
+	set "EXISTING_C_COMPILER_NAME="
+	set "EXPECTED_C_COMPILER_NAME="
+	set "MISMATCH_REASON="
 	for /f "tokens=1,* delims==" %%A in ('findstr /B /C:"CMAKE_GENERATOR:INTERNAL=" "%CMAKE_CACHE_FILE%"') do (
 		set "EXISTING_GENERATOR=%%B"
 	)
+	for /f "tokens=1,* delims==" %%A in ('findstr /B /C:"CMAKE_C_COMPILER:FILEPATH=" "%CMAKE_CACHE_FILE%"') do (
+		set "EXISTING_C_COMPILER=%%B"
+	)
+	if defined EXISTING_C_COMPILER (
+		for %%I in ("!EXISTING_C_COMPILER!") do (
+			set "EXISTING_C_COMPILER_NAME=%%~nxI"
+		)
+	)
+	if /I "%SELECTED_TOOLCHAIN%"=="msvc" (
+		set "EXPECTED_C_COMPILER_NAME=cl.exe"
+	) else (
+		if /I "%SELECTED_TOOLCHAIN%"=="clangcl" (
+			set "EXPECTED_C_COMPILER_NAME=clang-cl.exe"
+		) else (
+			set "EXPECTED_C_COMPILER_NAME=clang.exe"
+		)
+	)
 	if defined EXISTING_GENERATOR (
 		if /I not "!EXISTING_GENERATOR!"=="%GENERATOR%" (
-			if "%RESET_CMAKE_CACHE%"=="1" (
-				echo Resetting CMake cache in %BUILD_DIR% to switch generator ^(!EXISTING_GENERATOR! -^> %GENERATOR%^)
-				if exist "%BUILD_DIR%\CMakeCache.txt" del /f /q "%BUILD_DIR%\CMakeCache.txt"
-				if exist "%BUILD_DIR%\CMakeFiles" rmdir /s /q "%BUILD_DIR%\CMakeFiles"
-			) else (
-				echo Error: %BUILD_DIR% was configured with generator '!EXISTING_GENERATOR!', but requested '%GENERATOR%'.>&2
-				echo        Set RESET_CMAKE_CACHE=1 to remove CMakeCache.txt/CMakeFiles automatically.>&2
-				exit /b 1
+			set "MISMATCH_REASON=generator"
+		)
+	)
+	if not defined MISMATCH_REASON (
+		if defined EXISTING_C_COMPILER_NAME (
+			if /I not "!EXISTING_C_COMPILER_NAME!"=="!EXPECTED_C_COMPILER_NAME!" (
+				set "MISMATCH_REASON=compiler"
 			)
+		)
+	)
+	if defined MISMATCH_REASON (
+		if "%RESET_CMAKE_CACHE%"=="1" (
+			if /I "!MISMATCH_REASON!"=="generator" (
+				echo Resetting CMake cache in %BUILD_DIR% to switch generator ^(!EXISTING_GENERATOR! -^> %GENERATOR%^)
+			) else (
+				echo Resetting CMake cache in %BUILD_DIR% to switch compiler ^(!EXISTING_C_COMPILER_NAME! -^> !EXPECTED_C_COMPILER_NAME!^)
+			)
+			if exist "%BUILD_DIR%\CMakeCache.txt" del /f /q "%BUILD_DIR%\CMakeCache.txt"
+			if exist "%BUILD_DIR%\CMakeFiles" rmdir /s /q "%BUILD_DIR%\CMakeFiles"
+		) else (
+			if /I "!MISMATCH_REASON!"=="generator" (
+				echo Error: %BUILD_DIR% was configured with generator '!EXISTING_GENERATOR!', but requested '%GENERATOR%'.>&2
+			) else (
+				echo Error: %BUILD_DIR% was configured with C compiler '!EXISTING_C_COMPILER_NAME!', but requested '!EXPECTED_C_COMPILER_NAME!'.>&2
+			)
+			echo        Set RESET_CMAKE_CACHE=1 to remove CMakeCache.txt/CMakeFiles automatically.>&2
+			exit /b 1
 		)
 	)
 )
