@@ -117,18 +117,18 @@ if /I "%SELECTED_TOOLCHAIN%"=="msvc" (
 			echo Error: clang-cl.exe not found on PATH for clangcl toolchain.>&2
 			exit /b 1
 		)
-		set TOOLCHAIN_CMAKE_ARGS=-DCMAKE_C_COMPILER:FILEPATH="%CLANGCL_COMPILER_PATH%" -DCMAKE_CXX_COMPILER:FILEPATH="%CLANGCL_COMPILER_PATH%"
+		set TOOLCHAIN_CMAKE_ARGS=-DCMAKE_C_COMPILER:FILEPATH="!CLANGCL_COMPILER_PATH!" -DCMAKE_CXX_COMPILER:FILEPATH="!CLANGCL_COMPILER_PATH!"
 		where llvm-rc >nul 2>&1
 		if not errorlevel 1 (
 			set "LLVM_RC_COMPILER_PATH="
 			for /f "delims=" %%I in ('where llvm-rc') do (
 				if not defined LLVM_RC_COMPILER_PATH set "LLVM_RC_COMPILER_PATH=%%~fI"
 			)
-			if defined LLVM_RC_COMPILER_PATH set TOOLCHAIN_CMAKE_ARGS=%TOOLCHAIN_CMAKE_ARGS% -DCMAKE_RC_COMPILER:FILEPATH="%LLVM_RC_COMPILER_PATH%"
+			if defined LLVM_RC_COMPILER_PATH set TOOLCHAIN_CMAKE_ARGS=!TOOLCHAIN_CMAKE_ARGS! -DCMAKE_RC_COMPILER:FILEPATH="!LLVM_RC_COMPILER_PATH!"
 		)
 		set "EXPECTED_C_COMPILER_NAME=clang-cl.exe"
-		set "CC=%CLANGCL_COMPILER_PATH%"
-		set "CXX=%CLANGCL_COMPILER_PATH%"
+		set "CC=!CLANGCL_COMPILER_PATH!"
+		set "CXX=!CLANGCL_COMPILER_PATH!"
 	) else (
 		set "CLANG_COMPILER_PATH="
 		for /f "delims=" %%I in ('where clang') do (
@@ -146,18 +146,18 @@ if /I "%SELECTED_TOOLCHAIN%"=="msvc" (
 			echo Error: clang++.exe not found on PATH for clang64 toolchain.>&2
 			exit /b 1
 		)
-		set TOOLCHAIN_CMAKE_ARGS=-DCMAKE_C_COMPILER:FILEPATH="%CLANG_COMPILER_PATH%" -DCMAKE_CXX_COMPILER:FILEPATH="%CLANGXX_COMPILER_PATH%"
+		set TOOLCHAIN_CMAKE_ARGS=-DCMAKE_C_COMPILER:FILEPATH="!CLANG_COMPILER_PATH!" -DCMAKE_CXX_COMPILER:FILEPATH="!CLANGXX_COMPILER_PATH!"
 		where llvm-rc >nul 2>&1
 		if not errorlevel 1 (
 			set "LLVM_RC_COMPILER_PATH="
 			for /f "delims=" %%I in ('where llvm-rc') do (
 				if not defined LLVM_RC_COMPILER_PATH set "LLVM_RC_COMPILER_PATH=%%~fI"
 			)
-			if defined LLVM_RC_COMPILER_PATH set TOOLCHAIN_CMAKE_ARGS=%TOOLCHAIN_CMAKE_ARGS% -DCMAKE_RC_COMPILER:FILEPATH="%LLVM_RC_COMPILER_PATH%"
+			if defined LLVM_RC_COMPILER_PATH set TOOLCHAIN_CMAKE_ARGS=!TOOLCHAIN_CMAKE_ARGS! -DCMAKE_RC_COMPILER:FILEPATH="!LLVM_RC_COMPILER_PATH!"
 		)
 		set "EXPECTED_C_COMPILER_NAME=clang.exe"
-		set "CC=%CLANG_COMPILER_PATH%"
-		set "CXX=%CLANGXX_COMPILER_PATH%"
+		set "CC=!CLANG_COMPILER_PATH!"
+		set "CXX=!CLANGXX_COMPILER_PATH!"
 	)
 )
 
@@ -199,7 +199,7 @@ if exist "%CMAKE_CACHE_FILE%" (
 	for /f "tokens=1,* delims==" %%A in ('findstr /B /C:"CMAKE_GENERATOR:INTERNAL=" "%CMAKE_CACHE_FILE%"') do (
 		set "EXISTING_GENERATOR=%%B"
 	)
-	for /f "tokens=1,* delims==" %%A in ('findstr /B /C:"CMAKE_C_COMPILER:FILEPATH=" "%CMAKE_CACHE_FILE%"') do (
+	for /f "tokens=1,* delims==" %%A in ('findstr /B /C:"CMAKE_C_COMPILER:" "%CMAKE_CACHE_FILE%"') do (
 		set "EXISTING_C_COMPILER=%%B"
 	)
 	if defined EXISTING_C_COMPILER (
@@ -249,7 +249,7 @@ if errorlevel 1 exit /b %errorlevel%
 
 set "CONFIGURED_C_COMPILER="
 set "CONFIGURED_C_COMPILER_NAME="
-for /f "tokens=1,* delims==" %%A in ('findstr /B /C:"CMAKE_C_COMPILER:FILEPATH=" "%CMAKE_CACHE_FILE%"') do (
+for /f "tokens=1,* delims==" %%A in ('findstr /B /C:"CMAKE_C_COMPILER:" "%CMAKE_CACHE_FILE%"') do (
 	set "CONFIGURED_C_COMPILER=%%B"
 )
 if defined CONFIGURED_C_COMPILER (
