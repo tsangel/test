@@ -14,6 +14,8 @@
 #include <exception>
 #include <limits>
 #include <new>
+#include <optional>
+#include <span>
 #include <vector>
 
 #include "internal.hpp"
@@ -68,6 +70,84 @@ int pixel_format_for_samples(std::size_t samples_per_pixel) {
   default:
     return TJPF_UNKNOWN;
   }
+}
+
+std::optional<std::size_t> find_sequential_sos_se_patch_offset(
+    std::span<const std::uint8_t> codestream) {
+  // Accept non-standard SOF1+SOS(Se=0) streams seen in the field by patching
+  // Se to 63 before libjpeg-turbo decode.
+  if (codestream.size() < 4 || codestream[0] != 0xFF || codestream[1] != 0xD8) {
+    return std::nullopt;
+  }
+
+  std::size_t i = 2;
+  bool saw_sof1 = false;
+  while (i + 1 < codestream.size()) {
+    if (codestream[i] != 0xFF) {
+      return std::nullopt;
+    }
+
+    std::size_t marker_index = i + 1;
+    while (marker_index < codestream.size() && codestream[marker_index] == 0xFF) {
+      ++marker_index;
+    }
+    if (marker_index >= codestream.size()) {
+      return std::nullopt;
+    }
+
+    const auto marker = codestream[marker_index];
+    i = marker_index + 1;
+
+    if (marker == 0xD9) {
+      return std::nullopt;
+    }
+    if (marker == 0x01 || (marker >= 0xD0 && marker <= 0xD7)) {
+      continue;
+    }
+    if (i + 1 >= codestream.size()) {
+      return std::nullopt;
+    }
+
+    const std::size_t segment_length =
+        (static_cast<std::size_t>(codestream[i]) << 8) |
+        static_cast<std::size_t>(codestream[i + 1]);
+    if (segment_length < 2 || i + segment_length > codestream.size()) {
+      return std::nullopt;
+    }
+
+    if (marker == 0xC1) {
+      saw_sof1 = true;
+    } else if (marker == 0xDA) {
+      if (!saw_sof1) {
+        return std::nullopt;
+      }
+
+      const std::size_t payload_offset = i + 2;
+      const std::size_t payload_length = segment_length - 2;
+      if (payload_length < 4) {
+        return std::nullopt;
+      }
+
+      const auto component_count = static_cast<std::size_t>(codestream[payload_offset]);
+      const std::size_t required_length = 1 + 2 * component_count + 3;
+      if (payload_length < required_length) {
+        return std::nullopt;
+      }
+
+      const std::size_t ss_offset = payload_offset + 1 + 2 * component_count;
+      const std::size_t se_offset = ss_offset + 1;
+      const std::size_t ahal_offset = ss_offset + 2;
+      if (codestream[ss_offset] == 0x00 && codestream[se_offset] == 0x00 &&
+          codestream[ahal_offset] == 0x00) {
+        return se_offset;
+      }
+      return std::nullopt;
+    }
+
+    i += segment_length;
+  }
+
+  return std::nullopt;
 }
 
 pixel_error_code_v2 validate_decoder_request(
@@ -436,9 +516,21 @@ pixel_error_code_v2 decoder_decode_frame(
           "failed to initialize libjpeg-turbo decompressor");
     }
 
+    const auto frame_source = std::span<const std::uint8_t>(
+        request->source.source_buffer.data,
+        static_cast<std::size_t>(request->source.source_buffer.size));
+    std::span<const std::uint8_t> decode_source = frame_source;
+    std::vector<std::uint8_t> patched_source{};
+    if (const auto se_patch_offset =
+            find_sequential_sos_se_patch_offset(frame_source)) {
+      patched_source.assign(frame_source.begin(), frame_source.end());
+      patched_source[*se_patch_offset] = 0x3F;
+      decode_source = std::span<const std::uint8_t>(
+          patched_source.data(), patched_source.size());
+    }
+
     if (tj3DecompressHeader(
-            handle.get(), request->source.source_buffer.data,
-            static_cast<std::size_t>(request->source.source_buffer.size)) != 0) {
+            handle.get(), decode_source.data(), decode_source.size()) != 0) {
       const char* msg = tj3GetErrorStr(handle.get());
       return fail_detail(c, PIXEL_CODEC_ERR_FAILED, "decode_frame",
           (msg != nullptr && msg[0] != '\0') ? msg : "JPEG header decode failed");
@@ -532,8 +624,8 @@ pixel_error_code_v2 decoder_decode_frame(
             "decoded frame byte size overflow");
       }
       decoded_bytes.resize(static_cast<std::size_t>(decoded_total_bytes_u64));
-      if (tj3Decompress8(handle.get(), request->source.source_buffer.data,
-              static_cast<std::size_t>(request->source.source_buffer.size),
+      if (tj3Decompress8(handle.get(), decode_source.data(),
+              decode_source.size(),
               decoded_bytes.data(), destination_pitch_samples, pixel_format) != 0) {
         const char* msg = tj3GetErrorStr(handle.get());
         return fail_detail(c, PIXEL_CODEC_ERR_FAILED, "decode_frame",
@@ -546,8 +638,8 @@ pixel_error_code_v2 decoder_decode_frame(
             "decoded frame sample count overflow");
       }
       decoded_u16.resize(static_cast<std::size_t>(decoded_total_samples_u64));
-      if (tj3Decompress12(handle.get(), request->source.source_buffer.data,
-              static_cast<std::size_t>(request->source.source_buffer.size),
+      if (tj3Decompress12(handle.get(), decode_source.data(),
+              decode_source.size(),
               reinterpret_cast<short*>(decoded_u16.data()),
               destination_pitch_samples, pixel_format) != 0) {
         const char* msg = tj3GetErrorStr(handle.get());
@@ -563,8 +655,8 @@ pixel_error_code_v2 decoder_decode_frame(
             "decoded frame sample count overflow");
       }
       decoded_u16.resize(static_cast<std::size_t>(decoded_total_samples_u64));
-      if (tj3Decompress16(handle.get(), request->source.source_buffer.data,
-              static_cast<std::size_t>(request->source.source_buffer.size),
+      if (tj3Decompress16(handle.get(), decode_source.data(),
+              decode_source.size(),
               reinterpret_cast<unsigned short*>(decoded_u16.data()),
               destination_pitch_samples, pixel_format) != 0) {
         const char* msg = tj3GetErrorStr(handle.get());

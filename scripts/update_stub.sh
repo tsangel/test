@@ -80,7 +80,7 @@ fi
 
 STUBGEN_SCRIPT="${NANOBIND_STUBGEN_SCRIPT:-}"
 if [[ -z "$STUBGEN_SCRIPT" ]]; then
-	# Support both legacy submodule layout and FetchContent layout.
+	# Support both older submodule layout and FetchContent layout.
 	for candidate in \
 		"${ROOT_DIR}/extern/nanobind/src/stubgen.py" \
 		"${BUILD_DIR}/_deps/dicomsdl_nanobind-src/src/stubgen.py"; do

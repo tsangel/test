@@ -27,8 +27,8 @@
 #include "specific_character_set_registry.hpp"
 #include "version.h"
 #include "uid_lookup_detail.hpp"
-#include "pixel_decoder_plugin_abi.h"
-#include "pixel_encoder_plugin_abi.h"
+#include "pixel_decoder_plugin_abi_v2.h"
+#include "pixel_encoder_plugin_abi_v2.h"
 
 namespace dicom {
 
@@ -284,7 +284,7 @@ inline std::optional<Generated> make_generated(std::string_view value) {
 	return uid;
 }
 
-// Legacy DICOMSDL implementation UID metadata reused for file-meta generation.
+// Historical DICOMSDL implementation UID metadata reused for file-meta generation.
 inline constexpr std::string_view kUidPrefix = "1.3.6.1.4.1.56559";
 inline constexpr std::string_view kImplementationClassUid = "1.3.6.1.4.1.56559.1";
 inline constexpr std::string_view kImplementationVersionName = "DICOMSDL 2026FEB";
@@ -1145,11 +1145,11 @@ void decode_frame_into(const DicomFile& df, std::size_t frame_index,
 
 /// Register an external decoder plugin API without dynamic loading (static registrar path).
 [[nodiscard]] bool register_external_decoder_plugin_static(
-    const dicomsdl_decoder_plugin_api_v1* api, std::string* out_error = nullptr);
+    const pixel_decoder_plugin_api_v2* api, std::string* out_error = nullptr);
 
 /// Register an external encoder plugin API without dynamic loading (static registrar path).
 [[nodiscard]] bool register_external_encoder_plugin_static(
-    const dicomsdl_encoder_plugin_api_v1* api, std::string* out_error = nullptr);
+    const pixel_encoder_plugin_api_v2* api, std::string* out_error = nullptr);
 
 /// Unregister previously registered external plugin bridge and restore original dispatch.
 [[nodiscard]] bool unregister_external_codec_plugin(

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "pixel/registry/codec_registry.hpp"
+#include "dicom.h"
 
 #include <cstddef>
 #include <span>

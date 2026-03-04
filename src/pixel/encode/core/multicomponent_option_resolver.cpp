@@ -29,7 +29,7 @@ struct BoolOptionLookupResult {
 }
 
 [[nodiscard]] bool try_decode_codec_bool_option(
-    const codec_option_value& value, bool& out_value) noexcept {
+    const pixel::CodecOptionValue& value, bool& out_value) noexcept {
 	if (const auto* bool_value = std::get_if<bool>(&value)) {
 		out_value = *bool_value;
 		return true;

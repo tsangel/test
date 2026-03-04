@@ -4,22 +4,22 @@
 #include "core_api_v2.hpp"
 #include "plugin_registry_v2.hpp"
 
-#if defined(DICOMSDL_PIXEL_V2_RUNTIME_WITH_RLE_STATIC)
+#if defined(DICOMSDL_PIXEL_RUNTIME_WITH_RLE_STATIC)
 #include "../plugins/static/rle_v2/static_api.hpp"
 #endif
-#if defined(DICOMSDL_PIXEL_V2_RUNTIME_WITH_OPENJPEG_STATIC)
+#if defined(DICOMSDL_PIXEL_RUNTIME_WITH_OPENJPEG_STATIC)
 #include "../plugins/shared/openjpeg_v2/static_api.hpp"
 #endif
-#if defined(DICOMSDL_PIXEL_V2_RUNTIME_WITH_JPEG_STATIC)
+#if defined(DICOMSDL_PIXEL_RUNTIME_WITH_JPEG_STATIC)
 #include "../plugins/shared/jpeg_v2/static_api.hpp"
 #endif
-#if defined(DICOMSDL_PIXEL_V2_RUNTIME_WITH_JPEGLS_STATIC)
+#if defined(DICOMSDL_PIXEL_RUNTIME_WITH_JPEGLS_STATIC)
 #include "../plugins/shared/jpegls_v2/static_api.hpp"
 #endif
-#if defined(DICOMSDL_PIXEL_V2_RUNTIME_WITH_HTJ2K_STATIC)
+#if defined(DICOMSDL_PIXEL_RUNTIME_WITH_HTJ2K_STATIC)
 #include "../plugins/shared/htj2k_v2/static_api.hpp"
 #endif
-#if defined(DICOMSDL_PIXEL_V2_RUNTIME_WITH_JPEGXL_STATIC)
+#if defined(DICOMSDL_PIXEL_RUNTIME_WITH_JPEGXL_STATIC)
 #include "../plugins/shared/jpegxl_v2/static_api.hpp"
 #endif
 
@@ -181,7 +181,7 @@ void init_builtin_registry_v2(PluginRegistryV2* registry) {
   registry->clear();
   registry->register_core_routes(pixel::core_v2::supported_profile_flags(), "core");
 
-#if defined(DICOMSDL_PIXEL_V2_RUNTIME_WITH_RLE_STATIC)
+#if defined(DICOMSDL_PIXEL_RUNTIME_WITH_RLE_STATIC)
   {
     const auto& decoder_api = pixel::rle_plugin_v2::decoder_static_api();
     const auto& encoder_api = pixel::rle_plugin_v2::encoder_static_api();
@@ -189,7 +189,7 @@ void init_builtin_registry_v2(PluginRegistryV2* registry) {
     registry->register_encoder_api(&encoder_api);
   }
 #endif
-#if defined(DICOMSDL_PIXEL_V2_RUNTIME_WITH_JPEG_STATIC)
+#if defined(DICOMSDL_PIXEL_RUNTIME_WITH_JPEG_STATIC)
   {
     const auto& decoder_api = pixel::jpeg_plugin_v2::decoder_static_api();
     const auto& encoder_api = pixel::jpeg_plugin_v2::encoder_static_api();
@@ -197,7 +197,7 @@ void init_builtin_registry_v2(PluginRegistryV2* registry) {
     registry->register_encoder_api(&encoder_api);
   }
 #endif
-#if defined(DICOMSDL_PIXEL_V2_RUNTIME_WITH_JPEGLS_STATIC)
+#if defined(DICOMSDL_PIXEL_RUNTIME_WITH_JPEGLS_STATIC)
   {
     const auto& decoder_api = pixel::jpegls_plugin_v2::decoder_static_api();
     const auto& encoder_api = pixel::jpegls_plugin_v2::encoder_static_api();
@@ -205,7 +205,7 @@ void init_builtin_registry_v2(PluginRegistryV2* registry) {
     registry->register_encoder_api(&encoder_api);
   }
 #endif
-#if defined(DICOMSDL_PIXEL_V2_RUNTIME_WITH_HTJ2K_STATIC)
+#if defined(DICOMSDL_PIXEL_RUNTIME_WITH_HTJ2K_STATIC)
   {
     const auto& decoder_api = pixel::htj2k_plugin_v2::decoder_static_api();
     const auto& encoder_api = pixel::htj2k_plugin_v2::encoder_static_api();
@@ -213,7 +213,7 @@ void init_builtin_registry_v2(PluginRegistryV2* registry) {
     registry->register_encoder_api(&encoder_api);
   }
 #endif
-#if defined(DICOMSDL_PIXEL_V2_RUNTIME_WITH_OPENJPEG_STATIC)
+#if defined(DICOMSDL_PIXEL_RUNTIME_WITH_OPENJPEG_STATIC)
   {
     const auto& decoder_api = pixel::openjpeg_plugin_v2::decoder_static_api();
     const auto& encoder_api = pixel::openjpeg_plugin_v2::encoder_static_api();
@@ -221,7 +221,7 @@ void init_builtin_registry_v2(PluginRegistryV2* registry) {
     registry->register_encoder_api(&encoder_api);
   }
 #endif
-#if defined(DICOMSDL_PIXEL_V2_RUNTIME_WITH_JPEGXL_STATIC)
+#if defined(DICOMSDL_PIXEL_RUNTIME_WITH_JPEGXL_STATIC)
   {
     const auto& decoder_api = pixel::jpegxl_plugin_v2::decoder_static_api();
     const auto& encoder_api = pixel::jpegxl_plugin_v2::encoder_static_api();

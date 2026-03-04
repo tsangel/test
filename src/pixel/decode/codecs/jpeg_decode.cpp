@@ -145,7 +145,7 @@ void validate_destination(std::span<std::uint8_t> dst,
 
 std::optional<std::size_t> find_sequential_sos_se_patch_offset(
     std::span<const std::uint8_t> codestream) {
-	// Some legacy DICOM JPEG Extended codestreams use SOF1 with SOS Se=0.
+	// Some DICOM JPEG Extended codestreams use SOF1 with SOS Se=0.
 	// Libjpeg-turbo rejects these as invalid sequential JPEG, while other
 	// medical stacks often decode them by treating Se as 63.
 	if (codestream.size() < 4 || codestream[0] != 0xFF || codestream[1] != 0xD8) {

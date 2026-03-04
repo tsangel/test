@@ -1,6 +1,6 @@
 #pragma once
 
-#include "pixel/registry/codec_registry.hpp"
+#include "dicom.h"
 
 #include <optional>
 #include <string_view>
@@ -29,7 +29,7 @@ struct PixelEncodeTarget {
 };
 
 [[nodiscard]] PixelEncodeTarget classify_pixel_encode_target(
-    const TransferSyntaxPluginBinding& binding) noexcept;
+    uid::WellKnown transfer_syntax) noexcept;
 
 void validate_target_source_constraints(const PixelEncodeTarget& target,
     int bits_allocated, int bits_stored, std::string_view file_path);

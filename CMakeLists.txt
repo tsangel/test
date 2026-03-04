@@ -136,47 +136,20 @@ add_library(dicomsdl STATIC
 	src/instream.cpp
 	src/pixelsequence.cpp
 	src/pixel/registry/codec_registry.cpp
-	src/pixel/bridge/codec_dispatch_bridge.cpp
-	src/pixel/bridge/codec_option_bridge.cpp
-	src/pixel/plugin_abi/external/plugin_external_bridge.cpp
-	src/pixel/plugin_abi/builtin/jpeg2k_builtin_plugin.cpp
-	src/pixel/plugin_abi/builtin/htj2k_builtin_plugin.cpp
-	src/pixel/plugin_abi/builtin/jpegls_builtin_plugin.cpp
-	src/pixel/plugin_abi/builtin/jpegxl_builtin_plugin.cpp
-	src/pixel/plugin_abi/external/plugin_loader.cpp
-	src/pixel/plugin_abi/builtin/jpeg_builtin_plugin.cpp
-	src/pixel/plugin_abi/builtin/rle_builtin_plugin.cpp
+	src/pixel/external_plugin.cpp
 	src/pixel/entrypoint/decode_entrypoint.cpp
 	src/pixel/decode/core/decode_entrypoint_runner.cpp
 	src/pixel/decode/core/decode_modality_transform.cpp
 	src/pixel/decode/core/decode_frame_dispatch.cpp
-	src/pixel/decode/core/decode_frame_source_resolver.cpp
-	src/pixel/decode/core/decode_plugin_dispatch.cpp
 	src/pixel/decode/core/decode_frame_source_loader.cpp
 	src/pixel/decode/core/decode_planar_copy.cpp
-	src/pixel/decode/codecs/raw_decode.cpp
-	src/pixel/decode/codecs/encapsulated_uncompressed_decode.cpp
 	src/pixel/entrypoint/encode_entrypoint.cpp
-	src/pixel/encode/core/encode_context_resolver.cpp
-	src/pixel/encode/core/encode_set_pixel_data_resolver.cpp
-	src/pixel/encode/core/encode_binding_resolver.cpp
 	src/pixel/encode/core/encode_set_pixel_data_runner.cpp
 	src/pixel/encode/core/encode_source_layout_resolver.cpp
 	src/pixel/encode/core/encode_target_resolver.cpp
 	src/pixel/encode/core/native_pixel_copy.cpp
 	src/pixel/encode/core/multicomponent_option_resolver.cpp
 	src/pixel/encode/core/encode_metadata_updater.cpp
-	src/pixel/encode/codecs/encapsulated_encode.cpp
-	src/pixel/encode/codecs/jpeg2k_encode.cpp
-	src/pixel/encode/codecs/htj2k_encode.cpp
-	src/pixel/encode/codecs/jpegls_encode.cpp
-	src/pixel/encode/codecs/jpeg_encode.cpp
-	src/pixel/encode/codecs/jpegxl_encode.cpp
-	src/pixel/decode/codecs/jpeg2k_decode.cpp
-	src/pixel/decode/codecs/htj2k_decode.cpp
-	src/pixel/decode/codecs/jpegls_decode.cpp
-	src/pixel/decode/codecs/jpegxl_decode.cpp
-	src/pixel/decode/codecs/jpeg_decode.cpp
 	)
 set_target_properties(dicomsdl PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(dicomsdl PROPERTIES
@@ -188,6 +161,7 @@ target_include_directories(dicomsdl
 	PUBLIC
 		${DICOM_INCLUDE_DIR}
 		${GENERATED_INCLUDE_DIR}
+		${CMAKE_CURRENT_SOURCE_DIR}/src/pixel_/abi
 	PRIVATE
 		${CMAKE_CURRENT_SOURCE_DIR}/src
 )
@@ -204,51 +178,51 @@ option(DICOMSDL_ENABLE_OPENJPH "Enable OpenJPH backend for HTJ2K decoding" ON)
 option(DICOMSDL_ENABLE_JPEGXL "Enable JPEG XL backend dependencies (libjxl) for codec development" OFF)
 
 option(DICOMSDL_CODEC_JPEG_BUILTIN
-	"Enable builtin JPEG codec dispatch in CodecRegistry." ON)
+	"Enable static runtime JPEG plugin." ON)
 option(DICOMSDL_CODEC_JPEG_SHARED
-	"Build external shared JPEG codec plugin bridge target." OFF)
+	"Build runtime JPEG shared plugin target." OFF)
 option(DICOMSDL_CODEC_JPEGLS_BUILTIN
-	"Enable builtin JPEG-LS codec dispatch in CodecRegistry." ON)
+	"Enable static runtime JPEG-LS plugin." ON)
 option(DICOMSDL_CODEC_JPEGLS_SHARED
-	"Build external shared JPEG-LS codec plugin bridge target." OFF)
+	"Build runtime JPEG-LS shared plugin target." OFF)
 option(DICOMSDL_CODEC_JPEG2K_BUILTIN
-	"Enable builtin JPEG2000 codec dispatch in CodecRegistry." ON)
+	"Enable static runtime JPEG2000 plugin." ON)
 option(DICOMSDL_CODEC_JPEG2K_SHARED
-	"Build external shared JPEG2000 codec plugin bridge target." OFF)
+	"Build runtime JPEG2000 shared plugin target." OFF)
 option(DICOMSDL_CODEC_HTJ2K_BUILTIN
-	"Enable builtin HTJ2K codec dispatch in CodecRegistry." ON)
+	"Enable static runtime HTJ2K plugin." ON)
 option(DICOMSDL_CODEC_HTJ2K_SHARED
-	"Build external shared HTJ2K codec plugin bridge target." OFF)
+	"Build runtime HTJ2K shared plugin target." OFF)
 option(DICOMSDL_CODEC_JPEGXL_BUILTIN
-	"Enable builtin JPEG XL codec dispatch in CodecRegistry." ON)
+	"Enable static runtime JPEG XL plugin." ON)
 option(DICOMSDL_CODEC_JPEGXL_SHARED
-	"Build external shared JPEG XL codec plugin bridge target." OFF)
-option(DICOMSDL_PIXEL_V2_HTJ2K_PLUGIN
-	"Build src/pixel_ v2 HTJ2K DLL plugin target." OFF)
-option(DICOMSDL_PIXEL_V2_JPEGLS_PLUGIN
-	"Build src/pixel_ v2 JPEG-LS DLL plugin target." OFF)
-option(DICOMSDL_PIXEL_V2_OPENJPEG_PLUGIN
-	"Build src/pixel_ v2 OpenJPEG DLL plugin skeleton target." OFF)
-option(DICOMSDL_PIXEL_V2_OPENJPEG_STATIC_PLUGIN
-	"Build src/pixel_ v2 OpenJPEG static plugin target." ON)
-option(DICOMSDL_PIXEL_V2_JPEGXL_PLUGIN
-	"Build src/pixel_ v2 JPEG-XL DLL plugin target." OFF)
-option(DICOMSDL_PIXEL_V2_JPEGXL_STATIC_PLUGIN
-	"Build src/pixel_ v2 JPEG-XL static plugin target." ${DICOMSDL_ENABLE_JPEGXL})
-option(DICOMSDL_PIXEL_V2_JPEG_PLUGIN
-	"Build src/pixel_ v2 JPEG DLL plugin target." OFF)
-option(DICOMSDL_PIXEL_V2_JPEG_STATIC_PLUGIN
-	"Build src/pixel_ v2 JPEG static plugin target." ON)
-option(DICOMSDL_PIXEL_V2_JPEGLS_STATIC_PLUGIN
-	"Build src/pixel_ v2 JPEG-LS static plugin target." ON)
-option(DICOMSDL_PIXEL_V2_HTJ2K_STATIC_PLUGIN
-	"Build src/pixel_ v2 HTJ2K static plugin target." ${DICOMSDL_ENABLE_OPENJPH})
-option(DICOMSDL_PIXEL_V2_CORE
-	"Build src/pixel_ v2 core uncompressed helpers." ON)
-option(DICOMSDL_PIXEL_V2_RLE_STATIC_PLUGIN
-	"Build src/pixel_ v2 static RLE plugin target." ON)
-option(DICOMSDL_PIXEL_V2_RUNTIME
-	"Build src/pixel_ v2 runtime registry target." ON)
+	"Build runtime JPEG XL shared plugin target." OFF)
+option(DICOMSDL_PIXEL_HTJ2K_PLUGIN
+	"Build src/pixel_ HTJ2K shared plugin target." OFF)
+option(DICOMSDL_PIXEL_JPEGLS_PLUGIN
+	"Build src/pixel_ JPEG-LS shared plugin target." OFF)
+option(DICOMSDL_PIXEL_OPENJPEG_PLUGIN
+	"Build src/pixel_ OpenJPEG shared plugin target." OFF)
+option(DICOMSDL_PIXEL_OPENJPEG_STATIC_PLUGIN
+	"Build src/pixel_ OpenJPEG static plugin target." ON)
+option(DICOMSDL_PIXEL_JPEGXL_PLUGIN
+	"Build src/pixel_ JPEG-XL shared plugin target." OFF)
+option(DICOMSDL_PIXEL_JPEGXL_STATIC_PLUGIN
+	"Build src/pixel_ JPEG-XL static plugin target." ${DICOMSDL_ENABLE_JPEGXL})
+option(DICOMSDL_PIXEL_JPEG_PLUGIN
+	"Build src/pixel_ JPEG shared plugin target." OFF)
+option(DICOMSDL_PIXEL_JPEG_STATIC_PLUGIN
+	"Build src/pixel_ JPEG static plugin target." ON)
+option(DICOMSDL_PIXEL_JPEGLS_STATIC_PLUGIN
+	"Build src/pixel_ JPEG-LS static plugin target." ON)
+option(DICOMSDL_PIXEL_HTJ2K_STATIC_PLUGIN
+	"Build src/pixel_ HTJ2K static plugin target." ${DICOMSDL_ENABLE_OPENJPH})
+option(DICOMSDL_PIXEL_CORE
+	"Build src/pixel_ core uncompressed helpers." ON)
+option(DICOMSDL_PIXEL_RLE_STATIC_PLUGIN
+	"Build src/pixel_ static RLE plugin target." ON)
+option(DICOMSDL_PIXEL_RUNTIME
+	"Build src/pixel_ runtime registry target." ON)
 
 macro(dicomsdl_resolve_codec_mode CODEC_UPPER CODEC_LABEL)
 	if(DICOMSDL_CODEC_${CODEC_UPPER}_BUILTIN AND DICOMSDL_CODEC_${CODEC_UPPER}_SHARED)
@@ -275,11 +249,11 @@ dicomsdl_resolve_codec_mode(JPEG2K "jpeg2k")
 dicomsdl_resolve_codec_mode(HTJ2K "htj2k")
 dicomsdl_resolve_codec_mode(JPEGXL "jpegxl")
 
-set(_dicomsdl_any_codec_shared OFF)
 foreach(_dicomsdl_codec IN ITEMS JPEG JPEGLS JPEG2K HTJ2K JPEGXL)
 	if(DICOMSDL_CODEC_${_dicomsdl_codec}_SHARED)
-		set(_dicomsdl_any_codec_shared ON)
-		break()
+		message(WARNING
+			"DICOMSDL_CODEC_${_dicomsdl_codec}_SHARED uses a removed plugin ABI path and is ignored. "
+			"Use DICOMSDL_PIXEL_*_PLUGIN options instead.")
 	endif()
 endforeach()
 unset(_dicomsdl_codec)
@@ -392,7 +366,7 @@ FetchContent_Declare(dicomsdl_libdeflate
 )
 FetchContent_MakeAvailable(dicomsdl_libdeflate)
 
-if(DICOMSDL_ENABLE_OPENJPH OR DICOMSDL_PIXEL_V2_HTJ2K_PLUGIN)
+if(DICOMSDL_ENABLE_OPENJPH OR DICOMSDL_PIXEL_HTJ2K_PLUGIN)
 	if(DEFINED BUILD_SHARED_LIBS)
 		set(_dicomsdl_openjph_build_shared_libs_defined TRUE)
 		set(_dicomsdl_openjph_build_shared_libs "${BUILD_SHARED_LIBS}")
@@ -449,7 +423,7 @@ if(DICOMSDL_ENABLE_OPENJPH OR DICOMSDL_PIXEL_V2_HTJ2K_PLUGIN)
 	unset(_dicomsdl_openjph_build_shared_libs_cache_defined)
 endif()
 
-if(DICOMSDL_ENABLE_JPEGXL OR DICOMSDL_PIXEL_V2_JPEGXL_PLUGIN)
+if(DICOMSDL_ENABLE_JPEGXL OR DICOMSDL_PIXEL_JPEGXL_PLUGIN)
 	if(DEFINED BUILD_SHARED_LIBS)
 		set(_dicomsdl_jpegxl_build_shared_libs_defined TRUE)
 		set(_dicomsdl_jpegxl_build_shared_libs "${BUILD_SHARED_LIBS}")
@@ -714,214 +688,45 @@ else()
 endif()
 target_compile_features(dicomsdl PUBLIC cxx_std_20)
 
-if(_dicomsdl_any_codec_shared)
-	add_library(dicomsdl_codec_runtime SHARED
-		src/diagnostics.cpp
-		src/instream.cpp
-		src/pixel/bridge/codec_option_bridge.cpp
-		src/pixel/decode/core/decode_plugin_runtime_support.cpp
-		src/pixel/decode/core/decode_planar_copy.cpp
-	)
-	target_include_directories(dicomsdl_codec_runtime
-		PUBLIC
-			${DICOM_INCLUDE_DIR}
-			${GENERATED_INCLUDE_DIR}
-		PRIVATE
-			${CMAKE_CURRENT_SOURCE_DIR}/src
-			${dicomsdl_openjpeg_SOURCE_DIR}/src/lib/openjp2
-			${dicomsdl_openjpeg_BINARY_DIR}/src/lib/openjp2
-			${dicomsdl_libjpeg_turbo_SOURCE_DIR}/src
-			${dicomsdl_libjpeg_turbo_BINARY_DIR}
-	)
-	set_target_properties(dicomsdl_codec_runtime PROPERTIES
-		ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-		LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-		RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-		OUTPUT_NAME "dicomsdl_codec_runtime"
-	)
-	if(APPLE)
-		set_target_properties(dicomsdl_codec_runtime PROPERTIES
-			BUILD_RPATH "@loader_path"
-			INSTALL_RPATH "@loader_path"
-		)
-	elseif(UNIX)
-		set_target_properties(dicomsdl_codec_runtime PROPERTIES
-			BUILD_RPATH "\$ORIGIN"
-			INSTALL_RPATH "\$ORIGIN"
-		)
-	endif()
-	target_compile_features(dicomsdl_codec_runtime PUBLIC cxx_std_20)
-	target_compile_definitions(dicomsdl_codec_runtime
-		PRIVATE
-			DICOMSDL_CODEC_RUNTIME_EXPORTS=1
-			DICOMSDL_HAS_LIBDEFLATE=1
-	)
-	dicomsdl_apply_codec_builtin_defines(dicomsdl_codec_runtime)
-	target_link_libraries(dicomsdl_codec_runtime PRIVATE fmt::fmt-header-only)
-	if(TARGET openjp2_static)
-		target_link_libraries(dicomsdl_codec_runtime PRIVATE openjp2_static)
-	else()
-		target_link_libraries(dicomsdl_codec_runtime PRIVATE openjp2)
-	endif()
-	if(DICOMSDL_ENABLE_OPENJPH)
-		target_link_libraries(dicomsdl_codec_runtime PRIVATE openjph)
-	endif()
-	if(DICOMSDL_ENABLE_JPEGXL)
-		target_link_libraries(dicomsdl_codec_runtime PRIVATE jxl jxl_threads jxl_cms)
-	endif()
-	target_link_libraries(dicomsdl_codec_runtime PRIVATE charls dicomsdl_turbojpeg)
-	if(TARGET libdeflate::libdeflate_static)
-		target_link_libraries(dicomsdl_codec_runtime PRIVATE libdeflate::libdeflate_static)
-	elseif(TARGET libdeflate_static)
-		target_link_libraries(dicomsdl_codec_runtime PRIVATE libdeflate_static)
-	else()
-		message(FATAL_ERROR "libdeflate static target was not generated")
-	endif()
-	if(DICOMSDL_ENABLE_INFO_LOGS)
-		target_compile_definitions(dicomsdl_codec_runtime PUBLIC DICOMSDL_ENABLE_INFO_LOGS=1)
-	else()
-		target_compile_definitions(dicomsdl_codec_runtime PUBLIC DICOMSDL_ENABLE_INFO_LOGS=0)
-	endif()
-
-	if(DICOMSDL_CODEC_JPEG_SHARED)
-		target_sources(dicomsdl_codec_runtime PRIVATE
-			src/pixel/plugin_abi/builtin/jpeg_builtin_plugin.cpp
-			src/pixel/decode/codecs/jpeg_decode.cpp
-			src/pixel/encode/codecs/jpeg_encode.cpp
-		)
-	endif()
-	if(DICOMSDL_CODEC_JPEGLS_SHARED)
-		target_sources(dicomsdl_codec_runtime PRIVATE
-			src/pixel/plugin_abi/builtin/jpegls_builtin_plugin.cpp
-			src/pixel/decode/codecs/jpegls_decode.cpp
-			src/pixel/encode/codecs/jpegls_encode.cpp
-		)
-	endif()
-	if(DICOMSDL_CODEC_JPEG2K_SHARED)
-		target_sources(dicomsdl_codec_runtime PRIVATE
-			src/pixel/plugin_abi/builtin/jpeg2k_builtin_plugin.cpp
-			src/pixel/decode/codecs/jpeg2k_decode.cpp
-			src/pixel/encode/codecs/jpeg2k_encode.cpp
-		)
-	endif()
-	if(DICOMSDL_CODEC_HTJ2K_SHARED)
-		target_sources(dicomsdl_codec_runtime PRIVATE
-			src/pixel/plugin_abi/builtin/htj2k_builtin_plugin.cpp
-			src/pixel/decode/codecs/htj2k_decode.cpp
-			src/pixel/encode/codecs/htj2k_encode.cpp
-		)
-	endif()
-	if(DICOMSDL_CODEC_JPEGXL_SHARED)
-		target_sources(dicomsdl_codec_runtime PRIVATE
-			src/pixel/plugin_abi/builtin/jpegxl_builtin_plugin.cpp
-			src/pixel/decode/codecs/jpegxl_decode.cpp
-			src/pixel/encode/codecs/jpegxl_encode.cpp
-		)
-	endif()
-endif()
-
-function(dicomsdl_add_shared_codec_plugin TARGET_SUFFIX WRAPPER_SOURCE)
-	set(TARGET_NAME "dicomsdl_codec_plugin_${TARGET_SUFFIX}")
-	add_library(${TARGET_NAME} SHARED
-		${WRAPPER_SOURCE}
-	)
-	target_include_directories(${TARGET_NAME}
-		PRIVATE
-			${DICOM_INCLUDE_DIR}
-			${GENERATED_INCLUDE_DIR}
-			${CMAKE_CURRENT_SOURCE_DIR}/src
-	)
-	if(TARGET dicomsdl_codec_runtime)
-		target_link_libraries(${TARGET_NAME} PRIVATE dicomsdl_codec_runtime)
-		target_compile_definitions(${TARGET_NAME} PRIVATE DICOMSDL_CODEC_RUNTIME_IMPORTS=1)
-	else()
-		target_link_libraries(${TARGET_NAME} PRIVATE dicomsdl)
-	endif()
-	target_compile_features(${TARGET_NAME} PRIVATE cxx_std_20)
-	set_target_properties(${TARGET_NAME} PROPERTIES
-		LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-		RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-		ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-		OUTPUT_NAME "dicomsdl_codec_${TARGET_SUFFIX}_plugin"
-	)
-	if(APPLE)
-		set_target_properties(${TARGET_NAME} PROPERTIES
-			BUILD_RPATH "@loader_path"
-			INSTALL_RPATH "@loader_path"
-		)
-	elseif(UNIX)
-		set_target_properties(${TARGET_NAME} PROPERTIES
-			BUILD_RPATH "\$ORIGIN"
-			INSTALL_RPATH "\$ORIGIN"
-		)
-	endif()
-endfunction()
-
-if(DICOMSDL_CODEC_JPEG_SHARED)
-	dicomsdl_add_shared_codec_plugin(jpeg
-		src/pixel/plugin_abi/shared/jpeg_plugin_shared.cpp
-	)
-endif()
-if(DICOMSDL_CODEC_JPEGLS_SHARED)
-	dicomsdl_add_shared_codec_plugin(jpegls
-		src/pixel/plugin_abi/shared/jpegls_plugin_shared.cpp
-	)
-endif()
-if(DICOMSDL_CODEC_JPEG2K_SHARED)
-	dicomsdl_add_shared_codec_plugin(jpeg2k
-		src/pixel/plugin_abi/shared/jpeg2k_plugin_shared.cpp
-	)
-endif()
-if(DICOMSDL_CODEC_HTJ2K_SHARED)
-	dicomsdl_add_shared_codec_plugin(htj2k
-		src/pixel/plugin_abi/shared/htj2k_plugin_shared.cpp
-	)
-endif()
-if(DICOMSDL_CODEC_JPEGXL_SHARED)
-	dicomsdl_add_shared_codec_plugin(jpegxl
-		src/pixel/plugin_abi/shared/jpegxl_plugin_shared.cpp
-	)
-endif()
-
-if(DICOMSDL_PIXEL_V2_CORE)
-	add_library(dicomsdl_pixel_core_v2 STATIC
+if(DICOMSDL_PIXEL_CORE)
+	add_library(dicomsdl_pixel_core STATIC
 		src/pixel_/core/common.cpp
 		src/pixel_/core/decode_uncompressed.cpp
 		src/pixel_/core/encode_uncompressed.cpp
 	)
-	target_include_directories(dicomsdl_pixel_core_v2
+	target_include_directories(dicomsdl_pixel_core
 		PUBLIC
 			${CMAKE_CURRENT_SOURCE_DIR}/src/pixel_/abi
 			${CMAKE_CURRENT_SOURCE_DIR}/src/pixel_/core
 	)
-	target_compile_features(dicomsdl_pixel_core_v2 PRIVATE cxx_std_20)
-	set_target_properties(dicomsdl_pixel_core_v2 PROPERTIES
+	target_compile_features(dicomsdl_pixel_core PRIVATE cxx_std_20)
+	set_target_properties(dicomsdl_pixel_core PROPERTIES
 		ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-		OUTPUT_NAME "dicomsdl_pixel_core_v2"
+		OUTPUT_NAME "dicomsdl_pixel_core"
 	)
 endif()
 
-if(DICOMSDL_PIXEL_V2_RLE_STATIC_PLUGIN)
-	add_library(dicomsdl_pixel_rle_plugin_v2_static STATIC
+if(DICOMSDL_PIXEL_RLE_STATIC_PLUGIN)
+	add_library(dicomsdl_pixel_rle_plugin_static STATIC
 		src/pixel_/plugins/static/rle_v2/common.cpp
 		src/pixel_/plugins/static/rle_v2/decode.cpp
 		src/pixel_/plugins/static/rle_v2/encode.cpp
 		src/pixel_/plugins/static/rle_v2/entry.cpp
 	)
-	target_include_directories(dicomsdl_pixel_rle_plugin_v2_static
+	target_include_directories(dicomsdl_pixel_rle_plugin_static
 		PUBLIC
 			${CMAKE_CURRENT_SOURCE_DIR}/src/pixel_/abi
 			${CMAKE_CURRENT_SOURCE_DIR}/src/pixel_/plugins/static/rle_v2
 	)
-	target_compile_features(dicomsdl_pixel_rle_plugin_v2_static PRIVATE cxx_std_20)
-	set_target_properties(dicomsdl_pixel_rle_plugin_v2_static PROPERTIES
+	target_compile_features(dicomsdl_pixel_rle_plugin_static PRIVATE cxx_std_20)
+	set_target_properties(dicomsdl_pixel_rle_plugin_static PROPERTIES
 		ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-		OUTPUT_NAME "dicomsdl_pixel_rle_plugin_v2_static"
+		OUTPUT_NAME "dicomsdl_pixel_rle_plugin_static"
 	)
 endif()
 
-if(DICOMSDL_PIXEL_V2_OPENJPEG_STATIC_PLUGIN)
-	add_library(dicomsdl_pixel_openjpeg_plugin_v2_static STATIC
+if(DICOMSDL_PIXEL_OPENJPEG_STATIC_PLUGIN)
+	add_library(dicomsdl_pixel_openjpeg_plugin_static STATIC
 		src/pixel_/plugins/shared/openjpeg_v2/error.cpp
 		src/pixel_/plugins/shared/openjpeg_v2/value_utils.cpp
 		src/pixel_/plugins/shared/openjpeg_v2/openjpeg_helpers.cpp
@@ -930,119 +735,120 @@ if(DICOMSDL_PIXEL_V2_OPENJPEG_STATIC_PLUGIN)
 		src/pixel_/plugins/shared/openjpeg_v2/encode.cpp
 		src/pixel_/plugins/shared/openjpeg_v2/static_api.cpp
 	)
-	target_include_directories(dicomsdl_pixel_openjpeg_plugin_v2_static
+	target_include_directories(dicomsdl_pixel_openjpeg_plugin_static
 		PRIVATE
 			${CMAKE_CURRENT_SOURCE_DIR}/src/pixel_/abi
 			${dicomsdl_openjpeg_SOURCE_DIR}/src/lib/openjp2
 			${dicomsdl_openjpeg_BINARY_DIR}/src/lib/openjp2
 	)
 	if(TARGET openjp2_static)
-		target_link_libraries(dicomsdl_pixel_openjpeg_plugin_v2_static PRIVATE openjp2_static)
+		target_link_libraries(dicomsdl_pixel_openjpeg_plugin_static PRIVATE openjp2_static)
 	else()
-		target_link_libraries(dicomsdl_pixel_openjpeg_plugin_v2_static PRIVATE openjp2)
+		target_link_libraries(dicomsdl_pixel_openjpeg_plugin_static PRIVATE openjp2)
 	endif()
-	target_compile_features(dicomsdl_pixel_openjpeg_plugin_v2_static PRIVATE cxx_std_20)
-	set_target_properties(dicomsdl_pixel_openjpeg_plugin_v2_static PROPERTIES
+	target_compile_features(dicomsdl_pixel_openjpeg_plugin_static PRIVATE cxx_std_20)
+	set_target_properties(dicomsdl_pixel_openjpeg_plugin_static PROPERTIES
 		ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-		OUTPUT_NAME "dicomsdl_pixel_openjpeg_plugin_v2_static"
+		OUTPUT_NAME "dicomsdl_pixel_openjpeg_plugin_static"
 	)
 endif()
 
-if(DICOMSDL_PIXEL_V2_JPEG_STATIC_PLUGIN)
-	add_library(dicomsdl_pixel_jpeg_plugin_v2_static STATIC
+if(DICOMSDL_PIXEL_JPEG_STATIC_PLUGIN)
+	add_library(dicomsdl_pixel_jpeg_plugin_static STATIC
 		src/pixel_/plugins/shared/jpeg_v2/common.cpp
 		src/pixel_/plugins/shared/jpeg_v2/decode.cpp
 		src/pixel_/plugins/shared/jpeg_v2/encode.cpp
 		src/pixel_/plugins/shared/jpeg_v2/static_api.cpp
 	)
-	target_include_directories(dicomsdl_pixel_jpeg_plugin_v2_static
+	target_include_directories(dicomsdl_pixel_jpeg_plugin_static
 		PRIVATE
 			${CMAKE_CURRENT_SOURCE_DIR}/src/pixel_/abi
 			${dicomsdl_libjpeg_turbo_SOURCE_DIR}/src
 			${dicomsdl_libjpeg_turbo_BINARY_DIR}
 	)
-	target_link_libraries(dicomsdl_pixel_jpeg_plugin_v2_static PRIVATE dicomsdl_turbojpeg)
-	target_compile_features(dicomsdl_pixel_jpeg_plugin_v2_static PRIVATE cxx_std_20)
-	set_target_properties(dicomsdl_pixel_jpeg_plugin_v2_static PROPERTIES
+	target_link_libraries(dicomsdl_pixel_jpeg_plugin_static PRIVATE dicomsdl_turbojpeg)
+	target_compile_features(dicomsdl_pixel_jpeg_plugin_static PRIVATE cxx_std_20)
+	set_target_properties(dicomsdl_pixel_jpeg_plugin_static PROPERTIES
 		ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-		OUTPUT_NAME "dicomsdl_pixel_jpeg_plugin_v2_static"
+		OUTPUT_NAME "dicomsdl_pixel_jpeg_plugin_static"
 	)
 endif()
 
-if(DICOMSDL_PIXEL_V2_JPEGLS_STATIC_PLUGIN)
-	add_library(dicomsdl_pixel_jpegls_plugin_v2_static STATIC
+if(DICOMSDL_PIXEL_JPEGLS_STATIC_PLUGIN)
+	add_library(dicomsdl_pixel_jpegls_plugin_static STATIC
 		src/pixel_/plugins/shared/jpegls_v2/common.cpp
 		src/pixel_/plugins/shared/jpegls_v2/decode.cpp
 		src/pixel_/plugins/shared/jpegls_v2/encode.cpp
 		src/pixel_/plugins/shared/jpegls_v2/static_api.cpp
 	)
-	target_include_directories(dicomsdl_pixel_jpegls_plugin_v2_static
+	target_include_directories(dicomsdl_pixel_jpegls_plugin_static
 		PRIVATE
 			${CMAKE_CURRENT_SOURCE_DIR}/src/pixel_/abi
 	)
-	target_link_libraries(dicomsdl_pixel_jpegls_plugin_v2_static PRIVATE charls)
-	target_compile_features(dicomsdl_pixel_jpegls_plugin_v2_static PRIVATE cxx_std_20)
-	set_target_properties(dicomsdl_pixel_jpegls_plugin_v2_static PROPERTIES
+	target_link_libraries(dicomsdl_pixel_jpegls_plugin_static PRIVATE charls)
+	target_compile_features(dicomsdl_pixel_jpegls_plugin_static PRIVATE cxx_std_20)
+	set_target_properties(dicomsdl_pixel_jpegls_plugin_static PROPERTIES
 		ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-		OUTPUT_NAME "dicomsdl_pixel_jpegls_plugin_v2_static"
+		OUTPUT_NAME "dicomsdl_pixel_jpegls_plugin_static"
 	)
 endif()
 
-if(DICOMSDL_PIXEL_V2_HTJ2K_STATIC_PLUGIN)
+if(DICOMSDL_PIXEL_HTJ2K_STATIC_PLUGIN)
 	if(NOT TARGET openjph)
-		message(FATAL_ERROR "DICOMSDL_PIXEL_V2_HTJ2K_STATIC_PLUGIN requires OpenJPH (target openjph).")
+		message(FATAL_ERROR "DICOMSDL_PIXEL_HTJ2K_STATIC_PLUGIN requires OpenJPH (target openjph).")
 	endif()
-	add_library(dicomsdl_pixel_htj2k_plugin_v2_static STATIC
+	add_library(dicomsdl_pixel_htj2k_plugin_static STATIC
 		src/pixel_/plugins/shared/htj2k_v2/common.cpp
 		src/pixel_/plugins/shared/htj2k_v2/decode.cpp
 		src/pixel_/plugins/shared/htj2k_v2/encode.cpp
 		src/pixel_/plugins/shared/htj2k_v2/static_api.cpp
 	)
-	target_include_directories(dicomsdl_pixel_htj2k_plugin_v2_static
+	target_include_directories(dicomsdl_pixel_htj2k_plugin_static
 		PRIVATE
 			${CMAKE_CURRENT_SOURCE_DIR}/src/pixel_/abi
 	)
-	target_link_libraries(dicomsdl_pixel_htj2k_plugin_v2_static PRIVATE openjph)
-	target_compile_features(dicomsdl_pixel_htj2k_plugin_v2_static PRIVATE cxx_std_20)
-	set_target_properties(dicomsdl_pixel_htj2k_plugin_v2_static PROPERTIES
+	target_link_libraries(dicomsdl_pixel_htj2k_plugin_static PRIVATE openjph)
+	target_compile_features(dicomsdl_pixel_htj2k_plugin_static PRIVATE cxx_std_20)
+	set_target_properties(dicomsdl_pixel_htj2k_plugin_static PROPERTIES
 		ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-		OUTPUT_NAME "dicomsdl_pixel_htj2k_plugin_v2_static"
+		OUTPUT_NAME "dicomsdl_pixel_htj2k_plugin_static"
 	)
 endif()
 
-if(DICOMSDL_PIXEL_V2_JPEGXL_STATIC_PLUGIN)
+if(DICOMSDL_PIXEL_JPEGXL_STATIC_PLUGIN)
 	if(NOT TARGET jxl OR NOT TARGET jxl_threads OR NOT TARGET jxl_cms)
-		message(FATAL_ERROR "DICOMSDL_PIXEL_V2_JPEGXL_STATIC_PLUGIN requires libjxl targets (jxl/jxl_threads/jxl_cms).")
+		message(FATAL_ERROR "DICOMSDL_PIXEL_JPEGXL_STATIC_PLUGIN requires libjxl targets (jxl/jxl_threads/jxl_cms).")
 	endif()
-	add_library(dicomsdl_pixel_jpegxl_plugin_v2_static STATIC
+	add_library(dicomsdl_pixel_jpegxl_plugin_static STATIC
 		src/pixel_/plugins/shared/jpegxl_v2/common.cpp
 		src/pixel_/plugins/shared/jpegxl_v2/decode.cpp
 		src/pixel_/plugins/shared/jpegxl_v2/encode.cpp
 		src/pixel_/plugins/shared/jpegxl_v2/static_api.cpp
 	)
-	target_include_directories(dicomsdl_pixel_jpegxl_plugin_v2_static
+	target_include_directories(dicomsdl_pixel_jpegxl_plugin_static
 		PRIVATE
 			${CMAKE_CURRENT_SOURCE_DIR}/src/pixel_/abi
 	)
-	target_link_libraries(dicomsdl_pixel_jpegxl_plugin_v2_static PRIVATE jxl jxl_threads jxl_cms)
-	target_compile_features(dicomsdl_pixel_jpegxl_plugin_v2_static PRIVATE cxx_std_20)
-	set_target_properties(dicomsdl_pixel_jpegxl_plugin_v2_static PROPERTIES
+	target_link_libraries(dicomsdl_pixel_jpegxl_plugin_static PRIVATE jxl jxl_threads jxl_cms)
+	target_compile_features(dicomsdl_pixel_jpegxl_plugin_static PRIVATE cxx_std_20)
+	set_target_properties(dicomsdl_pixel_jpegxl_plugin_static PROPERTIES
 		ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-		OUTPUT_NAME "dicomsdl_pixel_jpegxl_plugin_v2_static"
+		OUTPUT_NAME "dicomsdl_pixel_jpegxl_plugin_static"
 	)
 endif()
 
-if(DICOMSDL_PIXEL_V2_RUNTIME)
-	if(NOT TARGET dicomsdl_pixel_core_v2)
-		message(FATAL_ERROR "DICOMSDL_PIXEL_V2_RUNTIME requires DICOMSDL_PIXEL_V2_CORE.")
+if(DICOMSDL_PIXEL_RUNTIME)
+	if(NOT TARGET dicomsdl_pixel_core)
+		message(FATAL_ERROR "DICOMSDL_PIXEL_RUNTIME requires DICOMSDL_PIXEL_CORE.")
 	endif()
-	add_library(dicomsdl_pixel_runtime_v2 STATIC
+	add_library(dicomsdl_pixel_runtime STATIC
 		src/pixel_/runtime/plugin_registry_v2.cpp
 		src/pixel_/runtime/shared_plugin_loader_v2.cpp
 		src/pixel_/runtime/registry_bootstrap_v2.cpp
 		src/pixel_/runtime/host_adapter_v2.cpp
+		src/pixel_/runtime/runtime_registry_v2.cpp
 	)
-	target_include_directories(dicomsdl_pixel_runtime_v2
+	target_include_directories(dicomsdl_pixel_runtime
 		PUBLIC
 			${CMAKE_CURRENT_SOURCE_DIR}/src/pixel_/abi
 			${CMAKE_CURRENT_SOURCE_DIR}/src/pixel_/runtime
@@ -1051,71 +857,71 @@ if(DICOMSDL_PIXEL_V2_RUNTIME)
 			${CMAKE_CURRENT_SOURCE_DIR}/include
 			${CMAKE_CURRENT_BINARY_DIR}/generated/include
 	)
-	target_link_libraries(dicomsdl_pixel_runtime_v2 PRIVATE
-		dicomsdl_pixel_core_v2
+	target_link_libraries(dicomsdl_pixel_runtime PRIVATE
+		dicomsdl_pixel_core
 		${CMAKE_DL_LIBS}
 	)
-	if(TARGET dicomsdl_pixel_rle_plugin_v2_static)
-		target_link_libraries(dicomsdl_pixel_runtime_v2 PRIVATE
-			dicomsdl_pixel_rle_plugin_v2_static
+	if(TARGET dicomsdl_pixel_rle_plugin_static)
+		target_link_libraries(dicomsdl_pixel_runtime PRIVATE
+			dicomsdl_pixel_rle_plugin_static
 		)
-		target_compile_definitions(dicomsdl_pixel_runtime_v2 PRIVATE
-			DICOMSDL_PIXEL_V2_RUNTIME_WITH_RLE_STATIC=1
-		)
-	endif()
-	if(TARGET dicomsdl_pixel_openjpeg_plugin_v2_static)
-		target_link_libraries(dicomsdl_pixel_runtime_v2 PRIVATE
-			dicomsdl_pixel_openjpeg_plugin_v2_static
-		)
-		target_compile_definitions(dicomsdl_pixel_runtime_v2 PRIVATE
-			DICOMSDL_PIXEL_V2_RUNTIME_WITH_OPENJPEG_STATIC=1
+		target_compile_definitions(dicomsdl_pixel_runtime PRIVATE
+			DICOMSDL_PIXEL_RUNTIME_WITH_RLE_STATIC=1
 		)
 	endif()
-	if(TARGET dicomsdl_pixel_jpeg_plugin_v2_static)
-		target_link_libraries(dicomsdl_pixel_runtime_v2 PRIVATE
-			dicomsdl_pixel_jpeg_plugin_v2_static
+	if(TARGET dicomsdl_pixel_openjpeg_plugin_static)
+		target_link_libraries(dicomsdl_pixel_runtime PRIVATE
+			dicomsdl_pixel_openjpeg_plugin_static
 		)
-		target_compile_definitions(dicomsdl_pixel_runtime_v2 PRIVATE
-			DICOMSDL_PIXEL_V2_RUNTIME_WITH_JPEG_STATIC=1
-		)
-	endif()
-	if(TARGET dicomsdl_pixel_jpegls_plugin_v2_static)
-		target_link_libraries(dicomsdl_pixel_runtime_v2 PRIVATE
-			dicomsdl_pixel_jpegls_plugin_v2_static
-		)
-		target_compile_definitions(dicomsdl_pixel_runtime_v2 PRIVATE
-			DICOMSDL_PIXEL_V2_RUNTIME_WITH_JPEGLS_STATIC=1
+		target_compile_definitions(dicomsdl_pixel_runtime PRIVATE
+			DICOMSDL_PIXEL_RUNTIME_WITH_OPENJPEG_STATIC=1
 		)
 	endif()
-	if(TARGET dicomsdl_pixel_htj2k_plugin_v2_static)
-		target_link_libraries(dicomsdl_pixel_runtime_v2 PRIVATE
-			dicomsdl_pixel_htj2k_plugin_v2_static
+	if(TARGET dicomsdl_pixel_jpeg_plugin_static)
+		target_link_libraries(dicomsdl_pixel_runtime PRIVATE
+			dicomsdl_pixel_jpeg_plugin_static
 		)
-		target_compile_definitions(dicomsdl_pixel_runtime_v2 PRIVATE
-			DICOMSDL_PIXEL_V2_RUNTIME_WITH_HTJ2K_STATIC=1
-		)
-	endif()
-	if(TARGET dicomsdl_pixel_jpegxl_plugin_v2_static)
-		target_link_libraries(dicomsdl_pixel_runtime_v2 PRIVATE
-			dicomsdl_pixel_jpegxl_plugin_v2_static
-		)
-		target_compile_definitions(dicomsdl_pixel_runtime_v2 PRIVATE
-			DICOMSDL_PIXEL_V2_RUNTIME_WITH_JPEGXL_STATIC=1
+		target_compile_definitions(dicomsdl_pixel_runtime PRIVATE
+			DICOMSDL_PIXEL_RUNTIME_WITH_JPEG_STATIC=1
 		)
 	endif()
-	target_compile_features(dicomsdl_pixel_runtime_v2 PRIVATE cxx_std_20)
-	set_target_properties(dicomsdl_pixel_runtime_v2 PROPERTIES
+	if(TARGET dicomsdl_pixel_jpegls_plugin_static)
+		target_link_libraries(dicomsdl_pixel_runtime PRIVATE
+			dicomsdl_pixel_jpegls_plugin_static
+		)
+		target_compile_definitions(dicomsdl_pixel_runtime PRIVATE
+			DICOMSDL_PIXEL_RUNTIME_WITH_JPEGLS_STATIC=1
+		)
+	endif()
+	if(TARGET dicomsdl_pixel_htj2k_plugin_static)
+		target_link_libraries(dicomsdl_pixel_runtime PRIVATE
+			dicomsdl_pixel_htj2k_plugin_static
+		)
+		target_compile_definitions(dicomsdl_pixel_runtime PRIVATE
+			DICOMSDL_PIXEL_RUNTIME_WITH_HTJ2K_STATIC=1
+		)
+	endif()
+	if(TARGET dicomsdl_pixel_jpegxl_plugin_static)
+		target_link_libraries(dicomsdl_pixel_runtime PRIVATE
+			dicomsdl_pixel_jpegxl_plugin_static
+		)
+		target_compile_definitions(dicomsdl_pixel_runtime PRIVATE
+			DICOMSDL_PIXEL_RUNTIME_WITH_JPEGXL_STATIC=1
+		)
+	endif()
+	target_compile_features(dicomsdl_pixel_runtime PRIVATE cxx_std_20)
+	set_target_properties(dicomsdl_pixel_runtime PROPERTIES
 		ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-		OUTPUT_NAME "dicomsdl_pixel_runtime_v2"
+		OUTPUT_NAME "dicomsdl_pixel_runtime"
 	)
-	target_link_libraries(dicomsdl PRIVATE dicomsdl_pixel_runtime_v2)
+	target_link_libraries(dicomsdl PRIVATE dicomsdl_pixel_runtime)
 	target_compile_definitions(dicomsdl PRIVATE
-		DICOMSDL_PIXEL_V2_RUNTIME_ENABLED=1
+		DICOMSDL_PIXEL_RUNTIME_ENABLED=1
 	)
 endif()
 
-if(DICOMSDL_PIXEL_V2_OPENJPEG_PLUGIN)
-	add_library(dicomsdl_pixel_openjpeg_plugin_v2 SHARED
+if(DICOMSDL_PIXEL_OPENJPEG_PLUGIN)
+	add_library(dicomsdl_pixel_openjpeg_plugin SHARED
 		src/pixel_/plugins/shared/openjpeg_v2/error.cpp
 		src/pixel_/plugins/shared/openjpeg_v2/value_utils.cpp
 		src/pixel_/plugins/shared/openjpeg_v2/openjpeg_helpers.cpp
@@ -1124,167 +930,167 @@ if(DICOMSDL_PIXEL_V2_OPENJPEG_PLUGIN)
 		src/pixel_/plugins/shared/openjpeg_v2/encode.cpp
 		src/pixel_/plugins/shared/openjpeg_v2/shared_entry.cpp
 	)
-	target_include_directories(dicomsdl_pixel_openjpeg_plugin_v2
+	target_include_directories(dicomsdl_pixel_openjpeg_plugin
 		PRIVATE
 			${CMAKE_CURRENT_SOURCE_DIR}/src/pixel_/abi
 			${dicomsdl_openjpeg_SOURCE_DIR}/src/lib/openjp2
 			${dicomsdl_openjpeg_BINARY_DIR}/src/lib/openjp2
 	)
 	if(TARGET openjp2_static)
-		target_link_libraries(dicomsdl_pixel_openjpeg_plugin_v2 PRIVATE openjp2_static)
+		target_link_libraries(dicomsdl_pixel_openjpeg_plugin PRIVATE openjp2_static)
 	else()
-		target_link_libraries(dicomsdl_pixel_openjpeg_plugin_v2 PRIVATE openjp2)
+		target_link_libraries(dicomsdl_pixel_openjpeg_plugin PRIVATE openjp2)
 	endif()
-	target_compile_features(dicomsdl_pixel_openjpeg_plugin_v2 PRIVATE cxx_std_20)
-	set_target_properties(dicomsdl_pixel_openjpeg_plugin_v2 PROPERTIES
+	target_compile_features(dicomsdl_pixel_openjpeg_plugin PRIVATE cxx_std_20)
+	set_target_properties(dicomsdl_pixel_openjpeg_plugin PROPERTIES
 		LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 		RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 		ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-		OUTPUT_NAME "dicomsdl_pixel_openjpeg_plugin_v2"
+		OUTPUT_NAME "dicomsdl_pixel_openjpeg_plugin"
 	)
 	if(APPLE)
-		set_target_properties(dicomsdl_pixel_openjpeg_plugin_v2 PROPERTIES
+		set_target_properties(dicomsdl_pixel_openjpeg_plugin PROPERTIES
 			BUILD_RPATH "@loader_path"
 			INSTALL_RPATH "@loader_path"
 		)
 	elseif(UNIX)
-		set_target_properties(dicomsdl_pixel_openjpeg_plugin_v2 PROPERTIES
+		set_target_properties(dicomsdl_pixel_openjpeg_plugin PROPERTIES
 			BUILD_RPATH "\$ORIGIN"
 			INSTALL_RPATH "\$ORIGIN"
 		)
 	endif()
 endif()
 
-if(DICOMSDL_PIXEL_V2_JPEG_PLUGIN)
-	add_library(dicomsdl_pixel_jpeg_plugin_v2 SHARED
+if(DICOMSDL_PIXEL_JPEG_PLUGIN)
+	add_library(dicomsdl_pixel_jpeg_plugin SHARED
 		src/pixel_/plugins/shared/jpeg_v2/common.cpp
 		src/pixel_/plugins/shared/jpeg_v2/decode.cpp
 		src/pixel_/plugins/shared/jpeg_v2/encode.cpp
 		src/pixel_/plugins/shared/jpeg_v2/shared_entry.cpp
 	)
-	target_include_directories(dicomsdl_pixel_jpeg_plugin_v2
+	target_include_directories(dicomsdl_pixel_jpeg_plugin
 		PRIVATE
 			${CMAKE_CURRENT_SOURCE_DIR}/src/pixel_/abi
 			${dicomsdl_libjpeg_turbo_SOURCE_DIR}/src
 			${dicomsdl_libjpeg_turbo_BINARY_DIR}
 	)
-	target_link_libraries(dicomsdl_pixel_jpeg_plugin_v2 PRIVATE dicomsdl_turbojpeg)
-	target_compile_features(dicomsdl_pixel_jpeg_plugin_v2 PRIVATE cxx_std_20)
-	set_target_properties(dicomsdl_pixel_jpeg_plugin_v2 PROPERTIES
+	target_link_libraries(dicomsdl_pixel_jpeg_plugin PRIVATE dicomsdl_turbojpeg)
+	target_compile_features(dicomsdl_pixel_jpeg_plugin PRIVATE cxx_std_20)
+	set_target_properties(dicomsdl_pixel_jpeg_plugin PROPERTIES
 		LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 		RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 		ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-		OUTPUT_NAME "dicomsdl_pixel_jpeg_plugin_v2"
+		OUTPUT_NAME "dicomsdl_pixel_jpeg_plugin"
 	)
 	if(APPLE)
-		set_target_properties(dicomsdl_pixel_jpeg_plugin_v2 PROPERTIES
+		set_target_properties(dicomsdl_pixel_jpeg_plugin PROPERTIES
 			BUILD_RPATH "@loader_path"
 			INSTALL_RPATH "@loader_path"
 		)
 	elseif(UNIX)
-		set_target_properties(dicomsdl_pixel_jpeg_plugin_v2 PROPERTIES
+		set_target_properties(dicomsdl_pixel_jpeg_plugin PROPERTIES
 			BUILD_RPATH "\$ORIGIN"
 			INSTALL_RPATH "\$ORIGIN"
 		)
 	endif()
 endif()
 
-if(DICOMSDL_PIXEL_V2_JPEGLS_PLUGIN)
-	add_library(dicomsdl_pixel_jpegls_plugin_v2 SHARED
+if(DICOMSDL_PIXEL_JPEGLS_PLUGIN)
+	add_library(dicomsdl_pixel_jpegls_plugin SHARED
 		src/pixel_/plugins/shared/jpegls_v2/common.cpp
 		src/pixel_/plugins/shared/jpegls_v2/decode.cpp
 		src/pixel_/plugins/shared/jpegls_v2/encode.cpp
 		src/pixel_/plugins/shared/jpegls_v2/shared_entry.cpp
 	)
-	target_include_directories(dicomsdl_pixel_jpegls_plugin_v2
+	target_include_directories(dicomsdl_pixel_jpegls_plugin
 		PRIVATE
 			${CMAKE_CURRENT_SOURCE_DIR}/src/pixel_/abi
 	)
-	target_link_libraries(dicomsdl_pixel_jpegls_plugin_v2 PRIVATE charls)
-	target_compile_features(dicomsdl_pixel_jpegls_plugin_v2 PRIVATE cxx_std_20)
-	set_target_properties(dicomsdl_pixel_jpegls_plugin_v2 PROPERTIES
+	target_link_libraries(dicomsdl_pixel_jpegls_plugin PRIVATE charls)
+	target_compile_features(dicomsdl_pixel_jpegls_plugin PRIVATE cxx_std_20)
+	set_target_properties(dicomsdl_pixel_jpegls_plugin PROPERTIES
 		LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 		RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 		ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-		OUTPUT_NAME "dicomsdl_pixel_jpegls_plugin_v2"
+		OUTPUT_NAME "dicomsdl_pixel_jpegls_plugin"
 	)
 	if(APPLE)
-		set_target_properties(dicomsdl_pixel_jpegls_plugin_v2 PROPERTIES
+		set_target_properties(dicomsdl_pixel_jpegls_plugin PROPERTIES
 			BUILD_RPATH "@loader_path"
 			INSTALL_RPATH "@loader_path"
 		)
 	elseif(UNIX)
-		set_target_properties(dicomsdl_pixel_jpegls_plugin_v2 PROPERTIES
+		set_target_properties(dicomsdl_pixel_jpegls_plugin PROPERTIES
 			BUILD_RPATH "\$ORIGIN"
 			INSTALL_RPATH "\$ORIGIN"
 		)
 		endif()
 endif()
 
-if(DICOMSDL_PIXEL_V2_HTJ2K_PLUGIN)
+if(DICOMSDL_PIXEL_HTJ2K_PLUGIN)
 	if(NOT TARGET openjph)
-		message(FATAL_ERROR "DICOMSDL_PIXEL_V2_HTJ2K_PLUGIN requires OpenJPH (target openjph).")
+		message(FATAL_ERROR "DICOMSDL_PIXEL_HTJ2K_PLUGIN requires OpenJPH (target openjph).")
 	endif()
-	add_library(dicomsdl_pixel_htj2k_plugin_v2 SHARED
+	add_library(dicomsdl_pixel_htj2k_plugin SHARED
 		src/pixel_/plugins/shared/htj2k_v2/common.cpp
 		src/pixel_/plugins/shared/htj2k_v2/decode.cpp
 		src/pixel_/plugins/shared/htj2k_v2/encode.cpp
 		src/pixel_/plugins/shared/htj2k_v2/shared_entry.cpp
 	)
-	target_include_directories(dicomsdl_pixel_htj2k_plugin_v2
+	target_include_directories(dicomsdl_pixel_htj2k_plugin
 		PRIVATE
 			${CMAKE_CURRENT_SOURCE_DIR}/src/pixel_/abi
 	)
-	target_link_libraries(dicomsdl_pixel_htj2k_plugin_v2 PRIVATE openjph)
-	target_compile_features(dicomsdl_pixel_htj2k_plugin_v2 PRIVATE cxx_std_20)
-	set_target_properties(dicomsdl_pixel_htj2k_plugin_v2 PROPERTIES
+	target_link_libraries(dicomsdl_pixel_htj2k_plugin PRIVATE openjph)
+	target_compile_features(dicomsdl_pixel_htj2k_plugin PRIVATE cxx_std_20)
+	set_target_properties(dicomsdl_pixel_htj2k_plugin PROPERTIES
 		LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 		RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 		ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-		OUTPUT_NAME "dicomsdl_pixel_htj2k_plugin_v2"
+		OUTPUT_NAME "dicomsdl_pixel_htj2k_plugin"
 	)
 	if(APPLE)
-		set_target_properties(dicomsdl_pixel_htj2k_plugin_v2 PROPERTIES
+		set_target_properties(dicomsdl_pixel_htj2k_plugin PROPERTIES
 			BUILD_RPATH "@loader_path"
 			INSTALL_RPATH "@loader_path"
 		)
 	elseif(UNIX)
-		set_target_properties(dicomsdl_pixel_htj2k_plugin_v2 PROPERTIES
+		set_target_properties(dicomsdl_pixel_htj2k_plugin PROPERTIES
 			BUILD_RPATH "\$ORIGIN"
 			INSTALL_RPATH "\$ORIGIN"
 		)
 	endif()
 endif()
 
-if(DICOMSDL_PIXEL_V2_JPEGXL_PLUGIN)
+if(DICOMSDL_PIXEL_JPEGXL_PLUGIN)
 	if(NOT TARGET jxl OR NOT TARGET jxl_threads OR NOT TARGET jxl_cms)
-		message(FATAL_ERROR "DICOMSDL_PIXEL_V2_JPEGXL_PLUGIN requires libjxl targets (jxl/jxl_threads/jxl_cms).")
+		message(FATAL_ERROR "DICOMSDL_PIXEL_JPEGXL_PLUGIN requires libjxl targets (jxl/jxl_threads/jxl_cms).")
 	endif()
-	add_library(dicomsdl_pixel_jpegxl_plugin_v2 SHARED
+	add_library(dicomsdl_pixel_jpegxl_plugin SHARED
 		src/pixel_/plugins/shared/jpegxl_v2/common.cpp
 		src/pixel_/plugins/shared/jpegxl_v2/decode.cpp
 		src/pixel_/plugins/shared/jpegxl_v2/encode.cpp
 		src/pixel_/plugins/shared/jpegxl_v2/shared_entry.cpp
 	)
-	target_include_directories(dicomsdl_pixel_jpegxl_plugin_v2
+	target_include_directories(dicomsdl_pixel_jpegxl_plugin
 		PRIVATE
 			${CMAKE_CURRENT_SOURCE_DIR}/src/pixel_/abi
 	)
-	target_link_libraries(dicomsdl_pixel_jpegxl_plugin_v2 PRIVATE jxl jxl_threads jxl_cms)
-	target_compile_features(dicomsdl_pixel_jpegxl_plugin_v2 PRIVATE cxx_std_20)
-	set_target_properties(dicomsdl_pixel_jpegxl_plugin_v2 PROPERTIES
+	target_link_libraries(dicomsdl_pixel_jpegxl_plugin PRIVATE jxl jxl_threads jxl_cms)
+	target_compile_features(dicomsdl_pixel_jpegxl_plugin PRIVATE cxx_std_20)
+	set_target_properties(dicomsdl_pixel_jpegxl_plugin PROPERTIES
 		LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 		RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 		ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-		OUTPUT_NAME "dicomsdl_pixel_jpegxl_plugin_v2"
+		OUTPUT_NAME "dicomsdl_pixel_jpegxl_plugin"
 	)
 	if(APPLE)
-		set_target_properties(dicomsdl_pixel_jpegxl_plugin_v2 PROPERTIES
+		set_target_properties(dicomsdl_pixel_jpegxl_plugin PROPERTIES
 			BUILD_RPATH "@loader_path"
 			INSTALL_RPATH "@loader_path"
 		)
 	elseif(UNIX)
-		set_target_properties(dicomsdl_pixel_jpegxl_plugin_v2 PROPERTIES
+		set_target_properties(dicomsdl_pixel_jpegxl_plugin PROPERTIES
 			BUILD_RPATH "\$ORIGIN"
 			INSTALL_RPATH "\$ORIGIN"
 		)
@@ -1426,159 +1232,119 @@ if(BUILD_TESTING)
 	)
 	target_link_libraries(dicomsdl_codec_cycle_realdata PRIVATE dicomsdl)
 
-	add_executable(dicomsdl_codec_plugin_abi_adapter
-		tests/codec_plugin_abi_adapter.cpp
-	)
-	target_link_libraries(dicomsdl_codec_plugin_abi_adapter PRIVATE dicomsdl)
-	add_test(NAME codec_plugin_abi_adapter COMMAND dicomsdl_codec_plugin_abi_adapter)
-	set_tests_properties(codec_plugin_abi_adapter PROPERTIES LABELS "dicomsdl")
-
-	add_executable(dicomsdl_codec_plugin_loader
-		tests/codec_plugin_loader.cpp
-	)
-	target_link_libraries(dicomsdl_codec_plugin_loader PRIVATE dicomsdl)
-	add_test(NAME codec_plugin_loader COMMAND dicomsdl_codec_plugin_loader)
-	set_tests_properties(codec_plugin_loader PROPERTIES LABELS "dicomsdl")
-
-	add_library(dicomsdl_test_codec_plugin SHARED
-		tests/codec_plugin_dynamic_fixture.cpp
-	)
-	target_include_directories(dicomsdl_test_codec_plugin
-		PRIVATE
-			${DICOM_INCLUDE_DIR}
-			${GENERATED_INCLUDE_DIR}
-	)
-
-	add_executable(dicomsdl_codec_plugin_dynamic_load
-		tests/codec_plugin_dynamic_load.cpp
-	)
-	target_link_libraries(dicomsdl_codec_plugin_dynamic_load PRIVATE dicomsdl)
-	add_dependencies(dicomsdl_codec_plugin_dynamic_load dicomsdl_test_codec_plugin)
-	add_test(NAME codec_plugin_dynamic_load
-		COMMAND dicomsdl_codec_plugin_dynamic_load
-		$<TARGET_FILE:dicomsdl_test_codec_plugin>)
-	set_tests_properties(codec_plugin_dynamic_load PROPERTIES LABELS "dicomsdl")
-
-		add_executable(dicomsdl_codec_plugin_registration
-			tests/codec_plugin_registration.cpp
-		)
-		target_link_libraries(dicomsdl_codec_plugin_registration PRIVATE dicomsdl)
-			add_test(NAME codec_plugin_registration COMMAND dicomsdl_codec_plugin_registration)
-			set_tests_properties(codec_plugin_registration PROPERTIES LABELS "dicomsdl")
-
-				if(TARGET dicomsdl_pixel_core_v2)
-					add_executable(dicomsdl_pixel_v2_core_uncompressed_smoke
-						tests/pixel_v2_core_uncompressed_smoke.cpp
-					)
-					target_include_directories(dicomsdl_pixel_v2_core_uncompressed_smoke
+				if(TARGET dicomsdl_pixel_core)
+						add_executable(dicomsdl_pixel_core_uncompressed_smoke
+							tests/pixel_core_uncompressed_smoke.cpp
+						)
+					target_include_directories(dicomsdl_pixel_core_uncompressed_smoke
 					PRIVATE
 						${CMAKE_CURRENT_SOURCE_DIR}/src/pixel_/abi
 						${CMAKE_CURRENT_SOURCE_DIR}/src/pixel_/core
-				)
-					target_link_libraries(dicomsdl_pixel_v2_core_uncompressed_smoke PRIVATE
-						dicomsdl_pixel_core_v2
 					)
-					target_compile_features(dicomsdl_pixel_v2_core_uncompressed_smoke PRIVATE cxx_std_20)
-					add_test(NAME pixel_v2_core_uncompressed_smoke
-						COMMAND dicomsdl_pixel_v2_core_uncompressed_smoke)
-					set_tests_properties(pixel_v2_core_uncompressed_smoke PROPERTIES LABELS "dicomsdl")
+					target_link_libraries(dicomsdl_pixel_core_uncompressed_smoke PRIVATE
+						dicomsdl_pixel_core
+					)
+					target_compile_features(dicomsdl_pixel_core_uncompressed_smoke PRIVATE cxx_std_20)
+					add_test(NAME pixel_core_uncompressed_smoke
+						COMMAND dicomsdl_pixel_core_uncompressed_smoke)
+					set_tests_properties(pixel_core_uncompressed_smoke PROPERTIES LABELS "dicomsdl")
 				endif()
 
-				if(TARGET dicomsdl_pixel_rle_plugin_v2_static)
-					add_executable(dicomsdl_pixel_v2_rle_static_plugin_smoke
-						tests/pixel_v2_rle_static_plugin_smoke.cpp
-					)
-				target_include_directories(dicomsdl_pixel_v2_rle_static_plugin_smoke
+				if(TARGET dicomsdl_pixel_rle_plugin_static)
+						add_executable(dicomsdl_pixel_rle_static_plugin_smoke
+							tests/pixel_rle_static_plugin_smoke.cpp
+						)
+				target_include_directories(dicomsdl_pixel_rle_static_plugin_smoke
 					PRIVATE
 						${CMAKE_CURRENT_SOURCE_DIR}/src/pixel_/abi
 						${CMAKE_CURRENT_SOURCE_DIR}/src/pixel_/plugins/static/rle_v2
-				)
-					target_link_libraries(dicomsdl_pixel_v2_rle_static_plugin_smoke PRIVATE
-						dicomsdl_pixel_rle_plugin_v2_static
 					)
-					target_compile_features(dicomsdl_pixel_v2_rle_static_plugin_smoke PRIVATE cxx_std_20)
-					add_test(NAME pixel_v2_rle_static_plugin_smoke
-						COMMAND dicomsdl_pixel_v2_rle_static_plugin_smoke)
-					set_tests_properties(pixel_v2_rle_static_plugin_smoke PROPERTIES LABELS "dicomsdl")
+					target_link_libraries(dicomsdl_pixel_rle_static_plugin_smoke PRIVATE
+						dicomsdl_pixel_rle_plugin_static
+					)
+					target_compile_features(dicomsdl_pixel_rle_static_plugin_smoke PRIVATE cxx_std_20)
+					add_test(NAME pixel_rle_static_plugin_smoke
+						COMMAND dicomsdl_pixel_rle_static_plugin_smoke)
+					set_tests_properties(pixel_rle_static_plugin_smoke PROPERTIES LABELS "dicomsdl")
 				endif()
 
-			if(TARGET dicomsdl_pixel_jpeg_plugin_v2)
-				add_executable(dicomsdl_pixel_v2_jpeg_plugin_smoke
-					tests/pixel_v2_jpeg_plugin_smoke.cpp
-				)
-			target_compile_features(dicomsdl_pixel_v2_jpeg_plugin_smoke PRIVATE cxx_std_20)
-			target_include_directories(dicomsdl_pixel_v2_jpeg_plugin_smoke
+			if(TARGET dicomsdl_pixel_jpeg_plugin)
+					add_executable(dicomsdl_pixel_jpeg_plugin_smoke
+						tests/pixel_jpeg_plugin_smoke.cpp
+					)
+			target_compile_features(dicomsdl_pixel_jpeg_plugin_smoke PRIVATE cxx_std_20)
+			target_include_directories(dicomsdl_pixel_jpeg_plugin_smoke
 				PRIVATE
 					${CMAKE_CURRENT_SOURCE_DIR}/src/pixel_/abi
 			)
 			if(CMAKE_DL_LIBS)
-				target_link_libraries(dicomsdl_pixel_v2_jpeg_plugin_smoke PRIVATE ${CMAKE_DL_LIBS})
+				target_link_libraries(dicomsdl_pixel_jpeg_plugin_smoke PRIVATE ${CMAKE_DL_LIBS})
 			endif()
-			add_dependencies(dicomsdl_pixel_v2_jpeg_plugin_smoke
-				dicomsdl_pixel_jpeg_plugin_v2
+			add_dependencies(dicomsdl_pixel_jpeg_plugin_smoke
+				dicomsdl_pixel_jpeg_plugin
 			)
-			add_test(NAME pixel_v2_jpeg_plugin_smoke
-				COMMAND dicomsdl_pixel_v2_jpeg_plugin_smoke
-				$<TARGET_FILE:dicomsdl_pixel_jpeg_plugin_v2>)
-			set_tests_properties(pixel_v2_jpeg_plugin_smoke PROPERTIES LABELS "dicomsdl")
+			add_test(NAME pixel_jpeg_plugin_smoke
+				COMMAND dicomsdl_pixel_jpeg_plugin_smoke
+				$<TARGET_FILE:dicomsdl_pixel_jpeg_plugin>)
+			set_tests_properties(pixel_jpeg_plugin_smoke PROPERTIES LABELS "dicomsdl")
 		endif()
 
-			if(TARGET dicomsdl_pixel_htj2k_plugin_v2)
-				add_executable(dicomsdl_pixel_v2_htj2k_plugin_smoke
-					tests/pixel_v2_htj2k_plugin_smoke.cpp
-				)
-		target_compile_features(dicomsdl_pixel_v2_htj2k_plugin_smoke PRIVATE cxx_std_20)
-		target_include_directories(dicomsdl_pixel_v2_htj2k_plugin_smoke
+			if(TARGET dicomsdl_pixel_htj2k_plugin)
+					add_executable(dicomsdl_pixel_htj2k_plugin_smoke
+						tests/pixel_htj2k_plugin_smoke.cpp
+					)
+		target_compile_features(dicomsdl_pixel_htj2k_plugin_smoke PRIVATE cxx_std_20)
+		target_include_directories(dicomsdl_pixel_htj2k_plugin_smoke
 			PRIVATE
 				${CMAKE_CURRENT_SOURCE_DIR}/src/pixel_/abi
 		)
 		if(CMAKE_DL_LIBS)
-			target_link_libraries(dicomsdl_pixel_v2_htj2k_plugin_smoke PRIVATE ${CMAKE_DL_LIBS})
+			target_link_libraries(dicomsdl_pixel_htj2k_plugin_smoke PRIVATE ${CMAKE_DL_LIBS})
 		endif()
-		add_dependencies(dicomsdl_pixel_v2_htj2k_plugin_smoke
-			dicomsdl_pixel_htj2k_plugin_v2
+		add_dependencies(dicomsdl_pixel_htj2k_plugin_smoke
+			dicomsdl_pixel_htj2k_plugin
 		)
-		add_test(NAME pixel_v2_htj2k_plugin_smoke
-			COMMAND dicomsdl_pixel_v2_htj2k_plugin_smoke
-			$<TARGET_FILE:dicomsdl_pixel_htj2k_plugin_v2>)
-		set_tests_properties(pixel_v2_htj2k_plugin_smoke PROPERTIES LABELS "dicomsdl")
+		add_test(NAME pixel_htj2k_plugin_smoke
+			COMMAND dicomsdl_pixel_htj2k_plugin_smoke
+			$<TARGET_FILE:dicomsdl_pixel_htj2k_plugin>)
+		set_tests_properties(pixel_htj2k_plugin_smoke PROPERTIES LABELS "dicomsdl")
 	endif()
 
-			if(TARGET dicomsdl_pixel_runtime_v2 AND TARGET dicomsdl_pixel_jpeg_plugin_v2)
-				add_executable(dicomsdl_pixel_v2_runtime_registry_bootstrap_smoke
-					tests/pixel_v2_runtime_registry_bootstrap_smoke.cpp
-				)
-			target_link_libraries(dicomsdl_pixel_v2_runtime_registry_bootstrap_smoke PRIVATE
-				dicomsdl_pixel_runtime_v2
+			if(TARGET dicomsdl_pixel_runtime AND TARGET dicomsdl_pixel_jpeg_plugin)
+					add_executable(dicomsdl_pixel_runtime_registry_bootstrap_smoke
+						tests/pixel_runtime_registry_bootstrap_smoke.cpp
+					)
+			target_link_libraries(dicomsdl_pixel_runtime_registry_bootstrap_smoke PRIVATE
+				dicomsdl_pixel_runtime
 			)
-			target_compile_features(dicomsdl_pixel_v2_runtime_registry_bootstrap_smoke PRIVATE cxx_std_20)
-			add_dependencies(dicomsdl_pixel_v2_runtime_registry_bootstrap_smoke
-				dicomsdl_pixel_jpeg_plugin_v2
+			target_compile_features(dicomsdl_pixel_runtime_registry_bootstrap_smoke PRIVATE cxx_std_20)
+			add_dependencies(dicomsdl_pixel_runtime_registry_bootstrap_smoke
+				dicomsdl_pixel_jpeg_plugin
 			)
-				add_test(NAME pixel_v2_runtime_registry_bootstrap_smoke
-					COMMAND dicomsdl_pixel_v2_runtime_registry_bootstrap_smoke
-					$<TARGET_FILE:dicomsdl_pixel_jpeg_plugin_v2>)
-				set_tests_properties(pixel_v2_runtime_registry_bootstrap_smoke PROPERTIES LABELS "dicomsdl")
+				add_test(NAME pixel_runtime_registry_bootstrap_smoke
+					COMMAND dicomsdl_pixel_runtime_registry_bootstrap_smoke
+					$<TARGET_FILE:dicomsdl_pixel_jpeg_plugin>)
+				set_tests_properties(pixel_runtime_registry_bootstrap_smoke PROPERTIES LABELS "dicomsdl")
 			endif()
 
-			if(TARGET dicomsdl_pixel_runtime_v2)
-				add_executable(dicomsdl_pixel_v2_host_adapter_smoke
-					tests/pixel_v2_host_adapter_smoke.cpp
-				)
-				target_include_directories(dicomsdl_pixel_v2_host_adapter_smoke
+			if(TARGET dicomsdl_pixel_runtime)
+					add_executable(dicomsdl_pixel_host_adapter_smoke
+						tests/pixel_host_adapter_smoke.cpp
+					)
+				target_include_directories(dicomsdl_pixel_host_adapter_smoke
 					PRIVATE
 						${CMAKE_CURRENT_SOURCE_DIR}/include
 						${CMAKE_CURRENT_SOURCE_DIR}/src/pixel_/abi
 						${CMAKE_CURRENT_SOURCE_DIR}/src/pixel_/runtime
 						${CMAKE_CURRENT_BINARY_DIR}/generated/include
-				)
-				target_link_libraries(dicomsdl_pixel_v2_host_adapter_smoke PRIVATE
-					dicomsdl_pixel_runtime_v2
-				)
-				target_compile_features(dicomsdl_pixel_v2_host_adapter_smoke PRIVATE cxx_std_20)
-				add_test(NAME pixel_v2_host_adapter_smoke
-					COMMAND dicomsdl_pixel_v2_host_adapter_smoke)
-				set_tests_properties(pixel_v2_host_adapter_smoke PROPERTIES LABELS "dicomsdl")
+					)
+					target_link_libraries(dicomsdl_pixel_host_adapter_smoke PRIVATE
+						dicomsdl_pixel_runtime
+					)
+				target_compile_features(dicomsdl_pixel_host_adapter_smoke PRIVATE cxx_std_20)
+				add_test(NAME pixel_host_adapter_smoke
+					COMMAND dicomsdl_pixel_host_adapter_smoke)
+				set_tests_properties(pixel_host_adapter_smoke PROPERTIES LABELS "dicomsdl")
 			endif()
 
 	foreach(_dicomsdl_test_target IN ITEMS
@@ -1591,18 +1357,13 @@ if(BUILD_TESTING)
 		dicomsdl_codec_cycle_roundtrip
 		dicomsdl_codec_error_boundary
 		dicomsdl_codec_cycle_realdata
-		dicomsdl_codec_plugin_abi_adapter
-			dicomsdl_codec_plugin_loader
-				dicomsdl_test_codec_plugin
-				dicomsdl_codec_plugin_dynamic_load
-				dicomsdl_codec_plugin_registration
-				dicomsdl_pixel_v2_core_uncompressed_smoke
-				dicomsdl_pixel_v2_rle_static_plugin_smoke
-					dicomsdl_pixel_v2_jpeg_plugin_smoke
-					dicomsdl_pixel_v2_htj2k_plugin_smoke
-					dicomsdl_pixel_v2_runtime_registry_bootstrap_smoke
-					dicomsdl_pixel_v2_host_adapter_smoke
-				)
+		dicomsdl_pixel_core_uncompressed_smoke
+		dicomsdl_pixel_rle_static_plugin_smoke
+		dicomsdl_pixel_jpeg_plugin_smoke
+		dicomsdl_pixel_htj2k_plugin_smoke
+		dicomsdl_pixel_runtime_registry_bootstrap_smoke
+		dicomsdl_pixel_host_adapter_smoke
+	)
 		if(TARGET ${_dicomsdl_test_target})
 			dicomsdl_apply_codec_builtin_defines(${_dicomsdl_test_target})
 		endif()

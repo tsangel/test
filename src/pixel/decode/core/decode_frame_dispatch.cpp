@@ -1,12 +1,11 @@
 #include "pixel/decode/core/decode_frame_dispatch.hpp"
 
-#include "pixel/decode/core/decode_frame_source_resolver.hpp"
-#include "pixel/decode/core/decode_plugin_dispatch.hpp"
-#include "pixel/plugin_abi/external/plugin_external_bridge.hpp"
+#include "pixel/decode/core/decode_codec_impl_detail.hpp"
+#include "pixel/registry/codec_registry.hpp"
 
-#if defined(DICOMSDL_PIXEL_V2_RUNTIME_ENABLED)
+#if defined(DICOMSDL_PIXEL_RUNTIME_ENABLED)
 #include "pixel_/runtime/host_adapter_v2.hpp"
-#include "pixel_/runtime/registry_bootstrap_v2.hpp"
+#include "pixel_/runtime/runtime_registry_v2.hpp"
 #endif
 
 #include <array>
@@ -16,41 +15,19 @@
 #include <new>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace dicom::pixel::detail {
 
-#if defined(DICOMSDL_PIXEL_V2_RUNTIME_ENABLED)
+#if defined(DICOMSDL_PIXEL_RUNTIME_ENABLED)
 namespace {
 
-constexpr std::string_view kV2RuntimePluginKey = "v2-runtime";
+struct ResolvedDecodeFrameSource {
+	std::span<const std::uint8_t> bytes{};
+	std::vector<std::uint8_t> owned_bytes{};
+};
 
-[[nodiscard]] std::string_view legacy_plugin_key_for_transfer_syntax(
-    uid::WellKnown transfer_syntax) noexcept {
-	if (transfer_syntax.is_uncompressed()) {
-		return transfer_syntax.is_encapsulated()
-		           ? std::string_view("encapsulated-uncompressed")
-		           : std::string_view("native");
-	}
-	if (transfer_syntax.is_rle()) {
-		return std::string_view("rle");
-	}
-	if (transfer_syntax.is_htj2k()) {
-		return std::string_view("htj2k");
-	}
-	if (transfer_syntax.is_jpeg2000()) {
-		return std::string_view("jpeg2k");
-	}
-	if (transfer_syntax.is_jpegls()) {
-		return std::string_view("jpegls");
-	}
-	if (transfer_syntax.is_jpegxl()) {
-		return std::string_view("jpegxl");
-	}
-	if (transfer_syntax.is_jpeg_family()) {
-		return std::string_view("jpeg");
-	}
-	return {};
-}
+constexpr std::string_view kRuntimePluginKey = "runtime";
 
 class DecoderContextGuard {
 public:
@@ -67,17 +44,11 @@ private:
 	::pixel::runtime_v2::HostDecoderContextV2* ctx_{nullptr};
 };
 
-[[nodiscard]] const ::pixel::runtime_v2::PluginRegistryV2* get_runtime_registry_v2() {
-	static ::pixel::runtime_v2::PluginRegistryRuntimeV2 runtime_state{};
-	static const bool kInitialized =
-	    ::pixel::runtime_v2::initialize_registry_v2({}, &runtime_state, nullptr);
-	if (!kInitialized) {
-		return nullptr;
-	}
-	return &runtime_state.registry;
+[[nodiscard]] const ::pixel::runtime_v2::PluginRegistryV2* get_runtime_registry() {
+	return ::pixel::runtime_v2::current_registry();
 }
 
-[[nodiscard]] CodecStatusCode map_error_code_v2(pixel_error_code_v2 ec) noexcept {
+[[nodiscard]] CodecStatusCode map_runtime_error_code(pixel_error_code_v2 ec) noexcept {
 	switch (ec) {
 	case PIXEL_CODEC_ERR_OK:
 		return CodecStatusCode::ok;
@@ -93,7 +64,7 @@ private:
 	}
 }
 
-void parse_v2_detail_or_default(
+void parse_runtime_detail_or_default(
     std::string_view raw_detail, std::string& out_stage, std::string& out_reason) {
 	constexpr std::string_view kStagePrefix = "stage=";
 	constexpr std::string_view kReasonMarker = ";reason=";
@@ -117,11 +88,11 @@ void parse_v2_detail_or_default(
 		out_reason.assign(raw_detail);
 	}
 	if (out_reason.empty()) {
-		out_reason = "decoder v2 host adapter failed";
+		out_reason = "decoder runtime host adapter failed";
 	}
 }
 
-[[nodiscard]] std::string decorate_v2_detail_with_callsite_context(
+[[nodiscard]] std::string decorate_runtime_detail_with_callsite_context(
     std::string detail, std::string_view file_path, std::size_t frame_index) {
 	if (detail.rfind("pixel::decode_frame_into ", 0) == 0) {
 		const std::size_t reason_pos = detail.find("reason=");
@@ -134,7 +105,7 @@ void parse_v2_detail_or_default(
 		detail.erase(detail.begin());
 	}
 	if (detail.empty()) {
-		detail = "decoder v2 host adapter failed";
+		detail = "decoder runtime host adapter failed";
 	}
 	if (detail.rfind("file=", 0) == 0) {
 		return detail;
@@ -143,14 +114,14 @@ void parse_v2_detail_or_default(
 	    std::to_string(frame_index) + " " + detail;
 }
 
-[[noreturn]] void throw_v2_decode_error(
+[[noreturn]] void throw_runtime_decode_error(
     std::string_view file_path, uid::WellKnown transfer_syntax,
     std::string_view plugin_key, std::size_t frame_index, pixel_error_code_v2 ec,
     std::string_view raw_detail) {
 	CodecError decode_error{};
-	decode_error.code = map_error_code_v2(ec);
-	parse_v2_detail_or_default(raw_detail, decode_error.stage, decode_error.detail);
-	decode_error.detail = decorate_v2_detail_with_callsite_context(
+	decode_error.code = map_runtime_error_code(ec);
+	parse_runtime_detail_or_default(raw_detail, decode_error.stage, decode_error.detail);
+	decode_error.detail = decorate_runtime_detail_with_callsite_context(
 	    std::move(decode_error.detail), file_path, frame_index);
 	throw_codec_error_with_context("pixel::decode_frame_into", file_path, transfer_syntax,
 	    plugin_key, frame_index, decode_error);
@@ -167,7 +138,7 @@ void parse_v2_detail_or_default(
 	return std::string(buffer.data(), buffer.data() + copied);
 }
 
-[[nodiscard]] ResolvedDecodeFrameSource resolve_decode_source_for_v2_or_throw(
+[[nodiscard]] ResolvedDecodeFrameSource resolve_decode_source_for_runtime_or_throw(
     const DicomFile& df, uid::WellKnown transfer_syntax, std::size_t frame_index,
     std::string_view plugin_key) {
 	const auto& info = df.pixeldata_info();
@@ -230,20 +201,13 @@ void parse_v2_detail_or_default(
 	return host_transform;
 }
 
-[[nodiscard]] bool try_dispatch_decode_frame_with_v2_runtime(const DicomFile& df,
+[[nodiscard]] bool try_dispatch_decode_frame_with_runtime(const DicomFile& df,
     const DecodeValueTransform& value_transform, std::size_t frame_index,
     std::span<std::uint8_t> dst, const DecodeStrides& dst_strides,
     const DecodeOptions& effective_opt) {
 	const auto& info = df.pixeldata_info();
-	const auto* registry = get_runtime_registry_v2();
-	const std::string_view legacy_plugin_key = legacy_plugin_key_for_transfer_syntax(info.ts);
-	const std::string_view plugin_key_fallback =
-	    legacy_plugin_key.empty() ? kV2RuntimePluginKey : legacy_plugin_key;
+	const auto* registry = get_runtime_registry();
 	if (registry == nullptr) {
-		return false;
-	}
-	if (!legacy_plugin_key.empty() && has_external_decoder_bridge(legacy_plugin_key)) {
-		// Keep legacy external bridge override semantics for decode tests and runtime parity.
 		return false;
 	}
 
@@ -268,16 +232,22 @@ void parse_v2_detail_or_default(
 	    ::pixel::runtime_v2::configure_host_decoder_context_v2(
 	        &ctx, registry, info.ts, option_ptr);
 	const std::string configure_detail = copy_decoder_error_detail(ctx);
-	const std::string_view plugin_key = plugin_key_fallback;
+	const std::string_view plugin_key = kRuntimePluginKey;
 	if (configure_ec == PIXEL_CODEC_ERR_UNSUPPORTED) {
-		return false;
+		throw_codec_error_with_context("pixel::decode_frame_into", df.path(), info.ts,
+		    plugin_key, frame_index,
+		    CodecError{
+		        .code = CodecStatusCode::unsupported,
+		        .stage = "plugin_lookup",
+		        .detail = "plugin is not registered in runtime registry",
+		    });
 	}
 	if (configure_ec != PIXEL_CODEC_ERR_OK) {
-		throw_v2_decode_error(df.path(), info.ts, plugin_key, frame_index,
+		throw_runtime_decode_error(df.path(), info.ts, plugin_key, frame_index,
 		    configure_ec, configure_detail);
 	}
 
-	const auto resolved_source = resolve_decode_source_for_v2_or_throw(
+	const auto resolved_source = resolve_decode_source_for_runtime_or_throw(
 	    df, info.ts, frame_index, plugin_key);
 	const auto host_transform = resolve_host_value_transform(value_transform);
 	const ::pixel::runtime_v2::HostValueTransformSpecV2* transform_ptr =
@@ -289,10 +259,16 @@ void parse_v2_detail_or_default(
 	        &ctx, &info, resolved_source.bytes, dst, &dst_strides, &effective_opt,
 	        transform_ptr);
 	if (decode_ec == PIXEL_CODEC_ERR_UNSUPPORTED) {
-		return false;
+		throw_codec_error_with_context("pixel::decode_frame_into", df.path(), info.ts,
+		    plugin_key, frame_index,
+		    CodecError{
+		        .code = CodecStatusCode::unsupported,
+		        .stage = "decode_frame",
+		        .detail = "runtime decoder does not support this request",
+		    });
 	}
 	if (decode_ec != PIXEL_CODEC_ERR_OK) {
-		throw_v2_decode_error(df.path(), info.ts, plugin_key, frame_index, decode_ec,
+		throw_runtime_decode_error(df.path(), info.ts, plugin_key, frame_index, decode_ec,
 		    copy_decoder_error_detail(ctx));
 	}
 	return true;
@@ -301,72 +277,26 @@ void parse_v2_detail_or_default(
 }  // namespace
 #endif
 
-namespace {
-
-void dispatch_decode_frame_with_legacy_registry(const DicomFile& df,
-    const DecodeValueTransform& value_transform, std::size_t frame_index,
-    std::span<std::uint8_t> dst, const DecodeStrides& dst_strides,
-    const DecodeOptions& effective_opt) {
-	const auto& info = df.pixeldata_info();
-
-	const auto& codec_registry = global_codec_registry();
-	// Keep dispatch stable for the whole decode call while plugin dispatchers may be swapped.
-	[[maybe_unused]] const auto dispatch_lock = codec_registry.acquire_dispatch_read_lock();
-	const auto* binding = codec_registry.find_binding(info.ts);
-	CodecError decode_error{};
-	if (!binding || !binding->decode_supported) {
-		decode_error.code = CodecStatusCode::unsupported;
-		decode_error.stage = "plugin_lookup";
-		decode_error.detail =
-		    "transfer syntax is not supported for decode by codec registry binding";
-		throw_codec_error_with_context("pixel::decode_frame_into",
-		    df.path(), info.ts, "<none>", frame_index, decode_error);
-	}
-	const auto* plugin = codec_registry.resolve_decoder_plugin(*binding);
-	if (!plugin) {
-		decode_error.code = CodecStatusCode::internal_error;
-		decode_error.stage = "plugin_lookup";
-		decode_error.detail = "registry binding references a missing plugin";
-		throw_codec_error_with_context("pixel::decode_frame_into",
-		    df.path(), info.ts, binding->plugin_key, frame_index, decode_error);
-	}
-	if (!plugin->decode_frame) {
-		decode_error.code = CodecStatusCode::internal_error;
-		decode_error.stage = "plugin_lookup";
-		decode_error.detail = "registered decode plugin has no dispatcher";
-		throw_codec_error_with_context("pixel::decode_frame_into",
-		    df.path(), info.ts, binding->plugin_key, frame_index, decode_error);
-	}
-
-	const auto resolved_source =
-	    resolve_decode_frame_source_or_throw(df, *binding, frame_index);
-	const CodecDecodeFrameInput decode_input{
-	    .info = info,
-	    .value_transform = value_transform,
-	    .prepared_source = resolved_source.bytes,
-	    .destination = dst,
-	    .destination_strides = dst_strides,
-	    .options = effective_opt,
-	};
-
-	invoke_decode_plugin_or_throw(
-	    df, *binding, *plugin, decode_input, frame_index);
-}
-
-}  // namespace
-
 void dispatch_decode_frame_with_resolved_transform(const DicomFile& df,
     const DecodeValueTransform& value_transform, std::size_t frame_index,
     std::span<std::uint8_t> dst, const DecodeStrides& dst_strides,
     const DecodeOptions& effective_opt) {
-#if defined(DICOMSDL_PIXEL_V2_RUNTIME_ENABLED)
-	if (try_dispatch_decode_frame_with_v2_runtime(
+#if defined(DICOMSDL_PIXEL_RUNTIME_ENABLED)
+	if (try_dispatch_decode_frame_with_runtime(
 	        df, value_transform, frame_index, dst, dst_strides, effective_opt)) {
 		return;
 	}
 #endif
-	dispatch_decode_frame_with_legacy_registry(
-	    df, value_transform, frame_index, dst, dst_strides, effective_opt);
+	CodecError decode_error{};
+	decode_error.code = CodecStatusCode::unsupported;
+	decode_error.stage = "plugin_lookup";
+	decode_error.detail = "runtime registry is not available";
+	std::string_view plugin_key = "runtime";
+#if defined(DICOMSDL_PIXEL_RUNTIME_ENABLED)
+	plugin_key = kRuntimePluginKey;
+#endif
+	throw_codec_error_with_context("pixel::decode_frame_into", df.path(),
+	    df.pixeldata_info().ts, plugin_key, frame_index, decode_error);
 }
 
 } // namespace dicom::pixel::detail

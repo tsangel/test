@@ -13,7 +13,7 @@ namespace {
 
 std::string decorate_decode_detail_with_callsite_context(
     std::string detail, std::string_view file_path, std::size_t frame_index) {
-	// Legacy decoder helpers often return fully formatted strings like:
+	// Some decoder helpers return fully formatted strings like:
 	// "pixel::decode_frame_into file=... frame=... reason=..."
 	// Strip only that prefix form; keep codec-native detail intact.
 	if (detail.rfind("pixel::decode_frame_into ", 0) == 0) {

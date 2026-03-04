@@ -1,5 +1,5 @@
 #include "pixel/decode/core/decode_codec_impl_detail.hpp"
-#include "pixel/bridge/codec_plugin_abi_adapter.hpp"
+#include "pixel/registry/codec_registry.hpp"
 
 #include "dicom_endian.h"
 #include "diagnostics.h"

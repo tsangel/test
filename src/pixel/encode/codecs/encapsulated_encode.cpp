@@ -11,7 +11,7 @@ namespace dicom::pixel::detail {
 namespace {
 
 std::string normalize_encode_error_detail(std::string detail) {
-	// Legacy encoder helpers may include "pixel::encode_* reason=...".
+	// Some encoder helpers may include "pixel::encode_* reason=...".
 	// Keep only reason payload so call-site context is the single source of file/frame info.
 	const auto reason_pos = detail.find("reason=");
 	if (detail.rfind("pixel::encode_", 0) == 0 && reason_pos != std::string::npos) {

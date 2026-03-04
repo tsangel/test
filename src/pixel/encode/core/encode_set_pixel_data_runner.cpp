@@ -5,14 +5,14 @@
 #include "pixel/encode/core/encode_target_resolver.hpp"
 #include "pixel/encode/core/multicomponent_option_resolver.hpp"
 #include "pixel/encode/core/native_pixel_copy.hpp"
-#include "pixel/encode/core/encode_codec_impl_detail.hpp"
+#include "pixel/registry/codec_registry.hpp"
 
-#if defined(DICOMSDL_PIXEL_V2_RUNTIME_ENABLED)
+#if defined(DICOMSDL_PIXEL_RUNTIME_ENABLED)
 #include "pixel_/runtime/host_adapter_v2.hpp"
-#include "pixel_/runtime/registry_bootstrap_v2.hpp"
+#include "pixel_/runtime/runtime_registry_v2.hpp"
 #endif
 
-#if defined(DICOMSDL_PIXEL_V2_RUNTIME_ENABLED)
+#if defined(DICOMSDL_PIXEL_RUNTIME_ENABLED)
 #include <array>
 #include <limits>
 #include <optional>
@@ -24,44 +24,17 @@
 #endif
 
 #include <cstddef>
+#include <optional>
 
 namespace dicom::pixel::detail {
 
-#if defined(DICOMSDL_PIXEL_V2_RUNTIME_ENABLED)
+#if defined(DICOMSDL_PIXEL_RUNTIME_ENABLED)
 namespace {
 
 constexpr std::size_t kMaxOptionCount = 64;
 constexpr std::size_t kMaxOptionKeyBytes = 128;
 constexpr std::size_t kMaxOptionValueBytes = 1024;
-constexpr std::string_view kV2RuntimePluginKey = "v2-runtime";
-
-[[nodiscard]] std::string_view legacy_plugin_key_for_transfer_syntax(
-    uid::WellKnown transfer_syntax) noexcept {
-	if (transfer_syntax.is_uncompressed()) {
-		return transfer_syntax.is_encapsulated()
-		           ? std::string_view("encapsulated-uncompressed")
-		           : std::string_view("native");
-	}
-	if (transfer_syntax.is_rle()) {
-		return std::string_view("rle");
-	}
-	if (transfer_syntax.is_htj2k()) {
-		return std::string_view("htj2k");
-	}
-	if (transfer_syntax.is_jpeg2000()) {
-		return std::string_view("jpeg2k");
-	}
-	if (transfer_syntax.is_jpegls()) {
-		return std::string_view("jpegls");
-	}
-	if (transfer_syntax.is_jpegxl()) {
-		return std::string_view("jpegxl");
-	}
-	if (transfer_syntax.is_jpeg_family()) {
-		return std::string_view("jpeg");
-	}
-	return {};
-}
+constexpr std::string_view kRuntimePluginKey = "runtime";
 
 class EncoderContextGuard {
 public:
@@ -78,24 +51,26 @@ private:
 	::pixel::runtime_v2::HostEncoderContextV2* ctx_{nullptr};
 };
 
-struct V2OptionListStorage {
+struct RuntimeOptionListStorage {
 	std::vector<std::string> keys{};
 	std::vector<std::string> values{};
 	std::vector<pixel_option_kv_v2> items{};
 	pixel_option_list_v2 list{};
 };
 
-[[nodiscard]] const ::pixel::runtime_v2::PluginRegistryV2* get_runtime_registry_v2() {
-	static ::pixel::runtime_v2::PluginRegistryRuntimeV2 runtime_state{};
-	static const bool kInitialized =
-	    ::pixel::runtime_v2::initialize_registry_v2({}, &runtime_state, nullptr);
-	if (!kInitialized) {
-		return nullptr;
-	}
-	return &runtime_state.registry;
+struct EncapsulatedEncodeInput {
+	const std::uint8_t* source_base{nullptr};
+	std::size_t frame_count{0};
+	std::size_t source_frame_stride{0};
+	std::size_t source_frame_size_bytes{0};
+	bool source_aliases_current_native_pixel_data{false};
+};
+
+[[nodiscard]] const ::pixel::runtime_v2::PluginRegistryV2* get_runtime_registry() {
+	return ::pixel::runtime_v2::current_registry();
 }
 
-[[nodiscard]] CodecStatusCode map_error_code_v2(pixel_error_code_v2 ec) noexcept {
+[[nodiscard]] CodecStatusCode map_runtime_error_code(pixel_error_code_v2 ec) noexcept {
 	switch (ec) {
 	case PIXEL_CODEC_ERR_OK:
 		return CodecStatusCode::ok;
@@ -111,7 +86,7 @@ struct V2OptionListStorage {
 	}
 }
 
-void parse_v2_detail_or_default(
+void parse_runtime_detail_or_default(
     std::string_view raw_detail, std::string& out_stage, std::string& out_reason) {
 	constexpr std::string_view kStagePrefix = "stage=";
 	constexpr std::string_view kReasonMarker = ";reason=";
@@ -135,7 +110,7 @@ void parse_v2_detail_or_default(
 		out_reason.assign(raw_detail);
 	}
 	if (out_reason.empty()) {
-		out_reason = "encoder v2 host adapter failed";
+		out_reason = "encoder runtime host adapter failed";
 	}
 }
 
@@ -150,18 +125,18 @@ void parse_v2_detail_or_default(
 	return std::string(buffer.data(), buffer.data() + copied);
 }
 
-[[noreturn]] void throw_v2_encode_error(
+[[noreturn]] void throw_runtime_encode_error(
     std::string_view file_path, uid::WellKnown transfer_syntax,
     std::string_view plugin_key, std::optional<std::size_t> frame_index,
     pixel_error_code_v2 ec, std::string_view raw_detail) {
 	CodecError encode_error{};
-	encode_error.code = map_error_code_v2(ec);
-	parse_v2_detail_or_default(raw_detail, encode_error.stage, encode_error.detail);
+	encode_error.code = map_runtime_error_code(ec);
+	parse_runtime_detail_or_default(raw_detail, encode_error.stage, encode_error.detail);
 	throw_codec_error_with_context("DicomFile::set_pixel_data", file_path, transfer_syntax,
 	    plugin_key, frame_index, encode_error);
 }
 
-[[nodiscard]] bool should_skip_legacy_option_for_profile(
+[[nodiscard]] bool should_skip_option_for_profile(
     uint32_t codec_profile_code, std::string_view key) noexcept {
 	switch (codec_profile_code) {
 	case PIXEL_CODEC_PROFILE_JPEG2000_LOSSLESS_V2:
@@ -177,8 +152,8 @@ void parse_v2_detail_or_default(
 	}
 }
 
-bool build_v2_option_list_from_pairs(std::span<const CodecOptionKv> option_pairs,
-    uint32_t codec_profile_code, V2OptionListStorage& out_storage,
+bool build_runtime_option_list_from_pairs(std::span<const CodecOptionKv> option_pairs,
+    uint32_t codec_profile_code, RuntimeOptionListStorage& out_storage,
     CodecError& out_error) noexcept {
 	out_storage = {};
 	out_error = {};
@@ -201,7 +176,7 @@ bool build_v2_option_list_from_pairs(std::span<const CodecOptionKv> option_pairs
 	out_storage.values.reserve(option_pairs.size());
 	out_storage.items.reserve(option_pairs.size());
 	for (const auto& pair : option_pairs) {
-		if (should_skip_legacy_option_for_profile(codec_profile_code, pair.key)) {
+		if (should_skip_option_for_profile(codec_profile_code, pair.key)) {
 			continue;
 		}
 		if (pair.key.empty()) {
@@ -252,7 +227,7 @@ bool build_v2_option_list_from_pairs(std::span<const CodecOptionKv> option_pairs
 	return true;
 }
 
-[[nodiscard]] std::vector<std::uint8_t> encode_frame_with_v2_runtime_or_throw(
+[[nodiscard]] std::vector<std::uint8_t> encode_frame_with_runtime_or_throw(
     ::pixel::runtime_v2::HostEncoderContextV2& ctx, std::string_view file_path,
     uid::WellKnown transfer_syntax, std::string_view plugin_key,
     const pixel::PixelSource& source, std::span<const std::uint8_t> source_frame,
@@ -267,7 +242,7 @@ bool build_v2_option_list_from_pairs(std::span<const CodecOptionKv> option_pairs
 	    pixel_output_buffer_v2{nullptr, 0u}, &encoded_size);
 	if (encode_ec != PIXEL_CODEC_ERR_OUTPUT_TOO_SMALL &&
 	    encode_ec != PIXEL_CODEC_ERR_OK) {
-		throw_v2_encode_error(file_path, transfer_syntax, plugin_key, frame_index, encode_ec,
+		throw_runtime_encode_error(file_path, transfer_syntax, plugin_key, frame_index, encode_ec,
 		    copy_encoder_error_detail(ctx));
 	}
 
@@ -293,7 +268,7 @@ bool build_v2_option_list_from_pairs(std::span<const CodecOptionKv> option_pairs
 	    },
 	    &actual_size);
 	if (encode_ec != PIXEL_CODEC_ERR_OK) {
-		throw_v2_encode_error(file_path, transfer_syntax, plugin_key, frame_index, encode_ec,
+		throw_runtime_encode_error(file_path, transfer_syntax, plugin_key, frame_index, encode_ec,
 		    copy_encoder_error_detail(ctx));
 	}
 	if (actual_size > static_cast<uint64_t>(encoded_frame.size())) {
@@ -309,30 +284,33 @@ bool build_v2_option_list_from_pairs(std::span<const CodecOptionKv> option_pairs
 	return encoded_frame;
 }
 
-[[nodiscard]] bool encode_encapsulated_pixel_data_with_v2_runtime_or_throw(DicomFile& file,
+[[nodiscard]] bool encode_encapsulated_pixel_data_with_runtime_or_throw(DicomFile& file,
     uid::WellKnown transfer_syntax, const pixel::PixelSource& source,
     const EncapsulatedEncodeInput& encode_input,
     std::span<const CodecOptionKv> codec_options, bool use_multicomponent_transform) {
-	const std::string_view legacy_plugin_key =
-	    legacy_plugin_key_for_transfer_syntax(transfer_syntax);
-	const std::string_view plugin_key_fallback =
-	    legacy_plugin_key.empty() ? kV2RuntimePluginKey : legacy_plugin_key;
-	const auto* registry = get_runtime_registry_v2();
+	const std::string_view plugin_key = kRuntimePluginKey;
+	const auto* registry = get_runtime_registry();
 	if (registry == nullptr) {
 		return false;
 	}
 
 	CodecError option_error{};
-	V2OptionListStorage option_storage{};
+	RuntimeOptionListStorage option_storage{};
 	uint32_t codec_profile_code = PIXEL_CODEC_PROFILE_UNKNOWN_V2;
 	if (!::pixel::runtime_v2::resolve_codec_profile_code_from_transfer_syntax_v2(
 	        transfer_syntax, &codec_profile_code)) {
-		return false;
+		throw_codec_error_with_context("DicomFile::set_pixel_data", file.path(),
+		    transfer_syntax, plugin_key, std::nullopt,
+		    CodecError{
+		        .code = CodecStatusCode::unsupported,
+		        .stage = "plugin_lookup",
+		        .detail = "transfer syntax is not mapped to a runtime codec profile",
+		    });
 	}
-	if (!build_v2_option_list_from_pairs(
+	if (!build_runtime_option_list_from_pairs(
 	        codec_options, codec_profile_code, option_storage, option_error)) {
 		throw_codec_error_with_context("DicomFile::set_pixel_data", file.path(),
-		    transfer_syntax, plugin_key_fallback, std::nullopt, option_error);
+		    transfer_syntax, plugin_key, std::nullopt, option_error);
 	}
 	const pixel_option_list_v2* option_ptr =
 	    option_storage.list.count == 0 ? nullptr : &option_storage.list;
@@ -343,18 +321,23 @@ bool build_v2_option_list_from_pairs(std::span<const CodecOptionKv> option_pairs
 	    ::pixel::runtime_v2::configure_host_encoder_context_v2(
 	        &encoder_ctx, registry, transfer_syntax, option_ptr);
 	const std::string configure_detail = copy_encoder_error_detail(encoder_ctx);
-	const std::string_view plugin_key = plugin_key_fallback;
 	if (configure_ec == PIXEL_CODEC_ERR_UNSUPPORTED) {
-		return false;
+		throw_codec_error_with_context("DicomFile::set_pixel_data", file.path(),
+		    transfer_syntax, plugin_key, std::nullopt,
+		    CodecError{
+		        .code = CodecStatusCode::unsupported,
+		        .stage = "plugin_lookup",
+		        .detail = "plugin is not registered in runtime registry",
+		    });
 	}
 	if (configure_ec != PIXEL_CODEC_ERR_OK) {
-		throw_v2_encode_error(file.path(), transfer_syntax, plugin_key, std::nullopt,
+		throw_runtime_encode_error(file.path(), transfer_syntax, plugin_key, std::nullopt,
 		    configure_ec, configure_detail);
 	}
 
 	const auto encode_frame_or_throw = [&](std::size_t frame_index,
 	                                   std::span<const std::uint8_t> source_frame_view) {
-			return encode_frame_with_v2_runtime_or_throw(encoder_ctx, file.path(),
+			return encode_frame_with_runtime_or_throw(encoder_ctx, file.path(),
 			    transfer_syntax, plugin_key, source, source_frame_view,
 			    use_multicomponent_transform, frame_index);
 		};
@@ -398,9 +381,8 @@ bool build_v2_option_list_from_pairs(std::span<const CodecOptionKv> option_pairs
 
 void run_set_pixel_data_with_resolved_codec_options(DicomFile& file,
     uid::WellKnown transfer_syntax, const pixel::PixelSource& source,
-    const TransferSyntaxPluginBinding& binding,
     std::span<const CodecOptionKv> codec_options) {
-	const auto target = classify_pixel_encode_target(binding);
+	const auto target = classify_pixel_encode_target(transfer_syntax);
 	const auto file_path = file.path();
 	const auto source_layout =
 	    resolve_encode_source_layout_or_throw(source, file_path);
@@ -450,41 +432,26 @@ void run_set_pixel_data_with_resolved_codec_options(DicomFile& file,
 		auto native_pixel_data = build_native_pixel_payload(native_copy_input);
 		file.set_native_pixel_data(std::move(native_pixel_data));
 	} else {
-#if defined(DICOMSDL_PIXEL_V2_RUNTIME_ENABLED)
-		if (encode_encapsulated_pixel_data_with_v2_runtime_or_throw(file, transfer_syntax,
+#if defined(DICOMSDL_PIXEL_RUNTIME_ENABLED)
+		if (!encode_encapsulated_pixel_data_with_runtime_or_throw(file, transfer_syntax,
 		        source, encapsulated_encode_input, codec_options,
 		        use_multicomponent_transform)) {
-			// v2 runtime path succeeded.
-		} else {
-#endif
-		const CodecEncodeFnInput dispatch_input{
-		    .file = file,
-		    .transfer_syntax = transfer_syntax,
-		    .encode_input = encapsulated_encode_input,
-		    .codec_options = codec_options,
-		    .rows = source_layout.rows,
-		    .cols = source_layout.cols,
-		    .samples_per_pixel = source_layout.samples_per_pixel,
-		    .bytes_per_sample = source_layout.bytes_per_sample,
-		    .bits_allocated = source_layout.bits_allocated,
-		    .bits_stored = source_layout.bits_stored,
-		    .pixel_representation = source_layout.pixel_representation,
-		    .use_multicomponent_transform = use_multicomponent_transform,
-		    .source_planar = source.planar,
-		    .planar_source = source_layout.planar_source,
-		    .row_payload_bytes = source_layout.row_payload_bytes,
-		    .source_row_stride = source_layout.source_row_stride,
-		    .source_plane_stride = source_layout.source_plane_stride,
-		    .source_frame_size_bytes = source_layout.source_frame_size_bytes,
-		    .destination_frame_payload = source_layout.destination_frame_payload,
-		    .profile = binding.profile,
-		    .plugin_key = binding.plugin_key,
-		};
-		encode_encapsulated_pixel_data(dispatch_input);
-#if defined(DICOMSDL_PIXEL_V2_RUNTIME_ENABLED)
+			CodecError encode_error{};
+			encode_error.code = CodecStatusCode::unsupported;
+			encode_error.stage = "plugin_lookup";
+			encode_error.detail = "runtime registry is not available";
+			throw_codec_error_with_context("DicomFile::set_pixel_data", file_path,
+			    transfer_syntax, kRuntimePluginKey, std::nullopt, encode_error);
 		}
+#else
+		CodecError encode_error{};
+		encode_error.code = CodecStatusCode::unsupported;
+		encode_error.stage = "plugin_lookup";
+		encode_error.detail = "runtime is disabled at build time";
+		throw_codec_error_with_context("DicomFile::set_pixel_data", file_path,
+		    transfer_syntax, "runtime", std::nullopt, encode_error);
 #endif
-	}
+		}
 
 	const auto encoded_payload_bytes = target_uses_lossy_compression(target)
 	    ? encoded_payload_size_from_pixel_sequence(dataset, file_path, transfer_syntax)
