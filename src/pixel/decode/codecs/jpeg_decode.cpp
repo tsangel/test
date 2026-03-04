@@ -1,7 +1,14 @@
 #include "pixel/decode/core/decode_codec_impl_detail.hpp"
 #include "pixel/registry/codec_registry.hpp"
 
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4819)
+#endif
 #include <turbojpeg.h>
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 
 #include <cstdint>
 #include <exception>
