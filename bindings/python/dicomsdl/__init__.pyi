@@ -1,4 +1,7 @@
 from . import _dicomsdl as _dicomsdl
 from ._dicomsdl import *
 
-__all__ = _dicomsdl.__all__
+def bundled_codec_plugin_libraries() -> tuple[str, ...]: ...
+def load_bundled_codec_plugins(*, strict: bool = ...) -> tuple[str, ...]: ...
+
+__all__: tuple[str, ...]

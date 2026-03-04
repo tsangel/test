@@ -11,6 +11,15 @@ BUILD_WHEEL="${BUILD_WHEEL:-1}"
 CTEST_LABEL="${CTEST_LABEL:-dicomsdl}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 WHEEL_DIR="${WHEEL_DIR:-${ROOT_DIR}/dist}"
+pixel_v2_args=(
+	-DDICOMSDL_PIXEL_V2_CORE=ON
+	-DDICOMSDL_PIXEL_V2_RUNTIME=ON
+	-DDICOMSDL_PIXEL_V2_RLE_STATIC_PLUGIN=ON
+	-DDICOMSDL_PIXEL_V2_OPENJPEG_STATIC_PLUGIN=ON
+	-DDICOMSDL_PIXEL_V2_JPEG_STATIC_PLUGIN=ON
+	-DDICOMSDL_PIXEL_V2_JPEGLS_STATIC_PLUGIN=ON
+	-DDICOMSDL_PIXEL_V2_HTJ2K_STATIC_PLUGIN=ON
+)
 
 if ! command -v cmake >/dev/null 2>&1; then
 	echo "Error: cmake is not installed or not on PATH" >&2
@@ -96,6 +105,7 @@ cmake_args=(-S "$ROOT_DIR" -B "$BUILD_DIR" \
 	-DCMAKE_BUILD_TYPE="${BUILD_TYPE}")
 
 cmake_args+=("${codec_mode_args[@]}")
+cmake_args+=("${pixel_v2_args[@]}")
 
 if [[ -n "${CMAKE_EXTRA_ARGS:-}" ]]; then
 	# shellcheck disable=SC2206
@@ -109,6 +119,7 @@ fi
 
 echo "Configuring dicomsdl (${BUILD_TYPE}) in $BUILD_DIR"
 echo "Codec modes: ${codec_mode_log_parts[*]}"
+echo "Pixel runtime mode: v2 (default)"
 cmake "${cmake_args[@]}"
 
 if [[ -z "${BUILD_PARALLELISM:-}" ]]; then

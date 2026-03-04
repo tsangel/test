@@ -2248,28 +2248,57 @@ m.def("reset_root_elements_reserve_hint",
     },
     "Reset adaptive root DataSet reserve hint to its initial value.");
 
-	m.def("set_htj2k_decoder_backend",
-	    [](const std::string& backend) {
-		    std::string error{};
-		    if (!dicom::pixel::set_htj2k_decoder_backend(
-		            parse_htj2k_decoder(backend), &error)) {
-			    if (error.empty()) {
-				    error = "failed to update htj2k decoder backend";
-			    }
-			    throw nb::value_error(error.c_str());
+m.def("set_htj2k_decoder_backend",
+    [](const std::string& backend) {
+	    std::string error{};
+	    if (!dicom::pixel::set_htj2k_decoder_backend(
+	            parse_htj2k_decoder(backend), &error)) {
+		    if (error.empty()) {
+			    error = "failed to update htj2k decoder backend";
 		    }
-	    },
-	    nb::arg("backend"),
-	    "Set global HTJ2K decoder backend for builtin registry dispatch.\n"
-	    "Allowed values: 'auto', 'openjph', 'openjpeg'.");
+		    throw nb::value_error(error.c_str());
+	    }
+    },
+    nb::arg("backend"),
+    "Set global HTJ2K decoder backend for builtin registry dispatch.\n"
+    "Allowed values: 'auto', 'openjph', 'openjpeg'.");
 
-	m.def("get_htj2k_decoder_backend",
-	    []() {
-		    const auto backend = dicom::pixel::get_htj2k_decoder_backend();
-		    const auto name = htj2k_decoder_name(backend);
-		    return std::string(name);
-	    },
-	    "Return current global HTJ2K decoder backend name.");
+m.def("get_htj2k_decoder_backend",
+    []() {
+	    const auto backend = dicom::pixel::get_htj2k_decoder_backend();
+	    const auto name = htj2k_decoder_name(backend);
+	    return std::string(name);
+    },
+    "Return current global HTJ2K decoder backend name.");
+
+m.def("register_external_codec_plugin",
+    [](const std::string& library_path) {
+	    std::string plugin_key{};
+	    std::string error{};
+	    if (!dicom::pixel::register_external_codec_plugin_from_library(
+	            library_path, &plugin_key, &error)) {
+		    if (error.empty()) {
+			    error = "failed to register external codec plugin";
+		    }
+		    throw nb::value_error(error.c_str());
+	    }
+	    return plugin_key;
+    },
+    nb::arg("library_path"),
+    "Load an external codec plugin shared library (.dll/.so/.dylib) and return the plugin key.");
+
+m.def("unregister_external_codec_plugin",
+    [](const std::string& plugin_key) {
+	    std::string error{};
+	    if (!dicom::pixel::unregister_external_codec_plugin(plugin_key, &error)) {
+		    if (error.empty()) {
+			    error = "failed to unregister external codec plugin";
+		    }
+		    throw nb::value_error(error.c_str());
+	    }
+    },
+    nb::arg("plugin_key"),
+    "Unregister an external codec plugin and restore builtin dispatch.");
 
 		nb::class_<Tag>(m, "Tag")
 		.def(nb::init<>())
@@ -2691,6 +2720,8 @@ m.def("generate_study_instance_uid",
 	    "reset_root_elements_reserve_hint",
 	    "set_htj2k_decoder_backend",
 	    "get_htj2k_decoder_backend",
+	    "register_external_codec_plugin",
+	    "unregister_external_codec_plugin",
 	    "keyword_to_tag_vr",
 	    "tag_to_keyword",
 	    "tag_to_entry",

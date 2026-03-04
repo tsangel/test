@@ -2,6 +2,7 @@
 
 #include "pixel/bridge/codec_plugin_abi_adapter.hpp"
 #include "pixel/plugin_abi/external/plugin_loader.hpp"
+#include "pixel/plugin_abi/external/plugin_external_bridge.hpp"
 #include "pixel/bridge/codec_option_bridge.hpp"
 #include "pixel/registry/codec_registry.hpp"
 
@@ -556,6 +557,15 @@ bool unregister_external_plugin_impl(
 }
 
 }  // namespace
+
+bool has_external_decoder_bridge(std::string_view plugin_key) {
+  const auto entry = find_external_entry_by_plugin_key(plugin_key);
+  if (!entry) {
+    return false;
+  }
+  std::lock_guard<std::mutex> lock(entry->mutex);
+  return entry->decoder_active;
+}
 
 }  // namespace dicom::pixel::detail
 

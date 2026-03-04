@@ -41,6 +41,8 @@ __all__ = [
     "reset_root_elements_reserve_hint",
     "set_htj2k_decoder_backend",
     "get_htj2k_decoder_backend",
+    "register_external_codec_plugin",
+    "unregister_external_codec_plugin",
     "keyword_to_tag_vr",
     "tag_to_keyword",
     "tag_to_entry",
@@ -487,6 +489,12 @@ def set_htj2k_decoder_backend(backend: str) -> None: ...
 
 
 def get_htj2k_decoder_backend() -> str: ...
+
+
+def register_external_codec_plugin(library_path: str) -> str: ...
+
+
+def unregister_external_codec_plugin(plugin_key: str) -> None: ...
 
 
 @overload

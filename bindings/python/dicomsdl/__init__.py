@@ -2,7 +2,34 @@
 
 import importlib as _importlib
 import importlib.util as _importlib_util
+import os as _os
+import pathlib as _pathlib
 import sys as _sys
+import warnings as _warnings
+
+_PACKAGE_DIR = _pathlib.Path(__file__).resolve().parent
+_WINDOWS_DLL_DIRECTORY_HANDLES = []
+
+
+def _configure_windows_dll_search_path():
+    if _sys.platform != "win32":
+        return
+    add_dll_directory = getattr(_os, "add_dll_directory", None)
+    if add_dll_directory is None:
+        return
+    try:
+        handle = add_dll_directory(str(_PACKAGE_DIR))
+    except OSError:
+        return
+    _WINDOWS_DLL_DIRECTORY_HANDLES.append(handle)
+
+
+def _codec_plugin_library_suffix():
+    if _sys.platform == "win32":
+        return ".dll"
+    if _sys.platform == "darwin":
+        return ".dylib"
+    return ".so"
 
 def _load_native_module():
     native_module_name = f"{__name__}._dicomsdl"
@@ -33,6 +60,7 @@ def _load_native_module():
     return native
 
 
+_configure_windows_dll_search_path()
 _dicomsdl = _load_native_module()
 
 _export_names = getattr(
@@ -42,10 +70,67 @@ _export_names = getattr(
 )
 globals().update({name: getattr(_dicomsdl, name) for name in _export_names})
 
+
+def bundled_codec_plugin_libraries():
+    suffix = _codec_plugin_library_suffix()
+    patterns = (
+        f"dicomsdl_codec_*_plugin{suffix}",
+        f"libdicomsdl_codec_*_plugin{suffix}",
+    )
+    entries = []
+    for pattern in patterns:
+        entries.extend(sorted(_PACKAGE_DIR.glob(pattern)))
+
+    unique_paths = []
+    seen = set()
+    for path in entries:
+        resolved = str(path.resolve())
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        unique_paths.append(resolved)
+    return tuple(unique_paths)
+
+
+def load_bundled_codec_plugins(*, strict=False):
+    register_plugin = getattr(_dicomsdl, "register_external_codec_plugin", None)
+    if register_plugin is None:
+        if strict:
+            raise RuntimeError(
+                "Native module does not expose register_external_codec_plugin"
+            )
+        return tuple()
+
+    loaded_plugin_keys = []
+    for library_path in bundled_codec_plugin_libraries():
+        try:
+            plugin_key = register_plugin(library_path)
+        except Exception as exc:  # pragma: no cover - exercised by integration setups
+            if strict:
+                raise
+            _warnings.warn(
+                f"Failed to load bundled codec plugin '{library_path}': {exc}",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            continue
+        loaded_plugin_keys.append(plugin_key)
+    return tuple(loaded_plugin_keys)
+
+
+def _autoload_bundled_codec_plugins():
+    value = _os.environ.get("DICOMSDL_AUTOLOAD_BUNDLED_CODECS", "1").strip().lower()
+    if value in {"0", "false", "no", "off"}:
+        return
+    load_bundled_codec_plugins(strict=False)
+
+
 from . import _image as _image  # noqa: F401
 
 DICOM_STANDARD_VERSION = getattr(_dicomsdl, "DICOM_STANDARD_VERSION", "")
 DICOMSDL_VERSION = getattr(_dicomsdl, "DICOMSDL_VERSION", "")
 __version__ = getattr(_dicomsdl, "__version__", DICOMSDL_VERSION)
+
+_autoload_bundled_codec_plugins()
 
 __all__ = tuple(_export_names)
