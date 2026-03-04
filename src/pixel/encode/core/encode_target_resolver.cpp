@@ -7,15 +7,17 @@ namespace dicom::pixel::detail {
 PixelEncodeTarget classify_pixel_encode_target(
     uid::WellKnown transfer_syntax) noexcept {
 	PixelEncodeTarget target{};
+	const bool is_htj2k = transfer_syntax.is_htj2k();
+	const bool is_j2k_family = transfer_syntax.is_jpeg2000();
 	target.is_native_uncompressed =
 	    transfer_syntax.is_uncompressed() && !transfer_syntax.is_encapsulated();
 	target.is_encapsulated_uncompressed =
 	    transfer_syntax.is_uncompressed() && transfer_syntax.is_encapsulated();
 	target.is_rle = transfer_syntax.is_rle();
-	target.is_j2k = transfer_syntax.is_jpeg2000();
+	target.is_j2k = is_j2k_family && !is_htj2k;
 	target.is_j2k_lossless = target.is_j2k && transfer_syntax.is_lossless();
 	target.is_j2k_lossy = target.is_j2k && transfer_syntax.is_lossy();
-	target.is_htj2k = transfer_syntax.is_htj2k();
+	target.is_htj2k = is_htj2k;
 	target.is_htj2k_lossless = target.is_htj2k && transfer_syntax.is_lossless();
 	target.is_htj2k_lossy = target.is_htj2k && transfer_syntax.is_lossy();
 	target.is_jpegls = transfer_syntax.is_jpegls();
@@ -67,11 +69,11 @@ bool target_uses_lossy_compression(const PixelEncodeTarget& target) noexcept {
 
 std::optional<std::string_view> lossy_method_for_target(
     const PixelEncodeTarget& target) noexcept {
-	if (target.is_j2k_lossy) {
-		return std::string_view("ISO_15444_1");
-	}
 	if (target.is_htj2k_lossy) {
 		return std::string_view("ISO_15444_15");
+	}
+	if (target.is_j2k_lossy) {
+		return std::string_view("ISO_15444_1");
 	}
 	if (target.is_jpegls_lossy) {
 		return std::string_view("ISO_14495_1");
