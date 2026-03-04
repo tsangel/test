@@ -1466,44 +1466,47 @@ if(BUILD_TESTING)
 			add_test(NAME codec_plugin_registration COMMAND dicomsdl_codec_plugin_registration)
 			set_tests_properties(codec_plugin_registration PROPERTIES LABELS "dicomsdl")
 
-			if(TARGET dicomsdl_pixel_core_v2)
-				add_executable(dicomsdl_pixel_v2_core_uncompressed_smoke
-					tests/pixel_v2_core_uncompressed_smoke.cpp
-				)
-				target_include_directories(dicomsdl_pixel_v2_core_uncompressed_smoke
+				if(TARGET dicomsdl_pixel_core_v2)
+					add_executable(dicomsdl_pixel_v2_core_uncompressed_smoke
+						tests/pixel_v2_core_uncompressed_smoke.cpp
+					)
+					target_include_directories(dicomsdl_pixel_v2_core_uncompressed_smoke
 					PRIVATE
 						${CMAKE_CURRENT_SOURCE_DIR}/src/pixel_/abi
 						${CMAKE_CURRENT_SOURCE_DIR}/src/pixel_/core
 				)
-				target_link_libraries(dicomsdl_pixel_v2_core_uncompressed_smoke PRIVATE
-					dicomsdl_pixel_core_v2
-				)
-				add_test(NAME pixel_v2_core_uncompressed_smoke
-					COMMAND dicomsdl_pixel_v2_core_uncompressed_smoke)
-				set_tests_properties(pixel_v2_core_uncompressed_smoke PROPERTIES LABELS "dicomsdl")
-			endif()
+					target_link_libraries(dicomsdl_pixel_v2_core_uncompressed_smoke PRIVATE
+						dicomsdl_pixel_core_v2
+					)
+					target_compile_features(dicomsdl_pixel_v2_core_uncompressed_smoke PRIVATE cxx_std_20)
+					add_test(NAME pixel_v2_core_uncompressed_smoke
+						COMMAND dicomsdl_pixel_v2_core_uncompressed_smoke)
+					set_tests_properties(pixel_v2_core_uncompressed_smoke PROPERTIES LABELS "dicomsdl")
+				endif()
 
-			if(TARGET dicomsdl_pixel_rle_plugin_v2_static)
-				add_executable(dicomsdl_pixel_v2_rle_static_plugin_smoke
-					tests/pixel_v2_rle_static_plugin_smoke.cpp
-				)
+				if(TARGET dicomsdl_pixel_rle_plugin_v2_static)
+					add_executable(dicomsdl_pixel_v2_rle_static_plugin_smoke
+						tests/pixel_v2_rle_static_plugin_smoke.cpp
+					)
 				target_include_directories(dicomsdl_pixel_v2_rle_static_plugin_smoke
 					PRIVATE
 						${CMAKE_CURRENT_SOURCE_DIR}/src/pixel_/abi
 						${CMAKE_CURRENT_SOURCE_DIR}/src/pixel_/plugins/static/rle_v2
 				)
-				target_link_libraries(dicomsdl_pixel_v2_rle_static_plugin_smoke PRIVATE
-					dicomsdl_pixel_rle_plugin_v2_static
-				)
-				add_test(NAME pixel_v2_rle_static_plugin_smoke
-					COMMAND dicomsdl_pixel_v2_rle_static_plugin_smoke)
-				set_tests_properties(pixel_v2_rle_static_plugin_smoke PROPERTIES LABELS "dicomsdl")
-			endif()
+					target_link_libraries(dicomsdl_pixel_v2_rle_static_plugin_smoke PRIVATE
+						dicomsdl_pixel_rle_plugin_v2_static
+					)
+					target_compile_features(dicomsdl_pixel_v2_rle_static_plugin_smoke PRIVATE cxx_std_20)
+					add_test(NAME pixel_v2_rle_static_plugin_smoke
+						COMMAND dicomsdl_pixel_v2_rle_static_plugin_smoke)
+					set_tests_properties(pixel_v2_rle_static_plugin_smoke PROPERTIES LABELS "dicomsdl")
+				endif()
 
 			if(TARGET dicomsdl_pixel_jpeg_plugin_v2)
 				add_executable(dicomsdl_pixel_v2_jpeg_plugin_smoke
 					tests/pixel_v2_jpeg_plugin_smoke.cpp
-			)
+				)
+			target_compile_features(dicomsdl_pixel_v2_jpeg_plugin_smoke PRIVATE cxx_std_20)
 			target_include_directories(dicomsdl_pixel_v2_jpeg_plugin_smoke
 				PRIVATE
 					${CMAKE_CURRENT_SOURCE_DIR}/src/pixel_/abi
@@ -1520,10 +1523,11 @@ if(BUILD_TESTING)
 			set_tests_properties(pixel_v2_jpeg_plugin_smoke PROPERTIES LABELS "dicomsdl")
 		endif()
 
-		if(TARGET dicomsdl_pixel_htj2k_plugin_v2)
-			add_executable(dicomsdl_pixel_v2_htj2k_plugin_smoke
-				tests/pixel_v2_htj2k_plugin_smoke.cpp
-			)
+			if(TARGET dicomsdl_pixel_htj2k_plugin_v2)
+				add_executable(dicomsdl_pixel_v2_htj2k_plugin_smoke
+					tests/pixel_v2_htj2k_plugin_smoke.cpp
+				)
+		target_compile_features(dicomsdl_pixel_v2_htj2k_plugin_smoke PRIVATE cxx_std_20)
 		target_include_directories(dicomsdl_pixel_v2_htj2k_plugin_smoke
 			PRIVATE
 				${CMAKE_CURRENT_SOURCE_DIR}/src/pixel_/abi
