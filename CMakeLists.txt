@@ -144,6 +144,12 @@ add_library(dicomsdl STATIC
 	src/pixel/decode/core/decode_frame_source_loader.cpp
 	src/pixel/decode/core/decode_planar_copy.cpp
 	src/pixel/entrypoint/encode_entrypoint.cpp
+	src/pixel/encode/codecs/encapsulated_encode.cpp
+	src/pixel/encode/codecs/jpeg2k_encode.cpp
+	src/pixel/encode/codecs/htj2k_encode.cpp
+	src/pixel/encode/codecs/jpegls_encode.cpp
+	src/pixel/encode/codecs/jpeg_encode.cpp
+	src/pixel/encode/codecs/jpegxl_encode.cpp
 	src/pixel/encode/core/encode_set_pixel_data_runner.cpp
 	src/pixel/encode/core/encode_source_layout_resolver.cpp
 	src/pixel/encode/core/encode_target_resolver.cpp
