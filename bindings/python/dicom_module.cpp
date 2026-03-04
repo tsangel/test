@@ -2271,6 +2271,30 @@ m.def("get_htj2k_decoder_backend",
     },
     "Return current global HTJ2K decoder backend name.");
 
+m.def("use_openjph_for_htj2k_decode",
+    []() {
+	    std::string error{};
+	    if (!dicom::pixel::use_openjph_for_htj2k_decode(&error)) {
+		    if (error.empty()) {
+			    error = "failed to force HTJ2K decoder backend to openjph";
+		    }
+		    throw nb::value_error(error.c_str());
+	    }
+    },
+    "Force global HTJ2K decoder backend to 'openjph'.");
+
+m.def("use_openjpeg_for_htj2k_decode",
+    []() {
+	    std::string error{};
+	    if (!dicom::pixel::use_openjpeg_for_htj2k_decode(&error)) {
+		    if (error.empty()) {
+			    error = "failed to force HTJ2K decoder backend to openjpeg";
+		    }
+		    throw nb::value_error(error.c_str());
+	    }
+    },
+    "Force global HTJ2K decoder backend to 'openjpeg'.");
+
 m.def("register_external_codec_plugin",
     [](const std::string& library_path) {
 	    std::string plugin_key{};
@@ -2720,6 +2744,8 @@ m.def("generate_study_instance_uid",
 	    "reset_root_elements_reserve_hint",
 	    "set_htj2k_decoder_backend",
 	    "get_htj2k_decoder_backend",
+	    "use_openjph_for_htj2k_decode",
+	    "use_openjpeg_for_htj2k_decode",
 	    "register_external_codec_plugin",
 	    "unregister_external_codec_plugin",
 	    "keyword_to_tag_vr",

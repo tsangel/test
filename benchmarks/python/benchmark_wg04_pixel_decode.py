@@ -869,6 +869,63 @@ def _configure_dicomsdl_htj2k_decoder(module: Any, backend: str) -> None:
     setter(backend)
 
 
+def _configure_dicomsdl_htj2k_decoder_override(module: Any, backend: str) -> None:
+    helper_name_map = {
+        "openjph": "use_openjph_for_htj2k_decode",
+        "openjpeg": "use_openjpeg_for_htj2k_decode",
+    }
+    helper_name = helper_name_map.get(backend)
+    if helper_name is None:
+        raise RuntimeError(f"unsupported HTJ2K override backend: {backend}")
+    helper = getattr(module, helper_name, None)
+    if helper is None:
+        raise RuntimeError(
+            f"dicomsdl module does not expose {helper_name} required by this benchmark fallback"
+        )
+    helper()
+
+
+def _htj2k_override_candidates(current_backend: str) -> tuple[str, ...]:
+    if current_backend == "openjph":
+        return ("openjph", "openjpeg")
+    if current_backend == "openjpeg":
+        return ("openjpeg", "openjph")
+    return ("openjph", "openjpeg")
+
+
+def _benchmark_codec_for_backend(
+    *,
+    backend: str,
+    codec: str,
+    root: Path,
+    module: Any,
+    warmup: int,
+    repeat: int,
+    scaled: bool,
+    dicomsdl_mode: str,
+    pydicom_mode: str,
+    verbose: bool,
+) -> CodecStats:
+    codec_dicomsdl_mode = dicomsdl_mode
+    if backend == "dicomsdl" and codec in _J2K_CODECS and dicomsdl_mode == "to_array":
+        codec_dicomsdl_mode = "decode_into"
+
+    paths = _codec_paths(root, codec)
+    inputs = _preload_inputs(paths, backend, module)
+    return _benchmark_codec(
+        backend,
+        codec,
+        inputs,
+        warmup=warmup,
+        repeat=repeat,
+        scaled=scaled,
+        dicomsdl_mode=codec_dicomsdl_mode,
+        pydicom_mode=pydicom_mode,
+        verbose=verbose,
+        decoder_threads=-1,
+    )
+
+
 def main(argv: list[str]) -> int:
     args = _parse_args(argv)
 
@@ -930,13 +987,14 @@ def main(argv: list[str]) -> int:
             print(f"failed to import {backend}: {exc}", file=sys.stderr)
             return 1
 
+        active_dicomsdl_htj2k_decoder = dicomsdl_htj2k_decoder
         if backend == "dicomsdl":
             try:
-                _configure_dicomsdl_htj2k_decoder(module, dicomsdl_htj2k_decoder)
+                _configure_dicomsdl_htj2k_decoder(module, active_dicomsdl_htj2k_decoder)
             except Exception as exc:
                 print(
                     f"failed to configure dicomsdl HTJ2K decoder backend "
-                    f"({dicomsdl_htj2k_decoder}): {exc}",
+                    f"({active_dicomsdl_htj2k_decoder}): {exc}",
                     file=sys.stderr,
                 )
                 return 1
@@ -947,26 +1005,56 @@ def main(argv: list[str]) -> int:
         skipped_for_backend: dict[str, str] = {}
         for codec in codecs:
             try:
-                codec_dicomsdl_mode = dicomsdl_mode
-                if backend == "dicomsdl" and codec in _J2K_CODECS and dicomsdl_mode == "to_array":
-                    codec_dicomsdl_mode = "decode_into"
-
-                paths = _codec_paths(root, codec)
-                inputs = _preload_inputs(paths, backend, module)
-                row = _benchmark_codec(
-                    backend,
-                    codec,
-                    inputs,
+                row = _benchmark_codec_for_backend(
+                    backend=backend,
+                    codec=codec,
+                    root=root,
+                    module=module,
                     warmup=args.warmup,
                     repeat=args.repeat,
                     scaled=args.scaled,
-                    dicomsdl_mode=codec_dicomsdl_mode,
+                    dicomsdl_mode=dicomsdl_mode,
                     pydicom_mode=pydicom_mode,
                     verbose=args.verbose,
-                    decoder_threads=-1,
                 )
                 backend_stats.append(row)
             except Exception as exc:
+                if backend == "dicomsdl" and codec in _HTJ2K_CODECS:
+                    fallback_errors: list[str] = []
+                    for fallback_backend in _htj2k_override_candidates(active_dicomsdl_htj2k_decoder):
+                        try:
+                            _configure_dicomsdl_htj2k_decoder_override(module, fallback_backend)
+                            row = _benchmark_codec_for_backend(
+                                backend=backend,
+                                codec=codec,
+                                root=root,
+                                module=module,
+                                warmup=args.warmup,
+                                repeat=args.repeat,
+                                scaled=args.scaled,
+                                dicomsdl_mode=dicomsdl_mode,
+                                pydicom_mode=pydicom_mode,
+                                verbose=args.verbose,
+                            )
+                            backend_stats.append(row)
+                            active_dicomsdl_htj2k_decoder = fallback_backend
+                            print(
+                                f"note: dicomsdl HTJ2K fallback applied for codec {codec}: "
+                                f"backend={fallback_backend} (initial error: {exc})",
+                                file=sys.stderr,
+                            )
+                            break
+                        except Exception as fallback_exc:
+                            fallback_errors.append(f"{fallback_backend}: {fallback_exc}")
+                    else:
+                        fallback_summary = "; ".join(fallback_errors)
+                        print(
+                            f"failed to benchmark {backend} codec {codec}: {exc} "
+                            f"(fallback attempts: {fallback_summary})",
+                            file=sys.stderr,
+                        )
+                        return 1
+                    continue
                 if backend == "pydicom":
                     skip_reason = _pydicom_skip_reason(codec, exc)
                     if skip_reason is not None:

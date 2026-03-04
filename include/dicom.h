@@ -1136,6 +1136,12 @@ void decode_frame_into(const DicomFile& df, std::size_t frame_index,
 /// When an external plugin overrides "htj2k" dispatch, this returns auto_select.
 [[nodiscard]] Htj2kDecoder get_htj2k_decoder_backend() noexcept;
 
+/// Convenience helper: force HTJ2K decode backend to OpenJPH.
+[[nodiscard]] bool use_openjph_for_htj2k_decode(std::string* out_error = nullptr);
+
+/// Convenience helper: force HTJ2K decode backend to OpenJPEG.
+[[nodiscard]] bool use_openjpeg_for_htj2k_decode(std::string* out_error = nullptr);
+
 /// Register external codec plugin(s) from a shared library.
 /// The library may export decoder and/or encoder plugin API symbols.
 /// When the plugin key matches an existing registry key, frame dispatch is overridden.

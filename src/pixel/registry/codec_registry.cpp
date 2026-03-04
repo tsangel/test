@@ -240,4 +240,12 @@ Htj2kDecoder get_htj2k_decoder_backend() noexcept {
   return selected_htj2k_backend();
 }
 
+bool use_openjph_for_htj2k_decode(std::string* out_error) {
+  return set_htj2k_decoder_backend(Htj2kDecoder::openjph, out_error);
+}
+
+bool use_openjpeg_for_htj2k_decode(std::string* out_error) {
+  return set_htj2k_decoder_backend(Htj2kDecoder::openjpeg, out_error);
+}
+
 }  // namespace dicom::pixel

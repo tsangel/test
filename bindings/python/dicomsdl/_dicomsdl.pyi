@@ -41,6 +41,8 @@ __all__ = [
     "reset_root_elements_reserve_hint",
     "set_htj2k_decoder_backend",
     "get_htj2k_decoder_backend",
+    "use_openjph_for_htj2k_decode",
+    "use_openjpeg_for_htj2k_decode",
     "register_external_codec_plugin",
     "unregister_external_codec_plugin",
     "keyword_to_tag_vr",
@@ -489,6 +491,10 @@ def set_htj2k_decoder_backend(backend: str) -> None: ...
 
 
 def get_htj2k_decoder_backend() -> str: ...
+
+def use_openjph_for_htj2k_decode() -> None: ...
+
+def use_openjpeg_for_htj2k_decode() -> None: ...
 
 
 def register_external_codec_plugin(library_path: str) -> str: ...
