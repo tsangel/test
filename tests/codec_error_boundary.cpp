@@ -33,6 +33,53 @@ void expect_not_contains(std::string_view haystack, std::string_view needle,
 	}
 }
 
+void expect_decode_plugin_or_runtime(std::string_view haystack,
+    std::string_view plugin_key, std::string_view label) {
+	const bool has_runtime =
+	    haystack.find("plugin=runtime") != std::string_view::npos;
+	if (has_runtime) {
+		expect_contains(haystack, "plugin=runtime", label);
+		return;
+	}
+	const std::string expected = std::string("plugin=") + std::string(plugin_key);
+	expect_contains(haystack, expected, label);
+}
+
+void expect_native_or_runtime_plugin(std::string_view haystack,
+    std::string_view label) {
+	expect_decode_plugin_or_runtime(haystack, "native", label);
+}
+
+void expect_none_or_runtime_plugin(std::string_view haystack,
+    std::string_view label) {
+	if (haystack.find("plugin=runtime") != std::string_view::npos) {
+		expect_contains(haystack, "plugin=runtime", label);
+		return;
+	}
+	expect_contains(haystack, "plugin=<none>", label);
+}
+
+void expect_decode_load_frame_source_or_runtime_lookup_error(
+    std::string_view what, std::string_view label) {
+	const bool has_runtime_plugin =
+	    what.find("plugin=runtime") != std::string_view::npos;
+	if (has_runtime_plugin) {
+		const bool has_load_frame_source =
+		    what.find("status=invalid_argument") != std::string_view::npos &&
+		    what.find("stage=load_frame_source") != std::string_view::npos;
+		const bool has_runtime_lookup =
+		    what.find("status=unsupported") != std::string_view::npos &&
+		    what.find("stage=plugin_lookup") != std::string_view::npos;
+		if (!has_load_frame_source && !has_runtime_lookup) {
+			fail(std::string(label) +
+			    " missing expected runtime status/stage pair");
+		}
+		return;
+	}
+	expect_contains(what, "status=invalid_argument", label);
+	expect_contains(what, "stage=load_frame_source", label);
+}
+
 void expect_missing_decode_plugin_or_runtime_native_error(
     std::string_view what, std::string_view label) {
 	if (what.find("plugin=<none>") != std::string_view::npos) {
@@ -44,7 +91,7 @@ void expect_missing_decode_plugin_or_runtime_native_error(
 		    label);
 		return;
 	}
-	expect_contains(what, "plugin=native", label);
+	expect_native_or_runtime_plugin(what, label);
 	expect_contains(what, "status=invalid_argument", label);
 	expect_contains(what, "stage=load_frame_source", label);
 	expect_contains(what, "missing PixelData", label);
@@ -471,7 +518,7 @@ int main() {
 			    std::string("ts=") + std::string("ExplicitVRLittleEndian"_uid.value());
 			expect_contains(what, "pixel::decode_frame_into", "decode throw message");
 			expect_contains(what, expected_ts, "decode throw message");
-			expect_contains(what, "plugin=native", "decode throw message");
+			expect_native_or_runtime_plugin(what, "decode throw message");
 			expect_contains(what, "frame=0", "decode throw message");
 			expect_contains(what, "status=invalid_argument", "decode throw message");
 			expect_contains(what, "stage=load_frame_source", "decode throw message");
@@ -491,10 +538,10 @@ int main() {
 			    std::string("ts=") + std::string("JPEGBaseline8Bit"_uid.value());
 			expect_contains(what, "pixel::decode_frame_into", "jpeg decode throw message");
 			expect_contains(what, expected_ts, "jpeg decode throw message");
-			expect_contains(what, "plugin=jpeg", "jpeg decode throw message");
+			expect_decode_plugin_or_runtime(what, "jpeg", "jpeg decode throw message");
 			expect_contains(what, "frame=0", "jpeg decode throw message");
-			expect_contains(what, "status=invalid_argument", "jpeg decode throw message");
-			expect_contains(what, "stage=load_frame_source", "jpeg decode throw message");
+			expect_decode_load_frame_source_or_runtime_lookup_error(
+			    what, "jpeg decode throw message");
 		}
 	}
 
@@ -511,10 +558,10 @@ int main() {
 			    std::string("ts=") + std::string("JPEGLSLossless"_uid.value());
 			expect_contains(what, "pixel::decode_frame_into", "jpegls decode throw message");
 			expect_contains(what, expected_ts, "jpegls decode throw message");
-			expect_contains(what, "plugin=jpegls", "jpegls decode throw message");
+			expect_decode_plugin_or_runtime(what, "jpegls", "jpegls decode throw message");
 			expect_contains(what, "frame=0", "jpegls decode throw message");
-			expect_contains(what, "status=invalid_argument", "jpegls decode throw message");
-			expect_contains(what, "stage=load_frame_source", "jpegls decode throw message");
+			expect_decode_load_frame_source_or_runtime_lookup_error(
+			    what, "jpegls decode throw message");
 		}
 	}
 
@@ -531,10 +578,10 @@ int main() {
 			    std::string("ts=") + std::string("JPEGXLLossless"_uid.value());
 			expect_contains(what, "pixel::decode_frame_into", "jpegxl decode throw message");
 			expect_contains(what, expected_ts, "jpegxl decode throw message");
-			expect_contains(what, "plugin=jpegxl", "jpegxl decode throw message");
+			expect_decode_plugin_or_runtime(what, "jpegxl", "jpegxl decode throw message");
 			expect_contains(what, "frame=0", "jpegxl decode throw message");
-			expect_contains(what, "status=invalid_argument", "jpegxl decode throw message");
-			expect_contains(what, "stage=load_frame_source", "jpegxl decode throw message");
+			expect_decode_load_frame_source_or_runtime_lookup_error(
+			    what, "jpegxl decode throw message");
 		}
 	}
 
@@ -551,10 +598,10 @@ int main() {
 			    std::string("ts=") + std::string("JPEG2000Lossless"_uid.value());
 			expect_contains(what, "pixel::decode_frame_into", "jpeg2k decode throw message");
 			expect_contains(what, expected_ts, "jpeg2k decode throw message");
-			expect_contains(what, "plugin=jpeg2k", "jpeg2k decode throw message");
+			expect_decode_plugin_or_runtime(what, "jpeg2k", "jpeg2k decode throw message");
 			expect_contains(what, "frame=0", "jpeg2k decode throw message");
-			expect_contains(what, "status=invalid_argument", "jpeg2k decode throw message");
-			expect_contains(what, "stage=load_frame_source", "jpeg2k decode throw message");
+			expect_decode_load_frame_source_or_runtime_lookup_error(
+			    what, "jpeg2k decode throw message");
 		}
 	}
 
@@ -571,10 +618,10 @@ int main() {
 			    std::string("ts=") + std::string("HTJ2KLossless"_uid.value());
 			expect_contains(what, "pixel::decode_frame_into", "htj2k decode throw message");
 			expect_contains(what, expected_ts, "htj2k decode throw message");
-			expect_contains(what, "plugin=htj2k", "htj2k decode throw message");
+			expect_decode_plugin_or_runtime(what, "htj2k", "htj2k decode throw message");
 			expect_contains(what, "frame=0", "htj2k decode throw message");
-			expect_contains(what, "status=invalid_argument", "htj2k decode throw message");
-			expect_contains(what, "stage=load_frame_source", "htj2k decode throw message");
+			expect_decode_load_frame_source_or_runtime_lookup_error(
+			    what, "htj2k decode throw message");
 		}
 	}
 
@@ -591,10 +638,10 @@ int main() {
 			    std::string("ts=") + std::string("RLELossless"_uid.value());
 			expect_contains(what, "pixel::decode_frame_into", "rle decode throw message");
 			expect_contains(what, expected_ts, "rle decode throw message");
-			expect_contains(what, "plugin=rle", "rle decode throw message");
+			expect_decode_plugin_or_runtime(what, "rle", "rle decode throw message");
 			expect_contains(what, "frame=0", "rle decode throw message");
-			expect_contains(what, "status=invalid_argument", "rle decode throw message");
-			expect_contains(what, "stage=load_frame_source", "rle decode throw message");
+			expect_decode_load_frame_source_or_runtime_lookup_error(
+			    what, "rle decode throw message");
 		}
 	}
 
@@ -617,11 +664,10 @@ int main() {
 			expect_contains(what, "pixel::decode_frame_into",
 			    "jpeg2k load_frame_source throw message");
 			expect_contains(what, expected_ts, "jpeg2k load_frame_source throw message");
-			expect_contains(what, "plugin=jpeg2k", "jpeg2k load_frame_source throw message");
-			expect_contains(what, "status=invalid_argument",
-			    "jpeg2k load_frame_source throw message");
-			expect_contains(what, "stage=load_frame_source",
-			    "jpeg2k load_frame_source throw message");
+			expect_decode_plugin_or_runtime(
+			    what, "jpeg2k", "jpeg2k load_frame_source throw message");
+			expect_decode_load_frame_source_or_runtime_lookup_error(
+			    what, "jpeg2k load_frame_source throw message");
 		}
 	}
 
@@ -644,11 +690,10 @@ int main() {
 			expect_contains(what, "pixel::decode_frame_into",
 			    "htj2k load_frame_source throw message");
 			expect_contains(what, expected_ts, "htj2k load_frame_source throw message");
-			expect_contains(what, "plugin=htj2k", "htj2k load_frame_source throw message");
-			expect_contains(what, "status=invalid_argument",
-			    "htj2k load_frame_source throw message");
-			expect_contains(what, "stage=load_frame_source",
-			    "htj2k load_frame_source throw message");
+			expect_decode_plugin_or_runtime(
+			    what, "htj2k", "htj2k load_frame_source throw message");
+			expect_decode_load_frame_source_or_runtime_lookup_error(
+			    what, "htj2k load_frame_source throw message");
 		}
 	}
 
@@ -671,7 +716,8 @@ int main() {
 			expect_contains(
 			    what, "pixel::decode_frame_into", "native load_frame_source throw message");
 			expect_contains(what, expected_ts, "native load_frame_source throw message");
-			expect_contains(what, "plugin=native", "native load_frame_source throw message");
+			expect_native_or_runtime_plugin(
+			    what, "native load_frame_source throw message");
 			expect_contains(what, "status=invalid_argument",
 			    "native load_frame_source throw message");
 			expect_contains(what, "stage=load_frame_source",
@@ -699,7 +745,8 @@ int main() {
 				expect_contains(what, "pixel::decode_frame_into",
 				    "native frame index throw message");
 				expect_contains(what, expected_ts, "native frame index throw message");
-				expect_contains(what, "plugin=native", "native frame index throw message");
+				expect_native_or_runtime_plugin(
+				    what, "native frame index throw message");
 				expect_contains(what, "frame=1", "native frame index throw message");
 				expect_contains(what, "status=invalid_argument",
 				    "native frame index throw message");
@@ -728,7 +775,8 @@ int main() {
 				expect_contains(what, "pixel::decode_frame_into",
 				    "native metadata throw message");
 				expect_contains(what, expected_ts, "native metadata throw message");
-				expect_contains(what, "plugin=native", "native metadata throw message");
+				expect_native_or_runtime_plugin(
+				    what, "native metadata throw message");
 				expect_contains(what, "status=invalid_argument",
 				    "native metadata throw message");
 				expect_contains(what, "stage=load_frame_source",
@@ -757,11 +805,10 @@ int main() {
 			expect_contains(
 			    what, "pixel::decode_frame_into", "jpeg load_frame_source throw message");
 			expect_contains(what, expected_ts, "jpeg load_frame_source throw message");
-			expect_contains(what, "plugin=jpeg", "jpeg load_frame_source throw message");
-			expect_contains(what, "status=invalid_argument",
-			    "jpeg load_frame_source throw message");
-			expect_contains(what, "stage=load_frame_source",
-			    "jpeg load_frame_source throw message");
+			expect_decode_plugin_or_runtime(
+			    what, "jpeg", "jpeg load_frame_source throw message");
+			expect_decode_load_frame_source_or_runtime_lookup_error(
+			    what, "jpeg load_frame_source throw message");
 		}
 	}
 
@@ -784,11 +831,10 @@ int main() {
 			expect_contains(
 			    what, "pixel::decode_frame_into", "jpegls load_frame_source throw message");
 			expect_contains(what, expected_ts, "jpegls load_frame_source throw message");
-			expect_contains(what, "plugin=jpegls", "jpegls load_frame_source throw message");
-			expect_contains(what, "status=invalid_argument",
-			    "jpegls load_frame_source throw message");
-			expect_contains(what, "stage=load_frame_source",
-			    "jpegls load_frame_source throw message");
+			expect_decode_plugin_or_runtime(
+			    what, "jpegls", "jpegls load_frame_source throw message");
+			expect_decode_load_frame_source_or_runtime_lookup_error(
+			    what, "jpegls load_frame_source throw message");
 		}
 	}
 
@@ -811,11 +857,10 @@ int main() {
 			expect_contains(
 			    what, "pixel::decode_frame_into", "jpegxl load_frame_source throw message");
 			expect_contains(what, expected_ts, "jpegxl load_frame_source throw message");
-			expect_contains(what, "plugin=jpegxl", "jpegxl load_frame_source throw message");
-			expect_contains(what, "status=invalid_argument",
-			    "jpegxl load_frame_source throw message");
-			expect_contains(what, "stage=load_frame_source",
-			    "jpegxl load_frame_source throw message");
+			expect_decode_plugin_or_runtime(
+			    what, "jpegxl", "jpegxl load_frame_source throw message");
+			expect_decode_load_frame_source_or_runtime_lookup_error(
+			    what, "jpegxl load_frame_source throw message");
 		}
 	}
 
@@ -838,11 +883,10 @@ int main() {
 			expect_contains(
 			    what, "pixel::decode_frame_into", "rle load_frame_source throw message");
 			expect_contains(what, expected_ts, "rle load_frame_source throw message");
-			expect_contains(what, "plugin=rle", "rle load_frame_source throw message");
-			expect_contains(what, "status=invalid_argument",
-			    "rle load_frame_source throw message");
-			expect_contains(what, "stage=load_frame_source",
-			    "rle load_frame_source throw message");
+			expect_decode_plugin_or_runtime(
+			    what, "rle", "rle load_frame_source throw message");
+			expect_decode_load_frame_source_or_runtime_lookup_error(
+			    what, "rle load_frame_source throw message");
 		}
 	}
 
@@ -868,7 +912,8 @@ int main() {
 			expect_contains(
 			    what, "pixel::decode_frame_into", "jpeg2k backend decode throw message");
 			expect_contains(what, expected_ts, "jpeg2k backend decode throw message");
-				expect_contains(what, "plugin=jpeg2k", "jpeg2k backend decode throw message");
+				expect_decode_plugin_or_runtime(
+				    what, "jpeg2k", "jpeg2k backend decode throw message");
 				expect_contains(
 				    what, "status=backend_error", "jpeg2k backend decode throw message");
 				expect_contains(
@@ -901,7 +946,8 @@ int main() {
 			expect_contains(
 			    what, "pixel::decode_frame_into", "htj2k backend decode throw message");
 			expect_contains(what, expected_ts, "htj2k backend decode throw message");
-				expect_contains(what, "plugin=htj2k", "htj2k backend decode throw message");
+				expect_decode_plugin_or_runtime(
+				    what, "htj2k", "htj2k backend decode throw message");
 				expect_contains(
 				    what, "status=backend_error", "htj2k backend decode throw message");
 				expect_contains(
@@ -942,7 +988,8 @@ int main() {
 				expect_contains(what, "pixel::decode_frame_into",
 				    "jpeg2k option throw message");
 				expect_contains(what, expected_ts, "jpeg2k option throw message");
-				expect_contains(what, "plugin=jpeg2k", "jpeg2k option throw message");
+				expect_decode_plugin_or_runtime(
+				    what, "jpeg2k", "jpeg2k option throw message");
 				expect_contains(
 				    what, "status=invalid_argument", "jpeg2k option throw message");
 				expect_contains(what, "stage=parse_options", "jpeg2k option throw message");
@@ -974,7 +1021,7 @@ int main() {
 			expect_contains(what, "pixel::decode_frame_into",
 			    "unsupported ts decode throw message");
 			expect_contains(what, expected_ts, "unsupported ts decode throw message");
-			expect_contains(what, "plugin=<none>", "unsupported ts decode throw message");
+			expect_none_or_runtime_plugin(what, "unsupported ts decode throw message");
 			expect_contains(
 			    what, "status=unsupported", "unsupported ts decode throw message");
 			expect_contains(

@@ -1,3 +1,5 @@
+#define PIXEL_DECODER_PLUGIN_API_NO_ENTRYPOINT_DECL
+#define PIXEL_ENCODER_PLUGIN_API_NO_ENTRYPOINT_DECL
 #include "internal.hpp"
 
 #if defined(_WIN32)
