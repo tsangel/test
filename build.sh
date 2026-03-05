@@ -10,7 +10,9 @@ BUILD_DIR="${BUILD_DIR:-${ROOT_DIR}/build}"
 BUILD_TYPE="${BUILD_TYPE:-Release}"
 BUILD_TESTING="${BUILD_TESTING:-ON}"
 DICOM_BUILD_EXAMPLES="${DICOM_BUILD_EXAMPLES:-ON}"
-DICOMSDL_CODEC_DEFAULT_MODE="${DICOMSDL_CODEC_DEFAULT_MODE:-builtin}"
+DICOMSDL_PIXEL_DEFAULT_MODE="${DICOMSDL_PIXEL_DEFAULT_MODE:-builtin}"
+# Keep JPEG XL opt-in by default because enabling JPEG XL modes requires libjxl.
+DICOMSDL_PIXEL_JPEGXL_MODE="${DICOMSDL_PIXEL_JPEGXL_MODE:-none}"
 BUILD_WHEEL="${BUILD_WHEEL:-1}"
 CTEST_LABEL="${CTEST_LABEL:-dicomsdl}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
@@ -30,56 +32,70 @@ if ! command -v cmake >/dev/null 2>&1; then
 	exit 1
 fi
 
-default_mode_lc="$(printf '%s' "$DICOMSDL_CODEC_DEFAULT_MODE" | tr '[:upper:]' '[:lower:]')"
+default_mode_lc="$(printf '%s' "$DICOMSDL_PIXEL_DEFAULT_MODE" | tr '[:upper:]' '[:lower:]')"
 case "$default_mode_lc" in
 	builtin|shared|none) ;;
 	*)
-		echo "Error: DICOMSDL_CODEC_DEFAULT_MODE must be one of builtin|shared|none (got: ${DICOMSDL_CODEC_DEFAULT_MODE})" >&2
+		echo "Error: DICOMSDL_PIXEL_DEFAULT_MODE must be one of builtin|shared|none (got: ${DICOMSDL_PIXEL_DEFAULT_MODE})" >&2
 		exit 1
 		;;
 esac
 
 CODEC_LIST=(JPEG JPEGLS JPEG2K HTJ2K JPEGXL)
-codec_mode_args=()
-codec_plugin_args=()
+codec_pixel_args=()
 codec_mode_log_parts=()
+jpegxl_mode_requested=0
 
 for codec in "${CODEC_LIST[@]}"; do
-	mode_var="DICOMSDL_CODEC_${codec}_MODE"
+	mode_var="DICOMSDL_PIXEL_${codec}_MODE"
 	mode_value="${!mode_var:-$default_mode_lc}"
 	mode_value_lc="$(printf '%s' "$mode_value" | tr '[:upper:]' '[:lower:]')"
 
-		case "$mode_value_lc" in
+	case "$codec" in
+		JPEG)
+			static_opt="DICOMSDL_PIXEL_JPEG_STATIC_PLUGIN"
+			shared_opt="DICOMSDL_PIXEL_JPEG_PLUGIN"
+			;;
+		JPEGLS)
+			static_opt="DICOMSDL_PIXEL_JPEGLS_STATIC_PLUGIN"
+			shared_opt="DICOMSDL_PIXEL_JPEGLS_PLUGIN"
+			;;
+		JPEG2K)
+			static_opt="DICOMSDL_PIXEL_OPENJPEG_STATIC_PLUGIN"
+			shared_opt="DICOMSDL_PIXEL_OPENJPEG_PLUGIN"
+			;;
+		HTJ2K)
+			static_opt="DICOMSDL_PIXEL_HTJ2K_STATIC_PLUGIN"
+			shared_opt="DICOMSDL_PIXEL_HTJ2K_PLUGIN"
+			;;
+		JPEGXL)
+			static_opt="DICOMSDL_PIXEL_JPEGXL_STATIC_PLUGIN"
+			shared_opt="DICOMSDL_PIXEL_JPEGXL_PLUGIN"
+			;;
+		*)
+			echo "Error: unsupported codec key '${codec}'" >&2
+			exit 1
+			;;
+	esac
+
+	case "$mode_value_lc" in
 		builtin)
-			codec_mode_args+=("-DDICOMSDL_CODEC_${codec}_BUILTIN=ON")
-			codec_mode_args+=("-DDICOMSDL_CODEC_${codec}_SHARED=OFF")
+			codec_pixel_args+=("-D${static_opt}=ON")
+			codec_pixel_args+=("-D${shared_opt}=OFF")
+			if [[ "$codec" == "JPEGXL" ]]; then
+				jpegxl_mode_requested=1
+			fi
 			;;
 		shared)
-			codec_mode_args+=("-DDICOMSDL_CODEC_${codec}_BUILTIN=OFF")
-			# DICOMSDL_CODEC_*_SHARED uses a removed plugin ABI path.
-			# Keep legacy shared flag OFF and enable pixel v2 shared plugins instead.
-			codec_mode_args+=("-DDICOMSDL_CODEC_${codec}_SHARED=OFF")
-			case "$codec" in
-				JPEG)
-					codec_plugin_args+=("-DDICOMSDL_PIXEL_JPEG_PLUGIN=ON")
-					;;
-				JPEGLS)
-					codec_plugin_args+=("-DDICOMSDL_PIXEL_JPEGLS_PLUGIN=ON")
-					;;
-				JPEG2K)
-					codec_plugin_args+=("-DDICOMSDL_PIXEL_OPENJPEG_PLUGIN=ON")
-					;;
-				HTJ2K)
-					codec_plugin_args+=("-DDICOMSDL_PIXEL_HTJ2K_PLUGIN=ON")
-					;;
-				JPEGXL)
-					codec_plugin_args+=("-DDICOMSDL_PIXEL_JPEGXL_PLUGIN=ON")
-					;;
-			esac
+			codec_pixel_args+=("-D${static_opt}=OFF")
+			codec_pixel_args+=("-D${shared_opt}=ON")
+			if [[ "$codec" == "JPEGXL" ]]; then
+				jpegxl_mode_requested=1
+			fi
 			;;
 		none)
-			codec_mode_args+=("-DDICOMSDL_CODEC_${codec}_BUILTIN=OFF")
-			codec_mode_args+=("-DDICOMSDL_CODEC_${codec}_SHARED=OFF")
+			codec_pixel_args+=("-D${static_opt}=OFF")
+			codec_pixel_args+=("-D${shared_opt}=OFF")
 			;;
 		*)
 			echo "Error: ${mode_var} must be one of builtin|shared|none (got: ${mode_value})" >&2
@@ -139,11 +155,11 @@ cmake_args=(-S "$ROOT_DIR" -B "$BUILD_DIR" \
 	-DDICOM_BUILD_EXAMPLES="${DICOM_BUILD_EXAMPLES}" \
 	-DCMAKE_BUILD_TYPE="${BUILD_TYPE}")
 
-if ((${#codec_mode_args[@]})); then
-	cmake_args+=("${codec_mode_args[@]}")
+if ((${#codec_pixel_args[@]})); then
+	cmake_args+=("${codec_pixel_args[@]}")
 fi
-if ((${#codec_plugin_args[@]})); then
-	cmake_args+=("${codec_plugin_args[@]}")
+if ((jpegxl_mode_requested)); then
+	cmake_args+=("-DDICOMSDL_ENABLE_JPEGXL=ON")
 fi
 if ((${#pixel_v2_args[@]})); then
 	cmake_args+=("${pixel_v2_args[@]}")
