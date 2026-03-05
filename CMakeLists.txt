@@ -135,27 +135,35 @@ add_library(dicomsdl STATIC
 	src/dataelement.cpp
 	src/instream.cpp
 	src/pixelsequence.cpp
-	src/pixel/registry/codec_registry.cpp
-	src/pixel/external_plugin.cpp
-	src/pixel/entrypoint/decode_entrypoint.cpp
-	src/pixel/decode/core/decode_entrypoint_runner.cpp
-	src/pixel/decode/core/decode_modality_transform.cpp
-	src/pixel/decode/core/decode_frame_dispatch.cpp
-	src/pixel/decode/core/decode_frame_source_loader.cpp
-	src/pixel/decode/core/decode_planar_copy.cpp
-	src/pixel/entrypoint/encode_entrypoint.cpp
-	src/pixel/encode/codecs/encapsulated_encode.cpp
-	src/pixel/encode/codecs/jpeg2k_encode.cpp
-	src/pixel/encode/codecs/htj2k_encode.cpp
-	src/pixel/encode/codecs/jpegls_encode.cpp
-	src/pixel/encode/codecs/jpeg_encode.cpp
-	src/pixel/encode/codecs/jpegxl_encode.cpp
-	src/pixel/encode/core/encode_set_pixel_data_runner.cpp
-	src/pixel/encode/core/encode_source_layout_resolver.cpp
-	src/pixel/encode/core/encode_target_resolver.cpp
-	src/pixel/encode/core/native_pixel_copy.cpp
-	src/pixel/encode/core/multicomponent_option_resolver.cpp
-	src/pixel/encode/core/encode_metadata_updater.cpp
+	src/pixel_/registry/codec_registry.cpp
+	src/pixel_/external_plugin.cpp
+	src/pixel_/entrypoint/decode_entrypoint.cpp
+	src/pixel_/decode/core/decode_entrypoint_runner.cpp
+	src/pixel_/decode/core/decode_modality_transform.cpp
+	src/pixel_/decode/core/decode_frame_dispatch.cpp
+	src/pixel_/decode/core/decode_frame_source_loader.cpp
+	src/pixel_/decode/core/decode_planar_copy.cpp
+	src/pixel_/decode/codecs/raw_decode.cpp
+	src/pixel_/decode/codecs/encapsulated_uncompressed_decode.cpp
+	src/pixel_/decode/codecs/jpeg_decode.cpp
+	src/pixel_/decode/codecs/jpegls_decode.cpp
+	src/pixel_/decode/codecs/jpeg2k_decode.cpp
+	src/pixel_/decode/codecs/htj2k_decode.cpp
+	src/pixel_/decode/codecs/jpegxl_decode.cpp
+	src/pixel_/plugin_abi/builtin/rle_builtin_plugin.cpp
+	src/pixel_/entrypoint/encode_entrypoint.cpp
+	src/pixel_/encode/codecs/encapsulated_encode.cpp
+	src/pixel_/encode/codecs/jpeg2k_encode.cpp
+	src/pixel_/encode/codecs/htj2k_encode.cpp
+	src/pixel_/encode/codecs/jpegls_encode.cpp
+	src/pixel_/encode/codecs/jpeg_encode.cpp
+	src/pixel_/encode/codecs/jpegxl_encode.cpp
+	src/pixel_/encode/core/encode_set_pixel_data_runner.cpp
+	src/pixel_/encode/core/encode_source_layout_resolver.cpp
+	src/pixel_/encode/core/encode_target_resolver.cpp
+	src/pixel_/encode/core/native_pixel_copy.cpp
+	src/pixel_/encode/core/multicomponent_option_resolver.cpp
+	src/pixel_/encode/core/encode_metadata_updater.cpp
 	)
 set_target_properties(dicomsdl PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(dicomsdl PROPERTIES

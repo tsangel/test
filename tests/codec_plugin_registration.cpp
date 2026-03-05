@@ -11,7 +11,7 @@
 
 #include <dicom.h>
 #include "codec_builtin_flags.hpp"
-#include "../src/pixel/registry/codec_registry.hpp"
+#include "../src/pixel_/registry/codec_registry.hpp"
 
 namespace {
 using namespace dicom::literals;

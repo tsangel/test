@@ -6,7 +6,7 @@
 
 #include <dicom.h>
 
-#include "../src/pixel/registry/codec_registry.hpp"
+#include "../src/pixel_/registry/codec_registry.hpp"
 
 namespace {
 
