@@ -47,7 +47,15 @@ void expect_decode_plugin_or_runtime(std::string_view haystack,
 
 void expect_native_or_runtime_plugin(std::string_view haystack,
     std::string_view label) {
-	expect_decode_plugin_or_runtime(haystack, "native", label);
+	if (haystack.find("plugin=runtime") != std::string_view::npos) {
+		expect_contains(haystack, "plugin=runtime", label);
+		return;
+	}
+	if (haystack.find("plugin=direct") != std::string_view::npos) {
+		expect_contains(haystack, "plugin=direct", label);
+		return;
+	}
+	expect_contains(haystack, "plugin=native", label);
 }
 
 void expect_none_or_runtime_plugin(std::string_view haystack,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import math
 import sys
 
@@ -62,27 +63,39 @@ HTJ2K_TRANSFER_SYNTAX_KEYWORDS = {
     "htj2klosslessrpcl",
 }
 
-HTJ2K_TRANSFER_SYNTAX_UID_VALUES = {
-    "1.2.840.10008.1.2.4.201",
-    "1.2.840.10008.1.2.4.202",
-    "1.2.840.10008.1.2.4.203",
-}
-
 JPEGXL_TRANSFER_SYNTAX_KEYWORDS = {
     "jpegxl",
     "jpegxllossless",
 }
 
-JPEGXL_TRANSFER_SYNTAX_UID_VALUES = {
-    "1.2.840.10008.1.2.4.110",
-    "1.2.840.10008.1.2.4.112",
-}
-
-JPEGXL_LOSSLESS_TRANSFER_SYNTAX_UID_VALUES = {"1.2.840.10008.1.2.4.110"}
+JPEGXL_LOSSLESS_TRANSFER_SYNTAX_KEYWORDS = {"jpegxllossless"}
 
 
 def normalize_token(text: str) -> str:
     return "".join(ch.lower() for ch in text if ch not in "_- \t")
+
+
+@functools.lru_cache(maxsize=1)
+def _codec_transfer_syntax_value_sets() -> tuple[set[str], set[str], set[str]]:
+    htj2k_values: set[str] = set()
+    jpegxl_values: set[str] = set()
+    jpegxl_lossless_values: set[str] = set()
+
+    for uid in dicom.transfer_syntax_uids():
+        keyword = uid.keyword or ""
+        value = uid.value
+        if not isinstance(keyword, str) or not isinstance(value, str):
+            continue
+
+        normalized_keyword = normalize_token(keyword)
+        if normalized_keyword in HTJ2K_TRANSFER_SYNTAX_KEYWORDS:
+            htj2k_values.add(value)
+        if normalized_keyword in JPEGXL_TRANSFER_SYNTAX_KEYWORDS:
+            jpegxl_values.add(value)
+        if normalized_keyword in JPEGXL_LOSSLESS_TRANSFER_SYNTAX_KEYWORDS:
+            jpegxl_lossless_values.add(value)
+
+    return (htj2k_values, jpegxl_values, jpegxl_lossless_values)
 
 
 def canonical_codec_name(codec_name: str) -> str:
@@ -111,7 +124,8 @@ def is_htj2k_transfer_syntax(uid: dicom.Uid) -> bool:
     if isinstance(keyword, str):
         if normalize_token(keyword) in HTJ2K_TRANSFER_SYNTAX_KEYWORDS:
             return True
-    return uid.value in HTJ2K_TRANSFER_SYNTAX_UID_VALUES
+    htj2k_values, _, _ = _codec_transfer_syntax_value_sets()
+    return uid.value in htj2k_values
 
 
 def is_jpegxl_transfer_syntax(uid: dicom.Uid) -> bool:
@@ -119,11 +133,17 @@ def is_jpegxl_transfer_syntax(uid: dicom.Uid) -> bool:
     if isinstance(keyword, str):
         if normalize_token(keyword) in JPEGXL_TRANSFER_SYNTAX_KEYWORDS:
             return True
-    return uid.value in JPEGXL_TRANSFER_SYNTAX_UID_VALUES
+    _, jpegxl_values, _ = _codec_transfer_syntax_value_sets()
+    return uid.value in jpegxl_values
 
 
 def is_jpegxl_lossless_transfer_syntax(uid: dicom.Uid) -> bool:
-    return uid.value in JPEGXL_LOSSLESS_TRANSFER_SYNTAX_UID_VALUES
+    keyword = uid.keyword or ""
+    if isinstance(keyword, str):
+        if normalize_token(keyword) in JPEGXL_LOSSLESS_TRANSFER_SYNTAX_KEYWORDS:
+            return True
+    _, _, jpegxl_lossless_values = _codec_transfer_syntax_value_sets()
+    return uid.value in jpegxl_lossless_values
 
 
 def supported_transfer_syntax_uids() -> list[dicom.Uid]:

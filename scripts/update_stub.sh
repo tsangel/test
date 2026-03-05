@@ -112,8 +112,25 @@ find "${TMP_PYTHON_ROOT}/dicomsdl" -maxdepth 1 \( -type f -o -type l \) \
 	\( -name '_dicomsdl*.so' -o -name '_dicomsdl*.pyd' -o -name '_dicomsdl*.dylib' \) \
 	-delete
 
+NATIVE_MODULE_PATH=""
+while IFS= read -r candidate; do
+	NATIVE_MODULE_PATH="$candidate"
+	break
+done < <(find "${BUILD_DIR}" \( -type f -o -type l \) \
+	\( -name '_dicomsdl*.so' -o -name '_dicomsdl*.pyd' -o -name '_dicomsdl*.dylib' \) \
+	| sort)
+
+if [[ -z "${NATIVE_MODULE_PATH}" ]]; then
+	echo "Error: native module '_dicomsdl' was not found under build dir: ${BUILD_DIR}" >&2
+	echo "Hint: run cmake --build \"${BUILD_DIR}\" --target _dicomsdl first." >&2
+	exit 1
+fi
+
+NATIVE_MODULE_DIR="$(dirname "${NATIVE_MODULE_PATH}")"
+
 cmd=(
 	"$PYTHON_BIN" "$STUBGEN_SCRIPT"
+	-i "$NATIVE_MODULE_DIR"
 	-i "$BUILD_DIR"
 	-i "$TMP_PYTHON_ROOT"
 	-m "$MODULE_NAME"
