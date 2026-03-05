@@ -153,29 +153,39 @@ build
 
 Both scripts support per-codec mode selection with:
 
-- `DICOMSDL_CODEC_DEFAULT_MODE` (`builtin|shared|none`, default: `builtin`)
-- `DICOMSDL_CODEC_JPEG_MODE`
-- `DICOMSDL_CODEC_JPEGLS_MODE`
-- `DICOMSDL_CODEC_JPEG2K_MODE`
-- `DICOMSDL_CODEC_HTJ2K_MODE`
-- `DICOMSDL_CODEC_JPEGXL_MODE`
+- `DICOMSDL_PIXEL_DEFAULT_MODE` (`builtin|shared|none`, default: `builtin`)
+- `DICOMSDL_PIXEL_JPEG_MODE`
+- `DICOMSDL_PIXEL_JPEGLS_MODE`
+- `DICOMSDL_PIXEL_JPEG2K_MODE`
+- `DICOMSDL_PIXEL_HTJ2K_MODE`
+- `DICOMSDL_PIXEL_JPEGXL_MODE`
 
-When one or more codec modes are set to `shared`, CMake builds an additional
-shared codec runtime (`dicomsdl_codec_runtime.dll` / `libdicomsdl_codec_runtime.so` /
-`libdicomsdl_codec_runtime.dylib`) so that:
+`DICOMSDL_PIXEL_*_MODE` controls pixel v2 plugin toggles (`DICOMSDL_PIXEL_*`).
+Legacy `DICOMSDL_CODEC_*` CMake options are removed.
 
-- codec implementation code is centralized in one runtime library
-- each `dicomsdl_codec_*_plugin` shared library stays thin and avoids duplicating codec/object code
+When one or more codec modes are set to `shared`, CMake builds per-codec shared
+plugins:
 
-If you are experimenting with shared codec plugins, prefer `BUILD_WHEEL=0`
-unless you also package runtime shared libraries explicitly.
+- Windows: `dicomsdl_pixel_*_plugin.dll`
+- Linux: `libdicomsdl_pixel_*_plugin.so`
+- macOS: `libdicomsdl_pixel_*_plugin.dylib`
+
+When wheel build is enabled, `setup.py` bundles the produced shared plugin
+libraries into the `dicomsdl/` package:
+
+- Windows: `dicomsdl_pixel_*_plugin.dll`
+- Linux: `libdicomsdl_pixel_*_plugin.so`
+- macOS: `libdicomsdl_pixel_*_plugin.dylib`
+
+The Python package auto-loads bundled codec plugins at import time by default.
+Set `DICOMSDL_AUTOLOAD_BUNDLED_CODECS=0` to disable auto-loading.
 
 Examples:
 
 ```bash
 # build.sh: disable all codecs, then enable JPEG2K as shared plugin only
-DICOMSDL_CODEC_DEFAULT_MODE=none \
-DICOMSDL_CODEC_JPEG2K_MODE=shared \
+DICOMSDL_PIXEL_DEFAULT_MODE=none \
+DICOMSDL_PIXEL_JPEG2K_MODE=shared \
 BUILD_DIR=build-codec-shared \
 BUILD_WHEEL=0 RUN_TESTS=0 \
 ./build.sh
@@ -183,9 +193,9 @@ BUILD_WHEEL=0 RUN_TESTS=0 \
 
 ```cmd
 :: build.bat: builtin JPEG2K, shared JPEGXL, disable HTJ2K
-set DICOMSDL_CODEC_JPEG2K_MODE=builtin
-set DICOMSDL_CODEC_JPEGXL_MODE=shared
-set DICOMSDL_CODEC_HTJ2K_MODE=none
+set DICOMSDL_PIXEL_JPEG2K_MODE=builtin
+set DICOMSDL_PIXEL_JPEGXL_MODE=shared
+set DICOMSDL_PIXEL_HTJ2K_MODE=none
 set BUILD_DIR=build-codec-mix
 build
 ```
@@ -193,12 +203,12 @@ build
 Optional extra CMake configure flags can be appended with:
 
 ```cmd
-set CMAKE_EXTRA_ARGS=-DDICOMSDL_CODEC_JPEG2K_BUILTIN=ON -DDICOMSDL_CODEC_JPEG2K_SHARED=OFF -DDICOMSDL_CODEC_JPEGXL_BUILTIN=OFF -DDICOMSDL_CODEC_JPEGXL_SHARED=ON
+set CMAKE_EXTRA_ARGS=-DDICOMSDL_PIXEL_OPENJPEG_STATIC_PLUGIN=ON -DDICOMSDL_PIXEL_OPENJPEG_PLUGIN=OFF -DDICOMSDL_PIXEL_JPEGXL_STATIC_PLUGIN=OFF -DDICOMSDL_PIXEL_JPEGXL_PLUGIN=ON -DDICOMSDL_ENABLE_JPEGXL=ON
 build
 ```
 
 ```bash
-CMAKE_EXTRA_ARGS="-DDICOMSDL_CODEC_JPEG2K_BUILTIN=ON -DDICOMSDL_CODEC_JPEG2K_SHARED=OFF" ./build.sh
+CMAKE_EXTRA_ARGS="-DDICOMSDL_PIXEL_OPENJPEG_STATIC_PLUGIN=ON -DDICOMSDL_PIXEL_OPENJPEG_PLUGIN=OFF" ./build.sh
 ```
 
 ### Run C++ examples

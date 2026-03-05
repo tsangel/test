@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_ROOT="${BUILD_ROOT:-${ROOT_DIR}/build_codec_matrix}"
 BUILD_TYPE="${BUILD_TYPE:-Release}"
 JOBS="${JOBS:-4}"
-TEST_REGEX="${TEST_REGEX:-^(basic_smoke|codec_cycle_roundtrip|codec_error_boundary|codec_plugin_loader|codec_plugin_dynamic_load|codec_plugin_registration)$}"
+TEST_REGEX="${TEST_REGEX:-^(basic_smoke|codec_cycle_roundtrip|codec_error_boundary)$}"
 
 DEFAULT_CASES=(
 	"all_builtin"
@@ -74,46 +74,12 @@ is_valid_case() {
 }
 
 emit_all_none_flags() {
-	for codec in JPEG JPEGLS JPEG2K HTJ2K JPEGXL; do
-		echo "-DDICOMSDL_CODEC_${codec}_BUILTIN=OFF"
-		echo "-DDICOMSDL_CODEC_${codec}_SHARED=OFF"
-	done
-}
-
-emit_all_builtin_flags() {
-	for codec in JPEG JPEGLS JPEG2K HTJ2K JPEGXL; do
-		echo "-DDICOMSDL_CODEC_${codec}_BUILTIN=ON"
-		echo "-DDICOMSDL_CODEC_${codec}_SHARED=OFF"
-	done
-}
-
-emit_single_builtin_flags() {
-	local target_codec="$1"
-	for codec in JPEG JPEGLS JPEG2K HTJ2K JPEGXL; do
-		if [[ "${codec}" == "${target_codec}" ]]; then
-			echo "-DDICOMSDL_CODEC_${codec}_BUILTIN=ON"
-			echo "-DDICOMSDL_CODEC_${codec}_SHARED=OFF"
-		else
-			echo "-DDICOMSDL_CODEC_${codec}_BUILTIN=OFF"
-			echo "-DDICOMSDL_CODEC_${codec}_SHARED=OFF"
-		fi
-	done
-}
-
-emit_single_shared_flags() {
-	local target_codec="$1"
-	for codec in JPEG JPEGLS JPEG2K HTJ2K JPEGXL; do
-		if [[ "${codec}" == "${target_codec}" ]]; then
-			echo "-DDICOMSDL_CODEC_${codec}_BUILTIN=OFF"
-			echo "-DDICOMSDL_CODEC_${codec}_SHARED=OFF"
-		else
-			echo "-DDICOMSDL_CODEC_${codec}_BUILTIN=OFF"
-			echo "-DDICOMSDL_CODEC_${codec}_SHARED=OFF"
-		fi
-	done
-}
-
-emit_all_pixel_shared_flags_off() {
+	echo "-DDICOMSDL_ENABLE_JPEGXL=OFF"
+	echo "-DDICOMSDL_PIXEL_JPEG_STATIC_PLUGIN=OFF"
+	echo "-DDICOMSDL_PIXEL_JPEGLS_STATIC_PLUGIN=OFF"
+	echo "-DDICOMSDL_PIXEL_OPENJPEG_STATIC_PLUGIN=OFF"
+	echo "-DDICOMSDL_PIXEL_HTJ2K_STATIC_PLUGIN=OFF"
+	echo "-DDICOMSDL_PIXEL_JPEGXL_STATIC_PLUGIN=OFF"
 	echo "-DDICOMSDL_PIXEL_JPEG_PLUGIN=OFF"
 	echo "-DDICOMSDL_PIXEL_JPEGLS_PLUGIN=OFF"
 	echo "-DDICOMSDL_PIXEL_OPENJPEG_PLUGIN=OFF"
@@ -121,9 +87,46 @@ emit_all_pixel_shared_flags_off() {
 	echo "-DDICOMSDL_PIXEL_JPEGXL_PLUGIN=OFF"
 }
 
-emit_pixel_shared_flag_for_codec() {
+emit_all_builtin_flags() {
+	emit_all_none_flags
+	echo "-DDICOMSDL_ENABLE_JPEGXL=ON"
+	echo "-DDICOMSDL_PIXEL_JPEG_STATIC_PLUGIN=ON"
+	echo "-DDICOMSDL_PIXEL_JPEGLS_STATIC_PLUGIN=ON"
+	echo "-DDICOMSDL_PIXEL_OPENJPEG_STATIC_PLUGIN=ON"
+	echo "-DDICOMSDL_PIXEL_HTJ2K_STATIC_PLUGIN=ON"
+	echo "-DDICOMSDL_PIXEL_JPEGXL_STATIC_PLUGIN=ON"
+}
+
+emit_single_builtin_flags() {
 	local target_codec="$1"
-	emit_all_pixel_shared_flags_off
+	emit_all_none_flags
+	case "${target_codec}" in
+		JPEG)
+			echo "-DDICOMSDL_PIXEL_JPEG_STATIC_PLUGIN=ON"
+			;;
+		JPEGLS)
+			echo "-DDICOMSDL_PIXEL_JPEGLS_STATIC_PLUGIN=ON"
+			;;
+		JPEG2K)
+			echo "-DDICOMSDL_PIXEL_OPENJPEG_STATIC_PLUGIN=ON"
+			;;
+		HTJ2K)
+			echo "-DDICOMSDL_PIXEL_HTJ2K_STATIC_PLUGIN=ON"
+			;;
+		JPEGXL)
+			echo "-DDICOMSDL_ENABLE_JPEGXL=ON"
+			echo "-DDICOMSDL_PIXEL_JPEGXL_STATIC_PLUGIN=ON"
+			;;
+		*)
+			echo "Unknown builtin codec: ${target_codec}" >&2
+			return 1
+			;;
+	esac
+}
+
+emit_single_shared_flags() {
+	local target_codec="$1"
+	emit_all_none_flags
 	case "${target_codec}" in
 		JPEG)
 			echo "-DDICOMSDL_PIXEL_JPEG_PLUGIN=ON"
@@ -138,6 +141,7 @@ emit_pixel_shared_flag_for_codec() {
 			echo "-DDICOMSDL_PIXEL_HTJ2K_PLUGIN=ON"
 			;;
 		JPEGXL)
+			echo "-DDICOMSDL_ENABLE_JPEGXL=ON"
 			echo "-DDICOMSDL_PIXEL_JPEGXL_PLUGIN=ON"
 			;;
 		*)
@@ -173,31 +177,28 @@ emit_case_flags() {
 			;;
 		jpeg_shared_only)
 			emit_single_shared_flags "JPEG"
-			emit_pixel_shared_flag_for_codec "JPEG"
 			;;
 		jpegls_shared_only)
 			emit_single_shared_flags "JPEGLS"
-			emit_pixel_shared_flag_for_codec "JPEGLS"
 			;;
 		jpeg2k_shared_only)
 			emit_single_shared_flags "JPEG2K"
-			emit_pixel_shared_flag_for_codec "JPEG2K"
 			;;
 		htj2k_shared_only)
 			emit_single_shared_flags "HTJ2K"
-			emit_pixel_shared_flag_for_codec "HTJ2K"
 			;;
 		jpegxl_shared_only)
 			emit_single_shared_flags "JPEGXL"
-			emit_pixel_shared_flag_for_codec "JPEGXL"
 			;;
 		mixed_jpeg2k_builtin_jpegxl_shared_htj2k_none)
-			emit_all_builtin_flags
-			echo "-DDICOMSDL_CODEC_HTJ2K_BUILTIN=OFF"
-			echo "-DDICOMSDL_CODEC_HTJ2K_SHARED=OFF"
-			echo "-DDICOMSDL_CODEC_JPEGXL_BUILTIN=OFF"
-			echo "-DDICOMSDL_CODEC_JPEGXL_SHARED=OFF"
-			emit_pixel_shared_flag_for_codec "JPEGXL"
+			emit_all_none_flags
+			echo "-DDICOMSDL_ENABLE_JPEGXL=ON"
+			echo "-DDICOMSDL_PIXEL_JPEG_STATIC_PLUGIN=ON"
+			echo "-DDICOMSDL_PIXEL_JPEGLS_STATIC_PLUGIN=ON"
+			echo "-DDICOMSDL_PIXEL_OPENJPEG_STATIC_PLUGIN=ON"
+			echo "-DDICOMSDL_PIXEL_HTJ2K_STATIC_PLUGIN=OFF"
+			echo "-DDICOMSDL_PIXEL_JPEGXL_STATIC_PLUGIN=OFF"
+			echo "-DDICOMSDL_PIXEL_JPEGXL_PLUGIN=ON"
 			;;
 		*)
 			echo "Unknown case: ${case_name}" >&2
