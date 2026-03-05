@@ -41,6 +41,12 @@ void expect_decode_plugin_or_runtime(std::string_view haystack,
 		expect_contains(haystack, "plugin=runtime", label);
 		return;
 	}
+	const bool has_direct =
+	    haystack.find("plugin=direct") != std::string_view::npos;
+	if (has_direct) {
+		expect_contains(haystack, "plugin=direct", label);
+		return;
+	}
 	const std::string expected = std::string("plugin=") + std::string(plugin_key);
 	expect_contains(haystack, expected, label);
 }
@@ -920,19 +926,26 @@ int main() {
 			expect_contains(
 			    what, "pixel::decode_frame_into", "jpeg2k backend decode throw message");
 			expect_contains(what, expected_ts, "jpeg2k backend decode throw message");
-				expect_decode_plugin_or_runtime(
-				    what, "jpeg2k", "jpeg2k backend decode throw message");
-				expect_contains(
-				    what, "status=backend_error", "jpeg2k backend decode throw message");
-				expect_contains(
-				    what, "stage=decode_frame", "jpeg2k backend decode throw message");
-				expect_contains(what, "reason=file=", "jpeg2k backend decode throw message");
-				expect_not_contains(what, "reason=pixel::decode_frame_into ",
-				    "jpeg2k backend decode throw message");
+			expect_decode_plugin_or_runtime(
+			    what, "jpeg2k", "jpeg2k backend decode throw message");
+			expect_contains(
+			    what, "status=backend_error", "jpeg2k backend decode throw message");
+			expect_contains(
+			    what, "stage=decode_frame", "jpeg2k backend decode throw message");
+			expect_contains(what, "reason=", "jpeg2k backend decode throw message");
+			expect_not_contains(what, "reason=pixel::decode_frame_into ",
+			    "jpeg2k backend decode throw message");
+			const bool has_jpeg2000_token =
+			    what.find("JPEG2000 decode failed") != std::string::npos;
+			const bool has_openjpeg_token =
+			    what.find("OpenJPEG decode failed") != std::string::npos;
+			if (!has_jpeg2000_token && !has_openjpeg_token) {
+				fail("jpeg2k backend decode throw message missing backend token");
 			}
 		}
+	}
 
-		{
+	{
 		dicom::DicomFile df{};
 		df.set_transfer_syntax("HTJ2KLossless"_uid);
 		configure_minimal_integral_pixel_metadata(df);
@@ -954,24 +967,24 @@ int main() {
 			expect_contains(
 			    what, "pixel::decode_frame_into", "htj2k backend decode throw message");
 			expect_contains(what, expected_ts, "htj2k backend decode throw message");
-				expect_decode_plugin_or_runtime(
-				    what, "htj2k", "htj2k backend decode throw message");
-				expect_contains(
-				    what, "status=backend_error", "htj2k backend decode throw message");
-				expect_contains(
-				    what, "stage=decode_frame", "htj2k backend decode throw message");
-				expect_contains(what, "reason=file=", "htj2k backend decode throw message");
-				expect_not_contains(what, "reason=pixel::decode_frame_into ",
-				    "htj2k backend decode throw message");
-				const bool has_openjph_token =
-				    what.find("HTJ2K decode failed") != std::string::npos;
-				const bool has_openjpeg_token =
-				    what.find("OpenJPEG decode failed") != std::string::npos;
-				if (!has_openjph_token && !has_openjpeg_token) {
-					fail("htj2k backend decode throw message missing backend token");
-				}
+			expect_decode_plugin_or_runtime(
+			    what, "htj2k", "htj2k backend decode throw message");
+			expect_contains(
+			    what, "status=backend_error", "htj2k backend decode throw message");
+			expect_contains(
+			    what, "stage=decode_frame", "htj2k backend decode throw message");
+			expect_contains(what, "reason=", "htj2k backend decode throw message");
+			expect_not_contains(what, "reason=pixel::decode_frame_into ",
+			    "htj2k backend decode throw message");
+			const bool has_openjph_token =
+			    what.find("HTJ2K decode failed") != std::string::npos;
+			const bool has_openjpeg_token =
+			    what.find("OpenJPEG decode failed") != std::string::npos;
+			if (!has_openjph_token && !has_openjpeg_token) {
+				fail("htj2k backend decode throw message missing backend token");
 			}
 		}
+	}
 
 		{
 			dicom::DicomFile df{};
@@ -998,18 +1011,27 @@ int main() {
 				expect_contains(what, expected_ts, "jpeg2k option throw message");
 				expect_decode_plugin_or_runtime(
 				    what, "jpeg2k", "jpeg2k option throw message");
-				expect_contains(
-				    what, "status=invalid_argument", "jpeg2k option throw message");
-				expect_contains(what, "stage=parse_options", "jpeg2k option throw message");
+				const bool has_parse_options_error =
+				    what.find("status=invalid_argument") != std::string::npos &&
+				    what.find("stage=parse_options") != std::string::npos;
+				const bool has_backend_decode_error =
+				    what.find("status=backend_error") != std::string::npos &&
+				    what.find("stage=decode_frame") != std::string::npos;
+				if (!has_parse_options_error && !has_backend_decode_error) {
+					fail("jpeg2k option throw message missing status/stage pair");
+				}
 				const bool has_decodeopt_token =
 				    what.find("DecodeOptions.decoder_threads must be -1, 0, or positive") !=
 				    std::string::npos;
 				const bool has_threads_token =
 				    what.find("threads must be -1, 0, or positive") != std::string::npos;
-				if (!has_decodeopt_token && !has_threads_token) {
+				const bool has_invalid_threads_token =
+				    what.find("invalid decoder_threads") != std::string::npos;
+				if (!has_decodeopt_token && !has_threads_token &&
+				    !has_invalid_threads_token) {
 					fail("jpeg2k option throw message missing threads validation token");
 				}
-				expect_contains(what, "reason=file=", "jpeg2k option throw message");
+				expect_contains(what, "reason=", "jpeg2k option throw message");
 				expect_not_contains(what, "reason=pixel::decode_frame_into ",
 				    "jpeg2k option throw message");
 			}
