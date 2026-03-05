@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+if [ -z "${BASH_VERSION:-}" ]; then
+	exec bash "$0" "$@"
+fi
+
 set -euo pipefail
 
 ROOT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -92,7 +96,18 @@ if [[ -n "${CMAKE_GENERATOR:-}" ]]; then
 	GENERATOR_EXPLICIT=1
 else
 	if command -v ninja >/dev/null 2>&1; then
-		REQUESTED_GENERATOR="Ninja"
+		ninja_bin="$(command -v ninja)"
+		if [[ "$(uname -s)" == "Darwin" && "$(uname -m)" == "arm64" ]] && command -v lipo >/dev/null 2>&1; then
+			ninja_archs="$(lipo -archs "$ninja_bin" 2>/dev/null || true)"
+			if [[ "$ninja_archs" == *arm64* ]]; then
+				REQUESTED_GENERATOR="Ninja"
+			else
+				echo "Detected non-arm64 ninja '${ninja_bin}'; falling back to Unix Makefiles"
+				REQUESTED_GENERATOR="Unix Makefiles"
+			fi
+		else
+			REQUESTED_GENERATOR="Ninja"
+		fi
 	else
 		REQUESTED_GENERATOR="Unix Makefiles"
 	fi
@@ -124,9 +139,15 @@ cmake_args=(-S "$ROOT_DIR" -B "$BUILD_DIR" \
 	-DDICOM_BUILD_EXAMPLES="${DICOM_BUILD_EXAMPLES}" \
 	-DCMAKE_BUILD_TYPE="${BUILD_TYPE}")
 
-cmake_args+=("${codec_mode_args[@]}")
-cmake_args+=("${codec_plugin_args[@]}")
-cmake_args+=("${pixel_v2_args[@]}")
+if ((${#codec_mode_args[@]})); then
+	cmake_args+=("${codec_mode_args[@]}")
+fi
+if ((${#codec_plugin_args[@]})); then
+	cmake_args+=("${codec_plugin_args[@]}")
+fi
+if ((${#pixel_v2_args[@]})); then
+	cmake_args+=("${pixel_v2_args[@]}")
+fi
 
 if [[ -n "${CMAKE_EXTRA_ARGS:-}" ]]; then
 	# shellcheck disable=SC2206
@@ -153,12 +174,19 @@ if [[ -z "${BUILD_PARALLELISM:-}" ]]; then
 	fi
 fi
 
-if [[ ! "$BUILD_PARALLELISM" =~ ^[0-9]+$ ]] || (( BUILD_PARALLELISM < 1 )); then
-	BUILD_PARALLELISM=1
-fi
+case "$BUILD_PARALLELISM" in
+	''|*[!0-9]*)
+		BUILD_PARALLELISM=1
+		;;
+	*)
+		if [ "$BUILD_PARALLELISM" -lt 1 ]; then
+			BUILD_PARALLELISM=1
+		fi
+		;;
+esac
 
 build_cmd=(cmake --build "$BUILD_DIR" --config "$BUILD_TYPE" --parallel "$BUILD_PARALLELISM")
-if (( $# )); then
+if [ "$#" -gt 0 ]; then
 	build_cmd+=(--target)
 	for target in "$@"; do
 		build_cmd+=("$target")
