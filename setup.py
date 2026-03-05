@@ -11,7 +11,20 @@ from setuptools import Extension, setup
 from setuptools.command.build_ext import build_ext
 
 ROOT_DIR = pathlib.Path(__file__).resolve().parent
-VERSION_FILE = ROOT_DIR / "VERSION"
+VERSION_HEADER_FILE = ROOT_DIR / "include" / "dicom_const.h"
+VERSION_EXTRACTOR_SCRIPT = ROOT_DIR / "scripts" / "extract_version_from_const_header.py"
+TEMP_VERSION_FILE = pathlib.Path(
+    os.environ.get(
+        "DICOMSDL_TEMP_VERSION_FILE",
+        str(ROOT_DIR / "build" / ".version_cache" / "VERSION"),
+    )
+).resolve()
+TEMP_DICOM_STANDARD_VERSION_FILE = pathlib.Path(
+    os.environ.get(
+        "DICOM_STANDARD_TEMP_VERSION_FILE",
+        str(ROOT_DIR / "build" / ".version_cache" / "DICOM_STANDARD_VERSION"),
+    )
+).resolve()
 CODEC_KEYS = ("JPEG", "JPEGLS", "JPEG2K", "HTJ2K", "JPEGXL")
 CODEC_SHARED_PLUGIN_TARGET = {
     "JPEG": "dicomsdl_pixel_jpeg_plugin",
@@ -30,10 +43,29 @@ CODEC_PIXEL_PLUGIN_OPTIONS = {
 VALID_CODEC_MODES = {"builtin", "shared", "none"}
 TRUTHY_ENV_VALUES = {"1", "true", "yes", "on"}
 
+
+def refresh_temp_version_files(
+    version_out: pathlib.Path = TEMP_VERSION_FILE,
+    dicom_standard_out: pathlib.Path = TEMP_DICOM_STANDARD_VERSION_FILE,
+) -> None:
+    cmd = [
+        sys.executable,
+        str(VERSION_EXTRACTOR_SCRIPT),
+        "--header",
+        str(VERSION_HEADER_FILE),
+        "--version-out",
+        str(version_out),
+        "--dicom-standard-out",
+        str(dicom_standard_out),
+    ]
+    subprocess.check_call(cmd)
+
+
 def load_version() -> str:
-    text = VERSION_FILE.read_text(encoding="utf-8").strip()
+    refresh_temp_version_files()
+    text = TEMP_VERSION_FILE.read_text(encoding="utf-8").strip()
     if not text:
-        raise RuntimeError(f"Version file {VERSION_FILE} is empty")
+        raise RuntimeError(f"Temporary version file {TEMP_VERSION_FILE} is empty")
     return text
 
 PACKAGE_VERSION = load_version()
@@ -199,6 +231,8 @@ class CMakeBuild(build_ext):
             f"-DPython3_EXECUTABLE={python_executable}",
             f"-DPython_ROOT_DIR={python_root_dir}",
             f"-DPython3_ROOT_DIR={python_root_dir}",
+            f"-DDICOMSDL_TEMP_VERSION_FILE={TEMP_VERSION_FILE}",
+            f"-DDICOM_STANDARD_TEMP_VERSION_FILE={TEMP_DICOM_STANDARD_VERSION_FILE}",
             "-DDICOM_BUILD_PYTHON=ON",
             "-DDICOMSDL_PIXEL_CORE=ON",
             "-DDICOMSDL_PIXEL_RUNTIME=ON",
@@ -257,14 +291,37 @@ class CMakeBuild(build_ext):
                 cmake_args += [f"-DCMAKE_OSX_ARCHITECTURES={arch_candidate}"]
 
         build_temp = pathlib.Path(self.build_temp) / build_suffix
-        if build_temp.exists() and not self.force:
+        # Keep incremental CMake/Ninja state by default for faster local builds.
+        clean_build = self.force or parse_env_bool("DICOMSDL_CLEAN_BUILD", False)
+        if build_temp.exists() and clean_build:
             shutil.rmtree(build_temp)
         build_temp.mkdir(parents=True, exist_ok=True)
 
         subprocess.check_call(
             ["cmake", "-S", ext.sourcedir, "-B", str(build_temp)] + cmake_args # type: ignore
         )
-        subprocess.check_call(["cmake", "--build", str(build_temp)] + build_args)
+
+        parallel_raw = (
+            os.environ.get("DICOMSDL_BUILD_PARALLELISM")
+            or os.environ.get("CMAKE_BUILD_PARALLEL_LEVEL")
+        )
+        if parallel_raw:
+            try:
+                parallel_jobs = int(parallel_raw)
+            except ValueError as exc:
+                raise RuntimeError(
+                    "DICOMSDL_BUILD_PARALLELISM/CMAKE_BUILD_PARALLEL_LEVEL must be an integer"
+                ) from exc
+            if parallel_jobs < 1:
+                raise RuntimeError(
+                    "DICOMSDL_BUILD_PARALLELISM/CMAKE_BUILD_PARALLEL_LEVEL must be >= 1"
+                )
+        else:
+            parallel_jobs = os.cpu_count() or 1
+
+        subprocess.check_call(
+            ["cmake", "--build", str(build_temp), "--parallel", str(parallel_jobs)] + build_args
+        )
 
         strip_targets: list[pathlib.Path] = []
 

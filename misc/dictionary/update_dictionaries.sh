@@ -35,4 +35,4 @@ echo "[6/7] Extracting Part 03 Specific Character Sets -> _specific_character_se
 echo "[7/7] Regenerating include/specific_character_set_registry.hpp"
 "${PYTHON_BIN}" "${DICT_DIR}/generate_specific_character_set_registry.py" --source "${DICT_DIR}/_specific_character_sets.tsv" --output "${ROOT_DIR}/include/specific_character_set_registry.hpp"
 
-echo "Done. Reconfigure CMake to propagate the updated version header if needed."
+echo "Done. CMake will regenerate temporary VERSION cache files from include/dicom_const.h."

@@ -25,7 +25,7 @@
 #include "dicom_endian.h"
 #include "dataelement_lookup_detail.hpp"
 #include "specific_character_set_registry.hpp"
-#include "version.h"
+#include "dicom_const.h"
 #include "uid_lookup_detail.hpp"
 #include "pixel_decoder_plugin_abi_v2.h"
 #include "pixel_encoder_plugin_abi_v2.h"
@@ -284,10 +284,7 @@ inline std::optional<Generated> make_generated(std::string_view value) {
 	return uid;
 }
 
-// Historical DICOMSDL implementation UID metadata reused for file-meta generation.
-inline constexpr std::string_view kUidPrefix = "1.3.6.1.4.1.56559";
-inline constexpr std::string_view kImplementationClassUid = "1.3.6.1.4.1.56559.1";
-inline constexpr std::string_view kImplementationVersionName = "DICOMSDL 2026FEB";
+// UID constants are defined in dicom_const.h.
 static_assert(
     kUidPrefix.size() <= Generated::max_str_length - (1 + 29),
     "kUidPrefix is too long for generate_uid() output format");
