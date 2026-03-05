@@ -37,6 +37,7 @@ esac
 
 CODEC_LIST=(JPEG JPEGLS JPEG2K HTJ2K JPEGXL)
 codec_mode_args=()
+codec_plugin_args=()
 codec_mode_log_parts=()
 
 for codec in "${CODEC_LIST[@]}"; do
@@ -44,14 +45,33 @@ for codec in "${CODEC_LIST[@]}"; do
 	mode_value="${!mode_var:-$default_mode_lc}"
 	mode_value_lc="$(printf '%s' "$mode_value" | tr '[:upper:]' '[:lower:]')"
 
-	case "$mode_value_lc" in
+		case "$mode_value_lc" in
 		builtin)
 			codec_mode_args+=("-DDICOMSDL_CODEC_${codec}_BUILTIN=ON")
 			codec_mode_args+=("-DDICOMSDL_CODEC_${codec}_SHARED=OFF")
 			;;
 		shared)
 			codec_mode_args+=("-DDICOMSDL_CODEC_${codec}_BUILTIN=OFF")
-			codec_mode_args+=("-DDICOMSDL_CODEC_${codec}_SHARED=ON")
+			# DICOMSDL_CODEC_*_SHARED uses a removed plugin ABI path.
+			# Keep legacy shared flag OFF and enable pixel v2 shared plugins instead.
+			codec_mode_args+=("-DDICOMSDL_CODEC_${codec}_SHARED=OFF")
+			case "$codec" in
+				JPEG)
+					codec_plugin_args+=("-DDICOMSDL_PIXEL_JPEG_PLUGIN=ON")
+					;;
+				JPEGLS)
+					codec_plugin_args+=("-DDICOMSDL_PIXEL_JPEGLS_PLUGIN=ON")
+					;;
+				JPEG2K)
+					codec_plugin_args+=("-DDICOMSDL_PIXEL_OPENJPEG_PLUGIN=ON")
+					;;
+				HTJ2K)
+					codec_plugin_args+=("-DDICOMSDL_PIXEL_HTJ2K_PLUGIN=ON")
+					;;
+				JPEGXL)
+					codec_plugin_args+=("-DDICOMSDL_PIXEL_JPEGXL_PLUGIN=ON")
+					;;
+			esac
 			;;
 		none)
 			codec_mode_args+=("-DDICOMSDL_CODEC_${codec}_BUILTIN=OFF")
@@ -105,6 +125,7 @@ cmake_args=(-S "$ROOT_DIR" -B "$BUILD_DIR" \
 	-DCMAKE_BUILD_TYPE="${BUILD_TYPE}")
 
 cmake_args+=("${codec_mode_args[@]}")
+cmake_args+=("${codec_plugin_args[@]}")
 cmake_args+=("${pixel_v2_args[@]}")
 
 if [[ -n "${CMAKE_EXTRA_ARGS:-}" ]]; then

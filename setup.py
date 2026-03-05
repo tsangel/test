@@ -12,12 +12,12 @@ from setuptools.command.build_ext import build_ext
 ROOT_DIR = pathlib.Path(__file__).resolve().parent
 VERSION_FILE = ROOT_DIR / "VERSION"
 CODEC_KEYS = ("JPEG", "JPEGLS", "JPEG2K", "HTJ2K", "JPEGXL")
-CODEC_TARGET_SUFFIX = {
-    "JPEG": "jpeg",
-    "JPEGLS": "jpegls",
-    "JPEG2K": "jpeg2k",
-    "HTJ2K": "htj2k",
-    "JPEGXL": "jpegxl",
+CODEC_SHARED_PLUGIN_TARGET = {
+    "JPEG": "dicomsdl_pixel_jpeg_plugin",
+    "JPEGLS": "dicomsdl_pixel_jpegls_plugin",
+    "JPEG2K": "dicomsdl_pixel_openjpeg_plugin",
+    "HTJ2K": "dicomsdl_pixel_htj2k_plugin",
+    "JPEGXL": "dicomsdl_pixel_jpegxl_plugin",
 }
 VALID_CODEC_MODES = {"builtin", "shared", "none"}
 
@@ -86,6 +86,8 @@ def remove_stale_shared_artifacts(extdir: pathlib.Path) -> None:
             f"libdicomsdl_codec_runtime*{suffix}",
             f"dicomsdl_codec_*_plugin*{suffix}",
             f"libdicomsdl_codec_*_plugin*{suffix}",
+            f"dicomsdl_pixel_*_plugin*{suffix}",
+            f"libdicomsdl_pixel_*_plugin*{suffix}",
         )
         for pattern in patterns:
             for path in extdir.glob(pattern):
@@ -129,27 +131,31 @@ class CMakeBuild(build_ext):
         ]
 
         codec_modes = resolve_codec_modes_from_env()
-        shared_codec_suffixes: list[str] = []
+        shared_plugin_targets: list[str] = []
         for codec_key in CODEC_KEYS:
             mode = codec_modes[codec_key]
-            builtin_on = "ON" if mode == "builtin" else "OFF"
-            shared_on = "ON" if mode == "shared" else "OFF"
+            if mode == "builtin":
+                builtin_on = "ON"
+                shared_on = "OFF"
+            else:
+                # DICOMSDL_CODEC_*_SHARED uses a removed plugin ABI path.
+                # Shared mode is handled by enabling dicomsdl_pixel_*_plugin targets.
+                builtin_on = "OFF"
+                shared_on = "OFF"
             cmake_args += [
                 f"-DDICOMSDL_CODEC_{codec_key}_BUILTIN={builtin_on}",
                 f"-DDICOMSDL_CODEC_{codec_key}_SHARED={shared_on}",
             ]
             if mode == "shared":
-                shared_codec_suffixes.append(CODEC_TARGET_SUFFIX[codec_key])
+                shared_plugin_targets.append(CODEC_SHARED_PLUGIN_TARGET[codec_key])
 
         extra_cmake_args = os.environ.get("DICOMSDL_CMAKE_ARGS") or os.environ.get("CMAKE_ARGS")
         if extra_cmake_args:
             cmake_args += shlex.split(extra_cmake_args)
 
         build_targets = ["_dicomsdl"]
-        if shared_codec_suffixes:
-            build_targets.append("dicomsdl_codec_runtime")
-            for suffix in shared_codec_suffixes:
-                build_targets.append(f"dicomsdl_codec_plugin_{suffix}")
+        if shared_plugin_targets:
+            build_targets += shared_plugin_targets
         build_args = ["--target", *build_targets]
 
         if self.compiler.compiler_type == "msvc":
@@ -178,13 +184,9 @@ class CMakeBuild(build_ext):
         )
         subprocess.check_call(["cmake", "--build", str(build_temp)] + build_args)
 
-        if shared_codec_suffixes:
-            runtime_src = find_dynamic_library(build_temp, "dicomsdl_codec_runtime")
-            shutil.copy2(runtime_src, extdir / runtime_src.name)
-            for suffix in shared_codec_suffixes:
-                plugin_src = find_dynamic_library(
-                    build_temp, f"dicomsdl_codec_{suffix}_plugin"
-                )
+        if shared_plugin_targets:
+            for plugin_target in shared_plugin_targets:
+                plugin_src = find_dynamic_library(build_temp, plugin_target)
                 shutil.copy2(plugin_src, extdir / plugin_src.name)
 
         if not ext_full_path.exists():
