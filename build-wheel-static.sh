@@ -7,6 +7,7 @@ cd "${ROOT_DIR}"
 : "${PYTHON_BIN:=python3}"
 : "${BUILD_DIR:=${ROOT_DIR}/build-wheel-static}"
 : "${WHEEL_DIR:=${ROOT_DIR}/dist-static}"
+: "${CLEAN_BUILD_DIR:=1}"
 : "${RESET_CMAKE_CACHE:=1}"
 : "${BUILD_TESTING:=OFF}"
 : "${DICOM_BUILD_EXAMPLES:=OFF}"
@@ -29,6 +30,7 @@ static_wheel_args="-DDICOMSDL_ENABLE_JPEGXL=ON -DDICOMSDL_PIXEL_OPENJPEG_PLUGIN=
 export PYTHON_BIN
 export BUILD_DIR
 export WHEEL_DIR
+export CLEAN_BUILD_DIR
 export RESET_CMAKE_CACHE
 export BUILD_TESTING
 export DICOM_BUILD_EXAMPLES
@@ -42,5 +44,14 @@ export DICOMSDL_PIXEL_HTJ2K_MODE
 export DICOMSDL_PIXEL_JPEGXL_MODE
 export CMAKE_EXTRA_ARGS
 export DICOMSDL_CMAKE_ARGS
+
+if [[ "${CLEAN_BUILD_DIR}" != "0" && -d "${BUILD_DIR}" ]]; then
+	if [[ -z "${BUILD_DIR}" || "${BUILD_DIR}" == "/" || "${BUILD_DIR}" == "${ROOT_DIR}" ]]; then
+		echo "Error: refusing to remove BUILD_DIR='${BUILD_DIR}'" >&2
+		exit 1
+	fi
+	echo "Removing existing build directory: ${BUILD_DIR}"
+	rm -rf "${BUILD_DIR}"
+fi
 
 exec "${ROOT_DIR}/build.sh" "$@"

@@ -9,6 +9,7 @@ import warnings as _warnings
 
 _PACKAGE_DIR = _pathlib.Path(__file__).resolve().parent
 _WINDOWS_DLL_DIRECTORY_HANDLES = []
+_NATIVE_MODULE_PATTERNS = ("_dicomsdl*.so", "_dicomsdl*.pyd", "_dicomsdl*.dylib")
 
 
 def _configure_windows_dll_search_path():
@@ -31,6 +32,73 @@ def _codec_plugin_library_suffix():
         return ".dylib"
     return ".so"
 
+
+def _discover_native_module_path():
+    explicit_path = _os.environ.get("DICOMSDL_NATIVE_MODULE_PATH", "").strip()
+    if explicit_path:
+        candidate = _pathlib.Path(explicit_path).expanduser().resolve()
+        if candidate.is_file():
+            return str(candidate)
+        raise ModuleNotFoundError(
+            f"DICOMSDL_NATIVE_MODULE_PATH does not point to a file: {candidate}"
+        )
+
+    search_roots = []
+    seen_roots = set()
+    for raw_entry in _sys.path:
+        if not raw_entry:
+            continue
+        try:
+            entry = _pathlib.Path(raw_entry).resolve()
+        except OSError:
+            continue
+        if not entry.is_dir():
+            continue
+        key = str(entry)
+        if key in seen_roots:
+            continue
+        seen_roots.add(key)
+        search_roots.append(entry)
+
+    candidates = []
+    seen_candidates = set()
+
+    def _append_candidate(path):
+        try:
+            resolved = path.resolve()
+        except OSError:
+            return
+        if not resolved.is_file():
+            return
+        key = str(resolved)
+        if key in seen_candidates:
+            return
+        seen_candidates.add(key)
+        candidates.append(resolved)
+
+    for root in search_roots:
+        for pattern in _NATIVE_MODULE_PATTERNS:
+            for path in sorted(root.glob(pattern)):
+                _append_candidate(path)
+
+    for root in search_roots:
+        root_lc = str(root).lower()
+        if "build" not in root_lc and "_deps" not in root_lc:
+            continue
+        for pattern in _NATIVE_MODULE_PATTERNS:
+            for path in root.rglob(pattern):
+                _append_candidate(path)
+
+    if not candidates:
+        return None
+
+    candidates.sort(
+        key=lambda path: (path.stat().st_mtime_ns, len(str(path))),
+        reverse=True,
+    )
+    return str(candidates[0])
+
+
 def _load_native_module():
     native_module_name = f"{__name__}._dicomsdl"
 
@@ -44,11 +112,15 @@ def _load_native_module():
 
     # Dev/CI fallback: extension exists only as top-level _dicomsdl.* in build dir.
     top_level_spec = _importlib_util.find_spec("_dicomsdl")
-    if top_level_spec is None or top_level_spec.origin is None:
-        raise ModuleNotFoundError("Cannot find native module '_dicomsdl'")
+    if top_level_spec is not None and top_level_spec.origin is not None:
+        native_module_path = top_level_spec.origin
+    else:
+        native_module_path = _discover_native_module_path()
+        if native_module_path is None:
+            raise ModuleNotFoundError("Cannot find native module '_dicomsdl'")
 
     alias_spec = _importlib_util.spec_from_file_location(
-        native_module_name, top_level_spec.origin
+        native_module_name, native_module_path
     )
     if alias_spec is None or alias_spec.loader is None:
         raise ImportError("Failed to create module spec for dicomsdl._dicomsdl")

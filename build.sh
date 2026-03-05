@@ -17,6 +17,7 @@ BUILD_WHEEL="${BUILD_WHEEL:-1}"
 CTEST_LABEL="${CTEST_LABEL:-dicomsdl}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 WHEEL_DIR="${WHEEL_DIR:-${ROOT_DIR}/dist}"
+PRESERVE_WHEEL_HISTORY="${PRESERVE_WHEEL_HISTORY:-1}"
 pixel_v2_args=(
 	-DDICOMSDL_PIXEL_CORE=ON
 	-DDICOMSDL_PIXEL_RUNTIME=ON
@@ -230,5 +231,32 @@ if [[ "${BUILD_WHEEL}" != "0" ]]; then
 	fi
 	echo "Building Python wheel into ${WHEEL_DIR}"
 	mkdir -p "$WHEEL_DIR"
-	"$PYTHON_BIN" -m pip wheel "$ROOT_DIR" --no-build-isolation --no-deps -w "$WHEEL_DIR"
+	tmp_wheel_dir="$(mktemp -d "${WHEEL_DIR}/.wheel-build.XXXXXX")"
+	"$PYTHON_BIN" -m pip wheel "$ROOT_DIR" --no-build-isolation --no-deps -w "$tmp_wheel_dir"
+	wheel_timestamp="$(date '+%Y%m%d-%H%M%S')"
+	shopt -s nullglob
+	built_wheels=("$tmp_wheel_dir"/*.whl)
+	if ((${#built_wheels[@]} == 0)); then
+		echo "Error: wheel build did not produce any .whl files in ${tmp_wheel_dir}" >&2
+		rm -rf "$tmp_wheel_dir"
+		exit 1
+	fi
+	for built_wheel in "${built_wheels[@]}"; do
+		wheel_name="$(basename "$built_wheel")"
+		target_wheel="${WHEEL_DIR}/${wheel_name}"
+		if [[ -f "$target_wheel" && "${PRESERVE_WHEEL_HISTORY}" != "0" ]]; then
+			backup_wheel="${WHEEL_DIR}/${wheel_name%.whl}-prev-${wheel_timestamp}.whl"
+			backup_suffix=1
+			while [[ -e "$backup_wheel" ]]; do
+				backup_wheel="${WHEEL_DIR}/${wheel_name%.whl}-prev-${wheel_timestamp}-${backup_suffix}.whl"
+				backup_suffix=$((backup_suffix + 1))
+			done
+			mv "$target_wheel" "$backup_wheel"
+			echo "Archived existing wheel: ${target_wheel} -> ${backup_wheel}"
+		fi
+		mv "$built_wheel" "$target_wheel"
+		echo "Saved wheel: ${target_wheel}"
+	done
+	shopt -u nullglob
+	rm -rf "$tmp_wheel_dir"
 fi

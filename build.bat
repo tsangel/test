@@ -10,6 +10,7 @@ if not defined BUILD_TESTING set "BUILD_TESTING=ON"
 if not defined DICOM_BUILD_EXAMPLES set "DICOM_BUILD_EXAMPLES=ON"
 if not defined BUILD_WHEEL set "BUILD_WHEEL=1"
 if not defined WHEEL_DIR set "WHEEL_DIR=%ROOT_DIR%\dist"
+if not defined PRESERVE_WHEEL_HISTORY set "PRESERVE_WHEEL_HISTORY=1"
 if not defined CTEST_LABEL set "CTEST_LABEL=dicomsdl"
 if not defined PYTHON_BIN (
 	where py >nul 2>&1
@@ -301,8 +302,46 @@ if not "%RUN_TESTS%"=="0" (
 if not "%BUILD_WHEEL%"=="0" (
 	echo Building Python wheel into %WHEEL_DIR%
 	if not exist "%WHEEL_DIR%" mkdir "%WHEEL_DIR%"
-	%PYTHON_BIN% -m pip wheel "%ROOT_DIR%" --no-build-isolation --no-deps -w "%WHEEL_DIR%"
-	if errorlevel 1 exit /b %errorlevel%
+	set "TMP_WHEEL_DIR=%WHEEL_DIR%\.wheel-build-%RANDOM%%RANDOM%"
+	if exist "%TMP_WHEEL_DIR%" rmdir /s /q "%TMP_WHEEL_DIR%"
+	mkdir "%TMP_WHEEL_DIR%"
+	%PYTHON_BIN% -m pip wheel "%ROOT_DIR%" --no-build-isolation --no-deps -w "%TMP_WHEEL_DIR%"
+	if errorlevel 1 (
+		if exist "%TMP_WHEEL_DIR%" rmdir /s /q "%TMP_WHEEL_DIR%"
+		exit /b %errorlevel%
+	)
+	set "WHEEL_TIMESTAMP="
+	for /f %%I in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss" 2^>nul') do (
+		if not defined WHEEL_TIMESTAMP set "WHEEL_TIMESTAMP=%%I"
+	)
+	if not defined WHEEL_TIMESTAMP (
+		set "WHEEL_TIMESTAMP=%DATE%-%TIME%"
+		set "WHEEL_TIMESTAMP=!WHEEL_TIMESTAMP: =0!"
+		set "WHEEL_TIMESTAMP=!WHEEL_TIMESTAMP::=-!"
+		set "WHEEL_TIMESTAMP=!WHEEL_TIMESTAMP:/=-!"
+	)
+	set "WHEEL_COUNT=0"
+	for %%F in ("%TMP_WHEEL_DIR%\*.whl") do (
+		if exist "%%~fF" (
+			set /a WHEEL_COUNT+=1
+			set "TARGET_WHEEL=%WHEEL_DIR%\%%~nxF"
+			if exist "!TARGET_WHEEL!" (
+				if not "%PRESERVE_WHEEL_HISTORY%"=="0" (
+					set "BACKUP_WHEEL=%WHEEL_DIR%\%%~nF-prev-!WHEEL_TIMESTAMP!-%RANDOM%.whl"
+					move /y "!TARGET_WHEEL!" "!BACKUP_WHEEL!" >nul
+					echo Archived existing wheel: !TARGET_WHEEL! ^-^> !BACKUP_WHEEL!
+				)
+			)
+			move /y "%%~fF" "!TARGET_WHEEL!" >nul
+			echo Saved wheel: !TARGET_WHEEL!
+		)
+	)
+	if "!WHEEL_COUNT!"=="0" (
+		if exist "%TMP_WHEEL_DIR%" rmdir /s /q "%TMP_WHEEL_DIR%"
+		echo Error: wheel build did not produce any .whl files in %TMP_WHEEL_DIR%.>&2
+		exit /b 1
+	)
+	if exist "%TMP_WHEEL_DIR%" rmdir /s /q "%TMP_WHEEL_DIR%"
 )
 
 exit /b 0

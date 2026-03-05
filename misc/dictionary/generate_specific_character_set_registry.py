@@ -43,9 +43,9 @@ struct SpecificCharacterSetInfo {{
     std::string_view description;
 }};
 
-inline constexpr std::array<SpecificCharacterSetInfo, {count}> kSpecificCharacterSetInfo = {{
+inline constexpr std::array<SpecificCharacterSetInfo, {count}> kSpecificCharacterSetInfo = {{{{
 {info_entries}
-}};
+}}}};
 
 namespace detail {{
 
