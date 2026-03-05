@@ -118,7 +118,7 @@ def _dicomfile_to_pil_image(
         ) from exc
 
     ds = self.dataset
-    array = self.to_array(frame=frame, scaled=True)
+    array = self.to_array(frame=frame, to_modality_value=True)
     if array.ndim == 2:
         display_window = _resolve_window(ds, window, auto_window)
         mono = _normalize_mono_to_uint8(array, display_window)

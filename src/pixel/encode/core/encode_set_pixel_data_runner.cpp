@@ -1,9 +1,9 @@
 #include "pixel/encode/core/encode_set_pixel_data_runner.hpp"
 
 #include "pixel/encode/core/encode_metadata_updater.hpp"
-#include "pixel/encode/core/encode_source_layout_resolver.hpp"
-#include "pixel/encode/core/encode_target_resolver.hpp"
-#include "pixel/encode/core/multicomponent_option_resolver.hpp"
+#include "pixel/encode/core/encode_source_layout_compute.hpp"
+#include "pixel/encode/core/encode_target_policy.hpp"
+#include "pixel/encode/core/multicomponent_transform_policy.hpp"
 #include "pixel/encode/core/native_pixel_copy.hpp"
 #include "pixel/registry/codec_registry.hpp"
 
@@ -379,20 +379,20 @@ bool build_runtime_option_list_from_pairs(std::span<const CodecOptionKv> option_
 }  // namespace
 #endif
 
-void run_set_pixel_data_with_resolved_codec_options(DicomFile& file,
+void run_set_pixel_data_with_computed_codec_options(DicomFile& file,
     uid::WellKnown transfer_syntax, const pixel::PixelSource& source,
     std::span<const CodecOptionKv> codec_options) {
 	const auto target = classify_pixel_encode_target(transfer_syntax);
 	const auto file_path = file.path();
 	const auto source_layout =
-	    resolve_encode_source_layout_or_throw(source, file_path);
+	    compute_encode_source_layout_or_throw(source, file_path);
 	validate_target_source_constraints(
 	    target, source_layout.bits_allocated, source_layout.bits_stored, file_path);
 	const bool use_multicomponent_transform =
-	    resolve_use_multicomponent_transform(transfer_syntax, target.is_j2k,
+	    should_use_multicomponent_transform(transfer_syntax, target.is_j2k,
 	        target.is_htj2k, codec_options, source_layout.samples_per_pixel,
 	        file_path);
-	const pixel::Photometric output_photometric = resolve_output_photometric(
+	const pixel::Photometric output_photometric = compute_output_photometric(
 	    target, use_multicomponent_transform, source.photometric);
 
 	auto& dataset = file.dataset();

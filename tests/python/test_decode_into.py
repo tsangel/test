@@ -18,13 +18,23 @@ def test_decode_into_matches_to_array_single_frame():
     dicom_file = dicom.read_file(_test_file())
 
     out = np.empty((4, 4), dtype=np.int16)
-    returned = dicom_file.decode_into(out, frame=0, scaled=False)
+    returned = dicom_file.decode_into(out, frame=0, to_modality_value=False)
 
     assert returned is out
-    assert np.array_equal(out, dicom_file.to_array(frame=0, scaled=False))
+    assert np.array_equal(out, dicom_file.to_array(frame=0, to_modality_value=False))
 
 
 def test_decode_into_scaled_matches_to_array():
+    dicom_file = dicom.read_file(_test_file())
+
+    out = np.empty((4, 4), dtype=np.float32)
+    dicom_file.decode_into(out, frame=0, to_modality_value=True)
+
+    expected = dicom_file.to_array(frame=0, to_modality_value=True)
+    assert np.array_equal(out, expected)
+
+
+def test_decode_into_scaled_alias_matches_to_array():
     dicom_file = dicom.read_file(_test_file())
 
     out = np.empty((4, 4), dtype=np.float32)
@@ -38,9 +48,9 @@ def test_decode_into_threads_option_accepted():
     dicom_file = dicom.read_file(_test_file())
 
     out = np.empty((4, 4), dtype=np.int16)
-    dicom_file.decode_into(out, frame=0, scaled=False, threads=1)
+    dicom_file.decode_into(out, frame=0, to_modality_value=False, threads=1)
 
-    expected = dicom_file.to_array(frame=0, scaled=False)
+    expected = dicom_file.to_array(frame=0, to_modality_value=False)
     assert np.array_equal(out, expected)
 
 
@@ -63,7 +73,7 @@ def test_decode_into_size_mismatch_raises():
     out = np.empty((4, 3), dtype=np.int16)
 
     with pytest.raises(ValueError):
-        dicom_file.decode_into(out, frame=0, scaled=False)
+        dicom_file.decode_into(out, frame=0, to_modality_value=False)
 
 
 def test_decode_into_requires_writable_c_contiguous_buffer():
@@ -72,16 +82,16 @@ def test_decode_into_requires_writable_c_contiguous_buffer():
     readonly = np.empty((4, 4), dtype=np.int16)
     readonly.flags.writeable = False
     with pytest.raises(TypeError):
-        dicom_file.decode_into(readonly, frame=0, scaled=False)
+        dicom_file.decode_into(readonly, frame=0, to_modality_value=False)
 
     non_contiguous = np.empty((4, 4), dtype=np.int16)[:, ::2]
     with pytest.raises(TypeError):
-        dicom_file.decode_into(non_contiguous, frame=0, scaled=False)
+        dicom_file.decode_into(non_contiguous, frame=0, to_modality_value=False)
 
 
 def test_decode_into_frame_minus_one_single_frame_matches_frame_zero():
     dicom_file = dicom.read_file(_test_file())
     out = np.empty((4, 4), dtype=np.int16)
-    returned = dicom_file.decode_into(out, frame=-1, scaled=False)
+    returned = dicom_file.decode_into(out, frame=-1, to_modality_value=False)
     assert returned is out
-    assert np.array_equal(out, dicom_file.to_array(frame=0, scaled=False))
+    assert np.array_equal(out, dicom_file.to_array(frame=0, to_modality_value=False))

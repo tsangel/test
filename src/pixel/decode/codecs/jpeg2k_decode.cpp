@@ -516,7 +516,7 @@ void write_unscaled_to_dst(const opj_image_t& image, std::span<std::uint8_t> dst
 }
 
 template <typename SampleT>
-void write_scaled_mono_to_dst(const DecodeValueTransform& value_transform,
+void write_scaled_mono_to_dst(const ModalityValueTransform& modality_value_transform,
     const opj_image_t& image, std::span<std::uint8_t> dst,
     const DecodeStrides& dst_strides, std::size_t rows, std::size_t cols) {
 	const auto* src = image.comps[0].data;
@@ -525,13 +525,13 @@ void write_scaled_mono_to_dst(const DecodeValueTransform& value_transform,
 		    "JPEG2000 decoded component has no data");
 	}
 
-	if (!value_transform.enabled) {
+	if (!modality_value_transform.enabled) {
 		throw_decode_error(
 		    "scaled output requested without value transform metadata");
 	}
 
-	if (value_transform.modality_lut) {
-		const auto& modality_lut = *value_transform.modality_lut;
+	if (modality_value_transform.modality_lut) {
+		const auto& modality_lut = *modality_value_transform.modality_lut;
 		const auto last_index = static_cast<std::int64_t>(modality_lut.values.size() - 1);
 		for (std::size_t r = 0; r < rows; ++r) {
 			const auto src_index = r * cols;
@@ -551,8 +551,8 @@ void write_scaled_mono_to_dst(const DecodeValueTransform& value_transform,
 		return;
 	}
 
-	const auto slope = value_transform.rescale_slope;
-	const auto intercept = value_transform.rescale_intercept;
+	const auto slope = modality_value_transform.rescale_slope;
+	const auto intercept = modality_value_transform.rescale_intercept;
 	if (!std::isfinite(slope) || !std::isfinite(intercept)) {
 		throw_decode_error(
 		    "RescaleSlope/RescaleIntercept must be finite");
@@ -572,7 +572,7 @@ void write_scaled_mono_to_dst(const DecodeValueTransform& value_transform,
 } // namespace
 
 bool decode_jpeg2k_into(const pixel::PixelDataInfo& info,
-    const DecodeValueTransform& value_transform,
+    const ModalityValueTransform& modality_value_transform,
     std::span<std::uint8_t> dst,
     const DecodeStrides& dst_strides, const DecodeOptions& opt,
     CodecError& out_error, std::span<const std::uint8_t> prepared_source) noexcept {
@@ -608,7 +608,7 @@ bool decode_jpeg2k_into(const pixel::PixelDataInfo& info,
 			    "only SamplesPerPixel=1/3/4 is supported in current JPEG2000 path");
 		}
 		const auto samples_per_pixel = static_cast<std::size_t>(samples_per_pixel_value);
-		if (opt.scaled && samples_per_pixel != 1) {
+		if (opt.to_modality_value && samples_per_pixel != 1) {
 			return fail(CodecStatusCode::invalid_argument, "validate",
 			    "scaled output supports SamplesPerPixel=1 only");
 		}
@@ -626,7 +626,7 @@ bool decode_jpeg2k_into(const pixel::PixelDataInfo& info,
 		const auto rows = static_cast<std::size_t>(info.rows);
 		const auto cols = static_cast<std::size_t>(info.cols);
 		const auto dst_bytes_per_sample =
-		    opt.scaled ? sizeof(float) : src_bytes_per_sample;
+		    opt.to_modality_value ? sizeof(float) : src_bytes_per_sample;
 		try {
 			validate_destination(dst, dst_strides, opt.planar_out, rows, cols,
 			    samples_per_pixel, dst_bytes_per_sample);
@@ -651,31 +651,31 @@ bool decode_jpeg2k_into(const pixel::PixelDataInfo& info,
 		auto image = decode_openjpeg_image(frame_source, opt);
 		validate_decoded_image(info, *image, rows, cols, samples_per_pixel);
 
-		if (opt.scaled) {
+		if (opt.to_modality_value) {
 			switch (info.sv_dtype) {
 			case DataType::u8:
 				write_scaled_mono_to_dst<std::uint8_t>(
-				    value_transform, *image, dst, dst_strides, rows, cols);
+				    modality_value_transform, *image, dst, dst_strides, rows, cols);
 				return true;
 			case DataType::s8:
 				write_scaled_mono_to_dst<std::int8_t>(
-				    value_transform, *image, dst, dst_strides, rows, cols);
+				    modality_value_transform, *image, dst, dst_strides, rows, cols);
 				return true;
 			case DataType::u16:
 				write_scaled_mono_to_dst<std::uint16_t>(
-				    value_transform, *image, dst, dst_strides, rows, cols);
+				    modality_value_transform, *image, dst, dst_strides, rows, cols);
 				return true;
 			case DataType::s16:
 				write_scaled_mono_to_dst<std::int16_t>(
-				    value_transform, *image, dst, dst_strides, rows, cols);
+				    modality_value_transform, *image, dst, dst_strides, rows, cols);
 				return true;
 			case DataType::u32:
 				write_scaled_mono_to_dst<std::uint32_t>(
-				    value_transform, *image, dst, dst_strides, rows, cols);
+				    modality_value_transform, *image, dst, dst_strides, rows, cols);
 				return true;
 			case DataType::s32:
 				write_scaled_mono_to_dst<std::int32_t>(
-				    value_transform, *image, dst, dst_strides, rows, cols);
+				    modality_value_transform, *image, dst, dst_strides, rows, cols);
 				return true;
 			default:
 				return fail(CodecStatusCode::unsupported, "validate",

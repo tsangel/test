@@ -1,4 +1,4 @@
-#include "pixel/encode/core/multicomponent_option_resolver.hpp"
+#include "pixel/encode/core/multicomponent_transform_policy.hpp"
 
 #include "diagnostics.h"
 
@@ -136,7 +136,7 @@ struct BoolOptionLookupResult {
 
 } // namespace
 
-bool resolve_use_multicomponent_transform(uid::WellKnown transfer_syntax,
+bool should_use_multicomponent_transform(uid::WellKnown transfer_syntax,
     bool is_j2k_target, bool is_htj2k_target, std::span<const CodecOptionKv> codec_options,
     std::size_t samples_per_pixel, std::string_view file_path) {
 	const auto mct_option = lookup_use_mct_option(codec_options);

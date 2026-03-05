@@ -206,7 +206,7 @@ int main() {
 	using dicom::pixel::detail::format_codec_error_context;
 	using dicom::pixel::detail::global_codec_registry;
 	using dicom::pixel::detail::throw_codec_error_with_context;
-	const dicom::pixel::detail::DecodeValueTransform decode_transform{};
+	const dicom::pixel::detail::ModalityValueTransform decode_transform{};
 
 	if (!(dicom::test::kJpegBuiltin &&
 	        dicom::test::kJpegLsBuiltin &&
@@ -268,7 +268,7 @@ int main() {
 			const auto& info = df.pixeldata_info();
 			CodecDecodeFrameInput decode_input{
 			    .info = info,
-			    .value_transform = decode_transform,
+			    .modality_value_transform = decode_transform,
 			    .destination = std::span<std::uint8_t>{},
 			    .destination_strides = dicom::pixel::DecodeStrides{},
 			    .options = dicom::pixel::DecodeOptions{},
@@ -318,7 +318,7 @@ int main() {
 			const auto& info = df.pixeldata_info();
 			CodecDecodeFrameInput decode_input{
 			    .info = info,
-			    .value_transform = decode_transform,
+			    .modality_value_transform = decode_transform,
 			    .destination = std::span<std::uint8_t>{},
 			    .destination_strides = dicom::pixel::DecodeStrides{},
 			    .options = dicom::pixel::DecodeOptions{},
@@ -347,7 +347,7 @@ int main() {
 			const auto& info = df.pixeldata_info();
 			CodecDecodeFrameInput decode_input{
 			    .info = info,
-			    .value_transform = decode_transform,
+			    .modality_value_transform = decode_transform,
 			    .destination = std::span<std::uint8_t>{},
 			    .destination_strides = dicom::pixel::DecodeStrides{},
 			    .options = dicom::pixel::DecodeOptions{},
@@ -376,7 +376,7 @@ int main() {
 			const auto& info = df.pixeldata_info();
 			CodecDecodeFrameInput decode_input{
 			    .info = info,
-			    .value_transform = decode_transform,
+			    .modality_value_transform = decode_transform,
 			    .destination = std::span<std::uint8_t>{},
 			    .destination_strides = dicom::pixel::DecodeStrides{},
 			    .options = dicom::pixel::DecodeOptions{},
@@ -405,7 +405,7 @@ int main() {
 			const auto& info = df.pixeldata_info();
 			CodecDecodeFrameInput decode_input{
 			    .info = info,
-			    .value_transform = decode_transform,
+			    .modality_value_transform = decode_transform,
 			    .destination = std::span<std::uint8_t>{},
 			    .destination_strides = dicom::pixel::DecodeStrides{},
 			    .options = dicom::pixel::DecodeOptions{},
@@ -434,7 +434,7 @@ int main() {
 			const auto& info = df.pixeldata_info();
 			CodecDecodeFrameInput decode_input{
 			    .info = info,
-			    .value_transform = decode_transform,
+			    .modality_value_transform = decode_transform,
 			    .destination = std::span<std::uint8_t>{},
 			    .destination_strides = dicom::pixel::DecodeStrides{},
 			    .options = dicom::pixel::DecodeOptions{},
@@ -463,7 +463,7 @@ int main() {
 			const auto& info = df.pixeldata_info();
 			CodecDecodeFrameInput decode_input{
 			    .info = info,
-			    .value_transform = decode_transform,
+			    .modality_value_transform = decode_transform,
 			    .destination = std::span<std::uint8_t>{},
 			    .destination_strides = dicom::pixel::DecodeStrides{},
 			    .options = dicom::pixel::DecodeOptions{},
@@ -492,7 +492,7 @@ int main() {
 			const auto& info = df.pixeldata_info();
 			CodecDecodeFrameInput decode_input{
 			    .info = info,
-			    .value_transform = decode_transform,
+			    .modality_value_transform = decode_transform,
 			    .destination = std::span<std::uint8_t>{},
 			    .destination_strides = dicom::pixel::DecodeStrides{},
 			    .options = dicom::pixel::DecodeOptions{},

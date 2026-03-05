@@ -141,7 +141,7 @@ int main() {
 
   dicom::pixel::DecodeOptions decode_options{};
   decode_options.planar_out = dicom::pixel::Planar::interleaved;
-  decode_options.scaled = false;
+  decode_options.to_modality_value = false;
   decode_options.decode_mct = false;
 
   std::vector<uint8_t> decoded_int(source_bytes.size(), uint8_t{0});

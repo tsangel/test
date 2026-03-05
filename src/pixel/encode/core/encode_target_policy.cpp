@@ -1,4 +1,4 @@
-#include "pixel/encode/core/encode_target_resolver.hpp"
+#include "pixel/encode/core/encode_target_policy.hpp"
 
 #include "diagnostics.h"
 
@@ -49,7 +49,7 @@ void validate_target_source_constraints(const PixelEncodeTarget& target,
 	}
 }
 
-pixel::Photometric resolve_output_photometric(const PixelEncodeTarget& target,
+pixel::Photometric compute_output_photometric(const PixelEncodeTarget& target,
     bool use_multicomponent_transform,
     pixel::Photometric source_photometric) noexcept {
 	if (!use_multicomponent_transform) {

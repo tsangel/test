@@ -7,7 +7,7 @@
 
 namespace dicom::pixel::detail {
 
-struct ResolvedEncodeSourceLayout {
+struct ComputedEncodeSourceLayout {
 	std::size_t bytes_per_sample{0};
 	std::size_t rows{0};
 	std::size_t cols{0};
@@ -27,7 +27,7 @@ struct ResolvedEncodeSourceLayout {
 	int high_bit{0};
 };
 
-[[nodiscard]] ResolvedEncodeSourceLayout resolve_encode_source_layout_or_throw(
+[[nodiscard]] ComputedEncodeSourceLayout compute_encode_source_layout_or_throw(
     const pixel::PixelSource& source, std::string_view file_path);
 
 } // namespace dicom::pixel::detail

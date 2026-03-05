@@ -1,4 +1,4 @@
-#include "pixel/encode/core/encode_source_layout_resolver.hpp"
+#include "pixel/encode/core/encode_source_layout_compute.hpp"
 
 #include "diagnostics.h"
 
@@ -56,7 +56,7 @@ struct NativeSourceLayout {
 
 } // namespace
 
-ResolvedEncodeSourceLayout resolve_encode_source_layout_or_throw(
+ComputedEncodeSourceLayout compute_encode_source_layout_or_throw(
     const pixel::PixelSource& source, std::string_view file_path) {
 	const auto native_layout = native_source_layout_of(source.data_type);
 	if (!native_layout) {
@@ -190,7 +190,7 @@ ResolvedEncodeSourceLayout resolve_encode_source_layout_or_throw(
 		    file_path, bits_stored, bits_allocated);
 	}
 
-	return ResolvedEncodeSourceLayout{
+	return ComputedEncodeSourceLayout{
 	    .bytes_per_sample = bytes_per_sample,
 	    .rows = rows,
 	    .cols = cols,

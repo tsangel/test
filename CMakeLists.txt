@@ -95,7 +95,7 @@ add_library(dicomsdl STATIC
     src/pixel/external_plugin.cpp
     src/pixel/entrypoint/decode_entrypoint.cpp
     src/pixel/decode/core/decode_entrypoint_runner.cpp
-    src/pixel/decode/core/decode_modality_transform.cpp
+    src/pixel/decode/core/decode_modality_value_transform.cpp
     src/pixel/decode/core/decode_frame_dispatch.cpp
     src/pixel/decode/core/decode_frame_source_loader.cpp
     src/pixel/decode/core/decode_planar_copy.cpp
@@ -114,10 +114,10 @@ add_library(dicomsdl STATIC
     src/pixel/encode/codecs/jpeg_encode.cpp
     src/pixel/encode/codecs/jpegxl_encode.cpp
     src/pixel/encode/core/encode_set_pixel_data_runner.cpp
-    src/pixel/encode/core/encode_source_layout_resolver.cpp
-    src/pixel/encode/core/encode_target_resolver.cpp
+    src/pixel/encode/core/encode_source_layout_compute.cpp
+    src/pixel/encode/core/encode_target_policy.cpp
     src/pixel/encode/core/native_pixel_copy.cpp
-    src/pixel/encode/core/multicomponent_option_resolver.cpp
+    src/pixel/encode/core/multicomponent_transform_policy.cpp
     src/pixel/encode/core/encode_metadata_updater.cpp
 )
 set_target_properties(dicomsdl PROPERTIES

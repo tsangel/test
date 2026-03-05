@@ -437,7 +437,7 @@ void dispatch_planar_transform_copy_by_bytes(PlanarTransform transform, std::siz
 
 } // namespace
 
-void decode_mono_scaled_into_f32(const DecodeValueTransform& value_transform,
+void decode_mono_scaled_into_f32(const ModalityValueTransform& modality_value_transform,
     const pixel::PixelDataInfo& info,
     const std::uint8_t* src_frame, std::span<std::uint8_t> dst,
     const DecodeStrides& dst_strides, std::size_t rows, std::size_t cols,
@@ -447,13 +447,13 @@ void decode_mono_scaled_into_f32(const DecodeValueTransform& value_transform,
 		    "pixel::decode_frame_into reason=scaled output supports SamplesPerPixel=1 only");
 	}
 
-	if (!value_transform.enabled) {
+	if (!modality_value_transform.enabled) {
 		diag::error_and_throw(
 		    "pixel::decode_frame_into reason=scaled output requested without value transform metadata");
 	}
 
-	if (value_transform.modality_lut) {
-		const auto& modality_lut = *value_transform.modality_lut;
+	if (modality_value_transform.modality_lut) {
+		const auto& modality_lut = *modality_value_transform.modality_lut;
 		switch (info.sv_dtype) {
 			case DataType::u8:
 				decode_mono_lut_samples_into<std::uint8_t>(
@@ -492,8 +492,8 @@ void decode_mono_scaled_into_f32(const DecodeValueTransform& value_transform,
 		}
 	}
 
-	const auto slope = value_transform.rescale_slope;
-	const auto intercept = value_transform.rescale_intercept;
+	const auto slope = modality_value_transform.rescale_slope;
+	const auto intercept = modality_value_transform.rescale_intercept;
 	if (!std::isfinite(slope) || !std::isfinite(intercept)) {
 		diag::error_and_throw(
 		    "pixel::decode_frame_into reason=RescaleSlope/RescaleIntercept must be finite");

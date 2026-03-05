@@ -1080,9 +1080,9 @@ enum class Htj2kDecoder : std::uint8_t {
 struct DecodeOptions {
 	Planar planar_out{Planar::interleaved};
 	std::uint16_t alignment{1};  // 0/1: packed, power-of-two aligned (<= 4096)
-	// true: output float32 after Modality LUT (if present) or Rescale
-	// applies only when SamplesPerPixel=1 and modality transform metadata exists.
-	bool scaled{false};
+	// true: output float32 modality values after Modality LUT (if present) or Rescale.
+	// Applies only when SamplesPerPixel=1 and modality transform metadata exists.
+	bool to_modality_value{false};
 	// true: apply codestream-level MCT/color transform inverse when decoder supports it.
 	// false: keep codestream component domain (for example, YBR_* domain for JPEG2000 MCT streams).
 	// Note: currently honored by OpenJPEG-based decode paths; other backends may ignore it.
@@ -1103,10 +1103,10 @@ struct ModalityLut {
 	std::vector<float> values;
 };
 
-/// Returns whether scaled float output is effectively applied for this file and options.
-/// Scaled output is ignored when SamplesPerPixel != 1, or when both Modality LUT Sequence
-/// and Rescale Slope/Intercept are absent.
-[[nodiscard]] bool should_use_scaled_output(const DicomFile& df, const DecodeOptions& opt = {});
+/// Returns whether modality-value float output is effectively applied for this file and options.
+/// Modality-value output is ignored when SamplesPerPixel != 1, or when both Modality LUT
+/// Sequence and Rescale Slope/Intercept are absent.
+[[nodiscard]] bool should_output_modality_value(const DicomFile& df, const DecodeOptions& opt = {});
 
 /// Decode a single frame into caller-provided buffer.
 /// Current implementation supports raw(uncompressed), RLE, JPEG (via libjpeg-turbo),
@@ -1117,7 +1117,7 @@ struct ModalityLut {
 /// - JPEG: integral up to 16-bit (subject to upstream libjpeg-turbo codestream support)
 /// - JPEG-LS: integral up to 16-bit
 /// - JPEG 2000: integral up to 32-bit
-/// When scaled output is effectively enabled, output sample type is float32.
+/// When modality-value output is effectively enabled, output sample type is float32.
 void decode_frame_into(const DicomFile& df, std::size_t frame_index,
     std::span<std::uint8_t> dst, const DecodeOptions& opt = {});
 void decode_frame_into(const DicomFile& df, std::size_t frame_index,

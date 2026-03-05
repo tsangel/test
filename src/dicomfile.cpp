@@ -179,7 +179,7 @@ struct DecodedNativePixelBuffer {
 	pixel::DecodeOptions decode_options{};
 	decode_options.planar_out = info.planar_configuration;
 	decode_options.alignment = 1;
-	decode_options.scaled = false;
+	decode_options.to_modality_value = false;
 	// Keep codestream component domain during transfer-syntax transcoding.
 	decode_options.decode_mct = false;
 	const auto decode_strides = file.calc_decode_strides(decode_options);
@@ -737,9 +737,9 @@ pixel::DecodeStrides DicomFile::calc_decode_strides(const pixel::DecodeOptions& 
 	const auto rows = static_cast<std::size_t>(rows_value);
 	const auto cols = static_cast<std::size_t>(cols_value);
 	const auto samples_per_pixel = static_cast<std::size_t>(spp_value);
-	const auto scaled_output = pixel::should_use_scaled_output(*this, opt);
+	const auto modality_value_output = pixel::should_output_modality_value(*this, opt);
 
-	const auto bytes_per_sample = scaled_output
+	const auto bytes_per_sample = modality_value_output
 	                                  ? sizeof(float)
 	                                  : bytes_per_sample_of(info.sv_dtype);
 	if (bytes_per_sample == 0) {

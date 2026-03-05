@@ -67,7 +67,7 @@ enum class CodecProfile : std::uint8_t {
 	jpegxl_jpeg_recompression,
 };
 
-struct DecodeValueTransform {
+struct ModalityValueTransform {
 	bool enabled{false};
 	std::optional<pixel::ModalityLut> modality_lut{};
 	double rescale_slope{1.0};
@@ -97,7 +97,7 @@ struct CodecEncodeFrameInput {
 
 struct CodecDecodeFrameInput {
 	pixel::PixelDataInfo info{};
-	DecodeValueTransform value_transform{};
+	ModalityValueTransform modality_value_transform{};
 	std::span<const std::uint8_t> prepared_source{};
 	std::span<std::uint8_t> destination{};
 	DecodeStrides destination_strides{};

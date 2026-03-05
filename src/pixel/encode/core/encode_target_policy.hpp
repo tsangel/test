@@ -34,7 +34,7 @@ struct PixelEncodeTarget {
 void validate_target_source_constraints(const PixelEncodeTarget& target,
     int bits_allocated, int bits_stored, std::string_view file_path);
 
-[[nodiscard]] pixel::Photometric resolve_output_photometric(
+[[nodiscard]] pixel::Photometric compute_output_photometric(
     const PixelEncodeTarget& target, bool use_multicomponent_transform,
     pixel::Photometric source_photometric) noexcept;
 

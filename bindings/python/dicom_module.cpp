@@ -78,8 +78,9 @@ struct DecodedArrayLayout {
 	bool decode_all_frames{false};
 };
 
-DecodedArraySpec decoded_array_spec(const dicom::pixel::PixelDataInfo& info, bool scaled) {
-	if (scaled) {
+DecodedArraySpec decoded_array_spec(
+    const dicom::pixel::PixelDataInfo& info, bool to_modality_value) {
+	if (to_modality_value) {
 		return DecodedArraySpec{nb::dtype<float>(), sizeof(float)};
 	}
 
@@ -810,7 +811,7 @@ std::string_view htj2k_decoder_name(dicom::pixel::Htj2kDecoder decoder) noexcept
 }
 
 DecodedArrayLayout build_decode_layout(
-    const DicomFile& self, long frame, bool scaled, int decoder_threads = -1,
+    const DicomFile& self, long frame, bool to_modality_value, int decoder_threads = -1,
     bool decode_mct = true) {
 	if (frame < -1) {
 		throw nb::value_error("frame must be >= -1");
@@ -840,14 +841,15 @@ DecodedArrayLayout build_decode_layout(
 
 	layout.opt.planar_out = dicom::pixel::Planar::interleaved;
 	layout.opt.alignment = 1;
-	layout.opt.scaled = scaled;
+	layout.opt.to_modality_value = to_modality_value;
 	layout.opt.decode_mct = decode_mct;
 	layout.opt.decoder_threads = decoder_threads;
-	const bool effective_scaled = dicom::pixel::should_use_scaled_output(self, layout.opt);
-	layout.opt.scaled = effective_scaled;
+	const bool effective_to_modality_value =
+	    dicom::pixel::should_output_modality_value(self, layout.opt);
+	layout.opt.to_modality_value = effective_to_modality_value;
 
 	layout.dst_strides = self.calc_decode_strides(layout.opt);
-	layout.spec = decoded_array_spec(info, effective_scaled);
+	layout.spec = decoded_array_spec(info, effective_to_modality_value);
 
 	const auto bytes_per_sample = layout.spec.bytes_per_sample;
 	if (bytes_per_sample == 0) {
@@ -915,6 +917,14 @@ DecodedArrayLayout build_decode_layout(
 		layout.strides[3] = 1;
 	}
 	return layout;
+}
+
+[[nodiscard]] bool resolve_to_modality_value_option(
+    bool to_modality_value, nb::handle scaled_alias) {
+	if (!scaled_alias.is_none()) {
+		return nb::cast<bool>(scaled_alias);
+	}
+	return to_modality_value;
 }
 
 void decode_layout_into(const DicomFile& self, const DecodedArrayLayout& layout,
@@ -1004,8 +1014,12 @@ nb::object dicomfile_to_array_view(const DicomFile& self, long frame) {
 }
 
 nb::object dicomfile_to_array(
-    const DicomFile& self, long frame, bool scaled, bool decode_mct) {
-	const auto layout = build_decode_layout(self, frame, scaled, -1, decode_mct);
+    const DicomFile& self, long frame, bool to_modality_value, bool decode_mct,
+    nb::handle scaled) {
+	const auto effective_to_modality_value =
+	    resolve_to_modality_value_option(to_modality_value, scaled);
+	const auto layout = build_decode_layout(
+	    self, frame, effective_to_modality_value, -1, decode_mct);
 	auto out = make_writable_numpy_array(
 	    layout.ndim, layout.shape, layout.strides, layout.spec.dtype, layout.required_bytes);
 	decode_layout_into(self, layout, out.bytes);
@@ -1034,8 +1048,11 @@ private:
 };
 
 nb::object dicomfile_decode_into_array(const DicomFile& self, nb::handle out,
-    long frame, bool scaled, int threads, bool decode_mct) {
-	const auto layout = build_decode_layout(self, frame, scaled, threads, decode_mct);
+    long frame, bool to_modality_value, int threads, bool decode_mct, nb::handle scaled) {
+	const auto effective_to_modality_value =
+	    resolve_to_modality_value_option(to_modality_value, scaled);
+	const auto layout =
+	    build_decode_layout(self, frame, effective_to_modality_value, threads, decode_mct);
 
 	PyWritableBufferView writable(out);
 	const auto& view = writable.view();
@@ -1989,18 +2006,21 @@ NB_MODULE(_dicomsdl, m) {
 		.def("to_array",
 		    &dicomfile_to_array,
 		    nb::arg("frame") = -1,
-		    nb::arg("scaled") = false,
+		    nb::arg("to_modality_value") = false,
 		    nb::arg("decode_mct") = true,
+		    nb::arg("scaled") = nb::none(),
 		    "Decode pixel samples and return a NumPy array.\n"
 		    "\n"
 		    "Parameters\n"
 		    "----------\n"
 		    "frame : int, optional\n"
 		    "    -1 decodes all frames (multi-frame only), otherwise decode the selected frame index.\n"
-		    "scaled : bool, optional\n"
-		    "    If True, apply Modality LUT/Rescale when available.\n"
-		    "    Scaled output is ignored when SamplesPerPixel != 1, or when both\n"
+		    "to_modality_value : bool, optional\n"
+		    "    If True, convert stored values to modality values via Modality LUT/Rescale when available.\n"
+		    "    Modality-value output is ignored when SamplesPerPixel != 1, or when both\n"
 		    "    Modality LUT Sequence and Rescale Slope/Intercept are absent.\n"
+		    "scaled : bool, optional\n"
+		    "    Deprecated alias of to_modality_value.\n"
 		    "decode_mct : bool, optional\n"
 		    "    Whether to apply codestream-level MCT/color inverse transform when supported.\n"
 		    "    True by default. Currently honored by OpenJPEG-based decode paths.\n"
@@ -2023,9 +2043,10 @@ NB_MODULE(_dicomsdl, m) {
 		    &dicomfile_decode_into_array,
 		    nb::arg("out"),
 		    nb::arg("frame") = 0,
-		    nb::arg("scaled") = false,
+		    nb::arg("to_modality_value") = false,
 		    nb::arg("threads") = -1,
 		    nb::arg("decode_mct") = true,
+		    nb::arg("scaled") = nb::none(),
 		    "Decode pixel samples into an existing writable C-contiguous buffer.\n"
 		    "\n"
 		    "Parameters\n"
@@ -2035,8 +2056,10 @@ NB_MODULE(_dicomsdl, m) {
 		    "    exactly match the decoded output for the requested frame selection.\n"
 		    "frame : int, optional\n"
 		    "    -1 decodes all frames (multi-frame only), otherwise decode the selected frame index.\n"
+		    "to_modality_value : bool, optional\n"
+		    "    If True, convert stored values to modality values via Modality LUT/Rescale when available.\n"
 		    "scaled : bool, optional\n"
-		    "    If True, apply Modality LUT/Rescale when available.\n"
+		    "    Deprecated alias of to_modality_value.\n"
 		    "threads : int, optional\n"
 		    "    Decoder thread count hint.\n"
 		    "    Default is -1 (use all CPUs).\n"
@@ -2053,9 +2076,10 @@ NB_MODULE(_dicomsdl, m) {
 		.def("pixel_array",
 		    &dicomfile_to_array,
 		    nb::arg("frame") = -1,
-		    nb::arg("scaled") = false,
+		    nb::arg("to_modality_value") = false,
 		    nb::arg("decode_mct") = true,
-		    "Alias of to_array(frame=-1, scaled=False, decode_mct=True).")
+		    nb::arg("scaled") = nb::none(),
+		    "Alias of to_array(frame=-1, to_modality_value=False, decode_mct=True).")
 		.def("__getitem__",
 		    [](DicomFile& self, nb::object key) -> nb::object {
 			    DataSet& dataset = self.dataset();

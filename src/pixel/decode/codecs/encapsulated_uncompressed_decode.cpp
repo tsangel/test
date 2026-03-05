@@ -33,7 +33,7 @@ namespace {
 } // namespace
 
 bool decode_encapsulated_uncompressed_into(const pixel::PixelDataInfo& info,
-    const DecodeValueTransform& value_transform,
+    const ModalityValueTransform& modality_value_transform,
     std::span<std::uint8_t> dst,
     const DecodeStrides& dst_strides, const DecodeOptions& opt, CodecError& out_error,
     std::span<const std::uint8_t> prepared_source) noexcept {
@@ -69,7 +69,7 @@ bool decode_encapsulated_uncompressed_into(const pixel::PixelDataInfo& info,
 			    "only sv_dtype=u8/s8/u16/s16/u32/s32/f32/f64 is supported in current encapsulated-uncompressed path");
 		}
 		const std::size_t dst_bytes_per_sample =
-		    opt.scaled ? sizeof(float) : src_bytes_per_sample;
+		    opt.to_modality_value ? sizeof(float) : src_bytes_per_sample;
 
 		if (info.frames <= 0) {
 			return fail(CodecStatusCode::invalid_argument, "validate",
@@ -154,10 +154,10 @@ bool decode_encapsulated_uncompressed_into(const pixel::PixelDataInfo& info,
 			        src_frame.size(), src_frame_bytes));
 		}
 
-		if (opt.scaled) {
+		if (opt.to_modality_value) {
 			try {
 				decode_mono_scaled_into_f32(
-				    value_transform, info, src_frame.data(), dst, dst_strides,
+				    modality_value_transform, info, src_frame.data(), dst, dst_strides,
 				    rows, cols, src_row_bytes);
 				return true;
 			} catch (const std::bad_alloc&) {

@@ -10,7 +10,7 @@
 namespace dicom::pixel::detail {
 
 struct CodecError;
-struct DecodeValueTransform;
+struct ModalityValueTransform;
 
 enum class PlanarTransform : std::uint8_t {
 	interleaved_to_interleaved = 0,
@@ -47,7 +47,7 @@ std::span<const std::uint8_t> materialize_encapsulated_frame_source(
     std::string_view file_path, std::size_t frame_index, std::string_view codec_name,
     const EncapsulatedFrameSource& source, std::vector<std::uint8_t>& out_owned);
 
-void decode_mono_scaled_into_f32(const DecodeValueTransform& value_transform,
+void decode_mono_scaled_into_f32(const ModalityValueTransform& modality_value_transform,
     const pixel::PixelDataInfo& info, const std::uint8_t* src_frame,
     std::span<std::uint8_t> dst,
     const DecodeStrides& dst_strides, std::size_t rows, std::size_t cols,
@@ -59,45 +59,45 @@ void run_planar_transform_copy(PlanarTransform transform, std::size_t bytes_per_
     std::size_t src_row_bytes, std::size_t dst_row_bytes);
 
 bool decode_raw_into(const pixel::PixelDataInfo& info,
-    const DecodeValueTransform& value_transform,
+    const ModalityValueTransform& modality_value_transform,
     std::span<std::uint8_t> dst,
     const DecodeStrides& dst_strides, const DecodeOptions& opt,
     CodecError& out_error,
     std::span<const std::uint8_t> prepared_source = {}) noexcept;
 
 bool decode_encapsulated_uncompressed_into(const pixel::PixelDataInfo& info,
-    const DecodeValueTransform& value_transform,
+    const ModalityValueTransform& modality_value_transform,
     std::span<std::uint8_t> dst, const DecodeStrides& dst_strides,
     const DecodeOptions& opt, CodecError& out_error,
     std::span<const std::uint8_t> prepared_source = {}) noexcept;
 
 bool decode_jpeg2k_into(const pixel::PixelDataInfo& info,
-    const DecodeValueTransform& value_transform,
+    const ModalityValueTransform& modality_value_transform,
     std::span<std::uint8_t> dst,
     const DecodeStrides& dst_strides, const DecodeOptions& opt, CodecError& out_error,
     std::span<const std::uint8_t> prepared_source = {}) noexcept;
 
 bool decode_htj2k_into(const pixel::PixelDataInfo& info,
-    const DecodeValueTransform& value_transform,
+    const ModalityValueTransform& modality_value_transform,
     std::span<std::uint8_t> dst,
     const DecodeStrides& dst_strides, const DecodeOptions& opt, CodecError& out_error,
     std::span<const std::uint8_t> prepared_source = {},
     Htj2kDecoder backend = Htj2kDecoder::auto_select) noexcept;
 
 bool decode_jpegls_into(const pixel::PixelDataInfo& info,
-    const DecodeValueTransform& value_transform,
+    const ModalityValueTransform& modality_value_transform,
     std::span<std::uint8_t> dst,
     const DecodeStrides& dst_strides, const DecodeOptions& opt, CodecError& out_error,
     std::span<const std::uint8_t> prepared_source = {}) noexcept;
 
 bool decode_jpegxl_into(const pixel::PixelDataInfo& info,
-    const DecodeValueTransform& value_transform,
+    const ModalityValueTransform& modality_value_transform,
     std::span<std::uint8_t> dst,
     const DecodeStrides& dst_strides, const DecodeOptions& opt, CodecError& out_error,
     std::span<const std::uint8_t> prepared_source = {}) noexcept;
 
 bool decode_jpeg_into(const pixel::PixelDataInfo& info,
-    const DecodeValueTransform& value_transform,
+    const ModalityValueTransform& modality_value_transform,
     std::span<std::uint8_t> dst,
     const DecodeStrides& dst_strides, const DecodeOptions& opt, CodecError& out_error,
     std::span<const std::uint8_t> prepared_source = {}) noexcept;

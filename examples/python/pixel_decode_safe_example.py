@@ -24,26 +24,31 @@ def main(argv: List[str]) -> int:
     parser.add_argument("path", help="Path to input DICOM file")
     parser.add_argument("--frame", type=int, default=0, help="Frame index (default: 0)")
     parser.add_argument(
+        "--to-modality-value",
         "--scaled",
+        dest="to_modality_value",
         action="store_true",
-        help="Enable scaled output (Modality LUT/Rescale for monochrome when available)",
+        help="Enable modality-value output (Modality LUT/Rescale for monochrome when available)",
     )
     args = parser.parse_args(argv)
 
     dicom_file = dicom.read_file(args.path)
-    arr = dicom_file.to_array(frame=args.frame, scaled=args.scaled)
+    arr = dicom_file.to_array(
+        frame=args.frame, to_modality_value=args.to_modality_value)
     print(f"decoded: shape={arr.shape}, dtype={arr.dtype}")
 
     # Safe buffer reuse pattern:
     # Allocate output buffer from the latest decoded layout, then decode_into.
     out = np.empty_like(arr)
-    dicom_file.decode_into(out, frame=args.frame, scaled=args.scaled)
+    dicom_file.decode_into(
+        out, frame=args.frame, to_modality_value=args.to_modality_value)
     print(f"decode_into: shape={out.shape}, dtype={out.dtype}")
 
     # If pixel-related metadata changes, refresh before decoding again.
     # Example policy:
     #   dicom_file = dicom.read_file(args.path)
-    #   arr = dicom_file.to_array(frame=args.frame, scaled=args.scaled)
+    #   arr = dicom_file.to_array(
+    #       frame=args.frame, to_modality_value=args.to_modality_value)
     #   out = np.empty_like(arr)
 
     return 0

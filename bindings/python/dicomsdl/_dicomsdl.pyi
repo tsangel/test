@@ -195,19 +195,28 @@ class DicomFile:
     ) -> bytes: ...
     def pixel_data(self, frame_index: int = ...) -> bytes: ...
     def to_array(
-        self, frame: int = ..., scaled: bool = ..., decode_mct: bool = ...
+        self,
+        frame: int = ...,
+        to_modality_value: bool = ...,
+        decode_mct: bool = ...,
+        scaled: bool | None = ...,
     ) -> Any: ...
     def to_array_view(self, frame: int = ...) -> Any: ...
     def decode_into(
         self,
         out: Any,
         frame: int = ...,
-        scaled: bool = ...,
+        to_modality_value: bool = ...,
         threads: int = ...,
         decode_mct: bool = ...,
+        scaled: bool | None = ...,
     ) -> Any: ...
     def pixel_array(
-        self, frame: int = ..., scaled: bool = ..., decode_mct: bool = ...
+        self,
+        frame: int = ...,
+        to_modality_value: bool = ...,
+        decode_mct: bool = ...,
+        scaled: bool | None = ...,
     ) -> Any: ...
     def to_pil_image(
         self,

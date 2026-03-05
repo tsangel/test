@@ -316,7 +316,7 @@ void validate_decoded_header(const pixel::PixelDataInfo& info, std::size_t rows,
 } // namespace
 
 bool decode_jpeg_into(const pixel::PixelDataInfo& info,
-    const DecodeValueTransform& value_transform,
+    const ModalityValueTransform& modality_value_transform,
     std::span<std::uint8_t> dst,
     const DecodeStrides& dst_strides, const DecodeOptions& opt,
     CodecError& out_error, std::span<const std::uint8_t> prepared_source) noexcept {
@@ -353,7 +353,7 @@ bool decode_jpeg_into(const pixel::PixelDataInfo& info,
 			    "only SamplesPerPixel=1/3/4 is supported in current JPEG path");
 		}
 		const auto samples_per_pixel = static_cast<std::size_t>(samples_per_pixel_value);
-		if (opt.scaled && samples_per_pixel != 1) {
+		if (opt.to_modality_value && samples_per_pixel != 1) {
 			return fail(CodecStatusCode::invalid_argument, "validate",
 			    "scaled output supports SamplesPerPixel=1 only");
 		}
@@ -371,7 +371,7 @@ bool decode_jpeg_into(const pixel::PixelDataInfo& info,
 		const auto rows = static_cast<std::size_t>(info.rows);
 		const auto cols = static_cast<std::size_t>(info.cols);
 		const auto dst_bytes_per_sample =
-		    opt.scaled ? sizeof(float) : src_bytes_per_sample;
+		    opt.to_modality_value ? sizeof(float) : src_bytes_per_sample;
 		try {
 			validate_destination(dst, dst_strides, opt.planar_out, rows, cols,
 			    samples_per_pixel, dst_bytes_per_sample);
@@ -430,7 +430,7 @@ bool decode_jpeg_into(const pixel::PixelDataInfo& info,
 		    cols * samples_per_pixel * src_bytes_per_sample;
 		const std::size_t src_row_samples = src_row_bytes / src_bytes_per_sample;
 		const bool requires_u16_alignment = decoded_precision > 8;
-		const bool can_decode_directly = !opt.scaled &&
+		const bool can_decode_directly = !opt.to_modality_value &&
 		    (samples_per_pixel == 1 || opt.planar_out == Planar::interleaved) &&
 		    (!requires_u16_alignment ||
 		        is_pointer_aligned(dst.data(), alignof(std::uint16_t)));
@@ -456,9 +456,9 @@ bool decode_jpeg_into(const pixel::PixelDataInfo& info,
 			    decoded.data(), source_pitch_samples, pixel_format,
 			    decoded_precision);
 
-			if (opt.scaled) {
+			if (opt.to_modality_value) {
 				decode_mono_scaled_into_f32(
-				    value_transform, info, decoded.data(), dst, dst_strides,
+				    modality_value_transform, info, decoded.data(), dst, dst_strides,
 				    rows, cols, src_row_bytes);
 				return true;
 			}
@@ -478,9 +478,9 @@ bool decode_jpeg_into(const pixel::PixelDataInfo& info,
 		const auto* decoded_bytes =
 		    reinterpret_cast<const std::uint8_t*>(decoded.data());
 
-		if (opt.scaled) {
+		if (opt.to_modality_value) {
 			decode_mono_scaled_into_f32(
-			    value_transform, info, decoded_bytes, dst, dst_strides,
+			    modality_value_transform, info, decoded_bytes, dst, dst_strides,
 			    rows, cols, src_row_bytes);
 			return true;
 		}

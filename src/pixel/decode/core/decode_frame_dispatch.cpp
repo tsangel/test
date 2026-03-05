@@ -23,7 +23,7 @@ namespace dicom::pixel::detail {
 #if defined(DICOMSDL_PIXEL_RUNTIME_ENABLED)
 namespace {
 
-struct ResolvedDecodeFrameSource {
+struct ComputedDecodeFrameSource {
 	std::span<const std::uint8_t> bytes{};
 	std::vector<std::uint8_t> owned_bytes{};
 };
@@ -143,25 +143,25 @@ void parse_runtime_detail_or_default(
 	return std::string(buffer.data(), buffer.data() + copied);
 }
 
-[[nodiscard]] ResolvedDecodeFrameSource resolve_decode_source_for_runtime_or_throw(
+[[nodiscard]] ComputedDecodeFrameSource compute_decode_source_for_runtime_or_throw(
     const DicomFile& df, uid::WellKnown transfer_syntax, std::size_t frame_index,
     std::string_view plugin_key) {
 	const auto& info = df.pixeldata_info();
 	const auto& ds = df.dataset();
 
-	ResolvedDecodeFrameSource resolved{};
+	ComputedDecodeFrameSource computed_source{};
 	try {
 		if (transfer_syntax.is_uncompressed() && !transfer_syntax.is_encapsulated()) {
 			const auto source = load_native_frame_source(ds, df.path(), info, frame_index);
-			resolved.bytes = source.contiguous;
-			return resolved;
+			computed_source.bytes = source.contiguous;
+			return computed_source;
 		}
 
 		const auto source = load_encapsulated_frame_source(
 		    ds, df.path(), frame_index, plugin_key);
-		resolved.bytes = materialize_encapsulated_frame_source(
-		    df.path(), frame_index, plugin_key, source, resolved.owned_bytes);
-		return resolved;
+		computed_source.bytes = materialize_encapsulated_frame_source(
+		    df.path(), frame_index, plugin_key, source, computed_source.owned_bytes);
+		return computed_source;
 	} catch (const std::bad_alloc&) {
 		throw_codec_error_with_context("pixel::decode_frame_into", df.path(),
 		    transfer_syntax, plugin_key, frame_index,
@@ -189,20 +189,20 @@ void parse_runtime_detail_or_default(
 	}
 }
 
-[[nodiscard]] ::pixel::runtime_v2::HostValueTransformSpecV2 resolve_host_value_transform(
-    const DecodeValueTransform& value_transform) {
+[[nodiscard]] ::pixel::runtime_v2::HostValueTransformSpecV2 compute_host_value_transform(
+    const ModalityValueTransform& modality_value_transform) {
 	::pixel::runtime_v2::HostValueTransformSpecV2 host_transform{};
-	if (!value_transform.enabled) {
+	if (!modality_value_transform.enabled) {
 		return host_transform;
 	}
-	if (value_transform.modality_lut.has_value()) {
+	if (modality_value_transform.modality_lut.has_value()) {
 		host_transform.kind = ::pixel::runtime_v2::HostValueTransformKindV2::kModalityLut;
-		host_transform.modality_lut = &(*value_transform.modality_lut);
+		host_transform.modality_lut = &(*modality_value_transform.modality_lut);
 		return host_transform;
 	}
 	host_transform.kind = ::pixel::runtime_v2::HostValueTransformKindV2::kRescale;
-	host_transform.rescale_slope = value_transform.rescale_slope;
-	host_transform.rescale_intercept = value_transform.rescale_intercept;
+	host_transform.rescale_slope = modality_value_transform.rescale_slope;
+	host_transform.rescale_intercept = modality_value_transform.rescale_intercept;
 	return host_transform;
 }
 
@@ -215,7 +215,7 @@ void parse_runtime_detail_or_default(
 }
 
 [[nodiscard]] bool try_dispatch_decode_frame_with_direct(const DicomFile& df,
-    const DecodeValueTransform& value_transform, std::size_t frame_index,
+    const ModalityValueTransform& modality_value_transform, std::size_t frame_index,
     std::span<std::uint8_t> dst, const DecodeStrides& dst_strides,
     const DecodeOptions& effective_opt) {
 	const auto& info = df.pixeldata_info();
@@ -223,34 +223,34 @@ void parse_runtime_detail_or_default(
 		return false;
 	}
 
-	const auto resolved_source = resolve_decode_source_for_runtime_or_throw(
+	const auto computed_source = compute_decode_source_for_runtime_or_throw(
 	    df, info.ts, frame_index, kDirectPluginKey);
 
 	CodecError decode_error{};
 	bool decoded = false;
 	if (info.ts.is_uncompressed()) {
 		if (info.ts.is_encapsulated()) {
-			decoded = decode_encapsulated_uncompressed_into(info, value_transform, dst,
-			    dst_strides, effective_opt, decode_error, resolved_source.bytes);
+			decoded = decode_encapsulated_uncompressed_into(info, modality_value_transform, dst,
+			    dst_strides, effective_opt, decode_error, computed_source.bytes);
 		} else {
-			decoded = decode_raw_into(info, value_transform, dst, dst_strides,
-			    effective_opt, decode_error, resolved_source.bytes);
+			decoded = decode_raw_into(info, modality_value_transform, dst, dst_strides,
+			    effective_opt, decode_error, computed_source.bytes);
 		}
 	} else if (info.ts.is_htj2k()) {
-		decoded = decode_htj2k_into(info, value_transform, dst, dst_strides,
-		    effective_opt, decode_error, resolved_source.bytes);
+		decoded = decode_htj2k_into(info, modality_value_transform, dst, dst_strides,
+		    effective_opt, decode_error, computed_source.bytes);
 	} else if (info.ts.is_jpeg2000()) {
-		decoded = decode_jpeg2k_into(info, value_transform, dst, dst_strides,
-		    effective_opt, decode_error, resolved_source.bytes);
+		decoded = decode_jpeg2k_into(info, modality_value_transform, dst, dst_strides,
+		    effective_opt, decode_error, computed_source.bytes);
 	} else if (info.ts.is_jpegls()) {
-		decoded = decode_jpegls_into(info, value_transform, dst, dst_strides,
-		    effective_opt, decode_error, resolved_source.bytes);
+		decoded = decode_jpegls_into(info, modality_value_transform, dst, dst_strides,
+		    effective_opt, decode_error, computed_source.bytes);
 	} else if (info.ts.is_jpegxl()) {
-		decoded = decode_jpegxl_into(info, value_transform, dst, dst_strides,
-		    effective_opt, decode_error, resolved_source.bytes);
+		decoded = decode_jpegxl_into(info, modality_value_transform, dst, dst_strides,
+		    effective_opt, decode_error, computed_source.bytes);
 	} else if (info.ts.is_jpeg_family()) {
-		decoded = decode_jpeg_into(info, value_transform, dst, dst_strides,
-		    effective_opt, decode_error, resolved_source.bytes);
+		decoded = decode_jpeg_into(info, modality_value_transform, dst, dst_strides,
+		    effective_opt, decode_error, computed_source.bytes);
 	}
 
 	if (decoded) {
@@ -272,7 +272,7 @@ void parse_runtime_detail_or_default(
 }
 
 [[nodiscard]] bool try_dispatch_decode_frame_with_runtime(const DicomFile& df,
-    const DecodeValueTransform& value_transform, std::size_t frame_index,
+    const ModalityValueTransform& modality_value_transform, std::size_t frame_index,
     std::span<std::uint8_t> dst, const DecodeStrides& dst_strides,
     const DecodeOptions& effective_opt) {
 	const auto& info = df.pixeldata_info();
@@ -338,16 +338,16 @@ void parse_runtime_detail_or_default(
 		cache.thread_option = thread_option;
 	}
 
-	const auto resolved_source = resolve_decode_source_for_runtime_or_throw(
+	const auto computed_source = compute_decode_source_for_runtime_or_throw(
 	    df, info.ts, frame_index, plugin_key);
-	const auto host_transform = resolve_host_value_transform(value_transform);
+	const auto host_transform = compute_host_value_transform(modality_value_transform);
 	const ::pixel::runtime_v2::HostValueTransformSpecV2* transform_ptr =
 	    host_transform.kind == ::pixel::runtime_v2::HostValueTransformKindV2::kNone
 	    ? nullptr
 	    : &host_transform;
 	const pixel_error_code_v2 decode_ec =
 	    ::pixel::runtime_v2::decode_frame_with_host_context_v2(
-	        ctx, &info, resolved_source.bytes, dst, &dst_strides, &effective_opt,
+	        ctx, &info, computed_source.bytes, dst, &dst_strides, &effective_opt,
 	        transform_ptr);
 	if (decode_ec == PIXEL_CODEC_ERR_UNSUPPORTED) {
 		throw_codec_error_with_context("pixel::decode_frame_into", df.path(), info.ts,
@@ -368,17 +368,17 @@ void parse_runtime_detail_or_default(
 }  // namespace
 #endif
 
-void dispatch_decode_frame_with_resolved_transform(const DicomFile& df,
-    const DecodeValueTransform& value_transform, std::size_t frame_index,
+void dispatch_decode_frame_with_computed_options(const DicomFile& df,
+    const ModalityValueTransform& modality_value_transform, std::size_t frame_index,
     std::span<std::uint8_t> dst, const DecodeStrides& dst_strides,
     const DecodeOptions& effective_opt) {
 #if defined(DICOMSDL_PIXEL_RUNTIME_ENABLED)
 	if (try_dispatch_decode_frame_with_direct(
-	        df, value_transform, frame_index, dst, dst_strides, effective_opt)) {
+	        df, modality_value_transform, frame_index, dst, dst_strides, effective_opt)) {
 		return;
 	}
 	if (try_dispatch_decode_frame_with_runtime(
-	        df, value_transform, frame_index, dst, dst_strides, effective_opt)) {
+	        df, modality_value_transform, frame_index, dst, dst_strides, effective_opt)) {
 		return;
 	}
 #endif

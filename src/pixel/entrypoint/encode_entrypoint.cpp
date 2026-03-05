@@ -226,7 +226,7 @@ void DicomFile::set_pixel_data(uid::WellKnown transfer_syntax,
 	const auto codec_options =
 	    pixel::detail::default_codec_options_for_transfer_syntax_or_throw(
 	        "DicomFile::set_pixel_data", transfer_syntax);
-	pixel::detail::run_set_pixel_data_with_resolved_codec_options(
+	pixel::detail::run_set_pixel_data_with_computed_codec_options(
 	    *this, transfer_syntax, source, codec_options);
 	finalize_set_pixel_data_transfer_syntax(transfer_syntax);
 }
@@ -235,7 +235,7 @@ void DicomFile::set_pixel_data(uid::WellKnown transfer_syntax,
     const pixel::PixelSource& source, const pixel::EncoderContext& encoder_ctx) {
 	pixel::detail::validate_encoder_context_for_set_pixel_data_or_throw(path(),
 	    transfer_syntax, encoder_ctx.configured_, encoder_ctx.transfer_syntax_uid_);
-	pixel::detail::run_set_pixel_data_with_resolved_codec_options(
+	pixel::detail::run_set_pixel_data_with_computed_codec_options(
 	    *this, transfer_syntax, source, encoder_ctx.codec_options_);
 	finalize_set_pixel_data_transfer_syntax(transfer_syntax);
 }
@@ -247,7 +247,7 @@ void DicomFile::set_pixel_data(uid::WellKnown transfer_syntax,
 	    "DicomFile::set_pixel_data", transfer_syntax);
 	auto codec_options = pixel::detail::build_codec_option_pairs_from_text_or_throw(
 	    "DicomFile::set_pixel_data", path(), transfer_syntax, codec_opt);
-	pixel::detail::run_set_pixel_data_with_resolved_codec_options(
+	pixel::detail::run_set_pixel_data_with_computed_codec_options(
 	    *this, transfer_syntax, source, codec_options);
 	finalize_set_pixel_data_transfer_syntax(transfer_syntax);
 }

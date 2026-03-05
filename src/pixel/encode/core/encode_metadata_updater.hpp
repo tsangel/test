@@ -1,7 +1,7 @@
 #pragma once
 
 #include "dicom.h"
-#include "pixel/encode/core/encode_target_resolver.hpp"
+#include "pixel/encode/core/encode_target_policy.hpp"
 
 #include <cstddef>
 #include <string_view>

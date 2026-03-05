@@ -25,6 +25,16 @@ def test_to_array_single_frame():
 
 def test_to_array_scaled():
     dicom_file = dicom.read_file(_test_file())
+    arr = dicom_file.to_array(to_modality_value=True)
+
+    assert isinstance(arr, np.ndarray)
+    assert arr.shape == (4, 4)
+    assert arr.dtype == np.float32
+    assert np.allclose(arr, 1.0)
+
+
+def test_to_array_scaled_alias():
+    dicom_file = dicom.read_file(_test_file())
     arr = dicom_file.to_array(scaled=True)
 
     assert isinstance(arr, np.ndarray)
@@ -39,7 +49,7 @@ def test_to_array_scaled_ignored_without_modality_transform():
     ds.remove_dataelement(dicom.Tag("RescaleSlope"))
     ds.remove_dataelement(dicom.Tag("RescaleIntercept"))
 
-    arr = dicom_file.to_array(scaled=True)
+    arr = dicom_file.to_array(to_modality_value=True)
     assert isinstance(arr, np.ndarray)
     assert arr.shape == (4, 4)
     assert arr.dtype == np.int16
@@ -64,7 +74,7 @@ def test_to_array_pixel_array_alias():
 
 def test_to_array_frame_minus_one_single_frame_matches_frame_zero():
     dicom_file = dicom.read_file(_test_file())
-    arr_all = dicom_file.to_array(frame=-1, scaled=False)
-    arr_zero = dicom_file.to_array(frame=0, scaled=False)
+    arr_all = dicom_file.to_array(frame=-1, to_modality_value=False)
+    arr_zero = dicom_file.to_array(frame=0, to_modality_value=False)
     assert arr_all.shape == (4, 4)
     assert np.array_equal(arr_all, arr_zero)

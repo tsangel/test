@@ -389,16 +389,16 @@ void decode_openjph_unscaled_into(const pixel::PixelDataInfo& info,
 }
 
 template <typename SampleT>
-void write_openjph_scaled_mono_to_dst(const DecodeValueTransform& value_transform,
+void write_openjph_scaled_mono_to_dst(const ModalityValueTransform& modality_value_transform,
     const std::vector<std::int32_t>& decoded, std::span<std::uint8_t> dst,
     const DecodeStrides& dst_strides, std::size_t rows, std::size_t cols) {
-	if (!value_transform.enabled) {
+	if (!modality_value_transform.enabled) {
 		throw std::runtime_error(fmt::format(
 		    "scaled output requested without value transform metadata"));
 	}
 
-	if (value_transform.modality_lut) {
-		const auto& modality_lut = *value_transform.modality_lut;
+	if (modality_value_transform.modality_lut) {
+		const auto& modality_lut = *modality_value_transform.modality_lut;
 		const auto last_index = static_cast<std::int64_t>(modality_lut.values.size() - 1);
 		for (std::size_t r = 0; r < rows; ++r) {
 			auto* dst_row = dst.data() + r * dst_strides.row;
@@ -418,8 +418,8 @@ void write_openjph_scaled_mono_to_dst(const DecodeValueTransform& value_transfor
 		return;
 	}
 
-	const auto slope = value_transform.rescale_slope;
-	const auto intercept = value_transform.rescale_intercept;
+	const auto slope = modality_value_transform.rescale_slope;
+	const auto intercept = modality_value_transform.rescale_intercept;
 	if (!std::isfinite(slope) || !std::isfinite(intercept)) {
 		throw std::runtime_error(fmt::format(
 		    "RescaleSlope/RescaleIntercept must be finite"));
@@ -437,39 +437,39 @@ void write_openjph_scaled_mono_to_dst(const DecodeValueTransform& value_transfor
 }
 
 bool try_decode_openjph_into(const pixel::PixelDataInfo& info,
-    const DecodeValueTransform& value_transform, const Htj2kFrameSource& source,
+    const ModalityValueTransform& modality_value_transform, const Htj2kFrameSource& source,
     std::span<std::uint8_t> dst, const DecodeStrides& dst_strides,
     const DecodeOptions& opt, std::size_t rows, std::size_t cols,
     std::size_t samples_per_pixel, std::string& failure) {
 	failure.clear();
 		try {
-			if (opt.scaled) {
+			if (opt.to_modality_value) {
 				auto decoded = decode_openjph_to_interleaved(
 				    info, source, rows, cols, samples_per_pixel);
 				switch (info.sv_dtype) {
 				case DataType::u8:
 					write_openjph_scaled_mono_to_dst<std::uint8_t>(
-					    value_transform, decoded, dst, dst_strides, rows, cols);
+					    modality_value_transform, decoded, dst, dst_strides, rows, cols);
 					return true;
 				case DataType::s8:
 					write_openjph_scaled_mono_to_dst<std::int8_t>(
-					    value_transform, decoded, dst, dst_strides, rows, cols);
+					    modality_value_transform, decoded, dst, dst_strides, rows, cols);
 					return true;
 				case DataType::u16:
 					write_openjph_scaled_mono_to_dst<std::uint16_t>(
-					    value_transform, decoded, dst, dst_strides, rows, cols);
+					    modality_value_transform, decoded, dst, dst_strides, rows, cols);
 					return true;
 				case DataType::s16:
 					write_openjph_scaled_mono_to_dst<std::int16_t>(
-					    value_transform, decoded, dst, dst_strides, rows, cols);
+					    modality_value_transform, decoded, dst, dst_strides, rows, cols);
 					return true;
 				case DataType::u32:
 					write_openjph_scaled_mono_to_dst<std::uint32_t>(
-					    value_transform, decoded, dst, dst_strides, rows, cols);
+					    modality_value_transform, decoded, dst, dst_strides, rows, cols);
 					return true;
 				case DataType::s32:
 					write_openjph_scaled_mono_to_dst<std::int32_t>(
-					    value_transform, decoded, dst, dst_strides, rows, cols);
+					    modality_value_transform, decoded, dst, dst_strides, rows, cols);
 					return true;
 				default:
 					throw std::runtime_error(fmt::format(
@@ -535,7 +535,7 @@ bool try_decode_openjph_into(const pixel::PixelDataInfo& info,
 } // namespace
 
 bool decode_htj2k_into(const pixel::PixelDataInfo& info,
-    const DecodeValueTransform& value_transform,
+    const ModalityValueTransform& modality_value_transform,
     std::span<std::uint8_t> dst,
     const DecodeStrides& dst_strides, const DecodeOptions& opt,
     CodecError& out_error, std::span<const std::uint8_t> prepared_source,
@@ -572,7 +572,7 @@ bool decode_htj2k_into(const pixel::PixelDataInfo& info,
 			    "only SamplesPerPixel=1/3/4 is supported in current HTJ2K path");
 		}
 		const auto samples_per_pixel = static_cast<std::size_t>(samples_per_pixel_value);
-		if (opt.scaled && samples_per_pixel != 1) {
+		if (opt.to_modality_value && samples_per_pixel != 1) {
 			return fail(CodecStatusCode::invalid_argument, "validate",
 			    "scaled output supports SamplesPerPixel=1 only");
 		}
@@ -590,7 +590,7 @@ bool decode_htj2k_into(const pixel::PixelDataInfo& info,
 		const auto rows = static_cast<std::size_t>(info.rows);
 		const auto cols = static_cast<std::size_t>(info.cols);
 			const auto dst_bytes_per_sample =
-			    opt.scaled ? sizeof(float) : src_bytes_per_sample;
+			    opt.to_modality_value ? sizeof(float) : src_bytes_per_sample;
 			try {
 				validate_destination(dst, dst_strides, opt.planar_out, rows, cols,
 				    samples_per_pixel, dst_bytes_per_sample);
@@ -615,7 +615,7 @@ bool decode_htj2k_into(const pixel::PixelDataInfo& info,
 			if (backend == Htj2kDecoder::openjpeg) {
 				CodecError jpeg2k_error{};
 				if (decode_jpeg2k_into(
-				        info, value_transform, dst, dst_strides, opt,
+				        info, modality_value_transform, dst, dst_strides, opt,
 				        jpeg2k_error,
 				        prepared_source)) {
 					return true;
@@ -636,7 +636,7 @@ bool decode_htj2k_into(const pixel::PixelDataInfo& info,
 
 			if (backend == Htj2kDecoder::openjph) {
 				std::string openjph_failure{};
-				if (try_decode_openjph_into(info, value_transform, frame_source,
+				if (try_decode_openjph_into(info, modality_value_transform, frame_source,
 				        dst, dst_strides, opt, rows, cols, samples_per_pixel, openjph_failure)) {
 					return true;
 				}
@@ -649,7 +649,7 @@ bool decode_htj2k_into(const pixel::PixelDataInfo& info,
 
 			CodecError openjpeg_error{};
 			if (decode_jpeg2k_into(
-			        info, value_transform, dst, dst_strides, opt,
+			        info, modality_value_transform, dst, dst_strides, opt,
 			        openjpeg_error,
 			        prepared_source)) {
 				return true;
@@ -660,7 +660,7 @@ bool decode_htj2k_into(const pixel::PixelDataInfo& info,
 		}
 
 			std::string openjph_failure{};
-			if (try_decode_openjph_into(info, value_transform, frame_source, dst,
+			if (try_decode_openjph_into(info, modality_value_transform, frame_source, dst,
 			        dst_strides, opt, rows, cols, samples_per_pixel, openjph_failure)) {
 				return true;
 			}

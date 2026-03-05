@@ -6,19 +6,19 @@ namespace dicom {
 
 namespace pixel {
 
-bool should_use_scaled_output(const DicomFile& df, const DecodeOptions& opt) {
-	return detail::should_use_scaled_output_with_resolved_options(df, opt);
+bool should_output_modality_value(const DicomFile& df, const DecodeOptions& opt) {
+	return detail::should_output_modality_value_with_computed_options(df, opt);
 }
 
 void decode_frame_into(const DicomFile& df, std::size_t frame_index,
     std::span<std::uint8_t> dst, const DecodeOptions& opt) {
-	detail::run_decode_frame_with_resolved_options(df, frame_index, dst, opt);
+	detail::run_decode_frame_with_computed_options(df, frame_index, dst, opt);
 }
 
 void decode_frame_into(const DicomFile& df, std::size_t frame_index,
     std::span<std::uint8_t> dst, const DecodeStrides& dst_strides,
     const DecodeOptions& opt) {
-	detail::run_decode_frame_with_resolved_options(
+	detail::run_decode_frame_with_computed_options(
 	    df, frame_index, dst, dst_strides, opt);
 }
 
