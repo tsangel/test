@@ -27,8 +27,6 @@
 #include "specific_character_set_registry.hpp"
 #include "dicom_const.h"
 #include "uid_lookup_detail.hpp"
-#include "pixel_decoder_plugin_abi_v2.h"
-#include "pixel_encoder_plugin_abi_v2.h"
 
 namespace dicom {
 
@@ -990,6 +988,25 @@ enum class DataType : std::uint8_t {
 	f64,
 };
 
+[[nodiscard]] inline constexpr std::size_t bytes_per_sample_of(DataType dtype) noexcept {
+	switch (dtype) {
+	case DataType::u8:
+	case DataType::s8:
+		return 1;
+	case DataType::u16:
+	case DataType::s16:
+		return 2;
+	case DataType::u32:
+	case DataType::s32:
+	case DataType::f32:
+		return 4;
+	case DataType::f64:
+		return 8;
+	default:
+		return 0;
+	}
+}
+
 enum class Photometric : std::uint8_t {
 	monochrome1 = 0,
 	monochrome2,
@@ -1042,6 +1059,12 @@ struct CodecOptionTextKv {
 	std::string_view value{};
 };
 
+class EncoderContext;
+
+/// Replace PixelData using the transfer syntax and codec options captured in `encoder_ctx`.
+void set_pixel_data(
+    DicomFile& file, const PixelSource& source, const EncoderContext& encoder_ctx);
+
 class EncoderContext {
 public:
 	EncoderContext() = default;
@@ -1055,13 +1078,14 @@ public:
 	}
 
 private:
+	friend void set_pixel_data(
+	    DicomFile& file, const PixelSource& source, const EncoderContext& encoder_ctx);
 	friend class ::dicom::DicomFile;
-	void set_configured_state(uid::WellKnown transfer_syntax, std::string plugin_key,
+	void set_configured_state(uid::WellKnown transfer_syntax,
 	    std::vector<std::string> option_keys,
 	    std::vector<CodecOptionKv> codec_options);
 
 	uid::WellKnown transfer_syntax_uid_{};
-	std::string plugin_key_{};
 	std::vector<std::string> option_keys_{};
 	std::vector<CodecOptionKv> codec_options_{};
 	bool configured_{false};
@@ -1070,12 +1094,6 @@ private:
 [[nodiscard]] EncoderContext create_encoder_context(uid::WellKnown transfer_syntax);
 [[nodiscard]] EncoderContext create_encoder_context(uid::WellKnown transfer_syntax,
     std::span<const CodecOptionTextKv> codec_opt);
-
-enum class Htj2kDecoder : std::uint8_t {
-	auto_select = 0,
-	openjph,
-	openjpeg,
-};
 
 struct DecodeOptions {
 	Planar planar_out{Planar::interleaved};
@@ -1103,10 +1121,28 @@ struct ModalityLut {
 	std::vector<float> values;
 };
 
-/// Returns whether modality-value float output is effectively applied for this file and options.
-/// Modality-value output is ignored when SamplesPerPixel != 1, or when both Modality LUT
-/// Sequence and Rescale Slope/Intercept are absent.
-[[nodiscard]] bool should_output_modality_value(const DicomFile& df, const DecodeOptions& opt = {});
+struct ModalityValueTransform {
+	bool enabled{false};
+	std::optional<ModalityLut> modality_lut{};
+	double rescale_slope{1.0};
+	double rescale_intercept{0.0};
+};
+
+/// Decode plan snapshot computed from the current file metadata and requested options.
+/// Recommended usage is:
+/// 1. create a plan
+/// 2. allocate `plan.strides.frame` bytes
+/// 3. call `decode_frame_into()` / `DicomFile::decode_into()`
+/// Recreate the plan after transfer syntax or pixel-affecting metadata changes.
+struct DecodePlan {
+	PixelDataInfo info{};
+	DecodeOptions options{};
+	DecodeStrides strides{};
+	ModalityValueTransform modality_value_transform{};
+};
+
+/// Compute a decode plan for the current pixel metadata snapshot.
+[[nodiscard]] DecodePlan create_decode_plan(const DicomFile& df, const DecodeOptions& opt = {});
 
 /// Decode a single frame into caller-provided buffer.
 /// Current implementation supports raw(uncompressed), RLE, JPEG (via libjpeg-turbo),
@@ -1118,45 +1154,37 @@ struct ModalityLut {
 /// - JPEG-LS: integral up to 16-bit
 /// - JPEG 2000: integral up to 32-bit
 /// When modality-value output is effectively enabled, output sample type is float32.
+/// `dst` is expected to match the layout implied by `plan`.
+/// @throws diag::DicomException on invalid frame index, mismatched destination layout/size,
+/// unsupported decoder binding, or backend decode failure.
 void decode_frame_into(const DicomFile& df, std::size_t frame_index,
-    std::span<std::uint8_t> dst, const DecodeOptions& opt = {});
-void decode_frame_into(const DicomFile& df, std::size_t frame_index,
-    std::span<std::uint8_t> dst, const DecodeStrides& dst_strides, const DecodeOptions& opt = {});
+    std::span<std::uint8_t> dst, const DecodePlan& plan);
 
-/// Set global HTJ2K decode backend for the builtin "htj2k" registry dispatch.
-/// This affects subsequent decode calls and is applied only after in-flight decodes complete.
-/// Returns false when HTJ2K dispatch is currently overridden by an external plugin.
-[[nodiscard]] bool set_htj2k_decoder_backend(
-    Htj2kDecoder backend, std::string* out_error = nullptr);
+enum class Htj2kDecoderBackend : std::uint8_t {
+	auto_select = 0,
+	openjph = 1,
+	openjpeg = 2,
+};
 
-/// Return current global HTJ2K decode backend for builtin registry dispatch.
-/// When an external plugin overrides "htj2k" dispatch, this returns auto_select.
-[[nodiscard]] Htj2kDecoder get_htj2k_decoder_backend() noexcept;
+/// Configure the preferred HTJ2K decoder backend before pixel runtime initialization.
+/// This must be called before the first pixel decode/encode or external plugin registration.
+[[nodiscard]] bool set_htj2k_decoder_backend(Htj2kDecoderBackend backend,
+    std::string* out_error = nullptr);
 
-/// Convenience helper: force HTJ2K decode backend to OpenJPH.
-[[nodiscard]] bool use_openjph_for_htj2k_decode(std::string* out_error = nullptr);
+/// Return the currently configured HTJ2K decoder backend preference.
+[[nodiscard]] Htj2kDecoderBackend get_htj2k_decoder_backend();
 
-/// Convenience helper: force HTJ2K decode backend to OpenJPEG.
-[[nodiscard]] bool use_openjpeg_for_htj2k_decode(std::string* out_error = nullptr);
+/// Convenience wrappers for selecting a specific HTJ2K decoder backend early in process startup.
+[[nodiscard]] bool use_openjph_for_htj2k_decoding(std::string* out_error = nullptr);
+[[nodiscard]] bool use_openjpeg_for_htj2k_decoding(std::string* out_error = nullptr);
 
 /// Register external codec plugin(s) from a shared library.
 /// The library may export decoder and/or encoder plugin API symbols.
-/// When the plugin key matches an existing registry key, frame dispatch is overridden.
 [[nodiscard]] bool register_external_codec_plugin_from_library(
-    std::string_view library_path, std::string* out_plugin_key = nullptr,
-    std::string* out_error = nullptr);
+    std::string_view library_path, std::string* out_error = nullptr);
 
-/// Register an external decoder plugin API without dynamic loading (static registrar path).
-[[nodiscard]] bool register_external_decoder_plugin_static(
-    const pixel_decoder_plugin_api_v2* api, std::string* out_error = nullptr);
-
-/// Register an external encoder plugin API without dynamic loading (static registrar path).
-[[nodiscard]] bool register_external_encoder_plugin_static(
-    const pixel_encoder_plugin_api_v2* api, std::string* out_error = nullptr);
-
-/// Unregister previously registered external plugin bridge and restore original dispatch.
-[[nodiscard]] bool unregister_external_codec_plugin(
-    std::string_view plugin_key, std::string* out_error = nullptr);
+/// Remove every externally registered codec plugin and restore builtin dispatch.
+[[nodiscard]] bool clear_external_codec_plugins(std::string* out_error = nullptr);
 
 } // namespace pixel
 
@@ -1753,8 +1781,11 @@ public:
 	void set_transfer_syntax(uid::WellKnown transfer_syntax,
 	    std::span<const pixel::CodecOptionTextKv> codec_opt);
 	[[nodiscard]] uid::WellKnown transfer_syntax_uid() const { return transfer_syntax_uid_; }
-	[[nodiscard]] const pixel::PixelDataInfo& pixeldata_info(bool recalc = false) const;
-	[[nodiscard]] pixel::DecodeStrides calc_decode_strides(const pixel::DecodeOptions& opt = {}) const;
+	[[nodiscard]] pixel::PixelDataInfo pixeldata_info() const;
+	[[nodiscard]] pixel::DecodePlan create_decode_plan(
+	    const pixel::DecodeOptions& opt = {}) const {
+		return pixel::create_decode_plan(*this, opt);
+	}
 	[[nodiscard]] std::optional<pixel::ModalityLut> modality_lut() const;
 	void set_pixel_data(uid::WellKnown transfer_syntax,
 	    const pixel::PixelSource& source);
@@ -1776,45 +1807,45 @@ public:
 	/// Ownership of `encoded_frame` is moved without byte copy.
 	/// NumberOfFrames is updated to match the appended frame count.
 	[[nodiscard]] PixelFrame* add_encoded_pixel_frame(std::vector<std::uint8_t>&& encoded_frame);
+	/// @throws diag::DicomException under the same conditions as pixel::decode_frame_into().
 	void decode_into(std::size_t frame_index, std::span<std::uint8_t> dst,
-	    const pixel::DecodeOptions& opt = {}) const {
-		pixel::decode_frame_into(*this, frame_index, dst, opt);
+	    const pixel::DecodePlan& plan) const {
+		pixel::decode_frame_into(*this, frame_index, dst, plan);
 	}
-	void decode_into(std::size_t frame_index, std::span<std::uint8_t> dst,
-	    const pixel::DecodeStrides& dst_strides, const pixel::DecodeOptions& opt = {}) const {
-		pixel::decode_frame_into(*this, frame_index, dst, dst_strides, opt);
+	/// @throws diag::DicomException under the same conditions as pixel::decode_frame_into().
+	void decode_into(std::span<std::uint8_t> dst, const pixel::DecodePlan& plan) const {
+		pixel::decode_frame_into(*this, 0, dst, plan);
 	}
-	void decode_into(std::span<std::uint8_t> dst, const pixel::DecodeOptions& opt = {}) const {
-		pixel::decode_frame_into(*this, 0, dst, opt);
-	}
-	void decode_into(std::span<std::uint8_t> dst, const pixel::DecodeStrides& dst_strides,
-	    const pixel::DecodeOptions& opt = {}) const {
-		pixel::decode_frame_into(*this, 0, dst, dst_strides, opt);
+	[[nodiscard]] std::vector<std::uint8_t> pixel_data(
+	    std::size_t frame_index, const pixel::DecodePlan& plan) const {
+		std::vector<std::uint8_t> out(plan.strides.frame);
+		pixel::decode_frame_into(*this, frame_index, std::span<std::uint8_t>(out), plan);
+		return out;
 	}
 	[[nodiscard]] std::vector<std::uint8_t> pixel_data(std::size_t frame_index = 0,
 	    const pixel::DecodeOptions& opt = {}) const {
-		const auto dst_strides = calc_decode_strides(opt);
-		std::vector<std::uint8_t> out(dst_strides.frame);
-		pixel::decode_frame_into(*this, frame_index, std::span<std::uint8_t>(out), dst_strides, opt);
-		return out;
+		return pixel_data(frame_index, create_decode_plan(opt));
 	}
 
 private:
 	friend class DataSet;
-	void invalidate_pixeldata_info_cache() const { pixeldata_info_cache_.reset(); }
+	friend void pixel::set_pixel_data(
+	    DicomFile& file, const pixel::PixelSource& source,
+	    const pixel::EncoderContext& encoder_ctx);
 	void set_transfer_syntax_state_only(uid::WellKnown transfer_syntax);
 	void apply_transfer_syntax(uid::WellKnown transfer_syntax);
 	void apply_transfer_syntax(uid::WellKnown transfer_syntax,
 	    const pixel::EncoderContext& encoder_ctx);
 	void apply_transfer_syntax(uid::WellKnown transfer_syntax,
 	    std::span<const pixel::CodecOptionTextKv> codec_opt_override);
+	// Commit transfer syntax state only after set_pixel_data finished updating
+	// PixelData bytes and related pixel metadata successfully.
 	void finalize_set_pixel_data_transfer_syntax(uid::WellKnown transfer_syntax);
 	void clear_error_state() noexcept;
 	void set_error_state(std::string message);
 
 	std::unique_ptr<DataSet> root_dataset_;
 	uid::WellKnown transfer_syntax_uid_{};
-	mutable std::optional<pixel::PixelDataInfo> pixeldata_info_cache_{};
 	bool has_error_{false};
 	std::string error_message_{};
 };

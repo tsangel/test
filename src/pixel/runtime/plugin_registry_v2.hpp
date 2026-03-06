@@ -8,6 +8,12 @@
 
 namespace pixel::runtime_v2 {
 
+enum class Htj2kDecoderBackendPreference : uint8_t {
+  kAuto = 0,
+  kOpenJph = 1,
+  kOpenJpeg = 2,
+};
+
 enum class DecoderBindingKind : uint8_t {
   kNone = 0,
   kCoreDirect = 1,
@@ -72,7 +78,10 @@ private:
   std::array<CodecSlot, kSlotCount> slots_{};
 };
 
-void init_builtin_registry_v2(PluginRegistryV2* registry);
+void init_builtin_registry_v2(
+    PluginRegistryV2* registry,
+    Htj2kDecoderBackendPreference htj2k_decoder_preference =
+        Htj2kDecoderBackendPreference::kAuto);
 uint32_t register_loaded_plugins_v2(PluginRegistryV2* registry,
     const LoadedPluginApisV2* loaded_plugins, uint32_t loaded_plugin_count);
 

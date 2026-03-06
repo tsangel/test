@@ -1242,10 +1242,10 @@ int main() {
 		}
 		}
 	}
-	{
-		const std::vector<std::uint8_t> rgb_source{
-		    0x10u, 0x20u, 0x30u, 0x40u, 0x50u, 0x60u,
-		    0x70u, 0x80u, 0x90u, 0xA0u, 0xB0u, 0xC0u};
+		{
+			const std::vector<std::uint8_t> rgb_source{
+			    0x10u, 0x20u, 0x30u, 0x40u, 0x50u, 0x60u,
+			    0x70u, 0x80u, 0x90u, 0xA0u, 0xB0u, 0xC0u};
 		dicom::pixel::PixelSource color_source{};
 		color_source.bytes =
 		    std::span<const std::uint8_t>(rgb_source.data(), rgb_source.size());
@@ -1253,9 +1253,50 @@ int main() {
 		color_source.rows = 2;
 		color_source.cols = 2;
 		color_source.frames = 1;
-		color_source.samples_per_pixel = 3;
-		color_source.planar = dicom::pixel::Planar::interleaved;
-		color_source.photometric = dicom::pixel::Photometric::rgb;
+			color_source.samples_per_pixel = 3;
+			color_source.planar = dicom::pixel::Planar::interleaved;
+			color_source.photometric = dicom::pixel::Photometric::rgb;
+
+			std::vector<std::uint8_t> lossy_quality_bytes(64 * 64 * 3, 0u);
+			for (std::size_t row = 0; row < 64; ++row) {
+				for (std::size_t col = 0; col < 64; ++col) {
+					const std::size_t base = (row * 64 + col) * 3;
+					lossy_quality_bytes[base + 0] =
+					    static_cast<std::uint8_t>((row * 3 + col) & 0xFFu);
+					lossy_quality_bytes[base + 1] =
+					    static_cast<std::uint8_t>((row * 5 + col * 2) & 0xFFu);
+					lossy_quality_bytes[base + 2] =
+					    static_cast<std::uint8_t>((row * 7 + col * 4) & 0xFFu);
+				}
+			}
+			dicom::pixel::PixelSource lossy_quality_source{};
+			lossy_quality_source.bytes = std::span<const std::uint8_t>(
+			    lossy_quality_bytes.data(), lossy_quality_bytes.size());
+			lossy_quality_source.data_type = dicom::pixel::DataType::u8;
+			lossy_quality_source.rows = 64;
+			lossy_quality_source.cols = 64;
+			lossy_quality_source.frames = 1;
+			lossy_quality_source.samples_per_pixel = 3;
+			lossy_quality_source.planar = dicom::pixel::Planar::interleaved;
+			lossy_quality_source.photometric = dicom::pixel::Photometric::rgb;
+
+			const auto first_encoded_frame_size = [&fail](const dicom::DicomFile& file,
+			                                     std::string_view label) -> std::size_t {
+					const auto* pixel_data = file.get_dataelement("PixelData"_tag);
+					if (!pixel_data || pixel_data->is_missing() ||
+					    !pixel_data->vr().is_pixel_sequence()) {
+						fail(std::string(label) + " should create encapsulated PixelData");
+					}
+					const auto* pixel_sequence = pixel_data->as_pixel_sequence();
+					if (!pixel_sequence || pixel_sequence->number_of_frames() != 1) {
+						fail(std::string(label) + " should create exactly one frame");
+					}
+					const auto* frame = pixel_sequence->frame(0);
+					if (!frame) {
+						fail(std::string(label) + " is missing frame #0");
+					}
+					return frame->encoded_data_size();
+				};
 
 		if (dicom::test::kJpeg2kBuiltin) {
 			dicom::DicomFile j2k_default_mct;
@@ -1359,13 +1400,53 @@ int main() {
 			    std::string_view("YBR_ICT")) {
 				fail("J2K text options via set_transfer_syntax should update PhotometricInterpretation to YBR_ICT");
 			}
-			if (j2k_lossy_text_ts["LossyImageCompression"_tag].to_string_view().value_or("") !=
-			    std::string_view("01")) {
-				fail("J2K text options via set_transfer_syntax should set LossyImageCompression to 01");
-			}
-		}
+				if (j2k_lossy_text_ts["LossyImageCompression"_tag].to_string_view().value_or("") !=
+				    std::string_view("01")) {
+					fail("J2K text options via set_transfer_syntax should set LossyImageCompression to 01");
+				}
 
-		if (dicom::test::kHtj2kBuiltin) {
+				const std::array<dicom::pixel::CodecOptionTextKv, 1> j2k_lossy_psnr30{{
+				    {"target_psnr", "30"},
+				}};
+				const std::array<dicom::pixel::CodecOptionTextKv, 1> j2k_lossy_psnr50{{
+				    {"target_psnr", "50"},
+				}};
+				dicom::DicomFile j2k_psnr30;
+				j2k_psnr30.set_pixel_data("JPEG2000"_uid, lossy_quality_source,
+				    std::span<const dicom::pixel::CodecOptionTextKv>(j2k_lossy_psnr30));
+				dicom::DicomFile j2k_psnr50;
+				j2k_psnr50.set_pixel_data("JPEG2000"_uid, lossy_quality_source,
+				    std::span<const dicom::pixel::CodecOptionTextKv>(j2k_lossy_psnr50));
+				const auto j2k_size_psnr30 =
+				    first_encoded_frame_size(j2k_psnr30, "J2K target_psnr=30");
+				const auto j2k_size_psnr50 =
+				    first_encoded_frame_size(j2k_psnr50, "J2K target_psnr=50");
+				if (j2k_size_psnr50 <= j2k_size_psnr30) {
+					fail("Higher JPEG2000 target_psnr should produce a larger encoded frame");
+				}
+
+				const std::array<dicom::pixel::CodecOptionTextKv, 1> j2k_lossy_bpp1{{
+				    {"target_bpp", "1.0"},
+				}};
+				const std::array<dicom::pixel::CodecOptionTextKv, 1> j2k_lossy_bpp4{{
+				    {"target_bpp", "4.0"},
+				}};
+				dicom::DicomFile j2k_bpp1;
+				j2k_bpp1.set_pixel_data("JPEG2000"_uid, lossy_quality_source,
+				    std::span<const dicom::pixel::CodecOptionTextKv>(j2k_lossy_bpp1));
+				dicom::DicomFile j2k_bpp4;
+				j2k_bpp4.set_pixel_data("JPEG2000"_uid, lossy_quality_source,
+				    std::span<const dicom::pixel::CodecOptionTextKv>(j2k_lossy_bpp4));
+				const auto j2k_size_bpp1 =
+				    first_encoded_frame_size(j2k_bpp1, "J2K target_bpp=1.0");
+				const auto j2k_size_bpp4 =
+				    first_encoded_frame_size(j2k_bpp4, "J2K target_bpp=4.0");
+				if (j2k_size_bpp4 <= j2k_size_bpp1) {
+					fail("Higher JPEG2000 target_bpp should produce a larger encoded frame");
+				}
+			}
+
+			if (dicom::test::kHtj2kBuiltin) {
 			dicom::DicomFile htj2k_default_mct;
 			htj2k_default_mct.set_pixel_data(
 			    "HTJ2KLossless"_uid, color_source);
@@ -1407,12 +1488,32 @@ int main() {
 			}
 			const auto htj2k_lossy_ratios =
 			    htj2k_lossy_mct["LossyImageCompressionRatio"_tag].to_double_vector();
-			if (!htj2k_lossy_ratios || htj2k_lossy_ratios->size() != 1 ||
-			    !((*htj2k_lossy_ratios)[0] > 0.0)) {
-				fail("HTJ2K lossy set_pixel_data should set a positive LossyImageCompressionRatio");
+				if (!htj2k_lossy_ratios || htj2k_lossy_ratios->size() != 1 ||
+				    !((*htj2k_lossy_ratios)[0] > 0.0)) {
+					fail("HTJ2K lossy set_pixel_data should set a positive LossyImageCompressionRatio");
+				}
+
+				const std::array<dicom::pixel::CodecOptionTextKv, 1> htj2k_lossy_psnr30{{
+				    {"target_psnr", "30"},
+				}};
+				const std::array<dicom::pixel::CodecOptionTextKv, 1> htj2k_lossy_psnr50{{
+				    {"target_psnr", "50"},
+				}};
+				dicom::DicomFile htj2k_psnr30;
+				htj2k_psnr30.set_pixel_data("HTJ2K"_uid, lossy_quality_source,
+				    std::span<const dicom::pixel::CodecOptionTextKv>(htj2k_lossy_psnr30));
+				dicom::DicomFile htj2k_psnr50;
+				htj2k_psnr50.set_pixel_data("HTJ2K"_uid, lossy_quality_source,
+				    std::span<const dicom::pixel::CodecOptionTextKv>(htj2k_lossy_psnr50));
+				const auto htj2k_size_psnr30 =
+				    first_encoded_frame_size(htj2k_psnr30, "HTJ2K target_psnr=30");
+				const auto htj2k_size_psnr50 =
+				    first_encoded_frame_size(htj2k_psnr50, "HTJ2K target_psnr=50");
+				if (htj2k_size_psnr50 <= htj2k_size_psnr30) {
+					fail("Higher HTJ2K target_psnr should produce a larger encoded frame");
+				}
 			}
 		}
-	}
 	if (dicom::test::kJpegLsBuiltin) {
 		dicom::DicomFile set_pixel_data_jpegls_file;
 		{

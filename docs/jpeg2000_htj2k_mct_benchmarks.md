@@ -79,6 +79,8 @@ This section adds decode-backend-forced results for HTJ2K (`openjph` vs `openjpe
 
 - Measured date: 2026-02-24
 - Decode benchmark method: `set_htj2k_decoder_backend(...)` + `to_array(frame=-1, scaled=False)`
+- Backend selection is process-initial only in the current runtime design; it must be
+  configured before the first pixel decode/encode.
 - Warm-up discarded: 1 run
 - Measured repetitions: 4 runs
 - Encoder side remains `threads=-1` (auto CPU)

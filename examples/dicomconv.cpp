@@ -1,4 +1,3 @@
-#include <algorithm>
 #include <array>
 #include <cctype>
 #include <cerrno>
@@ -15,9 +14,31 @@
 #include <vector>
 
 #include <dicom.h>
-#include "pixel/registry/codec_registry.hpp"
 
 namespace {
+
+using namespace dicom::literals;
+
+constexpr std::array<dicom::uid::WellKnown, 18> kSupportedTransferSyntaxes{
+    "ImplicitVRLittleEndian"_uid,
+    "ExplicitVRLittleEndian"_uid,
+    "DeflatedExplicitVRLittleEndian"_uid,
+    "EncapsulatedUncompressedExplicitVRLittleEndian"_uid,
+    "RLELossless"_uid,
+    "JPEGBaseline8Bit"_uid,
+    "JPEGLosslessSV1"_uid,
+    "JPEGLSLossless"_uid,
+    "JPEGLSNearLossless"_uid,
+    "JPEG2000"_uid,
+    "JPEG2000Lossless"_uid,
+    "JPEG2000MC"_uid,
+    "JPEG2000MCLossless"_uid,
+    "HTJ2K"_uid,
+    "HTJ2KLossless"_uid,
+    "HTJ2KLosslessRPCL"_uid,
+    "JPEGXL"_uid,
+    "JPEGXLLossless"_uid,
+};
 
 struct CliOptions {
 	std::string input_path{};
@@ -36,24 +57,10 @@ struct CliOptions {
 
 void print_transfer_syntax_list() {
 	std::cerr << "\nAvailable Transfer Syntax UIDs supported by dicomconv (keyword = UID):\n";
-	std::vector<dicom::uid::WellKnown> transfer_syntaxes;
-	const auto& registry = dicom::pixel::detail::global_codec_registry();
-	transfer_syntaxes.reserve(registry.bindings().size());
-	for (const auto& binding : registry.bindings()) {
-		if (!binding.encode_supported || !binding.transfer_syntax.valid()) {
+	for (const auto& transfer_syntax : kSupportedTransferSyntaxes) {
+		if (!transfer_syntax.supports_pixel_encode()) {
 			continue;
 		}
-		transfer_syntaxes.push_back(binding.transfer_syntax);
-	}
-	std::sort(transfer_syntaxes.begin(), transfer_syntaxes.end(),
-	    [](const dicom::uid::WellKnown& lhs, const dicom::uid::WellKnown& rhs) {
-		    return lhs.value() < rhs.value();
-	    });
-	transfer_syntaxes.erase(
-	    std::unique(transfer_syntaxes.begin(), transfer_syntaxes.end()),
-	    transfer_syntaxes.end());
-
-	for (const auto& transfer_syntax : transfer_syntaxes) {
 		const auto* entry = transfer_syntax.entry();
 		if (!entry || entry->uid_type != dicom::UidType::TransferSyntax) {
 			continue;
@@ -66,60 +73,20 @@ void print_transfer_syntax_list() {
 	}
 }
 
-std::string encoder_option_flag(std::string_view option_name) {
-	std::string out{"--"};
-	out.reserve(option_name.size() + 2);
-	for (const char ch : option_name) {
-		out.push_back(ch == '_' ? '-' : ch);
-	}
-	return out;
-}
-
-void print_encoder_option_schema(std::string_view plugin_label,
-    std::string_view plugin_key) {
-	const auto& registry = dicom::pixel::detail::global_codec_registry();
-	const auto* plugin = registry.find_plugin(plugin_key);
-	if (!plugin || plugin->option_schema.empty()) {
-		std::cerr << "  " << plugin_label << " : no codec-specific options\n";
-		return;
-	}
-
-	bool first = true;
-	for (const auto& option : plugin->option_schema) {
-		std::string option_text{};
-		if (option.name == "color_transform") {
-			option_text = "--color-transform | --no-color-transform";
-		} else {
-			option_text = encoder_option_flag(option.name);
-		}
-		if (!option.valid_range.empty()) {
-			option_text += " " + std::string(option.valid_range);
-		}
-		if (!option.recommendation.empty()) {
-			option_text += " (try: " + std::string(option.recommendation) + ")";
-		}
-		if (first) {
-			std::cerr << "  " << plugin_label << " : " << option_text << '\n';
-			first = false;
-		} else {
-			std::cerr << "           " << option_text << '\n';
-		}
-	}
-	if (plugin_key == "jpeg2k" || plugin_key == "htj2k") {
-		std::cerr << "           if both --target-psnr and --target-bpp are set, --target-psnr takes precedence\n";
-	}
-}
-
 void print_encoder_option_schema_section() {
-	std::cerr << "Codec-specific options (plugin schema):\n";
+	std::cerr << "Codec-specific options:\n";
 	std::cerr << "  auto   : no codec-specific options\n";
 	std::cerr << "  none   : no codec-specific options\n";
-	print_encoder_option_schema("rle", "rle");
-	print_encoder_option_schema("jpeg", "jpeg");
-	print_encoder_option_schema("jpegls", "jpegls");
-	print_encoder_option_schema("j2k", "jpeg2k");
-	print_encoder_option_schema("htj2k", "htj2k");
-	print_encoder_option_schema("jpegxl", "jpegxl");
+	std::cerr << "  rle    : no codec-specific options\n";
+	std::cerr << "  jpeg   : --quality [1,100] (default: 90)\n";
+	std::cerr << "  jpegls : --near-lossless-error [0,255] (lossless: 0, near-lossless: >0)\n";
+	std::cerr << "  j2k    : --target-psnr >=0, --target-bpp >=0, --threads -1|0|N,\n";
+	std::cerr << "           --color-transform | --no-color-transform\n";
+	std::cerr << "           if both --target-psnr and --target-bpp are set, --target-psnr takes precedence\n";
+	std::cerr << "  htj2k  : --target-psnr >=0, --target-bpp >=0, --threads -1|0|N,\n";
+	std::cerr << "           --color-transform | --no-color-transform\n";
+	std::cerr << "           if both --target-psnr and --target-bpp are set, --target-psnr takes precedence\n";
+	std::cerr << "  jpegxl : --distance [0,25], --effort [1,10], --threads -1|0|N\n";
 }
 
 std::string normalize_token(std::string_view text) {

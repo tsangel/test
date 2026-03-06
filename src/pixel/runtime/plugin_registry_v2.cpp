@@ -1,26 +1,26 @@
 #include <bit>
 #include <cstdint>
 
-#include "core_api_v2.hpp"
+#include "direct_api_v2.hpp"
 #include "plugin_registry_v2.hpp"
 
 #if defined(DICOMSDL_PIXEL_RUNTIME_WITH_RLE_STATIC)
-#include "../plugins/static/rle_v2/static_api.hpp"
+#include "../codecs/rle_v2/builtin_api.hpp"
 #endif
 #if defined(DICOMSDL_PIXEL_RUNTIME_WITH_OPENJPEG_STATIC)
-#include "../plugins/shared/openjpeg_v2/static_api.hpp"
+#include "../codecs/openjpeg_v2/builtin_api.hpp"
 #endif
 #if defined(DICOMSDL_PIXEL_RUNTIME_WITH_JPEG_STATIC)
-#include "../plugins/shared/jpeg_v2/static_api.hpp"
+#include "../codecs/jpeg_v2/builtin_api.hpp"
 #endif
 #if defined(DICOMSDL_PIXEL_RUNTIME_WITH_JPEGLS_STATIC)
-#include "../plugins/shared/jpegls_v2/static_api.hpp"
+#include "../codecs/jpegls_v2/builtin_api.hpp"
 #endif
 #if defined(DICOMSDL_PIXEL_RUNTIME_WITH_HTJ2K_STATIC)
-#include "../plugins/shared/htj2k_v2/static_api.hpp"
+#include "../codecs/htj2k_v2/builtin_api.hpp"
 #endif
 #if defined(DICOMSDL_PIXEL_RUNTIME_WITH_JPEGXL_STATIC)
-#include "../plugins/shared/jpegxl_v2/static_api.hpp"
+#include "../codecs/jpegxl_v2/builtin_api.hpp"
 #endif
 
 namespace pixel::runtime_v2 {
@@ -76,6 +76,50 @@ bool validate_encoder_api(const pixel_encoder_plugin_api_v2* api) {
     return false;
   }
   return true;
+}
+
+void register_htj2k_and_openjpeg_plugins(
+    PluginRegistryV2* registry,
+    Htj2kDecoderBackendPreference htj2k_decoder_preference) {
+#if defined(DICOMSDL_PIXEL_RUNTIME_WITH_OPENJPEG_STATIC)
+  const auto register_openjpeg = [&]() {
+    const auto& decoder_api = pixel::openjpeg_plugin_v2::decoder_builtin_api();
+    const auto& encoder_api = pixel::openjpeg_plugin_v2::encoder_builtin_api();
+    registry->register_decoder_api(&decoder_api);
+    registry->register_encoder_api(&encoder_api);
+  };
+#endif
+#if defined(DICOMSDL_PIXEL_RUNTIME_WITH_HTJ2K_STATIC)
+  const auto register_htj2k = [&]() {
+    const auto& decoder_api = pixel::htj2k_plugin_v2::decoder_builtin_api();
+    const auto& encoder_api = pixel::htj2k_plugin_v2::encoder_builtin_api();
+    registry->register_decoder_api(&decoder_api);
+    registry->register_encoder_api(&encoder_api);
+  };
+#endif
+
+#if defined(DICOMSDL_PIXEL_RUNTIME_WITH_HTJ2K_STATIC) && defined(DICOMSDL_PIXEL_RUNTIME_WITH_OPENJPEG_STATIC)
+  if (htj2k_decoder_preference == Htj2kDecoderBackendPreference::kOpenJph) {
+    register_openjpeg();
+    register_htj2k();
+    return;
+  }
+
+  register_htj2k();
+  register_openjpeg();
+  return;
+#elif defined(DICOMSDL_PIXEL_RUNTIME_WITH_HTJ2K_STATIC)
+  static_cast<void>(htj2k_decoder_preference);
+  register_htj2k();
+  return;
+#elif defined(DICOMSDL_PIXEL_RUNTIME_WITH_OPENJPEG_STATIC)
+  static_cast<void>(htj2k_decoder_preference);
+  register_openjpeg();
+  return;
+#else
+  static_cast<void>(registry);
+  static_cast<void>(htj2k_decoder_preference);
+#endif
 }
 
 }  // namespace
@@ -173,7 +217,8 @@ const EncoderBinding* PluginRegistryV2::find_encoder_binding(uint32_t profile_co
   return &slot->encoder;
 }
 
-void init_builtin_registry_v2(PluginRegistryV2* registry) {
+void init_builtin_registry_v2(PluginRegistryV2* registry,
+    Htj2kDecoderBackendPreference htj2k_decoder_preference) {
   if (registry == nullptr) {
     return;
   }
@@ -183,48 +228,33 @@ void init_builtin_registry_v2(PluginRegistryV2* registry) {
 
 #if defined(DICOMSDL_PIXEL_RUNTIME_WITH_RLE_STATIC)
   {
-    const auto& decoder_api = pixel::rle_plugin_v2::decoder_static_api();
-    const auto& encoder_api = pixel::rle_plugin_v2::encoder_static_api();
+    const auto& decoder_api = pixel::rle_plugin_v2::decoder_builtin_api();
+    const auto& encoder_api = pixel::rle_plugin_v2::encoder_builtin_api();
     registry->register_decoder_api(&decoder_api);
     registry->register_encoder_api(&encoder_api);
   }
 #endif
 #if defined(DICOMSDL_PIXEL_RUNTIME_WITH_JPEG_STATIC)
   {
-    const auto& decoder_api = pixel::jpeg_plugin_v2::decoder_static_api();
-    const auto& encoder_api = pixel::jpeg_plugin_v2::encoder_static_api();
+    const auto& decoder_api = pixel::jpeg_plugin_v2::decoder_builtin_api();
+    const auto& encoder_api = pixel::jpeg_plugin_v2::encoder_builtin_api();
     registry->register_decoder_api(&decoder_api);
     registry->register_encoder_api(&encoder_api);
   }
 #endif
 #if defined(DICOMSDL_PIXEL_RUNTIME_WITH_JPEGLS_STATIC)
   {
-    const auto& decoder_api = pixel::jpegls_plugin_v2::decoder_static_api();
-    const auto& encoder_api = pixel::jpegls_plugin_v2::encoder_static_api();
+    const auto& decoder_api = pixel::jpegls_plugin_v2::decoder_builtin_api();
+    const auto& encoder_api = pixel::jpegls_plugin_v2::encoder_builtin_api();
     registry->register_decoder_api(&decoder_api);
     registry->register_encoder_api(&encoder_api);
   }
 #endif
-#if defined(DICOMSDL_PIXEL_RUNTIME_WITH_HTJ2K_STATIC)
-  {
-    const auto& decoder_api = pixel::htj2k_plugin_v2::decoder_static_api();
-    const auto& encoder_api = pixel::htj2k_plugin_v2::encoder_static_api();
-    registry->register_decoder_api(&decoder_api);
-    registry->register_encoder_api(&encoder_api);
-  }
-#endif
-#if defined(DICOMSDL_PIXEL_RUNTIME_WITH_OPENJPEG_STATIC)
-  {
-    const auto& decoder_api = pixel::openjpeg_plugin_v2::decoder_static_api();
-    const auto& encoder_api = pixel::openjpeg_plugin_v2::encoder_static_api();
-    registry->register_decoder_api(&decoder_api);
-    registry->register_encoder_api(&encoder_api);
-  }
-#endif
+  register_htj2k_and_openjpeg_plugins(registry, htj2k_decoder_preference);
 #if defined(DICOMSDL_PIXEL_RUNTIME_WITH_JPEGXL_STATIC)
   {
-    const auto& decoder_api = pixel::jpegxl_plugin_v2::decoder_static_api();
-    const auto& encoder_api = pixel::jpegxl_plugin_v2::encoder_static_api();
+    const auto& decoder_api = pixel::jpegxl_plugin_v2::decoder_builtin_api();
+    const auto& encoder_api = pixel::jpegxl_plugin_v2::encoder_builtin_api();
     registry->register_decoder_api(&decoder_api);
     registry->register_encoder_api(&encoder_api);
   }

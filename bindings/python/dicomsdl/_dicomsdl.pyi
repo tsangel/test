@@ -41,10 +41,10 @@ __all__ = [
     "reset_root_elements_reserve_hint",
     "set_htj2k_decoder_backend",
     "get_htj2k_decoder_backend",
-    "use_openjph_for_htj2k_decode",
-    "use_openjpeg_for_htj2k_decode",
+    "use_openjph_for_htj2k_decoding",
+    "use_openjpeg_for_htj2k_decoding",
     "register_external_codec_plugin",
-    "unregister_external_codec_plugin",
+    "clear_external_codec_plugins",
     "keyword_to_tag_vr",
     "tag_to_keyword",
     "tag_to_entry",
@@ -501,15 +501,16 @@ def set_htj2k_decoder_backend(backend: str) -> None: ...
 
 def get_htj2k_decoder_backend() -> str: ...
 
-def use_openjph_for_htj2k_decode() -> None: ...
 
-def use_openjpeg_for_htj2k_decode() -> None: ...
-
-
-def register_external_codec_plugin(library_path: str) -> str: ...
+def use_openjph_for_htj2k_decoding() -> None: ...
 
 
-def unregister_external_codec_plugin(plugin_key: str) -> None: ...
+def use_openjpeg_for_htj2k_decoding() -> None: ...
+
+
+def register_external_codec_plugin(library_path: str) -> None: ...
+
+def clear_external_codec_plugins() -> None: ...
 
 
 @overload

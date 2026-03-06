@@ -43,7 +43,7 @@ struct FrameDigest {
 }
 
 [[nodiscard]] std::vector<FrameDigest> build_frame_digests(const dicom::DicomFile& file) {
-	const auto& info = file.pixeldata_info(true);
+	const auto& info = file.pixeldata_info();
 	if (!info.has_pixel_data || info.frames <= 0) {
 		throw std::runtime_error("No decodable pixel data");
 	}

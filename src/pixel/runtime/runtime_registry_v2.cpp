@@ -13,7 +13,7 @@ namespace pixel::runtime_v2 {
 namespace {
 
 struct ExternalPluginEntryV2 {
-  std::string plugin_key{};
+  std::string library_path{};
   bool owns_shared_library{false};
   LoadedSharedPluginV2 shared_plugin{};
   bool has_decoder_api{false};
@@ -25,9 +25,10 @@ struct ExternalPluginEntryV2 {
 struct RuntimeRegistryStateV2 {
   std::mutex mutex{};
   bool initialized{false};
+  Htj2kDecoderBackendPreference htj2k_decoder_backend_preference{
+      Htj2kDecoderBackendPreference::kAuto};
   PluginRegistryV2 registry{};
   std::vector<ExternalPluginEntryV2> external_plugins{};
-  uint32_t generated_plugin_index{0};
 };
 
 RuntimeRegistryStateV2& runtime_registry_state_v2() {
@@ -45,13 +46,15 @@ void ensure_initialized_locked(RuntimeRegistryStateV2& state) {
   if (state.initialized) {
     return;
   }
-  init_builtin_registry_v2(&state.registry);
+  init_builtin_registry_v2(
+      &state.registry, state.htj2k_decoder_backend_preference);
   state.initialized = true;
 }
 
 void rebuild_registry_locked(RuntimeRegistryStateV2& state) {
   state.registry.clear();
-  init_builtin_registry_v2(&state.registry);
+  init_builtin_registry_v2(
+      &state.registry, state.htj2k_decoder_backend_preference);
   for (const auto& plugin : state.external_plugins) {
     if (plugin.has_decoder_api) {
       (void)state.registry.register_decoder_api(&plugin.decoder_api);
@@ -80,110 +83,12 @@ std::string load_status_message(SharedPluginLoadStatusV2 status) {
   return "unknown plugin load failure";
 }
 
-bool has_profile(uint64_t flags, uint32_t profile_code) {
-  const uint64_t decode_bit = UINT64_C(1) << profile_code;
-  const uint64_t encode_bit = UINT64_C(1) << (32u + profile_code);
-  return (flags & decode_bit) != 0 || (flags & encode_bit) != 0;
-}
-
-std::string infer_plugin_key_from_flags(
-    uint64_t flags, RuntimeRegistryStateV2& state) {
-  bool has_jpeg = has_profile(flags, PIXEL_CODEC_PROFILE_JPEG_LOSSLESS_V2) ||
-      has_profile(flags, PIXEL_CODEC_PROFILE_JPEG_LOSSY_V2);
-  bool has_jpegls = has_profile(flags, PIXEL_CODEC_PROFILE_JPEGLS_LOSSLESS_V2) ||
-      has_profile(flags, PIXEL_CODEC_PROFILE_JPEGLS_NEAR_LOSSLESS_V2);
-  bool has_jpeg2k = has_profile(flags, PIXEL_CODEC_PROFILE_JPEG2000_LOSSLESS_V2) ||
-      has_profile(flags, PIXEL_CODEC_PROFILE_JPEG2000_LOSSY_V2);
-  bool has_htj2k = has_profile(flags, PIXEL_CODEC_PROFILE_HTJ2K_LOSSLESS_V2) ||
-      has_profile(flags, PIXEL_CODEC_PROFILE_HTJ2K_LOSSLESS_RPCL_V2) ||
-      has_profile(flags, PIXEL_CODEC_PROFILE_HTJ2K_LOSSY_V2);
-  bool has_jpegxl = has_profile(flags, PIXEL_CODEC_PROFILE_JPEGXL_LOSSLESS_V2) ||
-      has_profile(flags, PIXEL_CODEC_PROFILE_JPEGXL_LOSSY_V2) ||
-      has_profile(flags, PIXEL_CODEC_PROFILE_JPEGXL_JPEG_RECOMPRESSION_V2);
-  bool has_rle = has_profile(flags, PIXEL_CODEC_PROFILE_RLE_LOSSLESS_V2);
-  bool has_native = has_profile(flags, PIXEL_CODEC_PROFILE_NATIVE_UNCOMPRESSED_V2) ||
-      has_profile(flags, PIXEL_CODEC_PROFILE_ENCAPSULATED_UNCOMPRESSED_V2);
-
-  uint32_t family_count = 0;
-  family_count += has_jpeg ? 1u : 0u;
-  family_count += has_jpegls ? 1u : 0u;
-  family_count += has_jpeg2k ? 1u : 0u;
-  family_count += has_htj2k ? 1u : 0u;
-  family_count += has_jpegxl ? 1u : 0u;
-  family_count += has_rle ? 1u : 0u;
-  family_count += has_native ? 1u : 0u;
-
-  if (family_count == 1u) {
-    if (has_jpeg) {
-      return "jpeg";
-    }
-    if (has_jpegls) {
-      return "jpegls";
-    }
-    if (has_jpeg2k) {
-      return "jpeg2k";
-    }
-    if (has_htj2k) {
-      return "htj2k";
-    }
-    if (has_jpegxl) {
-      return "jpegxl";
-    }
-    if (has_rle) {
-      return "rle";
-    }
-    if (has_native) {
-      return "native";
-    }
-  }
-
-  return "external-v2-" + std::to_string(state.generated_plugin_index++);
-}
-
-std::vector<ExternalPluginEntryV2>::iterator find_plugin_entry(
-    RuntimeRegistryStateV2& state, std::string_view plugin_key) {
+std::vector<ExternalPluginEntryV2>::iterator find_library_plugin_entry(
+    RuntimeRegistryStateV2& state, std::string_view library_path) {
   return std::find_if(state.external_plugins.begin(), state.external_plugins.end(),
-      [plugin_key](const ExternalPluginEntryV2& entry) {
-        return entry.plugin_key == plugin_key;
+      [library_path](const ExternalPluginEntryV2& entry) {
+        return entry.owns_shared_library && entry.library_path == library_path;
       });
-}
-
-bool validate_decoder_api(const pixel_decoder_plugin_api_v2* api) {
-  if (api == nullptr) {
-    return false;
-  }
-  if (api->struct_size < sizeof(pixel_decoder_plugin_api_v2) ||
-      api->abi_version != PIXEL_DECODER_PLUGIN_ABI_V2) {
-    return false;
-  }
-  if (api->info.struct_size < sizeof(pixel_decoder_plugin_info_v2) ||
-      api->info.abi_version != PIXEL_DECODER_PLUGIN_ABI_V2) {
-    return false;
-  }
-  if (api->create == nullptr || api->destroy == nullptr || api->configure == nullptr ||
-      api->decode_frame == nullptr || api->copy_last_error_detail == nullptr) {
-    return false;
-  }
-  return true;
-}
-
-bool validate_encoder_api(const pixel_encoder_plugin_api_v2* api) {
-  if (api == nullptr) {
-    return false;
-  }
-  if (api->struct_size < sizeof(pixel_encoder_plugin_api_v2) ||
-      api->abi_version != PIXEL_ENCODER_PLUGIN_ABI_V2) {
-    return false;
-  }
-  if (api->info.struct_size < sizeof(pixel_encoder_plugin_info_v2) ||
-      api->info.abi_version != PIXEL_ENCODER_PLUGIN_ABI_V2) {
-    return false;
-  }
-  if (api->create == nullptr || api->destroy == nullptr || api->configure == nullptr ||
-      api->encode_frame == nullptr || api->copy_last_error_detail == nullptr) {
-    return false;
-  }
-  return true;
 }
 
 }  // namespace
@@ -195,8 +100,51 @@ const PluginRegistryV2* current_registry() noexcept {
   return &state.registry;
 }
 
+bool set_htj2k_decoder_backend_preference(
+    Htj2kDecoderBackendPreference backend, std::string* out_error) {
+  auto& state = runtime_registry_state_v2();
+  std::lock_guard<std::mutex> lock(state.mutex);
+  switch (backend) {
+  case Htj2kDecoderBackendPreference::kOpenJph:
+#if !defined(DICOMSDL_PIXEL_RUNTIME_WITH_HTJ2K_STATIC)
+    set_optional_error(
+        out_error,
+        "OpenJPH HTJ2K decoder backend is not available in this build");
+    return false;
+#endif
+    break;
+  case Htj2kDecoderBackendPreference::kOpenJpeg:
+#if !defined(DICOMSDL_PIXEL_RUNTIME_WITH_OPENJPEG_STATIC)
+    set_optional_error(
+        out_error,
+        "OpenJPEG HTJ2K decoder backend is not available in this build");
+    return false;
+#endif
+    break;
+  case Htj2kDecoderBackendPreference::kAuto:
+  default:
+    break;
+  }
+  if (state.initialized) {
+    set_optional_error(
+        out_error,
+        "HTJ2K decoder backend can only be configured before pixel runtime "
+        "initialization (before first pixel decode/encode or external plugin registration)");
+    return false;
+  }
+  state.htj2k_decoder_backend_preference = backend;
+  set_optional_error(out_error, {});
+  return true;
+}
+
+Htj2kDecoderBackendPreference get_htj2k_decoder_backend_preference() {
+  auto& state = runtime_registry_state_v2();
+  std::lock_guard<std::mutex> lock(state.mutex);
+  return state.htj2k_decoder_backend_preference;
+}
+
 bool register_external_codec_plugin_from_library(
-    std::string_view library_path, std::string* out_plugin_key, std::string* out_error) {
+    std::string_view library_path, std::string* out_error) {
   if (library_path.empty()) {
     set_optional_error(out_error, "library path is empty");
     return false;
@@ -216,16 +164,13 @@ bool register_external_codec_plugin_from_library(
     return false;
   }
 
-  uint64_t supported_flags = 0;
   if (entry.shared_plugin.has_decoder_api) {
     entry.has_decoder_api = true;
     entry.decoder_api = entry.shared_plugin.decoder_api;
-    supported_flags |= entry.decoder_api.info.supported_profile_flags;
   }
   if (entry.shared_plugin.has_encoder_api) {
     entry.has_encoder_api = true;
     entry.encoder_api = entry.shared_plugin.encoder_api;
-    supported_flags |= entry.encoder_api.info.supported_profile_flags;
   }
   if (!entry.has_decoder_api && !entry.has_encoder_api) {
     unload_shared_plugin_v2(&entry.shared_plugin);
@@ -233,9 +178,9 @@ bool register_external_codec_plugin_from_library(
     return false;
   }
 
-  entry.plugin_key = infer_plugin_key_from_flags(supported_flags, state);
+  entry.library_path = library_path_text;
 
-  auto it = find_plugin_entry(state, entry.plugin_key);
+  auto it = find_library_plugin_entry(state, library_path_text);
   if (it != state.external_plugins.end()) {
     if (it->owns_shared_library) {
       unload_shared_plugin_v2(&it->shared_plugin);
@@ -245,96 +190,22 @@ bool register_external_codec_plugin_from_library(
   state.external_plugins.push_back(std::move(entry));
   rebuild_registry_locked(state);
 
-  if (out_plugin_key != nullptr) {
-    *out_plugin_key = state.external_plugins.back().plugin_key;
-  }
   set_optional_error(out_error, {});
   return true;
 }
 
-bool register_external_decoder_plugin_static(
-    const pixel_decoder_plugin_api_v2* api, std::string* out_error) {
-  if (!validate_decoder_api(api)) {
-    set_optional_error(out_error, "decoder api contract is invalid");
-    return false;
-  }
-
+bool clear_external_codec_plugins(std::string* out_error) {
   auto& state = runtime_registry_state_v2();
   std::lock_guard<std::mutex> lock(state.mutex);
-  ensure_initialized_locked(state);
-
-  const std::string plugin_key =
-      infer_plugin_key_from_flags(api->info.supported_profile_flags, state);
-
-  auto it = find_plugin_entry(state, plugin_key);
-  if (it == state.external_plugins.end()) {
-    ExternalPluginEntryV2 entry{};
-    entry.plugin_key = plugin_key;
-    entry.has_decoder_api = true;
-    entry.decoder_api = *api;
-    state.external_plugins.push_back(std::move(entry));
-  } else {
-    it->has_decoder_api = true;
-    it->decoder_api = *api;
+  for (auto& entry : state.external_plugins) {
+    if (entry.owns_shared_library) {
+      unload_shared_plugin_v2(&entry.shared_plugin);
+    }
   }
-
-  rebuild_registry_locked(state);
-  set_optional_error(out_error, {});
-  return true;
-}
-
-bool register_external_encoder_plugin_static(
-    const pixel_encoder_plugin_api_v2* api, std::string* out_error) {
-  if (!validate_encoder_api(api)) {
-    set_optional_error(out_error, "encoder api contract is invalid");
-    return false;
+  state.external_plugins.clear();
+  if (state.initialized) {
+    rebuild_registry_locked(state);
   }
-
-  auto& state = runtime_registry_state_v2();
-  std::lock_guard<std::mutex> lock(state.mutex);
-  ensure_initialized_locked(state);
-
-  const std::string plugin_key =
-      infer_plugin_key_from_flags(api->info.supported_profile_flags, state);
-
-  auto it = find_plugin_entry(state, plugin_key);
-  if (it == state.external_plugins.end()) {
-    ExternalPluginEntryV2 entry{};
-    entry.plugin_key = plugin_key;
-    entry.has_encoder_api = true;
-    entry.encoder_api = *api;
-    state.external_plugins.push_back(std::move(entry));
-  } else {
-    it->has_encoder_api = true;
-    it->encoder_api = *api;
-  }
-
-  rebuild_registry_locked(state);
-  set_optional_error(out_error, {});
-  return true;
-}
-
-bool unregister_external_codec_plugin(
-    std::string_view plugin_key, std::string* out_error) {
-  if (plugin_key.empty()) {
-    set_optional_error(out_error, "plugin key is empty");
-    return false;
-  }
-
-  auto& state = runtime_registry_state_v2();
-  std::lock_guard<std::mutex> lock(state.mutex);
-  ensure_initialized_locked(state);
-
-  auto it = find_plugin_entry(state, plugin_key);
-  if (it == state.external_plugins.end()) {
-    set_optional_error(out_error, "plugin is not registered");
-    return false;
-  }
-  if (it->owns_shared_library) {
-    unload_shared_plugin_v2(&it->shared_plugin);
-  }
-  state.external_plugins.erase(it);
-  rebuild_registry_locked(state);
   set_optional_error(out_error, {});
   return true;
 }

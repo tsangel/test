@@ -1,4 +1,4 @@
-# Pixel v2 static/shared plugin targets and runtime wiring.
+# Pixel v2 codec targets and runtime wiring.
 
 function(dicomsdl_apply_pixel_static_plugin_defines TARGET_NAME)
     set(_dicomsdl_jpeg_builtin 0)
@@ -68,14 +68,14 @@ endfunction()
 
 if(DICOMSDL_PIXEL_CORE)
     add_library(dicomsdl_pixel_core STATIC
-        src/pixel/core/common.cpp
-        src/pixel/core/decode_uncompressed.cpp
-        src/pixel/core/encode_uncompressed.cpp
+        src/pixel/codecs/uncompressed_v2/support.cpp
+        src/pixel/codecs/uncompressed_v2/decode.cpp
+        src/pixel/codecs/uncompressed_v2/encode.cpp
     )
     target_include_directories(dicomsdl_pixel_core
         PUBLIC
             ${CMAKE_CURRENT_SOURCE_DIR}/src/pixel/abi
-            ${CMAKE_CURRENT_SOURCE_DIR}/src/pixel/core
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/pixel/codecs/uncompressed_v2
     )
     target_compile_features(dicomsdl_pixel_core PRIVATE cxx_std_20)
     dicomsdl_set_target_output_dirs(dicomsdl_pixel_core)
@@ -86,15 +86,15 @@ endif()
 
 if(DICOMSDL_PIXEL_RLE_STATIC_PLUGIN)
     add_library(dicomsdl_pixel_rle_plugin_static STATIC
-        src/pixel/plugins/static/rle_v2/common.cpp
-        src/pixel/plugins/static/rle_v2/decode.cpp
-        src/pixel/plugins/static/rle_v2/encode.cpp
-        src/pixel/plugins/static/rle_v2/entry.cpp
+        src/pixel/codecs/rle_v2/common.cpp
+        src/pixel/codecs/rle_v2/decode.cpp
+        src/pixel/codecs/rle_v2/encode.cpp
+        src/pixel/codecs/rle_v2/builtin_api.cpp
     )
     target_include_directories(dicomsdl_pixel_rle_plugin_static
         PUBLIC
             ${CMAKE_CURRENT_SOURCE_DIR}/src/pixel/abi
-            ${CMAKE_CURRENT_SOURCE_DIR}/src/pixel/plugins/static/rle_v2
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/pixel/codecs/rle_v2
     )
     target_compile_features(dicomsdl_pixel_rle_plugin_static PRIVATE cxx_std_20)
     dicomsdl_set_target_output_dirs(dicomsdl_pixel_rle_plugin_static)
@@ -105,13 +105,13 @@ endif()
 
 if(DICOMSDL_PIXEL_OPENJPEG_STATIC_PLUGIN)
     add_library(dicomsdl_pixel_openjpeg_plugin_static STATIC
-        src/pixel/plugins/shared/openjpeg_v2/error.cpp
-        src/pixel/plugins/shared/openjpeg_v2/value_utils.cpp
-        src/pixel/plugins/shared/openjpeg_v2/openjpeg_helpers.cpp
-        src/pixel/plugins/shared/openjpeg_v2/context_api.cpp
-        src/pixel/plugins/shared/openjpeg_v2/decode.cpp
-        src/pixel/plugins/shared/openjpeg_v2/encode.cpp
-        src/pixel/plugins/shared/openjpeg_v2/static_api.cpp
+        src/pixel/codecs/openjpeg_v2/error.cpp
+        src/pixel/codecs/openjpeg_v2/value_utils.cpp
+        src/pixel/codecs/openjpeg_v2/openjpeg_helpers.cpp
+        src/pixel/codecs/openjpeg_v2/context_api.cpp
+        src/pixel/codecs/openjpeg_v2/decode.cpp
+        src/pixel/codecs/openjpeg_v2/encode.cpp
+        src/pixel/codecs/openjpeg_v2/builtin_api.cpp
     )
     target_include_directories(dicomsdl_pixel_openjpeg_plugin_static
         PRIVATE
@@ -133,10 +133,10 @@ endif()
 
 if(DICOMSDL_PIXEL_JPEG_STATIC_PLUGIN)
     add_library(dicomsdl_pixel_jpeg_plugin_static STATIC
-        src/pixel/plugins/shared/jpeg_v2/common.cpp
-        src/pixel/plugins/shared/jpeg_v2/decode.cpp
-        src/pixel/plugins/shared/jpeg_v2/encode.cpp
-        src/pixel/plugins/shared/jpeg_v2/static_api.cpp
+        src/pixel/codecs/jpeg_v2/common.cpp
+        src/pixel/codecs/jpeg_v2/decode.cpp
+        src/pixel/codecs/jpeg_v2/encode.cpp
+        src/pixel/codecs/jpeg_v2/builtin_api.cpp
     )
     target_include_directories(dicomsdl_pixel_jpeg_plugin_static
         PRIVATE
@@ -154,10 +154,10 @@ endif()
 
 if(DICOMSDL_PIXEL_JPEGLS_STATIC_PLUGIN)
     add_library(dicomsdl_pixel_jpegls_plugin_static STATIC
-        src/pixel/plugins/shared/jpegls_v2/common.cpp
-        src/pixel/plugins/shared/jpegls_v2/decode.cpp
-        src/pixel/plugins/shared/jpegls_v2/encode.cpp
-        src/pixel/plugins/shared/jpegls_v2/static_api.cpp
+        src/pixel/codecs/jpegls_v2/common.cpp
+        src/pixel/codecs/jpegls_v2/decode.cpp
+        src/pixel/codecs/jpegls_v2/encode.cpp
+        src/pixel/codecs/jpegls_v2/builtin_api.cpp
     )
     target_include_directories(dicomsdl_pixel_jpegls_plugin_static
         PRIVATE
@@ -176,10 +176,10 @@ if(DICOMSDL_PIXEL_HTJ2K_STATIC_PLUGIN)
         message(FATAL_ERROR "DICOMSDL_PIXEL_HTJ2K_STATIC_PLUGIN requires OpenJPH (target openjph).")
     endif()
     add_library(dicomsdl_pixel_htj2k_plugin_static STATIC
-        src/pixel/plugins/shared/htj2k_v2/common.cpp
-        src/pixel/plugins/shared/htj2k_v2/decode.cpp
-        src/pixel/plugins/shared/htj2k_v2/encode.cpp
-        src/pixel/plugins/shared/htj2k_v2/static_api.cpp
+        src/pixel/codecs/htj2k_v2/common.cpp
+        src/pixel/codecs/htj2k_v2/decode.cpp
+        src/pixel/codecs/htj2k_v2/encode.cpp
+        src/pixel/codecs/htj2k_v2/builtin_api.cpp
     )
     target_include_directories(dicomsdl_pixel_htj2k_plugin_static
         PRIVATE
@@ -198,10 +198,10 @@ if(DICOMSDL_PIXEL_JPEGXL_STATIC_PLUGIN)
         message(FATAL_ERROR "DICOMSDL_PIXEL_JPEGXL_STATIC_PLUGIN requires libjxl targets (jxl/jxl_threads/jxl_cms).")
     endif()
     add_library(dicomsdl_pixel_jpegxl_plugin_static STATIC
-        src/pixel/plugins/shared/jpegxl_v2/common.cpp
-        src/pixel/plugins/shared/jpegxl_v2/decode.cpp
-        src/pixel/plugins/shared/jpegxl_v2/encode.cpp
-        src/pixel/plugins/shared/jpegxl_v2/static_api.cpp
+        src/pixel/codecs/jpegxl_v2/common.cpp
+        src/pixel/codecs/jpegxl_v2/decode.cpp
+        src/pixel/codecs/jpegxl_v2/encode.cpp
+        src/pixel/codecs/jpegxl_v2/builtin_api.cpp
     )
     target_include_directories(dicomsdl_pixel_jpegxl_plugin_static
         PRIVATE
@@ -224,15 +224,16 @@ if(DICOMSDL_PIXEL_RUNTIME)
         src/pixel/runtime/plugin_registry_v2.cpp
         src/pixel/runtime/shared_plugin_loader_v2.cpp
         src/pixel/runtime/registry_bootstrap_v2.cpp
-        src/pixel/runtime/host_adapter_v2.cpp
+        src/pixel/host/adapter/host_adapter_v2.cpp
         src/pixel/runtime/runtime_registry_v2.cpp
     )
     target_include_directories(dicomsdl_pixel_runtime
         PUBLIC
             ${CMAKE_CURRENT_SOURCE_DIR}/src/pixel/abi
             ${CMAKE_CURRENT_SOURCE_DIR}/src/pixel/runtime
+            ${CMAKE_CURRENT_SOURCE_DIR}/src
         PRIVATE
-            ${CMAKE_CURRENT_SOURCE_DIR}/src/pixel/core
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/pixel/codecs/uncompressed_v2
             ${CMAKE_CURRENT_SOURCE_DIR}/include
             ${CMAKE_CURRENT_BINARY_DIR}/generated/include
     )
@@ -278,13 +279,13 @@ endif()
 
 if(DICOMSDL_PIXEL_OPENJPEG_PLUGIN)
     add_library(dicomsdl_pixel_openjpeg_plugin SHARED
-        src/pixel/plugins/shared/openjpeg_v2/error.cpp
-        src/pixel/plugins/shared/openjpeg_v2/value_utils.cpp
-        src/pixel/plugins/shared/openjpeg_v2/openjpeg_helpers.cpp
-        src/pixel/plugins/shared/openjpeg_v2/context_api.cpp
-        src/pixel/plugins/shared/openjpeg_v2/decode.cpp
-        src/pixel/plugins/shared/openjpeg_v2/encode.cpp
-        src/pixel/plugins/shared/openjpeg_v2/shared_entry.cpp
+        src/pixel/codecs/openjpeg_v2/error.cpp
+        src/pixel/codecs/openjpeg_v2/value_utils.cpp
+        src/pixel/codecs/openjpeg_v2/openjpeg_helpers.cpp
+        src/pixel/codecs/openjpeg_v2/context_api.cpp
+        src/pixel/codecs/openjpeg_v2/decode.cpp
+        src/pixel/codecs/openjpeg_v2/encode.cpp
+        src/pixel/codecs/openjpeg_v2/loadable_entry.cpp
     )
     target_include_directories(dicomsdl_pixel_openjpeg_plugin
         PRIVATE
@@ -307,10 +308,10 @@ endif()
 
 if(DICOMSDL_PIXEL_JPEG_PLUGIN)
     add_library(dicomsdl_pixel_jpeg_plugin SHARED
-        src/pixel/plugins/shared/jpeg_v2/common.cpp
-        src/pixel/plugins/shared/jpeg_v2/decode.cpp
-        src/pixel/plugins/shared/jpeg_v2/encode.cpp
-        src/pixel/plugins/shared/jpeg_v2/shared_entry.cpp
+        src/pixel/codecs/jpeg_v2/common.cpp
+        src/pixel/codecs/jpeg_v2/decode.cpp
+        src/pixel/codecs/jpeg_v2/encode.cpp
+        src/pixel/codecs/jpeg_v2/loadable_entry.cpp
     )
     target_include_directories(dicomsdl_pixel_jpeg_plugin
         PRIVATE
@@ -329,10 +330,10 @@ endif()
 
 if(DICOMSDL_PIXEL_JPEGLS_PLUGIN)
     add_library(dicomsdl_pixel_jpegls_plugin SHARED
-        src/pixel/plugins/shared/jpegls_v2/common.cpp
-        src/pixel/plugins/shared/jpegls_v2/decode.cpp
-        src/pixel/plugins/shared/jpegls_v2/encode.cpp
-        src/pixel/plugins/shared/jpegls_v2/shared_entry.cpp
+        src/pixel/codecs/jpegls_v2/common.cpp
+        src/pixel/codecs/jpegls_v2/decode.cpp
+        src/pixel/codecs/jpegls_v2/encode.cpp
+        src/pixel/codecs/jpegls_v2/loadable_entry.cpp
     )
     target_include_directories(dicomsdl_pixel_jpegls_plugin
         PRIVATE
@@ -352,10 +353,10 @@ if(DICOMSDL_PIXEL_HTJ2K_PLUGIN)
         message(FATAL_ERROR "DICOMSDL_PIXEL_HTJ2K_PLUGIN requires OpenJPH (target openjph).")
     endif()
     add_library(dicomsdl_pixel_htj2k_plugin SHARED
-        src/pixel/plugins/shared/htj2k_v2/common.cpp
-        src/pixel/plugins/shared/htj2k_v2/decode.cpp
-        src/pixel/plugins/shared/htj2k_v2/encode.cpp
-        src/pixel/plugins/shared/htj2k_v2/shared_entry.cpp
+        src/pixel/codecs/htj2k_v2/common.cpp
+        src/pixel/codecs/htj2k_v2/decode.cpp
+        src/pixel/codecs/htj2k_v2/encode.cpp
+        src/pixel/codecs/htj2k_v2/loadable_entry.cpp
     )
     target_include_directories(dicomsdl_pixel_htj2k_plugin
         PRIVATE
@@ -375,10 +376,10 @@ if(DICOMSDL_PIXEL_JPEGXL_PLUGIN)
         message(FATAL_ERROR "DICOMSDL_PIXEL_JPEGXL_PLUGIN requires libjxl targets (jxl/jxl_threads/jxl_cms).")
     endif()
     add_library(dicomsdl_pixel_jpegxl_plugin SHARED
-        src/pixel/plugins/shared/jpegxl_v2/common.cpp
-        src/pixel/plugins/shared/jpegxl_v2/decode.cpp
-        src/pixel/plugins/shared/jpegxl_v2/encode.cpp
-        src/pixel/plugins/shared/jpegxl_v2/shared_entry.cpp
+        src/pixel/codecs/jpegxl_v2/common.cpp
+        src/pixel/codecs/jpegxl_v2/decode.cpp
+        src/pixel/codecs/jpegxl_v2/encode.cpp
+        src/pixel/codecs/jpegxl_v2/loadable_entry.cpp
     )
     target_include_directories(dicomsdl_pixel_jpegxl_plugin
         PRIVATE

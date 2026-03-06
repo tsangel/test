@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "dicom.h"
-#include "host_adapter_v2.hpp"
+#include "pixel/host/adapter/host_adapter_v2.hpp"
 
 namespace {
 
@@ -67,15 +67,21 @@ int main() {
 
   pixel::runtime_v2::HostEncoderContextV2 encoder_ctx{};
   pixel::runtime_v2::HostDecoderContextV2 decoder_ctx{};
+  pixel_option_kv_v2 ignored_option{};
+  ignored_option.key = "ignored_option";
+  ignored_option.value = "1";
+  pixel_option_list_v2 ignored_options{};
+  ignored_options.items = &ignored_option;
+  ignored_options.count = 1u;
 
   auto ec = pixel::runtime_v2::configure_host_encoder_context_v2(
-      &encoder_ctx, &registry, "ExplicitVRLittleEndian"_uid, nullptr);
+      &encoder_ctx, &registry, "ExplicitVRLittleEndian"_uid, &ignored_options);
   if (ec != PIXEL_CODEC_ERR_OK) {
     fail("configure_host_encoder_context_v2 failed: " + encoder_detail(encoder_ctx));
   }
 
   ec = pixel::runtime_v2::configure_host_decoder_context_v2(
-      &decoder_ctx, &registry, "ExplicitVRLittleEndian"_uid, nullptr);
+      &decoder_ctx, &registry, "ExplicitVRLittleEndian"_uid, &ignored_options);
   if (ec != PIXEL_CODEC_ERR_OK) {
     fail("configure_host_decoder_context_v2 failed: " + decoder_detail(decoder_ctx));
   }
@@ -160,8 +166,8 @@ int main() {
   float_strides.frame = 2u * float_strides.row;
 
   std::vector<uint8_t> decoded_rescale(float_strides.frame, uint8_t{0});
-  pixel::runtime_v2::HostValueTransformSpecV2 rescale{};
-  rescale.kind = pixel::runtime_v2::HostValueTransformKindV2::kRescale;
+  pixel::runtime_v2::HostModalityValueTransformV2 rescale{};
+  rescale.kind = pixel::runtime_v2::HostModalityValueTransformKindV2::kRescale;
   rescale.rescale_slope = 2.0;
   rescale.rescale_intercept = -1.0;
 
@@ -183,8 +189,8 @@ int main() {
   modality_lut.values = {100.0f, 101.0f, 102.0f, 103.0f, 104.0f, 105.0f};
 
   std::vector<uint8_t> decoded_lut(float_strides.frame, uint8_t{0});
-  pixel::runtime_v2::HostValueTransformSpecV2 lut_transform{};
-  lut_transform.kind = pixel::runtime_v2::HostValueTransformKindV2::kModalityLut;
+  pixel::runtime_v2::HostModalityValueTransformV2 lut_transform{};
+  lut_transform.kind = pixel::runtime_v2::HostModalityValueTransformKindV2::kModalityLut;
   lut_transform.modality_lut = &modality_lut;
 
   ec = pixel::runtime_v2::decode_frame_with_host_context_v2(&decoder_ctx, &info,

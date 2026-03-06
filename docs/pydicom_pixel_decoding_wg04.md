@@ -12,6 +12,8 @@ and how to compare it with `dicomsdl` using the same driver script.
   - default: `/Users/tsangel/workspace.dev/sample/nema/WG04/IMAGES`
 - HTJ2K backend override for dicomsdl:
   - `--dicomsdl-htj2k-decoder auto|openjph|openjpeg`
+  - this is applied once during dicomsdl startup, before the first pixel decode/encode
+  - mid-run backend fallback is not supported
 
 Supported codec directories:
 
@@ -63,6 +65,8 @@ python benchmarks/python/benchmark_wg04_pixel_decode.py \
 
 - Datasets are preloaded once per backend and codec before timed runs.
 - `dicomsdl` path:
+  - when `--dicomsdl-htj2k-decoder` is provided, the script configures the HTJ2K
+    backend immediately after importing `dicomsdl`, before any decode work starts
   - default decode call: `df.to_array(frame=-1, scaled=False)`
   - for `J2KR`/`J2KI` in the base table, the driver forces
     `df.decode_into(out, frame=-1, scaled=False, threads=-1)` to apply multi-CPU decoding

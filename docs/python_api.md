@@ -52,9 +52,10 @@ if elem:
 ## Error handling
 - Invalid keyword/tag strings raise `ValueError`.
 - Parse errors are surfaced as `RuntimeError`.
+- `decode_into` and `to_array` raise `ValueError` for invalid frame/buffer/layout
+  requests, and `RuntimeError` when the native decode path fails after validation.
 
 ## Pixel decode safety warning
-- Pixel decode paths may cache pixel metadata internally.
 - If you mutate pixel-affecting fields (for example: transfer syntax, rows/cols,
   samples-per-pixel, bits allocated, pixel representation, planar configuration,
   number of frames, or pixel data elements), treat any previous decode layout

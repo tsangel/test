@@ -7,7 +7,7 @@
 #include <string_view>
 #include <vector>
 
-#include "static_api.hpp"
+#include "builtin_api.hpp"
 
 namespace {
 
@@ -159,8 +159,8 @@ pixel_decoder_request_v2 make_decoder_request(
 }  // namespace
 
 int main() {
-  const auto& encoder_api = pixel::rle_plugin_v2::encoder_static_api();
-  const auto& decoder_api = pixel::rle_plugin_v2::decoder_static_api();
+  const auto& encoder_api = pixel::rle_plugin_v2::encoder_builtin_api();
+  const auto& decoder_api = pixel::rle_plugin_v2::decoder_builtin_api();
 
   EncoderContextGuard encoder_ctx{};
   encoder_ctx.api = &encoder_api;

@@ -85,40 +85,26 @@ add_library(dicomsdl STATIC
     src/dataset_endian_converter.cpp
     src/dumpdataset.cpp
     src/dicomfile.cpp
+    src/dicomfile_pixel_encode.cpp
     src/dicom_write.cpp
     src/uid_utils.cpp
     src/sequence.cpp
     src/dataelement.cpp
     src/instream.cpp
     src/pixelsequence.cpp
-    src/pixel/registry/codec_registry.cpp
-    src/pixel/external_plugin.cpp
-    src/pixel/entrypoint/decode_entrypoint.cpp
-    src/pixel/decode/core/decode_entrypoint_runner.cpp
-    src/pixel/decode/core/decode_modality_value_transform.cpp
-    src/pixel/decode/core/decode_frame_dispatch.cpp
-    src/pixel/decode/core/decode_frame_source_loader.cpp
-    src/pixel/decode/core/decode_planar_copy.cpp
-    src/pixel/decode/codecs/raw_decode.cpp
-    src/pixel/decode/codecs/encapsulated_uncompressed_decode.cpp
-    src/pixel/decode/codecs/jpeg_decode.cpp
-    src/pixel/decode/codecs/jpegls_decode.cpp
-    src/pixel/decode/codecs/jpeg2k_decode.cpp
-    src/pixel/decode/codecs/htj2k_decode.cpp
-    src/pixel/decode/codecs/jpegxl_decode.cpp
-    src/pixel/entrypoint/encode_entrypoint.cpp
-    src/pixel/encode/codecs/encapsulated_encode.cpp
-    src/pixel/encode/codecs/jpeg2k_encode.cpp
-    src/pixel/encode/codecs/htj2k_encode.cpp
-    src/pixel/encode/codecs/jpegls_encode.cpp
-    src/pixel/encode/codecs/jpeg_encode.cpp
-    src/pixel/encode/codecs/jpegxl_encode.cpp
-    src/pixel/encode/core/encode_set_pixel_data_runner.cpp
-    src/pixel/encode/core/encode_source_layout_compute.cpp
-    src/pixel/encode/core/encode_target_policy.cpp
-    src/pixel/encode/core/native_pixel_copy.cpp
-    src/pixel/encode/core/multicomponent_transform_policy.cpp
-    src/pixel/encode/core/encode_metadata_updater.cpp
+    src/pixel/host/error/codec_error.cpp
+    src/pixel/host/entrypoint/runtime_entrypoint.cpp
+    src/pixel/host/entrypoint/decode_entrypoint.cpp
+    src/pixel/host/decode/decode_modality_value_transform.cpp
+    src/pixel/host/decode/decode_frame_dispatch.cpp
+    src/pixel/host/support/dicom_pixel_support.cpp
+    src/pixel/host/entrypoint/encode_entrypoint.cpp
+    src/pixel/host/encode/encode_options_policy.cpp
+    src/pixel/host/encode/encode_context_validation.cpp
+    src/pixel/host/encode/encode_set_pixel_data_runner.cpp
+    src/pixel/host/encode/encode_target_policy.cpp
+    src/pixel/host/encode/multicomponent_transform_policy.cpp
+    src/pixel/host/encode/encode_metadata_updater.cpp
 )
 set_target_properties(dicomsdl PROPERTIES
     POSITION_INDEPENDENT_CODE ON

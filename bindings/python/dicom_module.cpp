@@ -66,6 +66,7 @@ struct DecodedArrayOutput {
 
 struct DecodedArrayLayout {
 	DecodedArraySpec spec{};
+	dicom::pixel::DecodePlan plan{};
 	dicom::pixel::DecodeOptions opt{};
 	dicom::pixel::DecodeStrides dst_strides{};
 	std::array<std::size_t, 4> shape{};
@@ -126,18 +127,6 @@ DecodedArrayOutput make_writable_numpy_array(
 	return DecodedArrayOutput{std::move(array), bytes};
 }
 
-std::string normalize_htj2k_decoder_name(std::string decoder) {
-	std::string normalized{};
-	normalized.reserve(decoder.size());
-	for (const unsigned char ch : decoder) {
-		if (ch == '_' || ch == '-' || ch == ' ' || ch == '\t') {
-			continue;
-		}
-		normalized.push_back(static_cast<char>(std::tolower(ch)));
-	}
-	return normalized;
-}
-
 std::string normalize_encoder_option_name(std::string option) {
 	std::string normalized{};
 	normalized.reserve(option.size());
@@ -148,6 +137,44 @@ std::string normalize_encoder_option_name(std::string option) {
 		normalized.push_back(static_cast<char>(std::tolower(ch)));
 	}
 	return normalized;
+}
+
+dicom::pixel::Htj2kDecoderBackend parse_htj2k_decoder_backend(
+    std::string_view text) {
+	std::string normalized{};
+	normalized.reserve(text.size());
+	for (const unsigned char ch : text) {
+		if (ch == '_' || ch == '-' || ch == ' ' || ch == '\t') {
+			continue;
+		}
+		normalized.push_back(static_cast<char>(std::tolower(ch)));
+	}
+
+	if (normalized.empty() || normalized == "auto") {
+		return dicom::pixel::Htj2kDecoderBackend::auto_select;
+	}
+	if (normalized == "openjph") {
+		return dicom::pixel::Htj2kDecoderBackend::openjph;
+	}
+	if (normalized == "openjpeg") {
+		return dicom::pixel::Htj2kDecoderBackend::openjpeg;
+	}
+
+	throw nb::value_error(
+	    "htj2k decoder backend must be one of: auto, openjph, openjpeg");
+}
+
+std::string_view htj2k_decoder_backend_name(
+    dicom::pixel::Htj2kDecoderBackend backend) {
+	switch (backend) {
+	case dicom::pixel::Htj2kDecoderBackend::openjph:
+		return "openjph";
+	case dicom::pixel::Htj2kDecoderBackend::openjpeg:
+		return "openjpeg";
+	case dicom::pixel::Htj2kDecoderBackend::auto_select:
+	default:
+		return "auto";
+	}
 }
 
 struct CodecOptionTextStorage {
@@ -784,32 +811,6 @@ void configure_encoder_context_with_options(EncoderContext& context,
 	context.configure(transfer_syntax, text_options.span());
 }
 
-dicom::pixel::Htj2kDecoder parse_htj2k_decoder(std::string decoder) {
-	const auto normalized = normalize_htj2k_decoder_name(std::move(decoder));
-	if (normalized.empty() || normalized == "auto" || normalized == "autoselect") {
-		return dicom::pixel::Htj2kDecoder::auto_select;
-	}
-	if (normalized == "openjph" || normalized == "ojph") {
-		return dicom::pixel::Htj2kDecoder::openjph;
-	}
-	if (normalized == "openjpeg" || normalized == "openjp2") {
-		return dicom::pixel::Htj2kDecoder::openjpeg;
-	}
-	throw nb::value_error("backend must be one of: 'auto', 'openjph', 'openjpeg'");
-}
-
-std::string_view htj2k_decoder_name(dicom::pixel::Htj2kDecoder decoder) noexcept {
-	switch (decoder) {
-	case dicom::pixel::Htj2kDecoder::openjph:
-		return "openjph";
-	case dicom::pixel::Htj2kDecoder::openjpeg:
-		return "openjpeg";
-	case dicom::pixel::Htj2kDecoder::auto_select:
-	default:
-		return "auto";
-	}
-}
-
 DecodedArrayLayout build_decode_layout(
     const DicomFile& self, long frame, bool to_modality_value, int decoder_threads = -1,
     bool decode_mct = true) {
@@ -820,7 +821,17 @@ DecodedArrayLayout build_decode_layout(
 		throw nb::value_error("threads must be -1, 0, or positive");
 	}
 
-	const auto& info = self.pixeldata_info();
+	DecodedArrayLayout layout{};
+	layout.opt.planar_out = dicom::pixel::Planar::interleaved;
+	layout.opt.alignment = 1;
+	layout.opt.to_modality_value = to_modality_value;
+	layout.opt.decode_mct = decode_mct;
+	layout.opt.decoder_threads = decoder_threads;
+	layout.plan = self.create_decode_plan(layout.opt);
+	layout.opt = layout.plan.options;
+	layout.dst_strides = layout.plan.strides;
+
+	const auto& info = layout.plan.info;
 	if (!info.has_pixel_data) {
 		throw nb::value_error(
 		    "to_array/decode_into requires PixelData, FloatPixelData, or DoubleFloatPixelData");
@@ -833,22 +844,12 @@ DecodedArrayLayout build_decode_layout(
 		throw nb::value_error("to_array/decode_into requires NumberOfFrames >= 1");
 	}
 
-	DecodedArrayLayout layout{};
 	const auto rows = static_cast<std::size_t>(info.rows);
 	const auto cols = static_cast<std::size_t>(info.cols);
 	const auto samples_per_pixel = static_cast<std::size_t>(info.samples_per_pixel);
 	layout.frames = static_cast<std::size_t>(info.frames);
 
-	layout.opt.planar_out = dicom::pixel::Planar::interleaved;
-	layout.opt.alignment = 1;
-	layout.opt.to_modality_value = to_modality_value;
-	layout.opt.decode_mct = decode_mct;
-	layout.opt.decoder_threads = decoder_threads;
-	const bool effective_to_modality_value =
-	    dicom::pixel::should_output_modality_value(self, layout.opt);
-	layout.opt.to_modality_value = effective_to_modality_value;
-
-	layout.dst_strides = self.calc_decode_strides(layout.opt);
+	const bool effective_to_modality_value = layout.plan.options.to_modality_value;
 	layout.spec = decoded_array_spec(info, effective_to_modality_value);
 
 	const auto bytes_per_sample = layout.spec.bytes_per_sample;
@@ -933,13 +934,13 @@ void decode_layout_into(const DicomFile& self, const DecodedArrayLayout& layout,
 		throw nb::value_error("decode_into output buffer is smaller than required size");
 	}
 	if (!layout.decode_all_frames) {
-		self.decode_into(layout.frame_index, out, layout.dst_strides, layout.opt);
+		self.decode_into(layout.frame_index, out, layout.plan);
 		return;
 	}
 
 	for (std::size_t frame_index = 0; frame_index < layout.frames; ++frame_index) {
 		auto frame_span = out.subspan(frame_index * layout.frame_stride, layout.frame_stride);
-		self.decode_into(frame_index, frame_span, layout.dst_strides, layout.opt);
+		self.decode_into(frame_index, frame_span, layout.plan);
 	}
 }
 
@@ -957,7 +958,7 @@ const DataElement* raw_source_element(const DicomFile& self, dicom::pixel::DataT
 
 nb::object dicomfile_to_array_view(const DicomFile& self, long frame) {
 	const auto layout = build_decode_layout(self, frame, false, 0);
-	const auto& info = self.pixeldata_info();
+	const auto& info = layout.plan.info;
 	const auto& dataset = self.dataset();
 
 	if (!info.ts.is_uncompressed()) {
@@ -2070,6 +2071,13 @@ NB_MODULE(_dicomsdl, m) {
 		    "    True by default. Currently honored by OpenJPEG-based decode paths.\n"
 		    "    OpenJPH backend ignores this flag.\n"
 		    "\n"
+		    "Raises\n"
+		    "------\n"
+		    "ValueError\n"
+		    "    If the requested frame, output buffer size/itemsize, or decoded layout is invalid.\n"
+		    "RuntimeError\n"
+		    "    If native decode fails after argument validation.\n"
+		    "\n"
 		    "Returns\n"
 		    "-------\n"
 		    "Same object as `out` for call chaining.")
@@ -2275,78 +2283,74 @@ m.def("reset_root_elements_reserve_hint",
 m.def("set_htj2k_decoder_backend",
     [](const std::string& backend) {
 	    std::string error{};
-	    if (!dicom::pixel::set_htj2k_decoder_backend(
-	            parse_htj2k_decoder(backend), &error)) {
+	    const auto parsed = parse_htj2k_decoder_backend(backend);
+	    if (!dicom::pixel::set_htj2k_decoder_backend(parsed, &error)) {
 		    if (error.empty()) {
-			    error = "failed to update htj2k decoder backend";
+			    error = "failed to configure HTJ2K decoder backend";
 		    }
-		    throw nb::value_error(error.c_str());
+		    throw std::runtime_error(error);
 	    }
     },
     nb::arg("backend"),
-    "Set global HTJ2K decoder backend for builtin registry dispatch.\n"
-    "Allowed values: 'auto', 'openjph', 'openjpeg'.");
+    "Configure the preferred HTJ2K decoder backend before first pixel runtime use.\n"
+    "Accepted values: 'auto', 'openjph', 'openjpeg'.");
 
 m.def("get_htj2k_decoder_backend",
     []() {
-	    const auto backend = dicom::pixel::get_htj2k_decoder_backend();
-	    const auto name = htj2k_decoder_name(backend);
-	    return std::string(name);
+	    return std::string(htj2k_decoder_backend_name(
+	        dicom::pixel::get_htj2k_decoder_backend()));
     },
-    "Return current global HTJ2K decoder backend name.");
+    "Return the configured HTJ2K decoder backend preference.");
 
-m.def("use_openjph_for_htj2k_decode",
+m.def("use_openjph_for_htj2k_decoding",
     []() {
 	    std::string error{};
-	    if (!dicom::pixel::use_openjph_for_htj2k_decode(&error)) {
+	    if (!dicom::pixel::use_openjph_for_htj2k_decoding(&error)) {
 		    if (error.empty()) {
-			    error = "failed to force HTJ2K decoder backend to openjph";
+			    error = "failed to configure HTJ2K decoder backend";
 		    }
-		    throw nb::value_error(error.c_str());
+		    throw std::runtime_error(error);
 	    }
     },
-    "Force global HTJ2K decoder backend to 'openjph'.");
+    "Prefer the OpenJPH HTJ2K decoder before first pixel runtime use.");
 
-m.def("use_openjpeg_for_htj2k_decode",
+m.def("use_openjpeg_for_htj2k_decoding",
     []() {
 	    std::string error{};
-	    if (!dicom::pixel::use_openjpeg_for_htj2k_decode(&error)) {
+	    if (!dicom::pixel::use_openjpeg_for_htj2k_decoding(&error)) {
 		    if (error.empty()) {
-			    error = "failed to force HTJ2K decoder backend to openjpeg";
+			    error = "failed to configure HTJ2K decoder backend";
 		    }
-		    throw nb::value_error(error.c_str());
+		    throw std::runtime_error(error);
 	    }
     },
-    "Force global HTJ2K decoder backend to 'openjpeg'.");
+    "Prefer the OpenJPEG HTJ2K decoder before first pixel runtime use.");
 
 m.def("register_external_codec_plugin",
     [](const std::string& library_path) {
-	    std::string plugin_key{};
 	    std::string error{};
 	    if (!dicom::pixel::register_external_codec_plugin_from_library(
-	            library_path, &plugin_key, &error)) {
+	            library_path, &error)) {
 		    if (error.empty()) {
 			    error = "failed to register external codec plugin";
 		    }
 		    throw nb::value_error(error.c_str());
 	    }
-	    return plugin_key;
     },
     nb::arg("library_path"),
-    "Load an external codec plugin shared library (.dll/.so/.dylib) and return the plugin key.");
+    "Load an external codec plugin shared library (.dll/.so/.dylib).");
 
-m.def("unregister_external_codec_plugin",
-    [](const std::string& plugin_key) {
+m.def("clear_external_codec_plugins",
+    []() {
 	    std::string error{};
-	    if (!dicom::pixel::unregister_external_codec_plugin(plugin_key, &error)) {
+	    if (!dicom::pixel::clear_external_codec_plugins(&error)) {
 		    if (error.empty()) {
-			    error = "failed to unregister external codec plugin";
+			    error = "failed to clear external codec plugins";
 		    }
 		    throw nb::value_error(error.c_str());
 	    }
     },
-    nb::arg("plugin_key"),
-    "Unregister an external codec plugin and restore builtin dispatch.");
+    "Unload every external codec plugin and restore builtin dispatch.");
 
 		nb::class_<Tag>(m, "Tag")
 		.def(nb::init<>())
@@ -2768,10 +2772,10 @@ m.def("generate_study_instance_uid",
 	    "reset_root_elements_reserve_hint",
 	    "set_htj2k_decoder_backend",
 	    "get_htj2k_decoder_backend",
-	    "use_openjph_for_htj2k_decode",
-	    "use_openjpeg_for_htj2k_decode",
+	    "use_openjph_for_htj2k_decoding",
+	    "use_openjpeg_for_htj2k_decoding",
 	    "register_external_codec_plugin",
-	    "unregister_external_codec_plugin",
+	    "clear_external_codec_plugins",
 	    "keyword_to_tag_vr",
 	    "tag_to_keyword",
 	    "tag_to_entry",

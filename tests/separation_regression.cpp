@@ -352,7 +352,7 @@ void require_patient_name_rows_cols(const dicom::DicomFile& file, std::string_vi
 } // namespace
 
 int main() {
-	// 1) Deflated stream parse + transfer syntax + pixeldata_info cache lifecycle regression.
+	// 1) Deflated stream parse + transfer syntax + pixeldata_info refresh regression.
 	const auto deflated_rows3_cols5 = build_part10(
 	    "1.2.840.10008.1.2.1.99", build_deflated_dataset_body(3, 5));
 	const auto deflated_rows7_cols9 = build_part10(
@@ -391,11 +391,11 @@ int main() {
 
 	const auto& info_after = deflated_file->pixeldata_info();
 	if (info_after.rows != 7 || info_after.cols != 9) {
-		fail("deflated reread: pixeldata_info cache was not refreshed");
+		fail("deflated reread: pixeldata_info was not refreshed");
 	}
 	const auto& file_info_after = deflated_file->pixeldata_info();
 	if (file_info_after.rows != 7 || file_info_after.cols != 9) {
-		fail("deflated reread: DicomFile pixeldata_info cache was not refreshed");
+		fail("deflated reread: DicomFile pixeldata_info was not refreshed");
 	}
 
 	const auto deflated_roundtrip_bytes = deflated_file->write_bytes();

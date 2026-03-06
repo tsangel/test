@@ -43,9 +43,11 @@ if elem:
 
 - If you change pixel-related tags or transfer syntax, treat previously derived
   pixel layout assumptions as stale.
-- Re-query pixel metadata and reallocate decode output buffers before calling
+- Recreate the decode plan and reallocate decode output buffers before calling
   `decode_into` again.
 - Do not keep using an old output array shape/stride after metadata changes.
+- `decode_into` raises if the requested frame, output buffer size/layout, or
+  native decode backend state is invalid.
 
 ## C++ (example build)
 1. Configure & build

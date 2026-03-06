@@ -173,10 +173,10 @@ def load_bundled_codec_plugins(*, strict=False):
             )
         return tuple()
 
-    loaded_plugin_keys = []
+    loaded_plugin_paths = []
     for library_path in bundled_codec_plugin_libraries():
         try:
-            plugin_key = register_plugin(library_path)
+            register_plugin(library_path)
         except Exception as exc:  # pragma: no cover - exercised by integration setups
             if strict:
                 raise
@@ -186,8 +186,8 @@ def load_bundled_codec_plugins(*, strict=False):
                 stacklevel=2,
             )
             continue
-        loaded_plugin_keys.append(plugin_key)
-    return tuple(loaded_plugin_keys)
+        loaded_plugin_paths.append(library_path)
+    return tuple(loaded_plugin_paths)
 
 
 def _autoload_bundled_codec_plugins():

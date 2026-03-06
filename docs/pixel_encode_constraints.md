@@ -8,23 +8,26 @@ This document summarizes the current constraints for the pixel encode path:
 ## Layer/Code Map Pointers
 
 - Entry point:
-  - `src/pixel/entrypoint/encode_entrypoint.cpp`
-- Core resolver/runner:
-  - `src/pixel/encode/core/*`
+  - `src/pixel/host/entrypoint/encode_entrypoint.cpp`
+- Host encode orchestration:
+  - `src/pixel/host/encode/*`
+- Runtime dispatch and registry:
+  - `src/pixel/host/adapter/host_adapter_v2.cpp`
+  - `src/pixel/runtime/runtime_registry_v2.cpp`
+  - `src/pixel/runtime/plugin_registry_v2.cpp`
 - Codec implementations:
-  - `src/pixel/encode/codecs/*_encode.cpp`
-- Registry and option schema:
-  - `src/pixel/registry/codec_registry.cpp`
-- Plugin ABI glue:
-  - `src/pixel/plugin_abi/builtin/*_builtin_plugin.cpp`
-  - `src/pixel/plugin_abi/common/codec_plugin_common.hpp`
+  - `src/pixel/codecs/*_v2/encode.cpp`
+  - `src/pixel/codecs/rle_v2/*`
+- ABI contract:
+  - `src/pixel/abi/pixel_encoder_plugin_abi_v2.h`
+  - `src/pixel/abi/pixel_codec_plugin_abi_v2.h`
 
 Naming conventions aligned with the refactor:
 
 - resolver layer: `resolve_*`
 - runner layer: `run_*`
 - dispatch layer: `dispatch_*`
-- codec implementation: `encode_<codec>_frame`
+- codec implementation: `encoder_encode_frame`
 
 ## Plugin Boundary Contract (Encoder Migration)
 
@@ -35,7 +38,7 @@ Naming conventions aligned with the refactor:
   - `stage`: typically `parse_options`, `validate`, `encode`, `allocate`
   - `detail`: codec/backend-specific detail text
 - Final exception creation is centralized in common orchestration with context:
-  `file`, `transfer syntax`, `plugin key`, and optional `frame index`.
+  `file`, `transfer syntax`, and optional `frame index`.
 
 ## Encode-capable Transfer Syntax UIDs
 
