@@ -19,6 +19,25 @@
 
 namespace dicom::pixel::detail {
 
+namespace {
+
+void validate_decode_plan_or_throw(
+    const DicomFile& df, std::size_t frame_index, const DecodePlan& plan) {
+	if (!plan.info.ts.valid() || plan.strides.frame == 0) {
+		const auto transfer_syntax =
+		    plan.info.ts.valid() ? plan.info.ts : df.transfer_syntax_uid();
+		throw_codec_error_with_context("pixel::decode_frame_into", df.path(),
+		    transfer_syntax, frame_index,
+		    CodecError{
+		        .code = CodecStatusCode::invalid_argument,
+		        .stage = "validate_plan",
+		        .detail = "decode plan is not initialized; call create_decode_plan()",
+		    });
+	}
+}
+
+} // namespace
+
 #if defined(DICOMSDL_PIXEL_RUNTIME_ENABLED)
 namespace {
 
@@ -299,7 +318,7 @@ void parse_runtime_detail_or_default(
 // Dispatch one frame decode through the runtime path or fail with a stable unsupported error.
 void dispatch_decode_frame(const DicomFile& df, std::size_t frame_index,
     std::span<std::uint8_t> dst, const DecodePlan& plan) {
-	const auto& info = plan.info;
+	validate_decode_plan_or_throw(df, frame_index, plan);
 #if defined(DICOMSDL_PIXEL_RUNTIME_ENABLED)
 	// Prefer the runtime-backed path when that subsystem is compiled in and initialized.
 	if (try_decode_frame_with_runtime(df, frame_index, dst, plan)) {
@@ -313,7 +332,7 @@ void dispatch_decode_frame(const DicomFile& df, std::size_t frame_index,
 	decode_error.stage = "plugin_lookup";
 	decode_error.detail = "runtime registry is not available";
 	throw_codec_error_with_context("pixel::decode_frame_into", df.path(),
-	    info.ts, frame_index, decode_error);
+	    plan.info.ts, frame_index, decode_error);
 }
 
 } // namespace dicom::pixel::detail

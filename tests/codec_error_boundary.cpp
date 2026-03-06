@@ -68,6 +68,18 @@ void expect_decode_throw(std::string_view label, dicom::DicomFile& df,
 	}
 }
 
+void expect_create_decode_plan_throw(
+    std::string_view label, dicom::DicomFile& df, std::string_view expected_reason) {
+	try {
+		(void)df.create_decode_plan(dicom::pixel::DecodeOptions{});
+		fail(std::string(label) + " should throw");
+	} catch (const std::exception& e) {
+		const std::string what = e.what();
+		expect_contains(what, "DicomFile::calc_decode_strides", label);
+		expect_contains(what, "reason=" + std::string(expected_reason), label);
+	}
+}
+
 } // namespace
 
 int main() {
@@ -128,25 +140,25 @@ int main() {
 	{
 		dicom::DicomFile df{};
 		df.set_transfer_syntax("ExplicitVRLittleEndian"_uid);
-		expect_decode_throw("decode throw message", df, 0, std::span<std::uint8_t>{},
-		    dicom::pixel::DecodePlan{},
-		    "ExplicitVRLittleEndian"_uid.value(), "invalid_argument", "load_frame_source");
+		expect_decode_throw("uninitialized decode plan throw message", df, 0,
+		    std::span<std::uint8_t>{}, dicom::pixel::DecodePlan{},
+		    "ExplicitVRLittleEndian"_uid.value(), "invalid_argument", "validate_plan");
 	}
 
 	for (const auto [label, ts] : {
 	         std::pair<std::string_view, dicom::uid::WellKnown>{
-	             "jpeg decode throw message", "JPEGBaseline8Bit"_uid},
-	         {"jpegls decode throw message", "JPEGLSLossless"_uid},
-	         {"jpegxl decode throw message", "JPEGXLLossless"_uid},
-	         {"jpeg2k decode throw message", "JPEG2000Lossless"_uid},
-	         {"htj2k decode throw message", "HTJ2KLossless"_uid},
-	         {"rle decode throw message", "RLELossless"_uid},
+	             "jpeg uninitialized decode plan throw message", "JPEGBaseline8Bit"_uid},
+	         {"jpegls uninitialized decode plan throw message", "JPEGLSLossless"_uid},
+	         {"jpegxl uninitialized decode plan throw message", "JPEGXLLossless"_uid},
+	         {"jpeg2k uninitialized decode plan throw message", "JPEG2000Lossless"_uid},
+	         {"htj2k uninitialized decode plan throw message", "HTJ2KLossless"_uid},
+	         {"rle uninitialized decode plan throw message", "RLELossless"_uid},
 	     }) {
 		dicom::DicomFile df{};
 		df.set_transfer_syntax(ts);
 		expect_decode_throw(label, df, 0, std::span<std::uint8_t>{},
-		    dicom::pixel::DecodePlan{},
-		    ts.value(), "invalid_argument", "load_frame_source");
+		    dicom::pixel::DecodePlan{}, ts.value(),
+		    "invalid_argument", "validate_plan");
 	}
 
 	{
@@ -191,9 +203,8 @@ int main() {
 		configure_minimal_integral_pixel_metadata(df);
 		set_long_element(df, "Rows"_tag, dicom::VR::US, 0, "Rows");
 		df.set_native_pixel_data(std::vector<std::uint8_t>{0x00, 0x00});
-		expect_decode_throw("native metadata throw message", df, 0, std::span<std::uint8_t>{},
-		    dicom::pixel::DecodePlan{},
-		    "ExplicitVRLittleEndian"_uid.value(), "invalid_argument", "load_frame_source");
+		expect_create_decode_plan_throw("native metadata create_decode_plan throw message", df,
+		    "invalid Rows/Columns/SamplesPerPixel");
 	}
 
 	for (const auto [label, ts] : {
@@ -291,8 +302,10 @@ int main() {
 	{
 		dicom::DicomFile df{};
 		df.set_transfer_syntax("MPEG2MPML"_uid);
+		configure_minimal_integral_pixel_metadata(df);
+		const auto plan = df.create_decode_plan(dicom::pixel::DecodeOptions{});
 		expect_decode_throw("unsupported ts decode throw message", df, 0,
-		    std::span<std::uint8_t>{}, dicom::pixel::DecodePlan{},
+		    std::span<std::uint8_t>{}, plan,
 		    "MPEG2MPML"_uid.value(), "unsupported",
 		    "plugin_lookup");
 	}

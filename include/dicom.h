@@ -1134,6 +1134,7 @@ struct ModalityValueTransform {
 /// 2. allocate `plan.strides.frame` bytes
 /// 3. call `decode_frame_into()` / `DicomFile::decode_into()`
 /// Recreate the plan after transfer syntax or pixel-affecting metadata changes.
+/// A default-constructed plan is not valid input to `decode_frame_into()`.
 struct DecodePlan {
 	PixelDataInfo info{};
 	DecodeOptions options{};
@@ -1155,8 +1156,9 @@ struct DecodePlan {
 /// - JPEG 2000: integral up to 32-bit
 /// When modality-value output is effectively enabled, output sample type is float32.
 /// `dst` is expected to match the layout implied by `plan`.
-/// @throws diag::DicomException on invalid frame index, mismatched destination layout/size,
-/// unsupported decoder binding, or backend decode failure.
+/// `plan` must come from `create_decode_plan()` for the current file state.
+/// @throws diag::DicomException on invalid decode plan, invalid frame index,
+/// mismatched destination layout/size, unsupported decoder binding, or backend decode failure.
 void decode_frame_into(const DicomFile& df, std::size_t frame_index,
     std::span<std::uint8_t> dst, const DecodePlan& plan);
 
