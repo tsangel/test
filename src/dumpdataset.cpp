@@ -419,7 +419,7 @@ std::string DataSet::dump(std::size_t max_print_chars, bool include_offset) cons
 }
 
 std::string DicomFile::dump(std::size_t max_print_chars, bool include_offset) const {
-	return root_dataset_->dump(max_print_chars, include_offset);
+	return root_dataset_.dump(max_print_chars, include_offset);
 }
 
 }  // namespace dicom

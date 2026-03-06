@@ -3,6 +3,8 @@
 #include <ojph_mem.h>
 #include <ojph_params.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>

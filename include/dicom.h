@@ -1564,8 +1564,9 @@ public:
 	~DataSet();
 	DataSet(const DataSet&) = delete;
 	DataSet& operator=(const DataSet&) = delete;
-	DataSet(DataSet&&) noexcept = default;
-	DataSet& operator=(DataSet&&) noexcept = default;
+	// DataSet keeps self/root pointers, so moving would invalidate internal context.
+	DataSet(DataSet&&) noexcept = delete;
+	DataSet& operator=(DataSet&&) noexcept = delete;
 
 	/// Attach the dataset to a DICOM file on disk. Lazy: parsing happens on first access.
 	/// @param path Filesystem path to the DICOM file.
@@ -1725,8 +1726,9 @@ public:
 	~DicomFile();
 	DicomFile(const DicomFile&) = delete;
 	DicomFile& operator=(const DicomFile&) = delete;
-	DicomFile(DicomFile&&) noexcept = default;
-	DicomFile& operator=(DicomFile&&) noexcept = default;
+	// DicomFile embeds the root DataSet, which keeps back-pointers into this owner.
+	DicomFile(DicomFile&&) noexcept = delete;
+	DicomFile& operator=(DicomFile&&) noexcept = delete;
 
 	[[nodiscard]] DataSet& dataset();
 	[[nodiscard]] const DataSet& dataset() const;
@@ -1844,7 +1846,7 @@ private:
 	void clear_error_state() noexcept;
 	void set_error_state(std::string message);
 
-	std::unique_ptr<DataSet> root_dataset_;
+	DataSet root_dataset_;
 	uid::WellKnown transfer_syntax_uid_{};
 	bool has_error_{false};
 	std::string error_message_{};
