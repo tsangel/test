@@ -1,13 +1,46 @@
- cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.16)
 
 if(APPLE)
-    if(DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
-        if(CMAKE_OSX_DEPLOYMENT_TARGET VERSION_LESS "10.13")
-            set(CMAKE_OSX_DEPLOYMENT_TARGET "10.13" CACHE STRING "Minimum macOS deployment target" FORCE)
-        endif()
-    else()
-        set(CMAKE_OSX_DEPLOYMENT_TARGET "10.13" CACHE STRING "Minimum macOS deployment target")
+    set(_dicomsdl_macos_min_target "10.13")
+    set(_dicomsdl_macos_architectures "")
+
+    if(DEFINED CMAKE_OSX_ARCHITECTURES AND NOT CMAKE_OSX_ARCHITECTURES STREQUAL "")
+        set(_dicomsdl_macos_architectures "${CMAKE_OSX_ARCHITECTURES}")
+    elseif(DEFINED ENV{CMAKE_OSX_ARCHITECTURES} AND NOT "$ENV{CMAKE_OSX_ARCHITECTURES}" STREQUAL "")
+        set(_dicomsdl_macos_architectures "$ENV{CMAKE_OSX_ARCHITECTURES}")
+    elseif(CMAKE_HOST_SYSTEM_PROCESSOR)
+        set(_dicomsdl_macos_architectures "${CMAKE_HOST_SYSTEM_PROCESSOR}")
     endif()
+
+    string(REPLACE ";" " " _dicomsdl_macos_architecture_text "${_dicomsdl_macos_architectures}")
+    string(TOLOWER "${_dicomsdl_macos_architecture_text}" _dicomsdl_macos_architecture_text)
+    if(_dicomsdl_macos_architecture_text MATCHES "(^|[ ,])arm64($|[ ,])" OR
+       _dicomsdl_macos_architecture_text MATCHES "(^|[ ,])aarch64($|[ ,])")
+        set(_dicomsdl_macos_min_target "11.0")
+    endif()
+
+    set(_dicomsdl_requested_macos_target "")
+    if(DEFINED CMAKE_OSX_DEPLOYMENT_TARGET AND NOT CMAKE_OSX_DEPLOYMENT_TARGET STREQUAL "")
+        set(_dicomsdl_requested_macos_target "${CMAKE_OSX_DEPLOYMENT_TARGET}")
+    elseif(DEFINED ENV{MACOSX_DEPLOYMENT_TARGET} AND NOT "$ENV{MACOSX_DEPLOYMENT_TARGET}" STREQUAL "")
+        set(_dicomsdl_requested_macos_target "$ENV{MACOSX_DEPLOYMENT_TARGET}")
+    endif()
+
+    if(_dicomsdl_requested_macos_target STREQUAL "" OR
+       _dicomsdl_requested_macos_target VERSION_LESS _dicomsdl_macos_min_target)
+        set(_dicomsdl_effective_macos_target "${_dicomsdl_macos_min_target}")
+    else()
+        set(_dicomsdl_effective_macos_target "${_dicomsdl_requested_macos_target}")
+    endif()
+
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "${_dicomsdl_effective_macos_target}" CACHE STRING
+        "Minimum macOS deployment target" FORCE)
+
+    unset(_dicomsdl_effective_macos_target)
+    unset(_dicomsdl_requested_macos_target)
+    unset(_dicomsdl_macos_architecture_text)
+    unset(_dicomsdl_macos_architectures)
+    unset(_dicomsdl_macos_min_target)
 endif()
 
 set(_version_header_file "${CMAKE_CURRENT_SOURCE_DIR}/include/dicom_const.h")

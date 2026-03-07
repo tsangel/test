@@ -297,6 +297,10 @@ class CMakeBuild(build_ext):
             build_args += ["--config", cfg]
 
         if sys.platform == "darwin":
+            deployment_target = os.environ.get("MACOSX_DEPLOYMENT_TARGET", "").strip()
+            if deployment_target:
+                cmake_args += [f"-DCMAKE_OSX_DEPLOYMENT_TARGET={deployment_target}"]
+
             arch_candidate = None
             plat_tokens = re.split(r"[-_]", plat_name_raw)
             if plat_tokens:

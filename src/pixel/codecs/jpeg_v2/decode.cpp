@@ -19,6 +19,7 @@
 #include <stdexcept>
 #include <vector>
 
+#include "../common/decode_fastpath_v2.hpp"
 #include "internal.hpp"
 
 namespace pixel::jpeg_plugin_v2 {
@@ -352,45 +353,6 @@ pixel_error_code_v2 write_decoded_pixels(DecoderCtx* ctx,
   const std::size_t dst_sample_bytes = static_cast<std::size_t>(dst_dtype.bytes);
   const std::size_t row_stride_sz = static_cast<std::size_t>(row_stride);
 
-  auto apply_transform = [&](int32_t sv, double* out_value) -> bool {
-    if (out_value == nullptr) {
-      return false;
-    }
-    if (transform_kind == PIXEL_DECODER_VALUE_TRANSFORM_NONE_V2) {
-      *out_value = static_cast<double>(sv);
-      return true;
-    }
-    if (transform_kind == PIXEL_DECODER_VALUE_TRANSFORM_RESCALE_V2) {
-      const double slope = request->value_transform.rescale_slope;
-      const double intercept = request->value_transform.rescale_intercept;
-      *out_value = static_cast<double>(sv) * slope + intercept;
-      return true;
-    }
-    if (transform_kind == PIXEL_DECODER_VALUE_TRANSFORM_MODALITY_LUT_V2) {
-      const int64_t first_mapped = request->value_transform.lut_first_mapped;
-      const uint64_t count = request->value_transform.lut_value_count;
-      if (count == 0) {
-        *out_value = 0.0;
-        return true;
-      }
-      int64_t idx = static_cast<int64_t>(sv) - first_mapped;
-      if (idx < 0) {
-        idx = 0;
-      }
-      const int64_t max_idx = static_cast<int64_t>(count - 1);
-      if (idx > max_idx) {
-        idx = max_idx;
-      }
-      float lut_value = 0.0f;
-      const uint8_t* lut_data = request->value_transform.lut_values_f32.data;
-      std::memcpy(&lut_value, lut_data + static_cast<std::size_t>(idx) * sizeof(float),
-          sizeof(float));
-      *out_value = static_cast<double>(lut_value);
-      return true;
-    }
-    return false;
-  };
-
   auto sample_ptr_at = [&](std::size_t r, std::size_t c, std::size_t comp) -> const uint8_t* {
     const std::size_t source_pixel_stride = samples_sz * source_sample_bytes_sz;
     return decoded + r * source_row_bytes_sz +
@@ -398,8 +360,33 @@ pixel_error_code_v2 write_decoded_pixels(DecoderCtx* ctx,
   };
 
   const bool transformed = transform_kind != PIXEL_DECODER_VALUE_TRANSFORM_NONE_V2;
+  const bool matching_integral_storage =
+      ::pixel::codec_common_v2::integral_storage_matches_dst_dtype_v2(
+          source_sample_bytes, source_is_signed, dst_dtype);
+
+  auto load_sample_or_throw = [&](const uint8_t* src_ptr) -> int32_t {
+    char reason[256];
+    int32_t sample = 0;
+    if (!load_integral_sample(src_ptr, source_sample_bytes,
+            source_is_signed, source_bits, &sample, reason, sizeof(reason))) {
+      throw std::runtime_error(reason);
+    }
+    return sample;
+  };
 
   if (!transformed) {
+    if (matching_integral_storage) {
+      const auto typed_status =
+          ::pixel::codec_common_v2::write_loaded_integral_rows_v2(
+              request, row_stride, output_planar,
+              [&](std::size_t row, std::size_t col, std::size_t comp) -> int32_t {
+                return load_sample_or_throw(sample_ptr_at(row, col, comp));
+              });
+      if (typed_status == ::pixel::codec_common_v2::loaded_integral_write_status_v2::ok) {
+        return PIXEL_CODEC_ERR_OK;
+      }
+    }
+
     if (output_planar && samples_sz > 1) {
       const std::size_t output_plane_bytes_sz = row_stride_sz * rows_sz;
       for (std::size_t comp = 0; comp < samples_sz; ++comp) {
@@ -465,31 +452,19 @@ pixel_error_code_v2 write_decoded_pixels(DecoderCtx* ctx,
     return PIXEL_CODEC_ERR_OK;
   }
 
-  for (std::size_t r = 0; r < rows_sz; ++r) {
-    uint8_t* dst_row = request->output.dst + r * row_stride_sz;
-    for (std::size_t c = 0; c < cols_sz; ++c) {
-      const uint8_t* src_ptr = sample_ptr_at(r, c, 0);
-      char reason[256];
-      int32_t sample = 0;
-      if (!load_integral_sample(src_ptr, source_sample_bytes,
-              source_is_signed, source_bits, &sample, reason, sizeof(reason))) {
-        return fail_detail(ctx, PIXEL_CODEC_ERR_FAILED, "decode_frame", reason);
-      }
-
-      double value = 0.0;
-      if (!apply_transform(sample, &value)) {
-        return fail_detail(ctx, PIXEL_CODEC_ERR_UNSUPPORTED, "decode_frame",
-            "unsupported value transform kind");
-      }
-
-      uint8_t* dst_ptr = dst_row + c * dst_sample_bytes;
-      if (!write_float_sample(request->output.dst_dtype, value, dst_ptr)) {
-        return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "decode_frame",
-            "value transform requires float destination dtype");
-      }
-    }
+  const auto status = ::pixel::codec_common_v2::write_mono_value_transform_rows_v2(
+      request, row_stride, transform_kind,
+      [&](std::size_t row, std::size_t col) -> int32_t {
+        return load_sample_or_throw(sample_ptr_at(row, col, 0));
+      });
+  if (status == ::pixel::codec_common_v2::mono_transform_write_status_v2::unsupported_transform_kind) {
+    return fail_detail(ctx, PIXEL_CODEC_ERR_UNSUPPORTED, "decode_frame",
+        "unsupported value transform kind");
   }
-
+  if (status == ::pixel::codec_common_v2::mono_transform_write_status_v2::unsupported_dst_dtype) {
+    return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "decode_frame",
+        "value transform requires float destination dtype");
+  }
   return PIXEL_CODEC_ERR_OK;
 }
 

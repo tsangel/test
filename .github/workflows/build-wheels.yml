@@ -15,12 +15,16 @@ jobs:
         include:
           - os: ubuntu-latest
             archs: x86_64
+            macos_env: ""
           - os: macos-15-intel
             archs: x86_64
+            macos_env: "MACOSX_DEPLOYMENT_TARGET=10.13"
           - os: macos-14
             archs: arm64
+            macos_env: "MACOSX_DEPLOYMENT_TARGET=11.0"
           - os: windows-latest
             archs: AMD64
+            macos_env: ""
     runs-on: ${{ matrix.os }}
     env:
       CIBW_BUILD: cp39-* cp310-* cp311-* cp312-* cp313-* cp314-*
@@ -28,7 +32,7 @@ jobs:
       CIBW_ARCHS: ${{ matrix.archs }}
       CIBW_PRERELEASE_PYTHONS: "1"
       CIBW_BEFORE_BUILD: python -m pip install --upgrade pip cmake ninja
-      CIBW_ENVIRONMENT_MACOS: "MACOSX_DEPLOYMENT_TARGET=10.13"
+      CIBW_ENVIRONMENT_MACOS: ${{ matrix.macos_env }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

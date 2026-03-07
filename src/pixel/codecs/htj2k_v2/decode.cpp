@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "../common/decode_fastpath_v2.hpp"
 #include "internal.hpp"
 
 namespace pixel::htj2k_plugin_v2 {
@@ -47,6 +48,20 @@ const int32_t* openjph_line_as_i32(const ojph::line_buf* line, std::size_t cols,
     (*scratch)[c] = static_cast<int32_t>(std::lround(line->f32[c]));
   }
   return scratch->data();
+}
+
+bool can_write_openjph_direct_to_dst_dtype(
+    ojph::param_siz siz, uint32_t components, const DtypeInfo& dst_dtype) {
+  if (dst_dtype.is_float) {
+    return false;
+  }
+  for (uint32_t comp = 0; comp < components; ++comp) {
+    if (!::pixel::codec_common_v2::decoded_integral_component_fits_dst_dtype_v2(
+            siz.get_bit_depth(comp), siz.is_signed(comp), dst_dtype)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 pixel_error_code_v2 validate_decoder_request(
@@ -211,7 +226,7 @@ pixel_error_code_v2 validate_decoder_request(
   return PIXEL_CODEC_ERR_OK;
 }
 
-pixel_error_code_v2 write_decoded_samples(DecoderCtx* ctx,
+pixel_error_code_v2 write_htj2k_decoded_samples(DecoderCtx* ctx,
     const pixel_decoder_request_v2* request,
     const std::vector<int32_t>& decoded_interleaved,
     DtypeInfo dst_dtype,
@@ -234,45 +249,6 @@ pixel_error_code_v2 write_decoded_samples(DecoderCtx* ctx,
 
   const std::size_t row_stride_sz = static_cast<std::size_t>(row_stride);
   const std::size_t dst_sample_bytes = static_cast<std::size_t>(dst_dtype.bytes);
-
-  auto apply_transform = [&](int32_t sv, double* out_value) -> bool {
-    if (out_value == nullptr) {
-      return false;
-    }
-    if (transform_kind == PIXEL_DECODER_VALUE_TRANSFORM_NONE_V2) {
-      *out_value = static_cast<double>(sv);
-      return true;
-    }
-    if (transform_kind == PIXEL_DECODER_VALUE_TRANSFORM_RESCALE_V2) {
-      const double slope = request->value_transform.rescale_slope;
-      const double intercept = request->value_transform.rescale_intercept;
-      *out_value = static_cast<double>(sv) * slope + intercept;
-      return true;
-    }
-    if (transform_kind == PIXEL_DECODER_VALUE_TRANSFORM_MODALITY_LUT_V2) {
-      const int64_t first_mapped = request->value_transform.lut_first_mapped;
-      const uint64_t count = request->value_transform.lut_value_count;
-      if (count == 0) {
-        *out_value = 0.0;
-        return true;
-      }
-      int64_t idx = static_cast<int64_t>(sv) - first_mapped;
-      if (idx < 0) {
-        idx = 0;
-      }
-      const int64_t max_idx = static_cast<int64_t>(count - 1);
-      if (idx > max_idx) {
-        idx = max_idx;
-      }
-      float lut_value = 0.0f;
-      const uint8_t* lut_data = request->value_transform.lut_values_f32.data;
-      std::memcpy(&lut_value, lut_data + static_cast<std::size_t>(idx) * sizeof(float),
-          sizeof(float));
-      *out_value = static_cast<double>(lut_value);
-      return true;
-    }
-    return false;
-  };
 
   if (transform_kind == PIXEL_DECODER_VALUE_TRANSFORM_NONE_V2) {
     if (output_planar && samples_sz > 1) {
@@ -330,40 +306,40 @@ pixel_error_code_v2 write_decoded_samples(DecoderCtx* ctx,
     return PIXEL_CODEC_ERR_OK;
   }
 
-  for (std::size_t r = 0; r < rows_sz; ++r) {
-    uint8_t* dst_row = request->output.dst + r * row_stride_sz;
-    for (std::size_t c = 0; c < cols_sz; ++c) {
-      const std::size_t src_index = (r * cols_sz + c) * samples_sz;
-      const int32_t sample = decoded_interleaved[src_index];
-      double value = 0.0;
-      if (!apply_transform(sample, &value)) {
-        return fail_detail(ctx, PIXEL_CODEC_ERR_UNSUPPORTED, "decode_frame",
-            "unsupported value transform kind");
-      }
-      uint8_t* dst_ptr = dst_row + c * dst_sample_bytes;
-      if (!write_float_sample(request->output.dst_dtype, value, dst_ptr)) {
-        return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "decode_frame",
-            "value transform requires float destination dtype");
-      }
-    }
+  const auto status = ::pixel::codec_common_v2::write_mono_value_transform_rows_v2(
+      request, row_stride, transform_kind,
+      [&](std::size_t row, std::size_t col) -> int32_t {
+        return decoded_interleaved[(row * cols_sz + col) * samples_sz];
+      });
+  if (status == ::pixel::codec_common_v2::mono_transform_write_status_v2::unsupported_transform_kind) {
+    return fail_detail(ctx, PIXEL_CODEC_ERR_UNSUPPORTED, "decode_frame",
+        "unsupported value transform kind");
   }
-
+  if (status == ::pixel::codec_common_v2::mono_transform_write_status_v2::unsupported_dst_dtype) {
+    return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "decode_frame",
+        "value transform requires float destination dtype");
+  }
   return PIXEL_CODEC_ERR_OK;
 }
 
 template <typename DstT>
-void write_openjph_line_to_output(const pixel_decoder_request_v2* request,
+void write_openjph_component_line(const pixel_decoder_request_v2* request,
     uint64_t row_stride, bool output_planar, std::size_t rows, std::size_t row,
     std::size_t comp, std::size_t cols, std::size_t samples,
     const int32_t* samples_line) {
   const std::size_t row_stride_sz = static_cast<std::size_t>(row_stride);
-  if (output_planar && samples > 1) {
+  if (samples == 1) {
+    uint8_t* dst_row = request->output.dst + row * row_stride_sz;
+    ::pixel::codec_common_v2::write_typed_integral_mono_row_v2<DstT>(
+        dst_row, cols, samples_line);
+    return;
+  }
+
+  if (output_planar) {
     const std::size_t plane_bytes = row_stride_sz * rows;
     uint8_t* dst_row = request->output.dst + comp * plane_bytes + row * row_stride_sz;
-    for (std::size_t c = 0; c < cols; ++c) {
-      store_htj2k_value(dst_row + c * sizeof(DstT),
-          static_cast<DstT>(samples_line[c]));
-    }
+    ::pixel::codec_common_v2::write_typed_integral_mono_row_v2<DstT>(
+        dst_row, cols, samples_line);
     return;
   }
 
@@ -376,7 +352,20 @@ void write_openjph_line_to_output(const pixel_decoder_request_v2* request,
 }
 
 template <typename DstT>
-pixel_error_code_v2 write_openjph_direct(DecoderCtx* ctx,
+void write_openjph_interleaved_row(const pixel_decoder_request_v2* request,
+    uint64_t row_stride, std::size_t row, std::size_t cols, std::size_t samples,
+    const int32_t* const* component_lines) {
+  const std::size_t row_stride_sz = static_cast<std::size_t>(row_stride);
+  uint8_t* dst_row = request->output.dst + row * row_stride_sz;
+  ::pixel::codec_common_v2::write_typed_integral_interleaved_row_v2<DstT>(
+      dst_row, cols, samples,
+      [&](std::size_t c, std::size_t comp) -> int32_t {
+        return component_lines[comp][c];
+      });
+}
+
+template <typename DstT>
+pixel_error_code_v2 decode_openjph_direct_to_output(DecoderCtx* ctx,
     ojph::codestream* codestream, const pixel_decoder_request_v2* request,
     uint64_t row_stride, bool output_planar) {
   if (codestream == nullptr) {
@@ -403,13 +392,15 @@ pixel_error_code_v2 write_openjph_direct(DecoderCtx* ctx,
           return fail_detail(ctx, PIXEL_CODEC_ERR_FAILED, "decode_frame",
               "OpenJPH returned invalid line buffer");
         }
-        write_openjph_line_to_output<DstT>(request, row_stride, output_planar,
+        write_openjph_component_line<DstT>(request, row_stride, output_planar,
             rows, row, comp, cols, samples, samples_line);
       }
     }
     return PIXEL_CODEC_ERR_OK;
   }
 
+  std::vector<std::vector<int32_t>> scratch_lines(samples);
+  std::vector<const int32_t*> component_lines(samples, nullptr);
   for (std::size_t row = 0; row < rows; ++row) {
     for (std::size_t comp = 0; comp < samples; ++comp) {
       ojph::ui32 comp_num = 0;
@@ -418,13 +409,21 @@ pixel_error_code_v2 write_openjph_direct(DecoderCtx* ctx,
         return fail_detail(ctx, PIXEL_CODEC_ERR_FAILED, "decode_frame",
             "OpenJPH interleaved pull order mismatch");
       }
-      const int32_t* samples_line = openjph_line_as_i32(line, cols, &scratch_line);
+      const int32_t* samples_line =
+          openjph_line_as_i32(line, cols, &scratch_lines[comp]);
       if (samples_line == nullptr) {
         return fail_detail(ctx, PIXEL_CODEC_ERR_FAILED, "decode_frame",
             "OpenJPH returned invalid line buffer");
       }
-      write_openjph_line_to_output<DstT>(request, row_stride, output_planar,
-          rows, row, comp, cols, samples, samples_line);
+      component_lines[comp] = samples_line;
+      if (output_planar || samples == 1) {
+        write_openjph_component_line<DstT>(request, row_stride, output_planar,
+            rows, row, comp, cols, samples, samples_line);
+      }
+    }
+    if (!output_planar && samples > 1) {
+      write_openjph_interleaved_row<DstT>(request, row_stride,
+          row, cols, samples, component_lines.data());
     }
   }
 
@@ -513,29 +512,26 @@ pixel_error_code_v2 decoder_decode_frame(
 
     codestream.create();
 
-    const bool matching_output_dtype = !dst_dtype.is_float &&
-        dst_dtype.bytes == source_dtype.bytes &&
-        dst_dtype.is_signed == source_dtype.is_signed;
     if (transform_kind == PIXEL_DECODER_VALUE_TRANSFORM_NONE_V2 &&
-        matching_output_dtype) {
+        can_write_openjph_direct_to_dst_dtype(siz, components, dst_dtype)) {
       pixel_error_code_v2 direct_ec = PIXEL_CODEC_ERR_UNSUPPORTED;
-      if (source_dtype.bytes == 1 && !source_dtype.is_signed) {
-        direct_ec = write_openjph_direct<uint8_t>(
+      if (request->output.dst_dtype == PIXEL_DTYPE_U8_V2) {
+        direct_ec = decode_openjph_direct_to_output<uint8_t>(
             c, &codestream, request, row_stride, output_planar);
-      } else if (source_dtype.bytes == 1 && source_dtype.is_signed) {
-        direct_ec = write_openjph_direct<int8_t>(
+      } else if (request->output.dst_dtype == PIXEL_DTYPE_S8_V2) {
+        direct_ec = decode_openjph_direct_to_output<int8_t>(
             c, &codestream, request, row_stride, output_planar);
-      } else if (source_dtype.bytes == 2 && !source_dtype.is_signed) {
-        direct_ec = write_openjph_direct<uint16_t>(
+      } else if (request->output.dst_dtype == PIXEL_DTYPE_U16_V2) {
+        direct_ec = decode_openjph_direct_to_output<uint16_t>(
             c, &codestream, request, row_stride, output_planar);
-      } else if (source_dtype.bytes == 2 && source_dtype.is_signed) {
-        direct_ec = write_openjph_direct<int16_t>(
+      } else if (request->output.dst_dtype == PIXEL_DTYPE_S16_V2) {
+        direct_ec = decode_openjph_direct_to_output<int16_t>(
             c, &codestream, request, row_stride, output_planar);
-      } else if (source_dtype.bytes == 4 && !source_dtype.is_signed) {
-        direct_ec = write_openjph_direct<uint32_t>(
+      } else if (request->output.dst_dtype == PIXEL_DTYPE_U32_V2) {
+        direct_ec = decode_openjph_direct_to_output<uint32_t>(
             c, &codestream, request, row_stride, output_planar);
-      } else if (source_dtype.bytes == 4 && source_dtype.is_signed) {
-        direct_ec = write_openjph_direct<int32_t>(
+      } else if (request->output.dst_dtype == PIXEL_DTYPE_S32_V2) {
+        direct_ec = decode_openjph_direct_to_output<int32_t>(
             c, &codestream, request, row_stride, output_planar);
       }
 
@@ -602,7 +598,7 @@ pixel_error_code_v2 decoder_decode_frame(
     codestream.close();
     infile.close();
 
-    const pixel_error_code_v2 write_ec = write_decoded_samples(c, request,
+    const pixel_error_code_v2 write_ec = write_htj2k_decoded_samples(c, request,
         decoded, dst_dtype, row_stride, output_planar, transform_kind);
     if (write_ec != PIXEL_CODEC_ERR_OK) {
       return write_ec;
