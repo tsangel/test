@@ -8,6 +8,7 @@
 namespace pixel::runtime_v2 {
 
 [[nodiscard]] const PluginRegistryV2* current_registry() noexcept;
+[[nodiscard]] std::uint64_t current_registry_generation() noexcept;
 
 [[nodiscard]] bool set_htj2k_decoder_backend_preference(
     Htj2kDecoderBackendPreference backend, std::string* out_error);

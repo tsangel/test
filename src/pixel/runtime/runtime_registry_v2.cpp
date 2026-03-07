@@ -1,6 +1,7 @@
 #include "runtime_registry_v2.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -27,6 +28,7 @@ struct RuntimeRegistryStateV2 {
   bool initialized{false};
   Htj2kDecoderBackendPreference htj2k_decoder_backend_preference{
       Htj2kDecoderBackendPreference::kAuto};
+  std::uint64_t generation{0};
   PluginRegistryV2 registry{};
   std::vector<ExternalPluginEntryV2> external_plugins{};
 };
@@ -48,6 +50,7 @@ void ensure_initialized_locked(RuntimeRegistryStateV2& state) {
   }
   init_builtin_registry_v2(
       &state.registry, state.htj2k_decoder_backend_preference);
+  ++state.generation;
   state.initialized = true;
 }
 
@@ -63,6 +66,7 @@ void rebuild_registry_locked(RuntimeRegistryStateV2& state) {
       (void)state.registry.register_encoder_api(&plugin.encoder_api);
     }
   }
+  ++state.generation;
 }
 
 std::string load_status_message(SharedPluginLoadStatusV2 status) {
@@ -98,6 +102,13 @@ const PluginRegistryV2* current_registry() noexcept {
   std::lock_guard<std::mutex> lock(state.mutex);
   ensure_initialized_locked(state);
   return &state.registry;
+}
+
+std::uint64_t current_registry_generation() noexcept {
+  auto& state = runtime_registry_state_v2();
+  std::lock_guard<std::mutex> lock(state.mutex);
+  ensure_initialized_locked(state);
+  return state.generation;
 }
 
 bool set_htj2k_decoder_backend_preference(

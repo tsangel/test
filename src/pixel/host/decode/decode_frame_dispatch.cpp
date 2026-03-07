@@ -10,8 +10,10 @@
 
 #include <array>
 #include <cctype>
+#include <cstdint>
 #include <cstdio>
 #include <exception>
+#include <limits>
 #include <new>
 #include <string>
 #include <string_view>
@@ -41,24 +43,41 @@ void validate_decode_plan_or_throw(
 #if defined(DICOMSDL_PIXEL_RUNTIME_ENABLED)
 namespace {
 
-// Own one host decoder context and always release it on scope exit.
-struct DecoderContextGuard {
-	::pixel::runtime_v2::HostDecoderContextV2 value{};
+constexpr int kNoThreadOption = std::numeric_limits<int>::min();
 
-	DecoderContextGuard() = default;
+// Reuse one decoder context per thread to avoid paying full configure/create
+// cost on every frame decode when the registry/options are unchanged.
+struct DecoderContextCache {
+	::pixel::runtime_v2::HostDecoderContextV2 ctx{};
+	const ::pixel::runtime_v2::PluginRegistryV2* registry{nullptr};
+	std::uint64_t registry_generation{0};
+	std::uint32_t transfer_syntax_index{0};
+	int thread_option{kNoThreadOption};
+	bool configured{false};
 
-	~DecoderContextGuard() {
-		::pixel::runtime_v2::destroy_host_decoder_context_v2(&value);
+	DecoderContextCache() = default;
+
+	~DecoderContextCache() {
+		::pixel::runtime_v2::destroy_host_decoder_context_v2(&ctx);
 	}
 
-	DecoderContextGuard(const DecoderContextGuard&) = delete;
-	DecoderContextGuard& operator=(const DecoderContextGuard&) = delete;
+	DecoderContextCache(const DecoderContextCache&) = delete;
+	DecoderContextCache& operator=(const DecoderContextCache&) = delete;
 };
+
+[[nodiscard]] DecoderContextCache& runtime_decoder_context_cache() {
+	thread_local DecoderContextCache cache{};
+	return cache;
+}
 
 // Return the current process-wide runtime registry, if one is installed.
 [[nodiscard]] const ::pixel::runtime_v2::PluginRegistryV2* get_runtime_registry() {
 	// Runtime dispatch is optional, so callers must handle a null registry.
 	return ::pixel::runtime_v2::current_registry();
+}
+
+[[nodiscard]] std::uint64_t get_runtime_registry_generation() {
+	return ::pixel::runtime_v2::current_registry_generation();
 }
 
 // Collapse runtime-specific error codes into the host-facing codec status categories.
@@ -234,21 +253,23 @@ void parse_runtime_detail_or_default(
     std::size_t frame_index, std::span<std::uint8_t> dst, const DecodePlan& plan) {
 	const auto& info = plan.info;
 	const auto* registry = get_runtime_registry();
+	const auto registry_generation = get_runtime_registry_generation();
 
 	// Runtime dispatch is optional; callers fall back when no registry is installed.
 	if (registry == nullptr) {
 		return false;
 	}
 
-	// Use a fresh host decoder context for this call.
-	DecoderContextGuard decoder_ctx{};
-	auto* const ctx = &decoder_ctx.value;
+	auto& cache = runtime_decoder_context_cache();
+	auto* const ctx = &cache.ctx;
 
 	// Only codecs with an exposed thread knob need runtime configure options.
 	pixel_option_kv_v2 option_item{};
 	pixel_option_list_v2 option_list{};
 	char threads_text[32]{};
+	int thread_option = kNoThreadOption;
 	if (info.ts.is_jpeg2000() || info.ts.is_jpegxl()) {
+		thread_option = plan.options.decoder_threads;
 		std::snprintf(threads_text, sizeof(threads_text), "%d",
 		    plan.options.decoder_threads);
 		option_item.key = "threads";
@@ -259,13 +280,26 @@ void parse_runtime_detail_or_default(
 	const pixel_option_list_v2* option_ptr =
 	    option_list.count == 0 ? nullptr : &option_list;
 
-	// Configure the runtime decoder binding for this transfer syntax and option set.
-	const pixel_error_code_v2 configure_ec =
-	    ::pixel::runtime_v2::configure_host_decoder_context_v2(
-	        ctx, registry, info.ts, option_ptr);
+	const auto transfer_syntax_index = info.ts.raw_index();
+	bool needs_configure = true;
+	if (cache.configured && cache.registry == registry &&
+	    cache.registry_generation == registry_generation &&
+	    cache.transfer_syntax_index == transfer_syntax_index &&
+	    cache.thread_option == thread_option) {
+		needs_configure = false;
+	}
+
+	pixel_error_code_v2 configure_ec = PIXEL_CODEC_ERR_OK;
+	std::string configure_detail{};
+	if (needs_configure) {
+		configure_ec = ::pixel::runtime_v2::configure_host_decoder_context_v2(
+		    ctx, registry, info.ts, option_ptr);
+		configure_detail = copy_decoder_error_detail(*ctx);
+	}
 
 	// Translate configure-time binding failures into the public host error model.
 	if (configure_ec == PIXEL_CODEC_ERR_UNSUPPORTED) {
+		cache.configured = false;
 		throw_codec_error_with_context("pixel::decode_frame_into", df.path(), info.ts,
 		    frame_index,
 		    CodecError{
@@ -275,8 +309,16 @@ void parse_runtime_detail_or_default(
 		    });
 	}
 	if (configure_ec != PIXEL_CODEC_ERR_OK) {
-		throw_runtime_decode_error(df.path(), info.ts, frame_index, configure_ec,
-	    copy_decoder_error_detail(*ctx));
+		cache.configured = false;
+		throw_runtime_decode_error(
+		    df.path(), info.ts, frame_index, configure_ec, configure_detail);
+	}
+	if (needs_configure) {
+		cache.configured = true;
+		cache.registry = registry;
+		cache.registry_generation = registry_generation;
+		cache.transfer_syntax_index = transfer_syntax_index;
+		cache.thread_option = thread_option;
 	}
 
 	// Load the frame source and convert the plan transform to the host ABI form.
