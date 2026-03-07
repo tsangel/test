@@ -99,19 +99,15 @@ if exist "%WHEEL_DIR%" (
 		exit /b 1
 	)
 	popd
-	call :assert_safe_remove_target "%WHEEL_DIR%" "WHEEL_DIR"
-	echo Removing existing wheel directory: %WHEEL_DIR%
-	rmdir /s /q "%WHEEL_DIR%"
-	if errorlevel 1 (
-		echo Error: failed to remove wheel directory: %WHEEL_DIR%.>&2
-		exit /b 1
-	)
+	echo Preserving existing wheel directory: %WHEEL_DIR%
+	goto wheel_dir_ready
 )
 mkdir "%WHEEL_DIR%" >nul 2>&1
 if errorlevel 1 (
 	echo Error: failed to create wheel directory: %WHEEL_DIR%.>&2
 	exit /b 1
 )
+:wheel_dir_ready
 
 exit /b 0
 

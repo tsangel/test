@@ -18,6 +18,27 @@ CTEST_LABEL="${CTEST_LABEL:-dicomsdl}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 WHEEL_DIR="${WHEEL_DIR:-${ROOT_DIR}/dist}"
 PRESERVE_WHEEL_HISTORY="${PRESERVE_WHEEL_HISTORY:-1}"
+
+ensure_python_wheel_build_requirements() {
+	local py_bin="$1"
+	if ! "$py_bin" - <<'PY' >/dev/null 2>&1
+import importlib.util
+import sys
+missing = []
+for mod in ("setuptools.build_meta", "wheel"):
+    if importlib.util.find_spec(mod) is None:
+        missing.append(mod)
+if missing:
+    sys.stderr.write("missing: " + ", ".join(missing) + "\n")
+    raise SystemExit(1)
+PY
+	then
+		echo "Error: Python wheel build requirements are missing for ${py_bin} (setuptools/wheel)." >&2
+		echo "Run: ${py_bin} -m pip install --upgrade pip setuptools wheel" >&2
+		exit 1
+	fi
+}
+
 pixel_v2_args=(
 	-DDICOMSDL_PIXEL_CORE=ON
 	-DDICOMSDL_PIXEL_RUNTIME=ON
@@ -229,6 +250,7 @@ if [[ "${BUILD_WHEEL}" != "0" ]]; then
 		echo "Error: ${PYTHON_BIN} not found; set PYTHON_BIN to a valid interpreter." >&2
 		exit 1
 	fi
+	ensure_python_wheel_build_requirements "$PYTHON_BIN"
 	echo "Building Python wheel into ${WHEEL_DIR}"
 	mkdir -p "$WHEEL_DIR"
 	tmp_wheel_dir="$(mktemp -d "${WHEEL_DIR}/.wheel-build.XXXXXX")"

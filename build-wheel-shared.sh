@@ -4,7 +4,16 @@ set -euo pipefail
 ROOT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${ROOT_DIR}"
 
-: "${PYTHON_BIN:=python3}"
+if [[ -z "${PYTHON_BIN:-}" ]]; then
+	if command -v python3 >/dev/null 2>&1; then
+		PYTHON_BIN="python3"
+	elif command -v python >/dev/null 2>&1; then
+		PYTHON_BIN="python"
+	else
+		echo "Error: neither python3 nor python is available on PATH." >&2
+		exit 1
+	fi
+fi
 : "${BUILD_DIR:=${ROOT_DIR}/build-wheel-shared}"
 : "${WHEEL_DIR:=${ROOT_DIR}/dist-shared}"
 : "${CLEAN_BUILD_DIR:=1}"
@@ -18,6 +27,7 @@ cd "${ROOT_DIR}"
 : "${DEBUG:=0}"
 : "${DISTUTILS_DEBUG:=0}"
 : "${STATIC_PRE_CLEAN_OUTPUTS:=1}"
+: "${AUTO_INSTALL_PYTHON_WHEEL_DEPS:=1}"
 : "${DICOMSDL_PIXEL_DEFAULT_MODE:=none}"
 : "${DICOMSDL_PIXEL_JPEG_MODE:=shared}"
 : "${DICOMSDL_PIXEL_JPEGLS_MODE:=shared}"
@@ -45,6 +55,7 @@ export BUILD_TYPE
 export DEBUG
 export DISTUTILS_DEBUG
 export STATIC_PRE_CLEAN_OUTPUTS
+export AUTO_INSTALL_PYTHON_WHEEL_DEPS
 export DICOMSDL_PIXEL_DEFAULT_MODE
 export DICOMSDL_PIXEL_JPEG_MODE
 export DICOMSDL_PIXEL_JPEGLS_MODE
@@ -53,6 +64,44 @@ export DICOMSDL_PIXEL_HTJ2K_MODE
 export DICOMSDL_PIXEL_JPEGXL_MODE
 export CMAKE_EXTRA_ARGS
 export DICOMSDL_CMAKE_ARGS
+
+ensure_python_wheel_build_requirements() {
+	local py_bin="$1"
+	if "$py_bin" - <<'PY' >/dev/null 2>&1
+import importlib.util
+import sys
+missing = [m for m in ("pip", "setuptools.build_meta", "wheel") if importlib.util.find_spec(m) is None]
+raise SystemExit(0 if not missing else 1)
+PY
+	then
+		return 0
+	fi
+
+	echo "Python wheel build dependencies are missing for ${py_bin} (pip/setuptools/wheel)." >&2
+	if [[ "${AUTO_INSTALL_PYTHON_WHEEL_DEPS}" == "0" ]]; then
+		echo "Run: ${py_bin} -m pip install --upgrade pip setuptools wheel" >&2
+		exit 1
+	fi
+
+	echo "Attempting to install missing wheel build dependencies..." >&2
+	"$py_bin" -m ensurepip --upgrade >/dev/null 2>&1 || true
+	if ! "$py_bin" -m pip install --upgrade pip setuptools wheel; then
+		echo "Error: failed to install Python wheel build dependencies." >&2
+		echo "Run manually: ${py_bin} -m pip install --upgrade pip setuptools wheel" >&2
+		exit 1
+	fi
+
+	if ! "$py_bin" - <<'PY' >/dev/null 2>&1
+import importlib.util
+import sys
+missing = [m for m in ("pip", "setuptools.build_meta", "wheel") if importlib.util.find_spec(m) is None]
+raise SystemExit(0 if not missing else 1)
+PY
+	then
+		echo "Error: pip/setuptools/wheel are still unavailable after installation attempt." >&2
+		exit 1
+	fi
+}
 
 normalize_dir_path() {
 	local path="$1"
@@ -91,8 +140,21 @@ if [[ "${STATIC_PRE_CLEAN_OUTPUTS}" != "0" ]]; then
 			rm -rf "${path}"
 		fi
 	done
-	safe_remove_dir_if_exists "${WHEEL_DIR}" "wheel directory"
+	if [[ -e "${WHEEL_DIR}" && ! -d "${WHEEL_DIR}" ]]; then
+		echo "Error: wheel directory path exists but is not a directory: ${WHEEL_DIR}" >&2
+		exit 1
+	fi
 	mkdir -p "${WHEEL_DIR}"
 fi
+
+if [[ "${MSYSTEM:-}" == "CLANG64" ]]; then
+	export CC="${CC:-clang}"
+	export CXX="${CXX:-clang++}"
+	if command -v ninja >/dev/null 2>&1; then
+		export CMAKE_GENERATOR="${CMAKE_GENERATOR:-Ninja}"
+	fi
+fi
+
+ensure_python_wheel_build_requirements "${PYTHON_BIN}"
 
 "${ROOT_DIR}/build.sh" "$@"

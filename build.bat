@@ -330,6 +330,8 @@ if not "%RUN_TESTS%"=="0" (
 
 :build_wheel
 if not "%BUILD_WHEEL%"=="0" (
+	call :check_python_wheel_build_requirements
+	if errorlevel 1 exit /b %errorlevel%
 	echo Building Python wheel into %WHEEL_DIR%
 	if exist "%WHEEL_DIR%" (
 		pushd "%WHEEL_DIR%" >nul 2>&1
@@ -402,6 +404,15 @@ if not "%BUILD_WHEEL%"=="0" (
 	if exist "!TMP_WHEEL_DIR!" rmdir /s /q "!TMP_WHEEL_DIR!"
 )
 
+exit /b 0
+
+:check_python_wheel_build_requirements
+%PYTHON_BIN% -c "exec('import importlib.util,sys\nmissing=[m for m in (\"setuptools.build_meta\",\"wheel\") if importlib.util.find_spec(m) is None]\nif missing:\n    print(\"missing: \" + \", \".join(missing), file=sys.stderr)\n    raise SystemExit(1)')"
+if errorlevel 1 (
+	echo Error: Python wheel build requirements are missing for %PYTHON_BIN% ^(setuptools/wheel^).>&2
+	echo Run: %PYTHON_BIN% -m pip install --upgrade pip setuptools wheel>&2
+	exit /b 1
+)
 exit /b 0
 
 :clean_python_wheel_build_dirs
