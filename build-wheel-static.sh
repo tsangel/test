@@ -18,7 +18,6 @@ cd "${ROOT_DIR}"
 : "${DEBUG:=0}"
 : "${DISTUTILS_DEBUG:=0}"
 : "${STATIC_PRE_CLEAN_OUTPUTS:=1}"
-: "${INSTALL_BUILT_WHEEL:=1}"
 
 : "${DICOMSDL_PIXEL_DEFAULT_MODE:=none}"
 : "${DICOMSDL_PIXEL_JPEG_MODE:=builtin}"
@@ -47,7 +46,6 @@ export BUILD_TYPE
 export DEBUG
 export DISTUTILS_DEBUG
 export STATIC_PRE_CLEAN_OUTPUTS
-export INSTALL_BUILT_WHEEL
 export DICOMSDL_PIXEL_DEFAULT_MODE
 export DICOMSDL_PIXEL_JPEG_MODE
 export DICOMSDL_PIXEL_JPEGLS_MODE
@@ -99,28 +97,3 @@ if [[ "${STATIC_PRE_CLEAN_OUTPUTS}" != "0" ]]; then
 fi
 
 "${ROOT_DIR}/build.sh" "$@"
-
-if [[ "${INSTALL_BUILT_WHEEL}" != "0" ]]; then
-	if [[ ! -d "${WHEEL_DIR}" ]]; then
-		echo "Error: WHEEL_DIR does not exist: ${WHEEL_DIR}" >&2
-		exit 1
-	fi
-
-	shopt -s nullglob
-	wheels=("${WHEEL_DIR}"/*.whl)
-	shopt -u nullglob
-	if (( ${#wheels[@]} == 0 )); then
-		echo "Error: no wheel found in ${WHEEL_DIR} to install." >&2
-		exit 1
-	fi
-
-	latest_wheel="${wheels[0]}"
-	for wheel in "${wheels[@]}"; do
-		if [[ "${wheel}" -nt "${latest_wheel}" ]]; then
-			latest_wheel="${wheel}"
-		fi
-	done
-
-	echo "Installing wheel (force-reinstall): ${latest_wheel}"
-	"${PYTHON_BIN}" -m pip install --force-reinstall --no-deps --no-cache-dir "${latest_wheel}"
-fi

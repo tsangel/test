@@ -21,7 +21,6 @@ if not defined BUILD_TYPE set "BUILD_TYPE=Release"
 if not defined DEBUG set "DEBUG=0"
 if not defined DISTUTILS_DEBUG set "DISTUTILS_DEBUG=0"
 if not defined STATIC_PRE_CLEAN_OUTPUTS set "STATIC_PRE_CLEAN_OUTPUTS=1"
-if not defined INSTALL_BUILT_WHEEL set "INSTALL_BUILT_WHEEL=1"
 
 set "BUILD_DIR=%BUILD_DIR:"=%"
 set "WHEEL_DIR=%WHEEL_DIR:"=%"
@@ -47,11 +46,6 @@ if not "%STATIC_PRE_CLEAN_OUTPUTS%"=="0" (
 call "%ROOT_DIR%build.bat" %*
 set "EXIT_CODE=%ERRORLEVEL%"
 if not "%EXIT_CODE%"=="0" goto finalize
-
-if not "%INSTALL_BUILT_WHEEL%"=="0" (
-	call :install_latest_wheel
-	if errorlevel 1 set "EXIT_CODE=%ERRORLEVEL%"
-)
 
 :finalize
 endlocal & exit /b %EXIT_CODE%
@@ -119,23 +113,6 @@ if errorlevel 1 (
 	exit /b 1
 )
 
-exit /b 0
-
-:install_latest_wheel
-set "LATEST_WHEEL="
-for /f "delims=" %%F in ('dir /b /a:-d /o:-d "%WHEEL_DIR%\*.whl" 2^>nul') do (
-	if not defined LATEST_WHEEL set "LATEST_WHEEL=%WHEEL_DIR%\%%F"
-)
-if not defined LATEST_WHEEL (
-	echo Error: no wheel found in %WHEEL_DIR% to install.>&2
-	exit /b 1
-)
-echo Installing wheel ^(force-reinstall^): %LATEST_WHEEL%
-%PYTHON_BIN% -m pip install --force-reinstall --no-deps --no-cache-dir "%LATEST_WHEEL%"
-if errorlevel 1 (
-	echo Error: failed to install wheel: %LATEST_WHEEL%.>&2
-	exit /b 1
-)
 exit /b 0
 
 :assert_safe_remove_target

@@ -290,13 +290,17 @@ Default behavior:
   - `${WHEEL_DIR}` (default: `dist-static`)
 - Force wheel build to Release (`FORCE_WHEEL_RELEASE=1`, `BUILD_TYPE=Release`).
 - Run `build.sh` / `build.bat` to produce a new wheel.
-- Force-reinstall the newest wheel from `${WHEEL_DIR}` after a successful build.
 
 Useful toggles:
 
 - `STATIC_PRE_CLEAN_OUTPUTS=0`: skip pre-clean stage.
-- `INSTALL_BUILT_WHEEL=0`: skip automatic wheel install.
 - `FORCE_WHEEL_RELEASE=0`: allow non-Release wheel builds.
+
+Install the built wheel manually when needed:
+
+```bash
+pip install --force-reinstall --no-deps --no-cache-dir dist-static/dicomsdl-*.whl
+```
 
 ### Run Python examples
 

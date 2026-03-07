@@ -27,13 +27,17 @@ Wrapper defaults:
 - Remove old outputs at start (`BUILD_DIR`, `build/temp.*`, `build/lib.*`, `build/bdist.*`, `WHEEL_DIR`).
 - Force wheel build to Release (`FORCE_WHEEL_RELEASE=1`, `BUILD_TYPE=Release`).
 - Build a fresh wheel.
-- Force-reinstall the newest wheel from `WHEEL_DIR`.
 
 To disable defaults:
 
 - `STATIC_PRE_CLEAN_OUTPUTS=0` disables pre-clean.
-- `INSTALL_BUILT_WHEEL=0` disables auto-install.
 - `FORCE_WHEEL_RELEASE=0` allows non-Release wheel builds.
+
+Then install the built wheel manually:
+
+```bash
+pip install --force-reinstall --no-deps --no-cache-dir dist-static/dicomsdl-*.whl
+```
 
 3. Five-line example
 
