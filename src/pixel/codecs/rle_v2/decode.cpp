@@ -12,6 +12,75 @@ namespace pixel::rle_plugin_v2 {
 
 namespace {
 
+template <std::size_t Bytes>
+inline void copy_sample_bytes(const std::uint8_t* src, std::uint8_t* dst) noexcept {
+  std::memcpy(dst, src, Bytes);
+}
+
+template <std::size_t Bytes, std::size_t SamplesPerPixel>
+void copy_planar_to_interleaved_fast(const std::uint8_t* src_frame,
+    std::uint8_t* dst_base, std::size_t rows, std::size_t cols,
+    std::size_t src_row_bytes, std::size_t dst_row_bytes) noexcept {
+  static_assert((Bytes == 1 || Bytes == 2), "fast path supports Bytes=1/2");
+  static_assert((SamplesPerPixel == 3 || SamplesPerPixel == 4),
+      "fast path supports SPP=3/4");
+
+  const std::size_t src_plane_bytes = src_row_bytes * rows;
+  for (std::size_t r = 0; r < rows; ++r) {
+    std::uint8_t* dst = dst_base + r * dst_row_bytes;
+    const std::uint8_t* s0 = src_frame + r * src_row_bytes;
+    const std::uint8_t* s1 = s0 + src_plane_bytes;
+    const std::uint8_t* s2 = s1 + src_plane_bytes;
+    if constexpr (SamplesPerPixel == 3) {
+      for (std::size_t c = 0; c < cols; ++c) {
+        if constexpr (Bytes == 1) {
+          *dst++ = *s0++;
+          *dst++ = *s1++;
+          *dst++ = *s2++;
+        } else {
+          copy_sample_bytes<2>(s0, dst);
+          s0 += 2;
+          dst += 2;
+
+          copy_sample_bytes<2>(s1, dst);
+          s1 += 2;
+          dst += 2;
+
+          copy_sample_bytes<2>(s2, dst);
+          s2 += 2;
+          dst += 2;
+        }
+      }
+    } else {
+      const std::uint8_t* s3 = s2 + src_plane_bytes;
+      for (std::size_t c = 0; c < cols; ++c) {
+        if constexpr (Bytes == 1) {
+          *dst++ = *s0++;
+          *dst++ = *s1++;
+          *dst++ = *s2++;
+          *dst++ = *s3++;
+        } else {
+          copy_sample_bytes<2>(s0, dst);
+          s0 += 2;
+          dst += 2;
+
+          copy_sample_bytes<2>(s1, dst);
+          s1 += 2;
+          dst += 2;
+
+          copy_sample_bytes<2>(s2, dst);
+          s2 += 2;
+          dst += 2;
+
+          copy_sample_bytes<2>(s3, dst);
+          s3 += 2;
+          dst += 2;
+        }
+      }
+    }
+  }
+}
+
 uint32_t bit_mask_u32(int bits) {
   if (bits <= 0) {
     return 0;
@@ -552,6 +621,24 @@ pixel_error_code_v2 decoder_decode_frame(
   }
 
   uint8_t* dst = request->output.dst;
+
+  // Single-channel planar/interleaved output layouts are equivalent.
+  if (transform_kind == PIXEL_DECODER_VALUE_TRANSFORM_NONE_V2 && samples == 1) {
+    if (row_stride == row_payload) {
+      std::memcpy(dst, decoded_planar.data(), plane_bytes);
+      clear_detail(c);
+      return PIXEL_CODEC_ERR_OK;
+    }
+
+    for (std::size_t r = 0; r < rows; ++r) {
+      const uint8_t* src_row = decoded_planar.data() + r * row_payload;
+      uint8_t* dst_row = dst + r * row_stride;
+      std::memcpy(dst_row, src_row, row_payload);
+    }
+    clear_detail(c);
+    return PIXEL_CODEC_ERR_OK;
+  }
+
   if (transform_kind != PIXEL_DECODER_VALUE_TRANSFORM_NONE_V2) {
     for (std::size_t r = 0; r < rows; ++r) {
       const uint8_t* src_row = decoded_planar.data() + r * row_payload;
@@ -600,6 +687,29 @@ pixel_error_code_v2 decoder_decode_frame(
         const uint8_t* src_row = src_plane + r * row_payload;
         uint8_t* dst_row = dst_plane + r * row_stride;
         std::memcpy(dst_row, src_row, row_payload);
+      }
+    }
+    clear_detail(c);
+    return PIXEL_CODEC_ERR_OK;
+  }
+
+  if ((sample_bytes == 1u || sample_bytes == 2u) &&
+      (samples == 3u || samples == 4u)) {
+    if (sample_bytes == 1u) {
+      if (samples == 3u) {
+        copy_planar_to_interleaved_fast<1, 3>(
+            decoded_planar.data(), dst, rows, cols, row_payload, row_stride);
+      } else {
+        copy_planar_to_interleaved_fast<1, 4>(
+            decoded_planar.data(), dst, rows, cols, row_payload, row_stride);
+      }
+    } else {
+      if (samples == 3u) {
+        copy_planar_to_interleaved_fast<2, 3>(
+            decoded_planar.data(), dst, rows, cols, row_payload, row_stride);
+      } else {
+        copy_planar_to_interleaved_fast<2, 4>(
+            decoded_planar.data(), dst, rows, cols, row_payload, row_stride);
       }
     }
     clear_detail(c);

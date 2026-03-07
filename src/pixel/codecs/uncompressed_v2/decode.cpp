@@ -398,8 +398,48 @@ pixel_error_code_v2 decode_uncompressed_frame(
     return PIXEL_CODEC_ERR_OK;
   }
 
+  // Single-channel planar/interleaved layouts are byte-identical, so avoid
+  // per-pixel shuffles and copy the decoded rows directly.
+  if (samples == 1) {
+    if (row_stride == source_row_bytes) {
+      uint64_t copy_bytes_u64 = 0;
+      std::size_t copy_bytes = 0;
+      if (!mul_u64(static_cast<uint64_t>(source_row_bytes), static_cast<uint64_t>(rows),
+              &copy_bytes_u64) ||
+          !u64_to_size(copy_bytes_u64, &copy_bytes)) {
+        return fail_detail(state, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
+            "single-channel copy byte size overflow");
+      }
+      std::memcpy(dst, src, copy_bytes);
+      clear_error(state);
+      return PIXEL_CODEC_ERR_OK;
+    }
+
+    for (std::size_t r = 0; r < rows; ++r) {
+      const uint8_t* src_row = src + r * source_row_bytes;
+      uint8_t* dst_row = dst + r * row_stride;
+      std::memcpy(dst_row, src_row, source_row_bytes);
+    }
+    clear_error(state);
+    return PIXEL_CODEC_ERR_OK;
+  }
+
   if (source_planar == output_planar) {
     if (!source_planar) {
+      if (row_stride == source_row_bytes) {
+        uint64_t copy_bytes_u64 = 0;
+        std::size_t copy_bytes = 0;
+        if (!mul_u64(static_cast<uint64_t>(source_row_bytes), static_cast<uint64_t>(rows),
+                &copy_bytes_u64) ||
+            !u64_to_size(copy_bytes_u64, &copy_bytes)) {
+          return fail_detail(state, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
+              "interleaved copy byte size overflow");
+        }
+        std::memcpy(dst, src, copy_bytes);
+        clear_error(state);
+        return PIXEL_CODEC_ERR_OK;
+      }
+
       for (std::size_t r = 0; r < rows; ++r) {
         const uint8_t* src_row = src + r * source_row_bytes;
         uint8_t* dst_row = dst + r * row_stride;

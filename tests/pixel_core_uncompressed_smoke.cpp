@@ -176,6 +176,20 @@ int main() {
   expect_true(std::memcmp(decoded_native.data(), expected.data(), expected.size()) == 0,
       "native decode payload equality");
 
+  std::vector<uint8_t> decoded_native_single_channel(expected.size(), uint8_t{0});
+  auto native_single_channel_decode_request = make_decode_request(
+      encoded_native, decoded_native_single_channel, PIXEL_CODEC_PROFILE_NATIVE_UNCOMPRESSED_V2);
+  native_single_channel_decode_request.frame.source_planar = PIXEL_PLANAR_PLANAR_V2;
+  native_single_channel_decode_request.output.dst_planar = PIXEL_PLANAR_INTERLEAVED_V2;
+  ec = pixel::core_v2::decode_uncompressed_frame(
+      &core_error, &native_single_channel_decode_request);
+  if (ec != PIXEL_CODEC_ERR_OK) {
+    fail("native single-channel layout-equivalent decode failed: " + error_detail(core_error));
+  }
+  expect_true(
+      std::memcmp(decoded_native_single_channel.data(), expected.data(), expected.size()) == 0,
+      "native single-channel layout-equivalent payload equality");
+
   std::vector<uint8_t> decoded_rescale(rows * cols * sizeof(float), uint8_t{0});
   auto native_rescale_decode_request = make_decode_request(
       encoded_native, decoded_rescale, PIXEL_CODEC_PROFILE_NATIVE_UNCOMPRESSED_V2,

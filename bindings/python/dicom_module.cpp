@@ -79,6 +79,12 @@ struct DecodedArrayLayout {
 	bool decode_all_frames{false};
 };
 
+struct DirectRawArrayAccess {
+	DecodedArrayLayout layout{};
+	std::span<const std::uint8_t> source_bytes{};
+	std::size_t byte_offset{0};
+};
+
 DecodedArraySpec decoded_array_spec(
     const dicom::pixel::PixelDataInfo& info, bool to_modality_value) {
 	if (to_modality_value) {
@@ -956,6 +962,133 @@ const DataElement* raw_source_element(const DicomFile& self, dicom::pixel::DataT
 	}
 }
 
+std::optional<DirectRawArrayAccess> try_build_direct_raw_array_access(
+    const DicomFile& self, long frame, bool to_modality_value) {
+	if (to_modality_value || frame < -1) {
+		return std::nullopt;
+	}
+
+	const auto& info = self.pixeldata_info();
+	if (!info.has_pixel_data || !info.ts.is_uncompressed() || info.rows <= 0 ||
+	    info.cols <= 0 || info.samples_per_pixel <= 0 || info.frames <= 0) {
+		return std::nullopt;
+	}
+	if (info.samples_per_pixel > 1 &&
+	    info.planar_configuration != dicom::pixel::Planar::interleaved) {
+		return std::nullopt;
+	}
+
+	const auto* source = raw_source_element(self, info.sv_dtype);
+	if (source == nullptr || source->is_missing() || source->vr().is_pixel_sequence()) {
+		return std::nullopt;
+	}
+
+	const auto spec = decoded_array_spec(info, false);
+	if (spec.bytes_per_sample == 0) {
+		return std::nullopt;
+	}
+
+	DirectRawArrayAccess access{};
+	auto& layout = access.layout;
+	layout.spec = spec;
+	layout.frames = static_cast<std::size_t>(info.frames);
+	layout.decode_all_frames = (frame == -1) && (layout.frames > 1);
+	layout.frame_index =
+	    layout.decode_all_frames ? 0u : ((frame < 0) ? 0u : static_cast<std::size_t>(frame));
+	if (layout.frame_index >= layout.frames) {
+		return std::nullopt;
+	}
+
+	const auto rows = static_cast<std::size_t>(info.rows);
+	const auto cols = static_cast<std::size_t>(info.cols);
+	const auto samples_per_pixel = static_cast<std::size_t>(info.samples_per_pixel);
+	if (samples_per_pixel != 0 &&
+	    cols > (std::numeric_limits<std::size_t>::max() / samples_per_pixel)) {
+		return std::nullopt;
+	}
+	const auto row_components = cols * samples_per_pixel;
+	if (spec.bytes_per_sample != 0 &&
+	    row_components >
+	        (std::numeric_limits<std::size_t>::max() / spec.bytes_per_sample)) {
+		return std::nullopt;
+	}
+	const auto row_stride = row_components * spec.bytes_per_sample;
+	const auto frame_stride = row_stride * rows;
+	if (rows != 0 && row_stride > (std::numeric_limits<std::size_t>::max() / rows)) {
+		return std::nullopt;
+	}
+	if (layout.frames != 0 &&
+	    frame_stride > (std::numeric_limits<std::size_t>::max() / layout.frames)) {
+		return std::nullopt;
+	}
+	layout.frame_stride = frame_stride;
+	layout.required_bytes =
+	    layout.decode_all_frames ? (frame_stride * layout.frames) : frame_stride;
+
+	const auto row_stride_elems = row_stride / spec.bytes_per_sample;
+	const auto frame_stride_elems = frame_stride / spec.bytes_per_sample;
+	const auto col_stride_elems = samples_per_pixel;
+	if (!layout.decode_all_frames) {
+		if (samples_per_pixel == 1) {
+			layout.ndim = 2;
+			layout.shape[0] = rows;
+			layout.shape[1] = cols;
+			layout.strides[0] = static_cast<std::int64_t>(row_stride_elems);
+			layout.strides[1] = 1;
+		} else {
+			layout.ndim = 3;
+			layout.shape[0] = rows;
+			layout.shape[1] = cols;
+			layout.shape[2] = samples_per_pixel;
+			layout.strides[0] = static_cast<std::int64_t>(row_stride_elems);
+			layout.strides[1] = static_cast<std::int64_t>(col_stride_elems);
+			layout.strides[2] = 1;
+		}
+	} else {
+		if (samples_per_pixel == 1) {
+			layout.ndim = 3;
+			layout.shape[0] = layout.frames;
+			layout.shape[1] = rows;
+			layout.shape[2] = cols;
+			layout.strides[0] = static_cast<std::int64_t>(frame_stride_elems);
+			layout.strides[1] = static_cast<std::int64_t>(row_stride_elems);
+			layout.strides[2] = 1;
+		} else {
+			layout.ndim = 4;
+			layout.shape[0] = layout.frames;
+			layout.shape[1] = rows;
+			layout.shape[2] = cols;
+			layout.shape[3] = samples_per_pixel;
+			layout.strides[0] = static_cast<std::int64_t>(frame_stride_elems);
+			layout.strides[1] = static_cast<std::int64_t>(row_stride_elems);
+			layout.strides[2] = static_cast<std::int64_t>(col_stride_elems);
+			layout.strides[3] = 1;
+		}
+	}
+
+	access.source_bytes = source->value_span();
+	if (access.source_bytes.size() < frame_stride * layout.frames) {
+		return std::nullopt;
+	}
+	access.byte_offset = layout.decode_all_frames ? 0u : (layout.frame_index * frame_stride);
+	if (access.source_bytes.size() < access.byte_offset + layout.required_bytes) {
+		return std::nullopt;
+	}
+	return access;
+}
+
+void copy_direct_raw_array_access(const DirectRawArrayAccess& access,
+    std::span<std::uint8_t> dst) {
+	if (dst.size() != access.layout.required_bytes) {
+		throw nb::value_error("direct raw copy size does not match expected decoded size");
+	}
+	if (access.layout.required_bytes == 0) {
+		return;
+	}
+	std::memcpy(dst.data(), access.source_bytes.data() + access.byte_offset,
+	    access.layout.required_bytes);
+}
+
 nb::object dicomfile_to_array_view(const DicomFile& self, long frame) {
 	const auto layout = build_decode_layout(self, frame, false, 0);
 	const auto& info = layout.plan.info;
@@ -1019,6 +1152,14 @@ nb::object dicomfile_to_array(
     nb::handle scaled) {
 	const auto effective_to_modality_value =
 	    resolve_to_modality_value_option(to_modality_value, scaled);
+	if (auto direct = try_build_direct_raw_array_access(
+	        self, frame, effective_to_modality_value)) {
+		auto out = make_writable_numpy_array(direct->layout.ndim, direct->layout.shape,
+		    direct->layout.strides, direct->layout.spec.dtype,
+		    direct->layout.required_bytes);
+		copy_direct_raw_array_access(*direct, out.bytes);
+		return nb::cast(std::move(out.array));
+	}
 	const auto layout = build_decode_layout(
 	    self, frame, effective_to_modality_value, -1, decode_mct);
 	auto out = make_writable_numpy_array(
@@ -1052,8 +1193,12 @@ nb::object dicomfile_decode_into_array(const DicomFile& self, nb::handle out,
     long frame, bool to_modality_value, int threads, bool decode_mct, nb::handle scaled) {
 	const auto effective_to_modality_value =
 	    resolve_to_modality_value_option(to_modality_value, scaled);
+	const auto direct =
+	    try_build_direct_raw_array_access(self, frame, effective_to_modality_value);
 	const auto layout =
-	    build_decode_layout(self, frame, effective_to_modality_value, threads, decode_mct);
+	    direct ? direct->layout
+	           : build_decode_layout(
+	                 self, frame, effective_to_modality_value, threads, decode_mct);
 
 	PyWritableBufferView writable(out);
 	const auto& view = writable.view();
@@ -1078,7 +1223,11 @@ nb::object dicomfile_decode_into_array(const DicomFile& self, nb::handle out,
 
 	auto out_span = std::span<std::uint8_t>(
 	    static_cast<std::uint8_t*>(view.buf), actual_bytes);
-	decode_layout_into(self, layout, out_span);
+	if (direct) {
+		copy_direct_raw_array_access(*direct, out_span);
+	} else {
+		decode_layout_into(self, layout, out_span);
+	}
 	return nb::borrow<nb::object>(out);
 }
 

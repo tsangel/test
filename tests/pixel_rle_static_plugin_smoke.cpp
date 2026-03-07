@@ -156,6 +156,79 @@ pixel_decoder_request_v2 make_decoder_request(
   return request;
 }
 
+pixel_encoder_request_v2 make_rgb8_encoder_request(
+    std::vector<uint8_t>& source, pixel_output_buffer_v2 encoded_buffer, uint64_t encoded_size) {
+  pixel_encoder_request_v2 request{};
+  request.struct_size = sizeof(pixel_encoder_request_v2);
+  request.abi_version = PIXEL_ENCODER_PLUGIN_ABI_V2;
+
+  request.source.struct_size = sizeof(pixel_encoder_source_v2);
+  request.source.abi_version = PIXEL_ENCODER_PLUGIN_ABI_V2;
+  request.source.source_buffer.data = source.data();
+  request.source.source_buffer.size = source.size();
+
+  request.frame.struct_size = sizeof(pixel_encoder_frame_info_v2);
+  request.frame.abi_version = PIXEL_ENCODER_PLUGIN_ABI_V2;
+  request.frame.codec_profile_code = PIXEL_CODEC_PROFILE_RLE_LOSSLESS_V2;
+  request.frame.source_dtype = PIXEL_DTYPE_U8_V2;
+  request.frame.source_planar = PIXEL_PLANAR_INTERLEAVED_V2;
+  request.frame.rows = 8;
+  request.frame.cols = 8;
+  request.frame.samples_per_pixel = 3;
+  request.frame.bits_allocated = 8;
+  request.frame.bits_stored = 8;
+  request.frame.pixel_representation = 0;
+  request.frame.source_row_stride = 0;
+  request.frame.source_plane_stride = 0;
+  request.frame.source_frame_size_bytes = 0;
+  request.frame.use_multicomponent_transform = 0;
+
+  request.output.struct_size = sizeof(pixel_encoder_output_v2);
+  request.output.abi_version = PIXEL_ENCODER_PLUGIN_ABI_V2;
+  request.output.encoded_buffer = encoded_buffer;
+  request.output.encoded_size = encoded_size;
+
+  return request;
+}
+
+pixel_decoder_request_v2 make_rgb8_decoder_request(
+    std::vector<uint8_t>& encoded, std::vector<uint8_t>& decoded) {
+  pixel_decoder_request_v2 request{};
+  request.struct_size = sizeof(pixel_decoder_request_v2);
+  request.abi_version = PIXEL_DECODER_PLUGIN_ABI_V2;
+
+  request.source.struct_size = sizeof(pixel_decoder_source_v2);
+  request.source.abi_version = PIXEL_DECODER_PLUGIN_ABI_V2;
+  request.source.source_buffer.data = encoded.data();
+  request.source.source_buffer.size = encoded.size();
+
+  request.frame.struct_size = sizeof(pixel_decoder_frame_info_v2);
+  request.frame.abi_version = PIXEL_DECODER_PLUGIN_ABI_V2;
+  request.frame.codec_profile_code = PIXEL_CODEC_PROFILE_RLE_LOSSLESS_V2;
+  request.frame.source_dtype = PIXEL_DTYPE_U8_V2;
+  request.frame.source_planar = PIXEL_PLANAR_INTERLEAVED_V2;
+  request.frame.rows = 8;
+  request.frame.cols = 8;
+  request.frame.samples_per_pixel = 3;
+  request.frame.bits_stored = 8;
+  request.frame.decode_mct = 0;
+
+  request.output.struct_size = sizeof(pixel_decoder_output_v2);
+  request.output.abi_version = PIXEL_DECODER_PLUGIN_ABI_V2;
+  request.output.dst = decoded.data();
+  request.output.dst_size = decoded.size();
+  request.output.row_stride = 0;
+  request.output.frame_stride = 0;
+  request.output.dst_dtype = PIXEL_DTYPE_U8_V2;
+  request.output.dst_planar = PIXEL_PLANAR_INTERLEAVED_V2;
+
+  request.value_transform.struct_size = sizeof(pixel_decoder_value_transform_v2);
+  request.value_transform.abi_version = PIXEL_DECODER_PLUGIN_ABI_V2;
+  request.value_transform.transform_kind = PIXEL_DECODER_VALUE_TRANSFORM_NONE_V2;
+
+  return request;
+}
+
 }  // namespace
 
 int main() {
@@ -249,6 +322,46 @@ int main() {
     expect_near(decoded_rescale_values[i], expected_value, 1e-5,
         "RLE rescale decoded sample");
   }
+
+  std::vector<uint8_t> rgb_source(8u * 8u * 3u, uint8_t{0});
+  for (std::size_t i = 0; i < rgb_source.size(); ++i) {
+    rgb_source[i] = static_cast<uint8_t>((i * 29u + 7u) & 0xFFu);
+  }
+
+  pixel_output_buffer_v2 rgb_tiny_output{};
+  auto first_rgb_encode_request =
+      make_rgb8_encoder_request(rgb_source, rgb_tiny_output, 0);
+  const auto first_rgb_encode_ec =
+      encoder_api.encode_frame(encoder_ctx.context, &first_rgb_encode_request);
+  expect_eq(first_rgb_encode_ec, PIXEL_CODEC_ERR_OUTPUT_TOO_SMALL,
+      "RGB encode should report output too small");
+  expect_true(first_rgb_encode_request.output.encoded_size > 0,
+      "RGB encode returns required encoded size");
+
+  std::vector<uint8_t> rgb_encoded(first_rgb_encode_request.output.encoded_size);
+  pixel_output_buffer_v2 rgb_output{};
+  rgb_output.data = rgb_encoded.data();
+  rgb_output.size = rgb_encoded.size();
+
+  auto second_rgb_encode_request =
+      make_rgb8_encoder_request(rgb_source, rgb_output, 0);
+  const auto second_rgb_encode_ec =
+      encoder_api.encode_frame(encoder_ctx.context, &second_rgb_encode_request);
+  if (second_rgb_encode_ec != PIXEL_CODEC_ERR_OK) {
+    fail("RGB encode failed: " + encoder_error_detail(encoder_api, encoder_ctx.context));
+  }
+  rgb_encoded.resize(
+      static_cast<std::size_t>(second_rgb_encode_request.output.encoded_size));
+
+  std::vector<uint8_t> rgb_decoded(rgb_source.size(), uint8_t{0});
+  auto rgb_decode_request = make_rgb8_decoder_request(rgb_encoded, rgb_decoded);
+  const auto rgb_decode_ec =
+      decoder_api.decode_frame(decoder_ctx.context, &rgb_decode_request);
+  if (rgb_decode_ec != PIXEL_CODEC_ERR_OK) {
+    fail("RGB decode failed: " + decoder_error_detail(decoder_api, decoder_ctx.context));
+  }
+  expect_true(std::memcmp(rgb_decoded.data(), rgb_source.data(), rgb_source.size()) == 0,
+      "RLE RGB round-trip data equality");
 
   return 0;
 }

@@ -1,12 +1,16 @@
 # Pixel v2 codec targets and runtime wiring.
 
 function(dicomsdl_apply_pixel_static_plugin_defines TARGET_NAME)
+    set(_dicomsdl_rle_builtin 0)
     set(_dicomsdl_jpeg_builtin 0)
     set(_dicomsdl_jpegls_builtin 0)
     set(_dicomsdl_jpeg2k_builtin 0)
     set(_dicomsdl_htj2k_builtin 0)
     set(_dicomsdl_jpegxl_builtin 0)
 
+    if(DICOMSDL_PIXEL_RUNTIME AND DICOMSDL_PIXEL_RLE_STATIC_PLUGIN)
+        set(_dicomsdl_rle_builtin 1)
+    endif()
     if(DICOMSDL_PIXEL_RUNTIME AND DICOMSDL_PIXEL_JPEG_STATIC_PLUGIN)
         set(_dicomsdl_jpeg_builtin 1)
     endif()
@@ -24,6 +28,7 @@ function(dicomsdl_apply_pixel_static_plugin_defines TARGET_NAME)
     endif()
 
     target_compile_definitions(${TARGET_NAME} PRIVATE
+        DICOMSDL_PIXEL_RLE_STATIC_PLUGIN_ENABLED=${_dicomsdl_rle_builtin}
         DICOMSDL_PIXEL_JPEG_STATIC_PLUGIN_ENABLED=${_dicomsdl_jpeg_builtin}
         DICOMSDL_PIXEL_JPEGLS_STATIC_PLUGIN_ENABLED=${_dicomsdl_jpegls_builtin}
         DICOMSDL_PIXEL_OPENJPEG_STATIC_PLUGIN_ENABLED=${_dicomsdl_jpeg2k_builtin}
