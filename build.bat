@@ -317,11 +317,11 @@ if not "%RUN_TESTS%"=="0" (
 :build_wheel
 if not "%BUILD_WHEEL%"=="0" (
 	echo Building Python wheel into %WHEEL_DIR%
-	if exist "%WHEEL_DIR%" (
-		if not exist "%WHEEL_DIR%\." (
-			echo Error: WHEEL_DIR exists but is not a directory: %WHEEL_DIR%.>&2
-			exit /b 1
-		)
+	if exist "%WHEEL_DIR%\NUL" (
+		rem WHEEL_DIR already exists as a directory.
+	) else if exist "%WHEEL_DIR%" (
+		echo Error: WHEEL_DIR exists but is not a directory: %WHEEL_DIR%.>&2
+		exit /b 1
 	) else (
 		mkdir "%WHEEL_DIR%"
 		if errorlevel 1 (

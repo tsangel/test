@@ -447,6 +447,26 @@ pixel_error_code_v2 decoder_decode_frame(
           "unsupported JPEG-LS interleave mode");
     }
 
+    const bool matching_output_dtype = !dst_dtype.is_float &&
+        dst_dtype.bytes == source_dtype.bytes &&
+        dst_dtype.is_signed == source_dtype.is_signed;
+    const bool can_decode_directly =
+        transform_kind == PIXEL_DECODER_VALUE_TRANSFORM_NONE_V2 &&
+        matching_output_dtype &&
+        (samples == 1 || source_planar == output_planar);
+    if (can_decode_directly) {
+      if (row_stride > static_cast<uint64_t>(std::numeric_limits<uint32_t>::max())) {
+        return fail_detail(c, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "decode_frame",
+            "destination row stride exceeds uint32 range");
+      }
+
+      decoder.decode(request->output.dst,
+          static_cast<std::size_t>(frame_stride),
+          static_cast<uint32_t>(row_stride));
+      clear_detail(c);
+      return PIXEL_CODEC_ERR_OK;
+    }
+
     const uint64_t source_row_components = source_planar ? 1 : samples;
     uint64_t source_row_bytes = 0;
     if (!mul_u64(cols, source_row_components, &source_row_bytes) ||

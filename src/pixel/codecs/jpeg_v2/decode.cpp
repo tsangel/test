@@ -16,6 +16,7 @@
 #include <new>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <vector>
 
 #include "internal.hpp"
@@ -70,6 +71,17 @@ int pixel_format_for_samples(std::size_t samples_per_pixel) {
   default:
     return TJPF_UNKNOWN;
   }
+}
+
+int checked_int_stride(std::size_t stride) {
+  if (stride > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+    throw std::runtime_error("stride exceeds int range");
+  }
+  return static_cast<int>(stride);
+}
+
+bool is_pointer_aligned(const void* pointer, std::size_t alignment) noexcept {
+  return (reinterpret_cast<std::uintptr_t>(pointer) % alignment) == 0;
 }
 
 std::optional<std::size_t> find_sequential_sos_se_patch_offset(
@@ -611,6 +623,47 @@ pixel_error_code_v2 decoder_decode_frame(
     if (decoded_pitch_samples > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
       return fail_detail(c, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "decode_frame",
           "decoded row stride exceeds TurboJPEG int range");
+    }
+
+    const bool matching_output_dtype = !dst_dtype.is_float &&
+        dst_dtype.bytes == source_dtype.bytes &&
+        dst_dtype.is_signed == source_dtype.is_signed;
+    const bool requires_u16_alignment = decoded_precision > 8;
+    const bool can_decode_directly = transform_kind == PIXEL_DECODER_VALUE_TRANSFORM_NONE_V2 &&
+        matching_output_dtype &&
+        (samples == 1 || !output_planar) &&
+        (!requires_u16_alignment ||
+            is_pointer_aligned(request->output.dst, alignof(std::uint16_t)));
+    if (can_decode_directly) {
+      if (row_stride % source_dtype.bytes != 0) {
+        return fail_detail(c, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "decode_frame",
+            "destination row stride is not aligned to sample size");
+      }
+
+      const int direct_pitch_samples = checked_int_stride(
+          static_cast<std::size_t>(row_stride / source_dtype.bytes));
+      int rc = -1;
+      if (decoded_precision <= 8) {
+        rc = tj3Decompress8(handle.get(), decode_source.data(), decode_source.size(),
+            request->output.dst, direct_pitch_samples, pixel_format);
+      } else if (decoded_precision <= 12) {
+        rc = tj3Decompress12(handle.get(), decode_source.data(), decode_source.size(),
+            reinterpret_cast<short*>(request->output.dst),
+            direct_pitch_samples, pixel_format);
+      } else {
+        rc = tj3Decompress16(handle.get(), decode_source.data(), decode_source.size(),
+            reinterpret_cast<unsigned short*>(request->output.dst),
+            direct_pitch_samples, pixel_format);
+      }
+
+      if (rc != 0) {
+        const char* msg = tj3GetErrorStr(handle.get());
+        return fail_detail(c, PIXEL_CODEC_ERR_FAILED, "decode_frame",
+            (msg != nullptr && msg[0] != '\0') ? msg : "JPEG decode failed");
+      }
+
+      clear_detail(c);
+      return PIXEL_CODEC_ERR_OK;
     }
 
     const int destination_pitch_samples = static_cast<int>(decoded_pitch_samples);

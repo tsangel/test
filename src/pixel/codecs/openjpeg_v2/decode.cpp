@@ -10,6 +10,55 @@
 
 namespace pixel::openjpeg_plugin_v2 {
 
+namespace {
+
+template <typename DstT>
+inline void store_value(uint8_t* dst, DstT value) {
+  std::memcpy(dst, &value, sizeof(DstT));
+}
+
+template <typename DstT>
+pixel_error_code_v2 write_unscaled_image_typed(const pixel_decoder_request_v2* request,
+    const opj_image_t* image, uint64_t row_stride, uint64_t plane_bytes,
+    bool planar) {
+  const std::size_t rows = static_cast<std::size_t>(request->frame.rows);
+  const std::size_t cols = static_cast<std::size_t>(request->frame.cols);
+  const std::size_t samples = static_cast<std::size_t>(request->frame.samples_per_pixel);
+  const std::size_t row_stride_sz = static_cast<std::size_t>(row_stride);
+  const std::size_t plane_bytes_sz = static_cast<std::size_t>(plane_bytes);
+
+  if (planar && samples > 1) {
+    for (std::size_t comp = 0; comp < samples; ++comp) {
+      const int* src_comp = image->comps[comp].data;
+      uint8_t* dst_plane = request->output.dst + comp * plane_bytes_sz;
+      for (std::size_t r = 0; r < rows; ++r) {
+        const std::size_t src_row_idx = r * cols;
+        uint8_t* dst_row = dst_plane + r * row_stride_sz;
+        for (std::size_t c = 0; c < cols; ++c) {
+          store_value(dst_row + c * sizeof(DstT),
+              static_cast<DstT>(src_comp[src_row_idx + c]));
+        }
+      }
+    }
+    return PIXEL_CODEC_ERR_OK;
+  }
+
+  const std::size_t pixel_stride = samples * sizeof(DstT);
+  for (std::size_t r = 0; r < rows; ++r) {
+    uint8_t* dst_row = request->output.dst + r * row_stride_sz;
+    const std::size_t src_row_idx = r * cols;
+    for (std::size_t c = 0; c < cols; ++c) {
+      uint8_t* dst_pixel = dst_row + c * pixel_stride;
+      for (std::size_t comp = 0; comp < samples; ++comp) {
+        store_value(dst_pixel + comp * sizeof(DstT),
+            static_cast<DstT>(image->comps[comp].data[src_row_idx + c]));
+      }
+    }
+  }
+
+  return PIXEL_CODEC_ERR_OK;
+}
+
 pixel_error_code_v2 validate_decoder_request(
     DecoderCtx* ctx, const pixel_decoder_request_v2* request) {
   if (request->struct_size < sizeof(pixel_decoder_request_v2) ||
@@ -186,6 +235,42 @@ pixel_error_code_v2 write_decoded_image(
   const uint32_t transform_kind = request->value_transform.transform_kind;
   const bool transformed = transform_kind != PIXEL_DECODER_VALUE_TRANSFORM_NONE_V2;
 
+  DtypeInfo source_dtype{};
+  const bool have_source_dtype =
+      dtype_info_from_code(request->frame.source_dtype, &source_dtype);
+  const bool matching_output_dtype = have_source_dtype &&
+      !source_dtype.is_float &&
+      !dst_dtype.is_float &&
+      source_dtype.bytes == dst_dtype.bytes &&
+      source_dtype.is_signed == dst_dtype.is_signed;
+
+  if (!transformed && matching_output_dtype) {
+    if (source_dtype.bytes == 1 && !source_dtype.is_signed) {
+      return write_unscaled_image_typed<uint8_t>(
+          request, image, row_stride, plane_bytes, planar);
+    }
+    if (source_dtype.bytes == 1 && source_dtype.is_signed) {
+      return write_unscaled_image_typed<int8_t>(
+          request, image, row_stride, plane_bytes, planar);
+    }
+    if (source_dtype.bytes == 2 && !source_dtype.is_signed) {
+      return write_unscaled_image_typed<uint16_t>(
+          request, image, row_stride, plane_bytes, planar);
+    }
+    if (source_dtype.bytes == 2 && source_dtype.is_signed) {
+      return write_unscaled_image_typed<int16_t>(
+          request, image, row_stride, plane_bytes, planar);
+    }
+    if (source_dtype.bytes == 4 && !source_dtype.is_signed) {
+      return write_unscaled_image_typed<uint32_t>(
+          request, image, row_stride, plane_bytes, planar);
+    }
+    if (source_dtype.bytes == 4 && source_dtype.is_signed) {
+      return write_unscaled_image_typed<int32_t>(
+          request, image, row_stride, plane_bytes, planar);
+    }
+  }
+
   const std::size_t row_stride_sz = static_cast<std::size_t>(row_stride);
   const std::size_t plane_bytes_sz = static_cast<std::size_t>(plane_bytes);
   const std::size_t samples_sz = static_cast<std::size_t>(samples);
@@ -309,6 +394,8 @@ pixel_error_code_v2 write_decoded_image(
 
   return PIXEL_CODEC_ERR_OK;
 }
+
+}  // namespace
 
 
 pixel_error_code_v2 decoder_decode_frame(
