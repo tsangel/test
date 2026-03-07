@@ -9,8 +9,10 @@ if not defined BUILD_TYPE set "BUILD_TYPE=Release"
 if not defined BUILD_TESTING set "BUILD_TESTING=ON"
 if not defined DICOM_BUILD_EXAMPLES set "DICOM_BUILD_EXAMPLES=ON"
 if not defined BUILD_WHEEL set "BUILD_WHEEL=1"
+if not defined WHEEL_ONLY set "WHEEL_ONLY=0"
 if not defined WHEEL_DIR set "WHEEL_DIR=%ROOT_DIR%\dist"
 if not defined PRESERVE_WHEEL_HISTORY set "PRESERVE_WHEEL_HISTORY=1"
+if not defined PIP_WHEEL_VERBOSE set "PIP_WHEEL_VERBOSE=0"
 if not defined CTEST_LABEL set "CTEST_LABEL=dicomsdl"
 if not defined PYTHON_BIN (
 	where py >nul 2>&1
@@ -196,6 +198,23 @@ if defined CMAKE_GENERATOR (
 	)
 )
 
+set "CMAKE_GENERATOR=%GENERATOR%"
+
+echo Selected Windows toolchain: %SELECTED_TOOLCHAIN%
+echo Codec modes: jpeg=%CODEC_MODE_JPEG% jpegls=%CODEC_MODE_JPEGLS% jpeg2k=%CODEC_MODE_JPEG2K% htj2k=%CODEC_MODE_HTJ2K% jpegxl=%CODEC_MODE_JPEGXL%
+echo Pixel runtime mode: v2 ^(default^)
+
+if not "%WHEEL_ONLY%"=="0" (
+	echo Wheel-only mode: skipping top-level CMake configure/build and relying on pip wheel.
+	if not "%RUN_TESTS%"=="0" (
+		echo Warning: RUN_TESTS is ignored in WHEEL_ONLY mode.
+	)
+	if not "%~1"=="" (
+		echo Warning: explicit CMake targets are ignored in WHEEL_ONLY mode.
+	)
+	goto build_wheel
+)
+
 set "CMAKE_CACHE_FILE=%BUILD_DIR%\CMakeCache.txt"
 if exist "%CMAKE_CACHE_FILE%" (
 	set "EXISTING_GENERATOR="
@@ -245,10 +264,6 @@ if exist "%CMAKE_CACHE_FILE%" (
 		)
 	)
 )
-
-echo Selected Windows toolchain: %SELECTED_TOOLCHAIN%
-echo Codec modes: jpeg=%CODEC_MODE_JPEG% jpegls=%CODEC_MODE_JPEGLS% jpeg2k=%CODEC_MODE_JPEG2K% htj2k=%CODEC_MODE_HTJ2K% jpegxl=%CODEC_MODE_JPEGXL%
-echo Pixel runtime mode: v2 ^(default^)
 echo Configuring dicomsdl (%BUILD_TYPE%) in %BUILD_DIR%
 echo Toolchain CMake args: %TOOLCHAIN_CMAKE_ARGS%
 cmake -S "%ROOT_DIR%" -B "%BUILD_DIR%" -DBUILD_TESTING=%BUILD_TESTING% -DDICOM_BUILD_EXAMPLES=%DICOM_BUILD_EXAMPLES% -DCMAKE_BUILD_TYPE=%BUILD_TYPE% -G "%GENERATOR%" %TOOLCHAIN_CMAKE_ARGS% %PIXEL_V2_CMAKE_ARGS% %CODEC_PIXEL_CMAKE_ARGS% %CMAKE_EXTRA_ARGS%
@@ -296,19 +311,39 @@ if not "%RUN_TESTS%"=="0" (
 	)
 	set "CTEST_ERROR=%errorlevel%"
 	popd
-	if not "%CTEST_ERROR%"=="0" exit /b %CTEST_ERROR%
+	if not "!CTEST_ERROR!"=="0" exit /b !CTEST_ERROR!
 )
 
+:build_wheel
 if not "%BUILD_WHEEL%"=="0" (
 	echo Building Python wheel into %WHEEL_DIR%
-	if not exist "%WHEEL_DIR%" mkdir "%WHEEL_DIR%"
+	if exist "%WHEEL_DIR%" (
+		if not exist "%WHEEL_DIR%\." (
+			echo Error: WHEEL_DIR exists but is not a directory: %WHEEL_DIR%.>&2
+			exit /b 1
+		)
+	) else (
+		mkdir "%WHEEL_DIR%"
+		if errorlevel 1 (
+			echo Error: failed to create WHEEL_DIR: %WHEEL_DIR%.>&2
+			exit /b !errorlevel!
+		)
+	)
 	set "TMP_WHEEL_DIR=%WHEEL_DIR%\.wheel-build-%RANDOM%%RANDOM%"
-	if exist "%TMP_WHEEL_DIR%" rmdir /s /q "%TMP_WHEEL_DIR%"
-	mkdir "%TMP_WHEEL_DIR%"
-	%PYTHON_BIN% -m pip wheel "%ROOT_DIR%" --no-build-isolation --no-deps -w "%TMP_WHEEL_DIR%"
+	if exist "!TMP_WHEEL_DIR!" rmdir /s /q "!TMP_WHEEL_DIR!"
+	mkdir "!TMP_WHEEL_DIR!"
 	if errorlevel 1 (
-		if exist "%TMP_WHEEL_DIR%" rmdir /s /q "%TMP_WHEEL_DIR%"
-		exit /b %errorlevel%
+		echo Error: failed to create temporary wheel directory: !TMP_WHEEL_DIR!.>&2
+		exit /b !errorlevel!
+	)
+	if not "%PIP_WHEEL_VERBOSE%"=="0" (
+		%PYTHON_BIN% -m pip wheel -v "%ROOT_DIR%" --no-build-isolation --no-deps -w "!TMP_WHEEL_DIR!"
+	) else (
+		%PYTHON_BIN% -m pip wheel "%ROOT_DIR%" --no-build-isolation --no-deps -w "!TMP_WHEEL_DIR!"
+	)
+	if errorlevel 1 (
+		if exist "!TMP_WHEEL_DIR!" rmdir /s /q "!TMP_WHEEL_DIR!"
+		exit /b !errorlevel!
 	)
 	set "WHEEL_TIMESTAMP="
 	for /f %%I in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss" 2^>nul') do (
@@ -321,7 +356,7 @@ if not "%BUILD_WHEEL%"=="0" (
 		set "WHEEL_TIMESTAMP=!WHEEL_TIMESTAMP:/=-!"
 	)
 	set "WHEEL_COUNT=0"
-	for %%F in ("%TMP_WHEEL_DIR%\*.whl") do (
+	for %%F in ("!TMP_WHEEL_DIR!\*.whl") do (
 		if exist "%%~fF" (
 			set /a WHEEL_COUNT+=1
 			set "TARGET_WHEEL=%WHEEL_DIR%\%%~nxF"
@@ -337,11 +372,11 @@ if not "%BUILD_WHEEL%"=="0" (
 		)
 	)
 	if "!WHEEL_COUNT!"=="0" (
-		if exist "%TMP_WHEEL_DIR%" rmdir /s /q "%TMP_WHEEL_DIR%"
-		echo Error: wheel build did not produce any .whl files in %TMP_WHEEL_DIR%.>&2
+		if exist "!TMP_WHEEL_DIR!" rmdir /s /q "!TMP_WHEEL_DIR!"
+		echo Error: wheel build did not produce any .whl files in !TMP_WHEEL_DIR!.>&2
 		exit /b 1
 	)
-	if exist "%TMP_WHEEL_DIR%" rmdir /s /q "%TMP_WHEEL_DIR%"
+	if exist "!TMP_WHEEL_DIR!" rmdir /s /q "!TMP_WHEEL_DIR!"
 )
 
 exit /b 0
