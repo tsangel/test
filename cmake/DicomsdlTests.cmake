@@ -20,6 +20,13 @@ if(BUILD_TESTING)
     add_test(NAME htj2k_backend_config_smoke COMMAND dicomsdl_htj2k_backend_config_smoke)
     set_tests_properties(htj2k_backend_config_smoke PROPERTIES LABELS "dicomsdl")
 
+    add_executable(dicomsdl_htj2k_threads_ignore_smoke
+        tests/htj2k_threads_ignore_smoke.cpp
+    )
+    target_link_libraries(dicomsdl_htj2k_threads_ignore_smoke PRIVATE dicomsdl)
+    add_test(NAME htj2k_threads_ignore_smoke COMMAND dicomsdl_htj2k_threads_ignore_smoke)
+    set_tests_properties(htj2k_threads_ignore_smoke PROPERTIES LABELS "dicomsdl")
+
     add_executable(dicomsdl_numeric_values
         tests/numeric_values.cpp
     )
@@ -183,6 +190,7 @@ if(BUILD_TESTING)
         dicomsdl_dictionary_consistency
         dicomsdl_basic_smoke
         dicomsdl_htj2k_backend_config_smoke
+        dicomsdl_htj2k_threads_ignore_smoke
         dicomsdl_numeric_values
         dicomsdl_uid_consistency
         dicomsdl_separation_regression

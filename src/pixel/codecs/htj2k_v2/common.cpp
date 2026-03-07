@@ -329,16 +329,26 @@ pixel_error_code_v2 parse_decoder_options(
     return PIXEL_CODEC_ERR_OK;
   }
 
-  const pixel_option_kv_v2& kv = options->items[0];
-  if (kv.key == nullptr || kv.value == nullptr) {
-    return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "parse_options",
-        "option key/value must not be null");
+  for (uint32_t i = 0; i < options->count; ++i) {
+    const pixel_option_kv_v2& kv = options->items[i];
+    if (kv.key == nullptr || kv.value == nullptr) {
+      return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "parse_options",
+          "option key/value must not be null");
+    }
+
+    // Accept the shared decoder thread hint for API compatibility even though
+    // the current OpenJPH-backed HTJ2K decoder does not use it yet.
+    if (std::strcmp(kv.key, "threads") == 0) {
+      continue;
+    }
+
+    char reason[256];
+    std::snprintf(reason, sizeof(reason),
+        "unknown option '%s' for decoder", kv.key);
+    return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "parse_options", reason);
   }
 
-  char reason[256];
-  std::snprintf(reason, sizeof(reason),
-      "unknown option '%s' for decoder", kv.key);
-  return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "parse_options", reason);
+  return PIXEL_CODEC_ERR_OK;
 }
 
 pixel_error_code_v2 parse_encoder_options(

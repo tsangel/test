@@ -2066,6 +2066,7 @@ NB_MODULE(_dicomsdl, m) {
 		    "    Default is -1 (use all CPUs).\n"
 		    "    0 uses library default, -1 uses all CPUs, >0 sets explicit thread count.\n"
 		    "    Currently applied to JPEG 2000; unsupported decoders may ignore it.\n"
+		    "    The OpenJPH HTJ2K backend currently accepts this hint and ignores it.\n"
 		    "decode_mct : bool, optional\n"
 		    "    Whether to apply codestream-level MCT/color inverse transform when supported.\n"
 		    "    True by default. Currently honored by OpenJPEG-based decode paths.\n"

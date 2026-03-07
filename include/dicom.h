@@ -1108,6 +1108,7 @@ struct DecodeOptions {
 	// Decoder thread count hint:
 	//  -1: auto(all CPUs) [default], 0: library default, >0: explicit thread count.
 	// Backends may ignore this option when unsupported.
+	// The current OpenJPH HTJ2K decoder accepts the hint but ignores it.
 	int decoder_threads{-1};
 };
 
