@@ -15,8 +15,27 @@ struct PreparedDecodeFrameSource {
 	std::vector<std::uint8_t> owned_bytes{};
 };
 
+struct NativeDecodeSourceView {
+	std::span<const std::uint8_t> source_bytes{};
+	std::string_view source_name{"PixelData"};
+	std::size_t rows{0};
+	std::size_t cols{0};
+	std::size_t frames{0};
+	std::size_t samples_per_pixel{0};
+	bool planar_source{false};
+	std::size_t bytes_per_sample{0};
+	std::size_t row_payload_bytes{0};
+	std::size_t frame_bytes{0};
+};
+
 [[nodiscard]] PreparedDecodeFrameSource prepare_decode_frame_source_or_throw(
     const DicomFile& df, const PixelDataInfo& info, std::size_t frame_index);
+
+[[nodiscard]] NativeDecodeSourceView compute_native_decode_source_view_or_throw(
+    const DicomFile& df, const PixelDataInfo& info);
+
+[[nodiscard]] std::span<const std::uint8_t> native_decode_frame_bytes_or_throw(
+    const NativeDecodeSourceView& source_view, std::size_t frame_index);
 
 struct ComputedEncodeSourceLayout {
 	std::size_t bytes_per_sample{0};

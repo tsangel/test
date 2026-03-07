@@ -23,5 +23,8 @@ if(DICOM_BUILD_PYTHON)
         )
     endif()
 
+    target_include_directories(_dicomsdl PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
     target_link_libraries(_dicomsdl PRIVATE dicomsdl fmt::fmt-header-only)
 endif()

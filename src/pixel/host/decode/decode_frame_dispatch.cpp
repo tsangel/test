@@ -7,13 +7,16 @@
 #include "pixel/codecs/uncompressed_v2/direct_api_v2.hpp"
 #if defined(DICOMSDL_PIXEL_RLE_STATIC_PLUGIN_ENABLED) && DICOMSDL_PIXEL_RLE_STATIC_PLUGIN_ENABLED
 #include "pixel/codecs/rle_v2/builtin_api.hpp"
+#include "pixel/codecs/rle_v2/direct_api_v2.hpp"
 #endif
 #include "pixel/host/adapter/host_adapter_v2.hpp"
+#include "pixel/host/support/abi_convert_v2.hpp"
 #include "pixel/runtime/runtime_registry_v2.hpp"
 #endif
 
 #include <array>
 #include <cctype>
+#include <cstring>
 #include <cstdint>
 #include <cstdio>
 #include <exception>
@@ -84,43 +87,16 @@ struct DecoderContextCache {
 	return ::pixel::runtime_v2::current_registry_generation();
 }
 
-[[nodiscard]] uint8_t to_direct_dtype_code(dicom::pixel::DataType data_type) noexcept {
-	switch (data_type) {
-	case dicom::pixel::DataType::u8:
-		return PIXEL_DTYPE_U8_V2;
-	case dicom::pixel::DataType::s8:
-		return PIXEL_DTYPE_S8_V2;
-	case dicom::pixel::DataType::u16:
-		return PIXEL_DTYPE_U16_V2;
-	case dicom::pixel::DataType::s16:
-		return PIXEL_DTYPE_S16_V2;
-	case dicom::pixel::DataType::u32:
-		return PIXEL_DTYPE_U32_V2;
-	case dicom::pixel::DataType::s32:
-		return PIXEL_DTYPE_S32_V2;
-	case dicom::pixel::DataType::f32:
-		return PIXEL_DTYPE_F32_V2;
-	case dicom::pixel::DataType::f64:
-		return PIXEL_DTYPE_F64_V2;
-	case dicom::pixel::DataType::unknown:
-	default:
-		return PIXEL_DTYPE_UNKNOWN_V2;
-	}
-}
-
-[[nodiscard]] uint8_t to_direct_planar_code(dicom::pixel::Planar planar) noexcept {
-	return planar == dicom::pixel::Planar::planar
-	    ? PIXEL_PLANAR_PLANAR_V2
-	    : PIXEL_PLANAR_INTERLEAVED_V2;
-}
-
 void populate_direct_decode_request(pixel_decoder_request_v2& request,
     uint32_t codec_profile_code, const PixelDataInfo& info,
     std::span<const uint8_t> prepared_source, std::span<uint8_t> destination,
     const DecodePlan& plan) {
-	const uint8_t source_dtype = to_direct_dtype_code(info.sv_dtype);
+	::pixel::runtime_v2::DtypeMeta source_dtype{};
+	if (!::pixel::runtime_v2::resolve_dtype_meta(info.sv_dtype, &source_dtype)) {
+		source_dtype.code = PIXEL_DTYPE_UNKNOWN_V2;
+	}
 	const uint8_t dst_dtype =
-	    plan.modality_value_transform.enabled ? PIXEL_DTYPE_F32_V2 : source_dtype;
+	    plan.modality_value_transform.enabled ? PIXEL_DTYPE_F32_V2 : source_dtype.code;
 	const bool mct_capable_profile =
 	    codec_profile_code == PIXEL_CODEC_PROFILE_JPEG2000_LOSSLESS_V2 ||
 	    codec_profile_code == PIXEL_CODEC_PROFILE_JPEG2000_LOSSY_V2 ||
@@ -140,8 +116,9 @@ void populate_direct_decode_request(pixel_decoder_request_v2& request,
 	request.frame.struct_size = sizeof(pixel_decoder_frame_info_v2);
 	request.frame.abi_version = PIXEL_DECODER_PLUGIN_ABI_V2;
 	request.frame.codec_profile_code = codec_profile_code;
-	request.frame.source_dtype = source_dtype;
-	request.frame.source_planar = to_direct_planar_code(info.planar_configuration);
+	request.frame.source_dtype = source_dtype.code;
+	request.frame.source_planar =
+	    ::pixel::runtime_v2::to_planar_code(info.planar_configuration);
 	request.frame.rows = info.rows;
 	request.frame.cols = info.cols;
 	request.frame.samples_per_pixel = info.samples_per_pixel;
@@ -156,7 +133,8 @@ void populate_direct_decode_request(pixel_decoder_request_v2& request,
 	request.output.row_stride = static_cast<uint64_t>(plan.strides.row);
 	request.output.frame_stride = static_cast<uint64_t>(plan.strides.frame);
 	request.output.dst_dtype = dst_dtype;
-	request.output.dst_planar = to_direct_planar_code(plan.options.planar_out);
+	request.output.dst_planar =
+	    ::pixel::runtime_v2::to_planar_code(plan.options.planar_out);
 
 	request.value_transform.struct_size = sizeof(pixel_decoder_value_transform_v2);
 	request.value_transform.abi_version = PIXEL_DECODER_PLUGIN_ABI_V2;
@@ -198,255 +176,6 @@ void populate_direct_decode_request(pixel_decoder_request_v2& request,
 	}
 	return std::string(buffer.data(), buffer.data() + copied);
 }
-
-#if defined(DICOMSDL_PIXEL_RLE_STATIC_PLUGIN_ENABLED) && DICOMSDL_PIXEL_RLE_STATIC_PLUGIN_ENABLED
-[[nodiscard]] bool checked_mul_size_t(
-    std::size_t lhs, std::size_t rhs, std::size_t& out) noexcept {
-	if (lhs == 0 || rhs == 0) {
-		out = 0;
-		return true;
-	}
-	if (lhs > std::numeric_limits<std::size_t>::max() / rhs) {
-		return false;
-	}
-	out = lhs * rhs;
-	return true;
-}
-
-[[nodiscard]] uint32_t direct_bit_mask_u32(int bits) noexcept {
-	if (bits <= 0) {
-		return 0;
-	}
-	if (bits >= 32) {
-		return 0xFFFFFFFFu;
-	}
-	return (uint32_t{1} << static_cast<unsigned>(bits)) - 1u;
-}
-
-[[nodiscard]] int32_t direct_sign_extend_u32(uint32_t raw, int bits) noexcept {
-	if (bits <= 0) {
-		return 0;
-	}
-	if (bits >= 32) {
-		return static_cast<int32_t>(raw);
-	}
-	const int shift = 32 - bits;
-	return static_cast<int32_t>(raw << static_cast<unsigned>(shift)) >>
-	    static_cast<unsigned>(shift);
-}
-
-[[nodiscard]] bool load_direct_integral_sample(const uint8_t* src,
-    std::size_t sample_bytes, bool is_signed, int bits_stored,
-    int32_t* out_value) noexcept {
-	if (src == nullptr || out_value == nullptr) {
-		return false;
-	}
-
-	uint32_t raw = 0;
-	switch (sample_bytes) {
-	case 1:
-		raw = src[0];
-		break;
-	case 2: {
-		uint16_t value = 0;
-		std::memcpy(&value, src, sizeof(value));
-		raw = value;
-		break;
-	}
-	case 4: {
-		uint32_t value = 0;
-		std::memcpy(&value, src, sizeof(value));
-		raw = value;
-		break;
-	}
-	default:
-		return false;
-	}
-
-	if (is_signed) {
-		*out_value = direct_sign_extend_u32(raw, bits_stored);
-		return true;
-	}
-
-	raw &= direct_bit_mask_u32(bits_stored);
-	*out_value = static_cast<int32_t>(raw);
-	return true;
-}
-
-[[nodiscard]] float apply_direct_modality_transform(
-    const ModalityValueTransform& value_transform, int32_t sample_value) {
-	if (value_transform.modality_lut.has_value()) {
-		const auto& lut = *value_transform.modality_lut;
-		if (lut.values.empty()) {
-			return 0.0f;
-		}
-		std::int64_t idx =
-		    static_cast<std::int64_t>(sample_value) - lut.first_mapped;
-		if (idx < 0) {
-			idx = 0;
-		}
-		const auto max_index =
-		    static_cast<std::int64_t>(lut.values.size() - std::size_t{1});
-		if (idx > max_index) {
-			idx = max_index;
-		}
-		return lut.values[static_cast<std::size_t>(idx)];
-	}
-
-	return static_cast<float>(
-	    static_cast<double>(sample_value) * value_transform.rescale_slope +
-	    value_transform.rescale_intercept);
-}
-
-void decode_rle_packbits_segment_or_throw(std::size_t segment_index,
-    std::span<const std::uint8_t> encoded, std::span<std::uint8_t> decoded) {
-	std::size_t in = 0;
-	std::size_t out = 0;
-	while (out < decoded.size()) {
-		if (in >= encoded.size()) {
-			throw std::runtime_error(
-			    "RLE segment ended early at index=" + std::to_string(segment_index));
-		}
-
-		const auto control = static_cast<std::int8_t>(encoded[in++]);
-		if (control >= 0) {
-			const auto literal_count = static_cast<std::size_t>(control) + 1u;
-			if (in + literal_count > encoded.size() ||
-			    out + literal_count > decoded.size()) {
-				throw std::runtime_error(
-				    "RLE literal run out of bounds at segment=" +
-				    std::to_string(segment_index));
-			}
-			std::memcpy(decoded.data() + out, encoded.data() + in, literal_count);
-			in += literal_count;
-			out += literal_count;
-			continue;
-		}
-
-		if (control >= -127) {
-			const auto repeat_count = static_cast<std::size_t>(1 - control);
-			if (in >= encoded.size() || out + repeat_count > decoded.size()) {
-				throw std::runtime_error(
-				    "RLE repeat run out of bounds at segment=" +
-				    std::to_string(segment_index));
-			}
-			std::memset(decoded.data() + out, encoded[in], repeat_count);
-			++in;
-			out += repeat_count;
-			continue;
-		}
-	}
-}
-
-void decode_rle_single_channel_direct_or_throw(
-    std::span<const std::uint8_t> encoded_frame, const PixelDataInfo& info,
-    std::span<std::uint8_t> dst, const DecodePlan& plan) {
-	if (encoded_frame.size() < 64) {
-		throw std::runtime_error("RLE codestream is shorter than 64-byte header");
-	}
-
-	const auto sample_bytes = bytes_per_sample_of(info.sv_dtype);
-	if (sample_bytes == 0 || sample_bytes > 4) {
-		throw std::runtime_error(
-		    "single-channel direct RLE path requires integral 8/16/32-bit source dtype");
-	}
-
-	const auto rows = static_cast<std::size_t>(info.rows);
-	const auto cols = static_cast<std::size_t>(info.cols);
-	std::size_t row_payload = 0;
-	std::size_t plane_bytes = 0;
-	if (!checked_mul_size_t(cols, sample_bytes, row_payload) ||
-	    !checked_mul_size_t(row_payload, rows, plane_bytes)) {
-		throw std::runtime_error("RLE decoded frame size overflow");
-	}
-	if (dst.size() < plan.strides.frame) {
-		throw std::runtime_error("destination buffer is too small");
-	}
-
-	const uint32_t segment_count_u32 = endian::load_le<std::uint32_t>(encoded_frame.data());
-	const std::size_t segment_count = static_cast<std::size_t>(segment_count_u32);
-	if (segment_count != sample_bytes) {
-		throw std::runtime_error("RLE segment count does not match expected single-channel layout");
-	}
-
-	std::array<std::size_t, 15> offsets{};
-	for (std::size_t i = 0; i < segment_count; ++i) {
-		offsets[i] = static_cast<std::size_t>(
-		    endian::load_le<std::uint32_t>(
-		        encoded_frame.data() + 4u + i * sizeof(std::uint32_t)));
-	}
-	for (std::size_t i = 0; i < segment_count; ++i) {
-		const std::size_t start = offsets[i];
-		const std::size_t end =
-		    (i + 1u < segment_count) ? offsets[i + 1u] : encoded_frame.size();
-		if (start < 64u || start >= encoded_frame.size() ||
-		    end < start || end > encoded_frame.size()) {
-			throw std::runtime_error(
-			    "invalid RLE segment range at index=" + std::to_string(i));
-		}
-	}
-
-	std::vector<std::uint8_t> byte_plane(rows * cols, uint8_t{0});
-	std::vector<std::uint8_t> decoded_plane{};
-	const bool needs_value_transform = plan.modality_value_transform.enabled;
-	if (needs_value_transform) {
-		decoded_plane.assign(plane_bytes, uint8_t{0});
-	}
-
-	for (std::size_t byte_plane_index = 0; byte_plane_index < sample_bytes;
-	     ++byte_plane_index) {
-		const std::size_t segment_start = offsets[byte_plane_index];
-		const std::size_t segment_end =
-		    (byte_plane_index + 1u < segment_count)
-		        ? offsets[byte_plane_index + 1u]
-		        : encoded_frame.size();
-		decode_rle_packbits_segment_or_throw(
-		    byte_plane_index,
-		    encoded_frame.subspan(segment_start, segment_end - segment_start),
-		    std::span<std::uint8_t>(byte_plane));
-
-		const std::size_t component_byte_index = sample_bytes - 1u - byte_plane_index;
-		if (needs_value_transform) {
-			for (std::size_t r = 0; r < rows; ++r) {
-				const auto* src_row = byte_plane.data() + r * cols;
-				auto* dst_row = decoded_plane.data() + r * row_payload;
-				for (std::size_t c = 0; c < cols; ++c) {
-					dst_row[c * sample_bytes + component_byte_index] = src_row[c];
-				}
-			}
-			continue;
-		}
-
-		for (std::size_t r = 0; r < rows; ++r) {
-			const auto* src_row = byte_plane.data() + r * cols;
-			auto* dst_row = dst.data() + r * plan.strides.row;
-			for (std::size_t c = 0; c < cols; ++c) {
-				dst_row[c * sample_bytes + component_byte_index] = src_row[c];
-			}
-		}
-	}
-
-	if (!needs_value_transform) {
-		return;
-	}
-
-	for (std::size_t r = 0; r < rows; ++r) {
-		const auto* src_row = decoded_plane.data() + r * row_payload;
-		auto* dst_row = reinterpret_cast<float*>(dst.data() + r * plan.strides.row);
-		for (std::size_t c = 0; c < cols; ++c) {
-			int32_t sample_value = 0;
-			if (!load_direct_integral_sample(src_row + c * sample_bytes, sample_bytes,
-			        info.sv_dtype == DataType::s8 || info.sv_dtype == DataType::s16 ||
-			            info.sv_dtype == DataType::s32,
-			        info.bits_stored, &sample_value)) {
-				throw std::runtime_error("failed to parse decoded RLE sample");
-			}
-			dst_row[c] = apply_direct_modality_transform(
-			    plan.modality_value_transform, sample_value);
-		}
-	}
-}
-#endif
 
 // Collapse runtime-specific error codes into the host-facing codec status categories.
 [[nodiscard]] CodecStatusCode map_runtime_error_code(pixel_error_code_v2 ec) noexcept {
@@ -582,6 +311,39 @@ void parse_runtime_detail_or_default(
 		    });
 	} catch (...) {
 		// Preserve the host error shape even for non-standard exceptions.
+		throw_codec_error_with_context("pixel::decode_frame_into", df.path(),
+		    transfer_syntax, frame_index,
+		    CodecError{
+		        .code = CodecStatusCode::backend_error,
+		        .stage = "load_frame_source",
+		        .detail = "non-standard exception",
+		    });
+	}
+}
+
+[[nodiscard]] support_detail::NativeDecodeSourceView prepare_native_decode_source_view_or_throw(
+    const DicomFile& df, const PixelDataInfo& info,
+    uid::WellKnown transfer_syntax, std::size_t frame_index) {
+	try {
+		(void)frame_index;
+		return support_detail::compute_native_decode_source_view_or_throw(df, info);
+	} catch (const std::bad_alloc&) {
+		throw_codec_error_with_context("pixel::decode_frame_into", df.path(),
+		    transfer_syntax, frame_index,
+		    CodecError{
+		        .code = CodecStatusCode::internal_error,
+		        .stage = "allocate",
+		        .detail = "memory allocation failed",
+		    });
+	} catch (const std::exception& e) {
+		throw_codec_error_with_context("pixel::decode_frame_into", df.path(),
+		    transfer_syntax, frame_index,
+		    CodecError{
+		        .code = CodecStatusCode::invalid_argument,
+		        .stage = "load_frame_source",
+		        .detail = e.what(),
+		    });
+	} catch (...) {
 		throw_codec_error_with_context("pixel::decode_frame_into", df.path(),
 		    transfer_syntax, frame_index,
 		    CodecError{
@@ -755,9 +517,18 @@ void parse_runtime_detail_or_default(
 
 	const auto computed_source =
 	    prepare_runtime_frame_source_or_throw(df, info, info.ts, frame_index);
+	pixel_decoder_request_v2 request{};
+	populate_direct_decode_request(
+	    request, codec_profile_code, info, computed_source.bytes, dst, plan);
+	if (request.frame.source_dtype == PIXEL_DTYPE_UNKNOWN_V2) {
+		return false;
+	}
+
+	std::array<char, 1024> detail{};
+	pixel_error_code_v2 decode_ec = PIXEL_CODEC_ERR_OK;
 	try {
-		decode_rle_single_channel_direct_or_throw(
-		    computed_source.bytes, info, dst, plan);
+		decode_ec = ::pixel::rle_plugin_v2::decode_single_channel_frame_direct(
+		    &request, detail.data(), static_cast<uint32_t>(detail.size()));
 	} catch (const std::bad_alloc&) {
 		throw_codec_error_with_context("pixel::decode_frame_into", df.path(), info.ts,
 		    frame_index,
@@ -766,10 +537,10 @@ void parse_runtime_detail_or_default(
 		        .stage = "allocate",
 		        .detail = "memory allocation failed",
 		    });
-	} catch (const std::exception& e) {
-		throw_runtime_decode_error(df.path(), info.ts, frame_index,
-		    PIXEL_CODEC_ERR_INVALID_ARGUMENT,
-		    std::string("stage=decode_frame;reason=") + e.what());
+	}
+	if (decode_ec != PIXEL_CODEC_ERR_OK) {
+		throw_runtime_decode_error(df.path(), info.ts, frame_index, decode_ec,
+		    std::string_view(detail.data()));
 	}
 	return true;
 }
@@ -779,7 +550,7 @@ void parse_runtime_detail_or_default(
     const DicomFile& df, std::size_t frame_index, std::span<std::uint8_t> dst,
     const DecodePlan& plan) {
 	const auto& info = plan.info;
-	if (!info.ts.is_uncompressed()) {
+	if (!info.ts.is_uncompressed() || info.ts.is_encapsulated()) {
 		return false;
 	}
 	if (plan.modality_value_transform.enabled) {
@@ -789,16 +560,16 @@ void parse_runtime_detail_or_default(
 		return false;
 	}
 
-	const auto sample_bytes = bytes_per_sample_of(info.sv_dtype);
-	if (sample_bytes == 0) {
+	const auto rows = static_cast<std::size_t>(info.rows);
+	const auto samples = static_cast<std::size_t>(info.samples_per_pixel);
+	support_detail::NativeDecodeSourceView native_source{};
+	try {
+		native_source = support_detail::compute_native_decode_source_view_or_throw(df, info);
+	} catch (...) {
 		return false;
 	}
-
-	const auto rows = static_cast<std::size_t>(info.rows);
-	const auto cols = static_cast<std::size_t>(info.cols);
-	const auto samples = static_cast<std::size_t>(info.samples_per_pixel);
 	const bool source_planar =
-	    info.planar_configuration == Planar::planar && samples > std::size_t{1};
+	    native_source.planar_source && samples > std::size_t{1};
 	const bool output_planar =
 	    plan.options.planar_out == Planar::planar && samples > std::size_t{1};
 
@@ -807,15 +578,13 @@ void parse_runtime_detail_or_default(
 		return false;
 	}
 
-	const auto computed_source =
-	    prepare_runtime_frame_source_or_throw(df, info, info.ts, frame_index);
-	const auto src = computed_source.bytes;
-	if (src.empty()) {
+	std::span<const std::uint8_t> src{};
+	try {
+		src = support_detail::native_decode_frame_bytes_or_throw(native_source, frame_index);
+	} catch (...) {
 		return false;
 	}
-
-	const std::size_t row_payload =
-	    cols * (source_planar ? std::size_t{1} : samples) * sample_bytes;
+	const std::size_t row_payload = native_source.row_payload_bytes;
 	if (row_payload == 0 || plan.strides.row < row_payload ||
 	    dst.size() < plan.strides.frame) {
 		return false;

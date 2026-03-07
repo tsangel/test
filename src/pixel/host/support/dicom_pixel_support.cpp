@@ -24,11 +24,6 @@ struct EncapsulatedFrameSource {
 	std::size_t total_size{0};
 };
 
-struct NativeFrameSource {
-	std::span<const std::uint8_t> contiguous{};
-	std::string_view name{"PixelData"};
-};
-
 struct NativeSourceLayout {
 	int bits_allocated{0};
 	int pixel_representation{0};
@@ -161,8 +156,8 @@ EncapsulatedFrameSource load_encapsulated_frame_source_or_throw(
 	return source;
 }
 
-NativeFrameSource load_native_frame_source_or_throw(
-    const DataSet& ds, const pixel::PixelDataInfo& info, std::size_t frame_index) {
+NativeDecodeSourceView build_native_decode_source_view_or_throw(
+    const DataSet& ds, const pixel::PixelDataInfo& info) {
 	const auto source = select_native_source_element(ds, info.sv_dtype);
 	if (!source.element || !(*source.element)) {
 		throw_decode_frame_source_error("missing " + std::string(source.name));
@@ -185,45 +180,45 @@ NativeFrameSource load_native_frame_source_or_throw(
 	const auto rows = static_cast<std::size_t>(info.rows);
 	const auto cols = static_cast<std::size_t>(info.cols);
 	const auto samples_per_pixel = static_cast<std::size_t>(info.samples_per_pixel);
-	const auto frame_count = static_cast<std::size_t>(info.frames);
-	if (frame_index >= frame_count) {
-		throw_decode_frame_source_error(
-		    "raw frame index out of range (frames=" + std::to_string(frame_count) + ")");
-	}
-
-	const auto src_planar = info.planar_configuration;
-	const std::size_t src_row_components =
-	    (src_planar == Planar::interleaved) ? samples_per_pixel : std::size_t{1};
-	std::size_t src_row_pixels = 0;
-	std::size_t src_row_bytes = 0;
-	if (!checked_mul_size_t(cols, src_row_components, src_row_pixels) ||
-	    !checked_mul_size_t(src_row_pixels, bytes_per_sample, src_row_bytes)) {
+	const auto frames = static_cast<std::size_t>(info.frames);
+	const bool planar_source =
+	    info.planar_configuration == Planar::planar && samples_per_pixel > std::size_t{1};
+	const std::size_t row_components =
+	    planar_source ? cols : cols * samples_per_pixel;
+	std::size_t row_payload_bytes = 0;
+	if (!checked_mul_size_t(row_components, bytes_per_sample, row_payload_bytes)) {
 		throw_decode_frame_source_error("raw row bytes exceed size_t range");
 	}
 
-	std::size_t src_frame_bytes = 0;
-	if (!checked_mul_size_t(src_row_bytes, rows, src_frame_bytes)) {
+	std::size_t frame_bytes = 0;
+	if (!checked_mul_size_t(row_payload_bytes, rows, frame_bytes)) {
 		throw_decode_frame_source_error("raw frame bytes exceed size_t range");
 	}
-	if (src_planar == Planar::planar &&
-	    !checked_mul_size_t(src_frame_bytes, samples_per_pixel, src_frame_bytes)) {
+	if (planar_source &&
+	    !checked_mul_size_t(frame_bytes, samples_per_pixel, frame_bytes)) {
 		throw_decode_frame_source_error("raw planar frame bytes exceed size_t range");
 	}
 
-	NativeFrameSource native_source{};
-	native_source.contiguous = source.element->value_span();
-	native_source.name = source.name;
-	std::size_t src_frame_offset = 0;
-	if (!checked_mul_size_t(frame_index, src_frame_bytes, src_frame_offset)) {
-		throw_decode_frame_source_error("raw frame offset exceeds size_t range");
+	std::size_t total_bytes = 0;
+	if (!checked_mul_size_t(frame_bytes, frames, total_bytes)) {
+		throw_decode_frame_source_error("raw total frame bytes exceed size_t range");
 	}
-	if (native_source.contiguous.size() < src_frame_offset ||
-	    native_source.contiguous.size() - src_frame_offset < src_frame_bytes) {
+
+	NativeDecodeSourceView native_source{};
+	native_source.source_bytes = source.element->value_span();
+	native_source.source_name = source.name;
+	native_source.rows = rows;
+	native_source.cols = cols;
+	native_source.frames = frames;
+	native_source.samples_per_pixel = samples_per_pixel;
+	native_source.planar_source = planar_source;
+	native_source.bytes_per_sample = bytes_per_sample;
+	native_source.row_payload_bytes = row_payload_bytes;
+	native_source.frame_bytes = frame_bytes;
+	if (native_source.source_bytes.size() < total_bytes) {
 		throw_decode_frame_source_error(
-		    std::string(native_source.name) + " is shorter than expected");
+		    std::string(native_source.source_name) + " is shorter than expected");
 	}
-	native_source.contiguous =
-	    native_source.contiguous.subspan(src_frame_offset, src_frame_bytes);
 	return native_source;
 }
 
@@ -278,8 +273,8 @@ PreparedDecodeFrameSource prepare_decode_frame_source_or_throw(
 
 	PreparedDecodeFrameSource prepared_source{};
 	if (info.ts.is_uncompressed() && !info.ts.is_encapsulated()) {
-		const auto source = load_native_frame_source_or_throw(ds, info, frame_index);
-		prepared_source.bytes = source.contiguous;
+		const auto source = build_native_decode_source_view_or_throw(ds, info);
+		prepared_source.bytes = native_decode_frame_bytes_or_throw(source, frame_index);
 		return prepared_source;
 	}
 
@@ -287,6 +282,30 @@ PreparedDecodeFrameSource prepare_decode_frame_source_or_throw(
 	prepared_source.bytes = materialize_encapsulated_frame_source_or_throw(
 	    source, prepared_source.owned_bytes);
 	return prepared_source;
+}
+
+NativeDecodeSourceView compute_native_decode_source_view_or_throw(
+    const DicomFile& df, const PixelDataInfo& info) {
+	return build_native_decode_source_view_or_throw(df.dataset(), info);
+}
+
+std::span<const std::uint8_t> native_decode_frame_bytes_or_throw(
+    const NativeDecodeSourceView& source_view, std::size_t frame_index) {
+	if (frame_index >= source_view.frames) {
+		throw_decode_frame_source_error(
+		    "raw frame index out of range (frames=" + std::to_string(source_view.frames) + ")");
+	}
+
+	std::size_t frame_offset = 0;
+	if (!checked_mul_size_t(frame_index, source_view.frame_bytes, frame_offset)) {
+		throw_decode_frame_source_error("raw frame offset exceeds size_t range");
+	}
+	if (source_view.source_bytes.size() < frame_offset ||
+	    source_view.source_bytes.size() - frame_offset < source_view.frame_bytes) {
+		throw_decode_frame_source_error(
+		    std::string(source_view.source_name) + " is shorter than expected");
+	}
+	return source_view.source_bytes.subspan(frame_offset, source_view.frame_bytes);
 }
 
 ComputedEncodeSourceLayout compute_encode_source_layout_or_throw(

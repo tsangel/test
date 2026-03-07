@@ -28,6 +28,7 @@
 #include <dicom.h>
 #include <dicom_endian.h>
 #include <diagnostics.h>
+#include "pixel/host/support/dicom_pixel_support.hpp"
 
 namespace nb = nanobind;
 
@@ -950,115 +951,87 @@ void decode_layout_into(const DicomFile& self, const DecodedArrayLayout& layout,
 	}
 }
 
-const DataElement* raw_source_element(const DicomFile& self, dicom::pixel::DataType sv_dtype) {
-	const auto& dataset = self.dataset();
-	switch (sv_dtype) {
-	case dicom::pixel::DataType::f32:
-		return dataset.get_dataelement(Tag("FloatPixelData"));
-	case dicom::pixel::DataType::f64:
-		return dataset.get_dataelement(Tag("DoubleFloatPixelData"));
-	default:
-		return dataset.get_dataelement(Tag("PixelData"));
-	}
-}
-
-std::optional<DirectRawArrayAccess> try_build_direct_raw_array_access(
-    const DicomFile& self, long frame, bool to_modality_value) {
-	if (to_modality_value || frame < -1) {
-		return std::nullopt;
+DirectRawArrayAccess build_direct_raw_array_access_or_throw(
+    const DicomFile& self, long frame) {
+	if (frame < -1) {
+		throw nb::value_error("frame must be >= -1");
 	}
 
 	const auto& info = self.pixeldata_info();
-	if (!info.has_pixel_data || !info.ts.is_uncompressed() || info.rows <= 0 ||
-	    info.cols <= 0 || info.samples_per_pixel <= 0 || info.frames <= 0) {
-		return std::nullopt;
+	if (!info.has_pixel_data) {
+		throw nb::value_error(
+		    "to_array/decode_into requires PixelData, FloatPixelData, or DoubleFloatPixelData");
 	}
-	if (info.samples_per_pixel > 1 &&
-	    info.planar_configuration != dicom::pixel::Planar::interleaved) {
-		return std::nullopt;
+	if (!info.ts.is_uncompressed()) {
+		throw nb::value_error("to_array_view requires an uncompressed transfer syntax");
+	}
+	if (info.rows <= 0 || info.cols <= 0 || info.samples_per_pixel <= 0) {
+		throw nb::value_error(
+		    "to_array/decode_into requires positive Rows/Columns/SamplesPerPixel");
+	}
+	if (info.frames <= 0) {
+		throw nb::value_error("to_array/decode_into requires NumberOfFrames >= 1");
 	}
 
-	const auto* source = raw_source_element(self, info.sv_dtype);
-	if (source == nullptr || source->is_missing() || source->vr().is_pixel_sequence()) {
-		return std::nullopt;
-	}
-
-	const auto spec = decoded_array_spec(info, false);
-	if (spec.bytes_per_sample == 0) {
-		return std::nullopt;
+	const auto source_view =
+	    dicom::pixel::support_detail::compute_native_decode_source_view_or_throw(self, info);
+	if (source_view.planar_source && source_view.samples_per_pixel > std::size_t{1}) {
+		throw nb::value_error(
+		    "to_array_view requires PlanarConfiguration=interleaved when SamplesPerPixel > 1");
 	}
 
 	DirectRawArrayAccess access{};
 	auto& layout = access.layout;
-	layout.spec = spec;
-	layout.frames = static_cast<std::size_t>(info.frames);
+	layout.spec = decoded_array_spec(info, false);
+	layout.frames = source_view.frames;
 	layout.decode_all_frames = (frame == -1) && (layout.frames > 1);
 	layout.frame_index =
 	    layout.decode_all_frames ? 0u : ((frame < 0) ? 0u : static_cast<std::size_t>(frame));
 	if (layout.frame_index >= layout.frames) {
-		return std::nullopt;
+		throw nb::index_error("to_array/decode_into frame index out of range");
 	}
 
-	const auto rows = static_cast<std::size_t>(info.rows);
-	const auto cols = static_cast<std::size_t>(info.cols);
-	const auto samples_per_pixel = static_cast<std::size_t>(info.samples_per_pixel);
-	if (samples_per_pixel != 0 &&
-	    cols > (std::numeric_limits<std::size_t>::max() / samples_per_pixel)) {
-		return std::nullopt;
-	}
-	const auto row_components = cols * samples_per_pixel;
-	if (spec.bytes_per_sample != 0 &&
-	    row_components >
-	        (std::numeric_limits<std::size_t>::max() / spec.bytes_per_sample)) {
-		return std::nullopt;
-	}
-	const auto row_stride = row_components * spec.bytes_per_sample;
-	const auto frame_stride = row_stride * rows;
-	if (rows != 0 && row_stride > (std::numeric_limits<std::size_t>::max() / rows)) {
-		return std::nullopt;
-	}
-	if (layout.frames != 0 &&
-	    frame_stride > (std::numeric_limits<std::size_t>::max() / layout.frames)) {
-		return std::nullopt;
-	}
-	layout.frame_stride = frame_stride;
+	layout.frame_stride = source_view.frame_bytes;
 	layout.required_bytes =
-	    layout.decode_all_frames ? (frame_stride * layout.frames) : frame_stride;
+	    layout.decode_all_frames ? (source_view.frame_bytes * source_view.frames)
+	                             : source_view.frame_bytes;
 
-	const auto row_stride_elems = row_stride / spec.bytes_per_sample;
-	const auto frame_stride_elems = frame_stride / spec.bytes_per_sample;
-	const auto col_stride_elems = samples_per_pixel;
+	const auto row_stride_elems =
+	    source_view.row_payload_bytes / layout.spec.bytes_per_sample;
+	const auto frame_stride_elems =
+	    source_view.frame_bytes / layout.spec.bytes_per_sample;
+	const auto col_stride_elems = source_view.samples_per_pixel;
 	if (!layout.decode_all_frames) {
-		if (samples_per_pixel == 1) {
+		if (source_view.samples_per_pixel == 1) {
 			layout.ndim = 2;
-			layout.shape[0] = rows;
-			layout.shape[1] = cols;
+			layout.shape[0] = source_view.rows;
+			layout.shape[1] = source_view.cols;
 			layout.strides[0] = static_cast<std::int64_t>(row_stride_elems);
 			layout.strides[1] = 1;
 		} else {
 			layout.ndim = 3;
-			layout.shape[0] = rows;
-			layout.shape[1] = cols;
-			layout.shape[2] = samples_per_pixel;
+			layout.shape[0] = source_view.rows;
+			layout.shape[1] = source_view.cols;
+			layout.shape[2] = source_view.samples_per_pixel;
 			layout.strides[0] = static_cast<std::int64_t>(row_stride_elems);
 			layout.strides[1] = static_cast<std::int64_t>(col_stride_elems);
 			layout.strides[2] = 1;
 		}
 	} else {
-		if (samples_per_pixel == 1) {
+		if (source_view.samples_per_pixel == 1) {
 			layout.ndim = 3;
 			layout.shape[0] = layout.frames;
-			layout.shape[1] = rows;
-			layout.shape[2] = cols;
+			layout.shape[1] = source_view.rows;
+			layout.shape[2] = source_view.cols;
 			layout.strides[0] = static_cast<std::int64_t>(frame_stride_elems);
 			layout.strides[1] = static_cast<std::int64_t>(row_stride_elems);
 			layout.strides[2] = 1;
 		} else {
 			layout.ndim = 4;
 			layout.shape[0] = layout.frames;
-			layout.shape[1] = rows;
-			layout.shape[2] = cols;
-			layout.shape[3] = samples_per_pixel;
+			layout.shape[1] = source_view.rows;
+			layout.shape[2] = source_view.cols;
+			layout.shape[3] = source_view.samples_per_pixel;
 			layout.strides[0] = static_cast<std::int64_t>(frame_stride_elems);
 			layout.strides[1] = static_cast<std::int64_t>(row_stride_elems);
 			layout.strides[2] = static_cast<std::int64_t>(col_stride_elems);
@@ -1066,15 +1039,22 @@ std::optional<DirectRawArrayAccess> try_build_direct_raw_array_access(
 		}
 	}
 
-	access.source_bytes = source->value_span();
-	if (access.source_bytes.size() < frame_stride * layout.frames) {
-		return std::nullopt;
-	}
-	access.byte_offset = layout.decode_all_frames ? 0u : (layout.frame_index * frame_stride);
-	if (access.source_bytes.size() < access.byte_offset + layout.required_bytes) {
-		return std::nullopt;
-	}
+	access.source_bytes = source_view.source_bytes;
+	access.byte_offset =
+	    layout.decode_all_frames ? 0u : (layout.frame_index * source_view.frame_bytes);
 	return access;
+}
+
+std::optional<DirectRawArrayAccess> try_build_direct_raw_array_access(
+    const DicomFile& self, long frame, bool to_modality_value) {
+	if (to_modality_value) {
+		return std::nullopt;
+	}
+	try {
+		return build_direct_raw_array_access_or_throw(self, frame);
+	} catch (...) {
+		return std::nullopt;
+	}
 }
 
 void copy_direct_raw_array_access(const DirectRawArrayAccess& access,
@@ -1090,60 +1070,14 @@ void copy_direct_raw_array_access(const DirectRawArrayAccess& access,
 }
 
 nb::object dicomfile_to_array_view(const DicomFile& self, long frame) {
-	const auto layout = build_decode_layout(self, frame, false, 0);
-	const auto& info = layout.plan.info;
-	const auto& dataset = self.dataset();
-
-	if (!info.ts.is_uncompressed()) {
-		throw nb::value_error("to_array_view requires an uncompressed transfer syntax");
-	}
-	if (info.samples_per_pixel > 1 &&
-	    info.planar_configuration != dicom::pixel::Planar::interleaved) {
-		throw nb::value_error(
-		    "to_array_view requires PlanarConfiguration=interleaved when SamplesPerPixel > 1");
-	}
-	const auto* source = raw_source_element(self, info.sv_dtype);
-	if (source->is_missing()) {
-		throw nb::value_error("to_array_view requires source pixel data to be present");
-	}
-	if (source->vr().is_pixel_sequence()) {
-		throw nb::value_error("to_array_view does not support encapsulated PixelData");
-	}
-
-	const auto src = source->value_span();
-	const auto rows = static_cast<std::size_t>(info.rows);
-	const auto cols = static_cast<std::size_t>(info.cols);
-	const auto samples_per_pixel = static_cast<std::size_t>(info.samples_per_pixel);
-	const auto src_row_components =
-	    (info.planar_configuration == dicom::pixel::Planar::interleaved)
-	        ? samples_per_pixel
-	        : std::size_t{1};
-	const auto src_row_bytes = cols * src_row_components * layout.spec.bytes_per_sample;
-	std::size_t src_frame_bytes = src_row_bytes * rows;
-	if (info.planar_configuration == dicom::pixel::Planar::planar) {
-		src_frame_bytes *= samples_per_pixel;
-	}
-	if (layout.frames != 0 &&
-	    src_frame_bytes > (std::numeric_limits<std::size_t>::max() / layout.frames)) {
-		throw nb::value_error("to_array_view source frame size overflow");
-	}
-	const auto total_required_bytes = src_frame_bytes * layout.frames;
-	if (src.size() < total_required_bytes) {
-		throw nb::value_error("to_array_view source pixel data is smaller than expected");
-	}
-	if (src_frame_bytes < layout.required_bytes) {
-		throw nb::value_error("to_array_view requires contiguous source frame layout");
-	}
-
-	const auto byte_offset = layout.decode_all_frames ? std::size_t{0} : layout.frame_index * src_frame_bytes;
-	if (src.size() < byte_offset + layout.required_bytes) {
-		throw nb::value_error("to_array_view requested frame is out of source bounds");
-	}
-
-	const auto* data_ptr = layout.required_bytes == 0 ? nullptr : (src.data() + byte_offset);
+	const auto direct = build_direct_raw_array_access_or_throw(self, frame);
+	const auto* data_ptr =
+	    direct.layout.required_bytes == 0 ? nullptr
+	                                      : (direct.source_bytes.data() + direct.byte_offset);
 	nb::object owner = nb::cast(&self, nb::rv_policy::reference);
 	return nb::cast(nb::ndarray<nb::numpy, const std::uint8_t>(
-	    data_ptr, layout.ndim, layout.shape.data(), owner, layout.strides.data(), layout.spec.dtype,
+	    data_ptr, direct.layout.ndim, direct.layout.shape.data(), owner,
+	    direct.layout.strides.data(), direct.layout.spec.dtype,
 	    nb::device::cpu::value, 0, 'C'));
 }
 

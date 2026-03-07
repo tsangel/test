@@ -9,17 +9,11 @@
 #include <string_view>
 
 #include "direct_api_v2.hpp"
+#include "pixel/host/support/abi_convert_v2.hpp"
 
 namespace pixel::runtime_v2 {
 
 namespace {
-
-struct DtypeMeta {
-  uint8_t code{PIXEL_DTYPE_UNKNOWN_V2};
-  uint32_t bytes{0};
-  bool is_signed{false};
-  bool is_float{false};
-};
 
 struct StrideMeta {
   uint64_t min_row_bytes{0};
@@ -89,47 +83,6 @@ void capture_plugin_detail(CopyFn copy_fn, const void* plugin_ctx, std::string* 
     return;
   }
   out_detail->assign(buffer.data(), buffer.data() + copied);
-}
-
-bool resolve_dtype_meta(dicom::pixel::DataType data_type, DtypeMeta* out_meta) {
-  if (out_meta == nullptr) {
-    return false;
-  }
-  switch (data_type) {
-  case dicom::pixel::DataType::u8:
-    *out_meta = DtypeMeta{PIXEL_DTYPE_U8_V2, 1u, false, false};
-    return true;
-  case dicom::pixel::DataType::s8:
-    *out_meta = DtypeMeta{PIXEL_DTYPE_S8_V2, 1u, true, false};
-    return true;
-  case dicom::pixel::DataType::u16:
-    *out_meta = DtypeMeta{PIXEL_DTYPE_U16_V2, 2u, false, false};
-    return true;
-  case dicom::pixel::DataType::s16:
-    *out_meta = DtypeMeta{PIXEL_DTYPE_S16_V2, 2u, true, false};
-    return true;
-  case dicom::pixel::DataType::u32:
-    *out_meta = DtypeMeta{PIXEL_DTYPE_U32_V2, 4u, false, false};
-    return true;
-  case dicom::pixel::DataType::s32:
-    *out_meta = DtypeMeta{PIXEL_DTYPE_S32_V2, 4u, true, false};
-    return true;
-  case dicom::pixel::DataType::f32:
-    *out_meta = DtypeMeta{PIXEL_DTYPE_F32_V2, 4u, true, true};
-    return true;
-  case dicom::pixel::DataType::f64:
-    *out_meta = DtypeMeta{PIXEL_DTYPE_F64_V2, 8u, true, true};
-    return true;
-  case dicom::pixel::DataType::unknown:
-  default:
-    return false;
-  }
-}
-
-uint8_t to_planar_code(dicom::pixel::Planar planar) {
-  return planar == dicom::pixel::Planar::planar
-      ? PIXEL_PLANAR_PLANAR_V2
-      : PIXEL_PLANAR_INTERLEAVED_V2;
 }
 
 bool resolve_source_strides(const dicom::pixel::PixelSource& source,
