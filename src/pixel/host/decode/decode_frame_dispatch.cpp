@@ -5,10 +5,6 @@
 
 #if defined(DICOMSDL_PIXEL_RUNTIME_ENABLED)
 #include "pixel/codecs/uncompressed_v2/direct_api_v2.hpp"
-#if defined(DICOMSDL_PIXEL_RLE_STATIC_PLUGIN_ENABLED) && DICOMSDL_PIXEL_RLE_STATIC_PLUGIN_ENABLED
-#include "pixel/codecs/rle_v2/builtin_api.hpp"
-#include "pixel/codecs/rle_v2/direct_api_v2.hpp"
-#endif
 #include "pixel/host/adapter/host_adapter_v2.hpp"
 #include "pixel/host/support/abi_convert_v2.hpp"
 #include "pixel/runtime/runtime_registry_v2.hpp"
@@ -484,72 +480,12 @@ void parse_runtime_detail_or_default(
 	return true;
 }
 
-#if defined(DICOMSDL_PIXEL_RLE_STATIC_PLUGIN_ENABLED) && DICOMSDL_PIXEL_RLE_STATIC_PLUGIN_ENABLED
-[[nodiscard]] bool try_decode_frame_with_builtin_rle_direct(const DicomFile& df,
-    std::size_t frame_index, std::span<std::uint8_t> dst, const DecodePlan& plan) {
-	const auto& info = plan.info;
-	if (!info.ts.is_rle()) {
-		return false;
-	}
-
-	const auto* registry = get_runtime_registry();
-	if (registry == nullptr) {
-		return false;
-	}
-
-	uint32_t codec_profile_code = PIXEL_CODEC_PROFILE_UNKNOWN_V2;
-	if (!::pixel::runtime_v2::codec_profile_code_from_transfer_syntax(
-	        info.ts, &codec_profile_code)) {
-		return false;
-	}
-	const auto* binding = registry->find_decoder_binding(codec_profile_code);
-	const auto& builtin_api = ::pixel::rle_plugin_v2::decoder_builtin_api();
-	if (binding == nullptr || binding->binding_kind != ::pixel::runtime_v2::DecoderBindingKind::kPluginApi ||
-	    binding->plugin_api != &builtin_api) {
-		return false;
-	}
-	if (info.samples_per_pixel != 1 || plan.modality_value_transform.enabled &&
-	    !(info.sv_dtype == DataType::u8 || info.sv_dtype == DataType::s8 ||
-	        info.sv_dtype == DataType::u16 || info.sv_dtype == DataType::s16 ||
-	        info.sv_dtype == DataType::u32 || info.sv_dtype == DataType::s32)) {
-		return false;
-	}
-
-	const auto computed_source =
-	    prepare_runtime_frame_source_or_throw(df, info, info.ts, frame_index);
-	pixel_decoder_request_v2 request{};
-	populate_direct_decode_request(
-	    request, codec_profile_code, info, computed_source.bytes, dst, plan);
-	if (request.frame.source_dtype == PIXEL_DTYPE_UNKNOWN_V2) {
-		return false;
-	}
-
-	std::array<char, 1024> detail{};
-	pixel_error_code_v2 decode_ec = PIXEL_CODEC_ERR_OK;
-	try {
-		decode_ec = ::pixel::rle_plugin_v2::decode_single_channel_frame_direct(
-		    &request, detail.data(), static_cast<uint32_t>(detail.size()));
-	} catch (const std::bad_alloc&) {
-		throw_codec_error_with_context("pixel::decode_frame_into", df.path(), info.ts,
-		    frame_index,
-		    CodecError{
-		        .code = CodecStatusCode::internal_error,
-		        .stage = "allocate",
-		        .detail = "memory allocation failed",
-		    });
-	}
-	if (decode_ec != PIXEL_CODEC_ERR_OK) {
-		throw_runtime_decode_error(df.path(), info.ts, frame_index, decode_ec,
-		    std::string_view(detail.data()));
-	}
-	return true;
-}
-#endif
-
-[[nodiscard]] bool try_decode_frame_with_builtin_uncompressed_host_copy(
+[[nodiscard]] bool try_copy_frame_with_builtin_native_fast_path(
     const DicomFile& df, std::size_t frame_index, std::span<std::uint8_t> dst,
     const DecodePlan& plan) {
 	const auto& info = plan.info;
+	// REF-style raw frames can skip decode entirely and copy from the native source
+	// when the requested output layout already matches the stored layout.
 	if (!info.ts.is_uncompressed() || info.ts.is_encapsulated()) {
 		return false;
 	}
@@ -627,9 +563,11 @@ void parse_runtime_detail_or_default(
 	return true;
 }
 
-[[nodiscard]] bool try_decode_frame_with_builtin_core_direct(const DicomFile& df,
+[[nodiscard]] bool try_decode_frame_with_builtin_uncompressed_core_path(const DicomFile& df,
     std::size_t frame_index, std::span<std::uint8_t> dst, const DecodePlan& plan) {
 	const auto& info = plan.info;
+	// Fall back to the uncompressed core decoder when raw-copy is not enough,
+	// e.g. layout conversion, value transform, or encapsulated-uncompressed input.
 	if (!info.ts.is_uncompressed()) {
 		return false;
 	}
@@ -669,20 +607,24 @@ void parse_runtime_detail_or_default(
 	return true;
 }
 
-[[nodiscard]] bool try_decode_frame_with_builtin_direct(const DicomFile& df,
+[[nodiscard]] bool try_decode_frame_with_builtin_uncompressed_fast_paths(const DicomFile& df,
     std::size_t frame_index, std::span<std::uint8_t> dst, const DecodePlan& plan) {
-	if (try_decode_frame_with_builtin_uncompressed_host_copy(
+	if (!plan.info.ts.is_uncompressed()) {
+		return false;
+	}
+
+	// Fast-path order matters:
+	// 1. REF/native raw copy
+	// 2. uncompressed core decode
+	// Everything else falls through to the generic runtime path below.
+	if (try_copy_frame_with_builtin_native_fast_path(
+		        df, frame_index, dst, plan)) {
+		return true;
+	}
+	if (try_decode_frame_with_builtin_uncompressed_core_path(
 	        df, frame_index, dst, plan)) {
 		return true;
 	}
-	if (try_decode_frame_with_builtin_core_direct(df, frame_index, dst, plan)) {
-		return true;
-	}
-#if defined(DICOMSDL_PIXEL_RLE_STATIC_PLUGIN_ENABLED) && DICOMSDL_PIXEL_RLE_STATIC_PLUGIN_ENABLED
-	if (try_decode_frame_with_builtin_rle_direct(df, frame_index, dst, plan)) {
-		return true;
-	}
-	#endif
 	return false;
 }
 
@@ -694,7 +636,10 @@ void dispatch_decode_frame(const DicomFile& df, std::size_t frame_index,
     std::span<std::uint8_t> dst, const DecodePlan& plan) {
 	validate_decode_plan_or_throw(df, frame_index, plan);
 #if defined(DICOMSDL_PIXEL_RUNTIME_ENABLED)
-	if (try_decode_frame_with_builtin_direct(df, frame_index, dst, plan)) {
+	// Try the narrow builtin hot paths first before paying the full runtime
+	// adapter/setup cost for general codec dispatch.
+	if (try_decode_frame_with_builtin_uncompressed_fast_paths(
+	        df, frame_index, dst, plan)) {
 		return;
 	}
 	// Prefer the runtime-backed path when that subsystem is compiled in and initialized.

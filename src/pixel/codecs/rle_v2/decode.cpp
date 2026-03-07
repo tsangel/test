@@ -6,7 +6,6 @@
 #include <utility>
 #include <vector>
 
-#include "direct_api_v2.hpp"
 #include "internal.hpp"
 
 namespace pixel::rle_plugin_v2 {
@@ -541,6 +540,103 @@ pixel_error_code_v2 validate_decoder_request(DecoderCtx* ctx,
   return PIXEL_CODEC_ERR_OK;
 }
 
+pixel_error_code_v2 decode_single_channel_frame_fast(DecoderCtx* ctx,
+    const pixel_decoder_request_v2* request, const DtypeInfo& source_dtype,
+    const DtypeInfo& dst_dtype, uint64_t row_stride_u64,
+    uint32_t transform_kind) {
+  std::size_t rows = 0;
+  std::size_t cols = 0;
+  std::size_t sample_bytes = 0;
+  std::size_t row_stride = 0;
+  if (!u64_to_size(static_cast<uint64_t>(request->frame.rows), &rows) ||
+      !u64_to_size(static_cast<uint64_t>(request->frame.cols), &cols) ||
+      !u64_to_size(source_dtype.bytes, &sample_bytes) ||
+      !u64_to_size(row_stride_u64, &row_stride)) {
+    return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
+        "size conversion overflow");
+  }
+
+  uint64_t row_payload_u64 = 0;
+  if (!mul_u64(static_cast<uint64_t>(cols), source_dtype.bytes, &row_payload_u64)) {
+    return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
+        "decoded row payload overflow");
+  }
+  std::size_t row_payload = 0;
+  if (!u64_to_size(row_payload_u64, &row_payload)) {
+    return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
+        "decoded row payload conversion overflow");
+  }
+
+  std::size_t source_size = 0;
+  if (!u64_to_size(request->source.source_buffer.size, &source_size)) {
+    return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
+        "source buffer size conversion overflow");
+  }
+
+  std::vector<uint8_t> decoded_planar{};
+  const pixel_error_code_v2 decode_ec = decode_rle_frame_to_planar(ctx,
+      request->source.source_buffer.data, source_size, rows, cols, 1u, sample_bytes,
+      &decoded_planar);
+  if (decode_ec != PIXEL_CODEC_ERR_OK) {
+    return decode_ec;
+  }
+
+  uint64_t plane_bytes_u64 = 0;
+  if (!mul_u64(row_payload_u64, static_cast<uint64_t>(rows), &plane_bytes_u64)) {
+    return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "decode_frame",
+        "decoded plane byte size overflow");
+  }
+  std::size_t plane_bytes = 0;
+  if (!u64_to_size(plane_bytes_u64, &plane_bytes)) {
+    return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "decode_frame",
+        "decoded plane byte size conversion overflow");
+  }
+
+  uint8_t* dst = request->output.dst;
+  if (transform_kind == PIXEL_DECODER_VALUE_TRANSFORM_NONE_V2) {
+    if (row_stride == row_payload) {
+      std::memcpy(dst, decoded_planar.data(), plane_bytes);
+    } else {
+      for (std::size_t r = 0; r < rows; ++r) {
+        const uint8_t* src_row = decoded_planar.data() + r * row_payload;
+        uint8_t* dst_row = dst + r * row_stride;
+        std::memcpy(dst_row, src_row, row_payload);
+      }
+    }
+    clear_detail(ctx);
+    return PIXEL_CODEC_ERR_OK;
+  }
+
+  for (std::size_t r = 0; r < rows; ++r) {
+    const uint8_t* src_row = decoded_planar.data() + r * row_payload;
+    uint8_t* dst_row = dst + r * row_stride;
+    for (std::size_t col = 0; col < cols; ++col) {
+      const uint8_t* src_sample = src_row + col * sample_bytes;
+      int32_t sample_value = 0;
+      if (!load_integral_sample(src_sample, static_cast<uint32_t>(sample_bytes),
+              source_dtype.is_signed, request->frame.bits_stored, &sample_value)) {
+        return fail_detail(ctx, PIXEL_CODEC_ERR_FAILED, "decode_frame",
+            "failed to parse decoded RLE sample");
+      }
+
+      double transformed = 0.0;
+      if (!apply_value_transform(request, sample_value, &transformed)) {
+        return fail_detail(ctx, PIXEL_CODEC_ERR_UNSUPPORTED, "decode_frame",
+            "unsupported value transform kind");
+      }
+
+      uint8_t* dst_sample = dst_row + col * dst_dtype.bytes;
+      if (!write_float_sample(request->output.dst_dtype, transformed, dst_sample)) {
+        return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "decode_frame",
+            "value transform requires float destination dtype");
+      }
+    }
+  }
+
+  clear_detail(ctx);
+  return PIXEL_CODEC_ERR_OK;
+}
+
 }  // namespace
 
 pixel_error_code_v2 decoder_decode_frame(
@@ -568,6 +664,13 @@ pixel_error_code_v2 decoder_decode_frame(
       &transform_kind);
   if (validate_ec != PIXEL_CODEC_ERR_OK) {
     return validate_ec;
+  }
+
+  // Keep the dominant mono RLE case on a compact path inside the generic
+  // decoder so host dispatch does not need a separate codec-specific bypass.
+  if (request->frame.samples_per_pixel == 1) {
+    return decode_single_channel_frame_fast(
+        c, request, source_dtype, dst_dtype, row_stride_u64, transform_kind);
   }
 
   std::size_t rows = 0;
@@ -732,219 +835,6 @@ pixel_error_code_v2 decoder_decode_frame(
 
   clear_detail(c);
   return PIXEL_CODEC_ERR_OK;
-}
-
-pixel_error_code_v2 decode_single_channel_frame_direct(
-    const pixel_decoder_request_v2* request, char* out_detail,
-    uint32_t out_detail_capacity) {
-  DecoderCtx ctx{};
-  ctx.configured = true;
-  ctx.codec_profile_code = PIXEL_CODEC_PROFILE_RLE_LOSSLESS_V2;
-  auto finish = [&](pixel_error_code_v2 code) noexcept {
-    copy_text(out_detail, out_detail_capacity, ctx.last_error_detail);
-    return code;
-  };
-
-  if (request == nullptr) {
-    return finish(fail_detail(&ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
-        "decoder request is null"));
-  }
-
-  if (request->struct_size < sizeof(pixel_decoder_request_v2) ||
-      request->source.struct_size < sizeof(pixel_decoder_source_v2) ||
-      request->frame.struct_size < sizeof(pixel_decoder_frame_info_v2) ||
-      request->output.struct_size < sizeof(pixel_decoder_output_v2) ||
-      request->value_transform.struct_size < sizeof(pixel_decoder_value_transform_v2)) {
-    return finish(fail_detail(&ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
-        "decoder request struct_size is too small"));
-  }
-  if (request->frame.codec_profile_code != PIXEL_CODEC_PROFILE_RLE_LOSSLESS_V2) {
-    return finish(fail_detail(&ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
-        "decoder request codec_profile_code does not match configured profile"));
-  }
-  if (request->source.source_buffer.data == nullptr ||
-      request->source.source_buffer.size == 0) {
-    return finish(fail_detail(&ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
-        "source_buffer is null or empty"));
-  }
-  if (request->frame.rows <= 0 || request->frame.cols <= 0) {
-    return finish(fail_detail(&ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
-        "rows/cols must be positive"));
-  }
-  if (request->frame.samples_per_pixel != 1) {
-    return finish(fail_detail(&ctx, PIXEL_CODEC_ERR_UNSUPPORTED, "validate",
-        "single-channel direct path requires samples_per_pixel=1"));
-  }
-  if (request->frame.decode_mct != 0) {
-    return finish(fail_detail(&ctx, PIXEL_CODEC_ERR_UNSUPPORTED, "validate",
-        "RLE decoder does not support decode_mct"));
-  }
-
-  DtypeInfo source_dtype{};
-  DtypeInfo dst_dtype{};
-  if (!dtype_info_from_code(request->frame.source_dtype, &source_dtype) ||
-      source_dtype.is_float || source_dtype.bytes == 0 || source_dtype.bytes > 4u) {
-    return finish(fail_detail(&ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
-        "source_dtype must be integral 8/16/32-bit type"));
-  }
-  if (!dtype_info_from_code(request->output.dst_dtype, &dst_dtype)) {
-    return finish(fail_detail(&ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
-        "unsupported dst_dtype code"));
-  }
-  if (request->frame.bits_stored <= 0 ||
-      request->frame.bits_stored > static_cast<int32_t>(source_dtype.bytes * 8u)) {
-    return finish(fail_detail(&ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
-        "bits_stored must be in [1, source dtype width]"));
-  }
-  if (request->output.dst == nullptr) {
-    return finish(fail_detail(&ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
-        "output dst is null"));
-  }
-
-  const uint32_t transform_kind = request->value_transform.transform_kind;
-  if (transform_kind != PIXEL_DECODER_VALUE_TRANSFORM_NONE_V2) {
-    if (!dst_dtype.is_float) {
-      return finish(fail_detail(&ctx, PIXEL_CODEC_ERR_UNSUPPORTED, "validate",
-          "value transform requires float destination dtype"));
-    }
-    if (transform_kind == PIXEL_DECODER_VALUE_TRANSFORM_MODALITY_LUT_V2) {
-      const uint64_t lut_values_bytes = request->value_transform.lut_values_f32.size;
-      const uint64_t lut_count = request->value_transform.lut_value_count;
-      uint64_t required_bytes = 0;
-      if (!mul_u64(lut_count, sizeof(float), &required_bytes) ||
-          lut_values_bytes < required_bytes ||
-          request->value_transform.lut_values_f32.data == nullptr) {
-        return finish(fail_detail(&ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
-            "invalid modality LUT buffer"));
-      }
-    } else if (transform_kind == PIXEL_DECODER_VALUE_TRANSFORM_RESCALE_V2) {
-      if (!std::isfinite(request->value_transform.rescale_slope) ||
-          !std::isfinite(request->value_transform.rescale_intercept)) {
-        return finish(fail_detail(&ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
-            "rescale slope/intercept must be finite"));
-      }
-    } else {
-      return finish(fail_detail(&ctx, PIXEL_CODEC_ERR_UNSUPPORTED, "validate",
-          "unsupported value transform kind"));
-    }
-  } else if (request->frame.source_dtype != request->output.dst_dtype) {
-    return finish(fail_detail(&ctx, PIXEL_CODEC_ERR_UNSUPPORTED, "validate",
-        "source_dtype must match dst_dtype without value transform"));
-  }
-
-  uint64_t row_payload_u64 = 0;
-  if (!mul_u64(static_cast<uint64_t>(request->frame.cols), source_dtype.bytes,
-          &row_payload_u64)) {
-    return finish(fail_detail(&ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
-        "decoded row payload overflow"));
-  }
-
-  uint64_t row_stride_u64 = request->output.row_stride;
-  if (row_stride_u64 == 0) {
-    row_stride_u64 = row_payload_u64;
-  }
-  if (row_stride_u64 < row_payload_u64) {
-    return finish(fail_detail(&ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
-        "row_stride is too small"));
-  }
-
-  uint64_t frame_stride_u64 = request->output.frame_stride;
-  if (frame_stride_u64 == 0) {
-    uint64_t required_frame_bytes = 0;
-    if (!mul_u64(row_stride_u64, static_cast<uint64_t>(request->frame.rows),
-            &required_frame_bytes)) {
-      return finish(fail_detail(&ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
-          "destination frame byte size overflow"));
-    }
-    frame_stride_u64 = required_frame_bytes;
-  }
-  if (request->output.dst_size < frame_stride_u64) {
-    return finish(fail_detail(&ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
-        "destination buffer is too small"));
-  }
-
-  std::size_t rows = 0;
-  std::size_t cols = 0;
-  std::size_t sample_bytes = 0;
-  std::size_t row_stride = 0;
-  std::size_t row_payload = 0;
-  if (!u64_to_size(static_cast<uint64_t>(request->frame.rows), &rows) ||
-      !u64_to_size(static_cast<uint64_t>(request->frame.cols), &cols) ||
-      !u64_to_size(source_dtype.bytes, &sample_bytes) ||
-      !u64_to_size(row_stride_u64, &row_stride) ||
-      !u64_to_size(row_payload_u64, &row_payload)) {
-    return finish(fail_detail(&ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
-        "size conversion overflow"));
-  }
-
-  std::size_t source_size = 0;
-  if (!u64_to_size(request->source.source_buffer.size, &source_size)) {
-    return finish(fail_detail(&ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
-        "source buffer size conversion overflow"));
-  }
-
-  std::vector<uint8_t> decoded_planar{};
-  const pixel_error_code_v2 decode_ec = decode_rle_frame_to_planar(&ctx,
-      request->source.source_buffer.data, source_size, rows, cols, 1u, sample_bytes,
-      &decoded_planar);
-  if (decode_ec != PIXEL_CODEC_ERR_OK) {
-    return finish(decode_ec);
-  }
-
-  uint64_t plane_bytes_u64 = 0;
-  if (!mul_u64(row_payload_u64, static_cast<uint64_t>(rows), &plane_bytes_u64)) {
-    return finish(fail_detail(&ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "decode_frame",
-        "decoded plane byte size overflow"));
-  }
-  std::size_t plane_bytes = 0;
-  if (!u64_to_size(plane_bytes_u64, &plane_bytes)) {
-    return finish(fail_detail(&ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "decode_frame",
-        "decoded plane byte size conversion overflow"));
-  }
-
-  uint8_t* dst = request->output.dst;
-  if (transform_kind == PIXEL_DECODER_VALUE_TRANSFORM_NONE_V2) {
-    if (row_stride == row_payload) {
-      std::memcpy(dst, decoded_planar.data(), plane_bytes);
-    } else {
-      for (std::size_t r = 0; r < rows; ++r) {
-        const uint8_t* src_row = decoded_planar.data() + r * row_payload;
-        uint8_t* dst_row = dst + r * row_stride;
-        std::memcpy(dst_row, src_row, row_payload);
-      }
-    }
-    clear_detail(&ctx);
-    return finish(PIXEL_CODEC_ERR_OK);
-  }
-
-  for (std::size_t r = 0; r < rows; ++r) {
-    const uint8_t* src_row = decoded_planar.data() + r * row_payload;
-    uint8_t* dst_row = dst + r * row_stride;
-    for (std::size_t col = 0; col < cols; ++col) {
-      const uint8_t* src_sample = src_row + col * sample_bytes;
-      int32_t sample_value = 0;
-      if (!load_integral_sample(src_sample, static_cast<uint32_t>(sample_bytes),
-              source_dtype.is_signed, request->frame.bits_stored, &sample_value)) {
-        return finish(fail_detail(&ctx, PIXEL_CODEC_ERR_FAILED, "decode_frame",
-            "failed to parse decoded RLE sample"));
-      }
-
-      double transformed = 0.0;
-      if (!apply_value_transform(request, sample_value, &transformed)) {
-        return finish(fail_detail(&ctx, PIXEL_CODEC_ERR_UNSUPPORTED, "decode_frame",
-            "unsupported value transform kind"));
-      }
-
-      uint8_t* dst_sample = dst_row + col * dst_dtype.bytes;
-      if (!write_float_sample(request->output.dst_dtype, transformed, dst_sample)) {
-        return finish(fail_detail(&ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "decode_frame",
-            "value transform requires float destination dtype"));
-      }
-    }
-  }
-
-  clear_detail(&ctx);
-  return finish(PIXEL_CODEC_ERR_OK);
 }
 
 }  // namespace pixel::rle_plugin_v2
