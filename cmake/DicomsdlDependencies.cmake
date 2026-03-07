@@ -251,12 +251,25 @@ function(dicomsdl_prepare_libturbojpeg)
     set(_dicomsdl_libturbojpeg_archive
         "${_dicomsdl_libturbojpeg_install_dir}/lib/${_dicomsdl_libturbojpeg_filename}")
 
-    ExternalProject_Add(dicomsdl_libturbojpeg
+    set(_dicomsdl_libturbojpeg_externalproject_args
         SOURCE_DIR "${dicomsdl_libjpeg_turbo_SOURCE_DIR}"
         BINARY_DIR "${_dicomsdl_libturbojpeg_build_dir}"
         PREFIX "${_dicomsdl_libturbojpeg_prefix}"
         CMAKE_ARGS ${_dicomsdl_libturbojpeg_cmake_args}
         BUILD_BYPRODUCTS "${_dicomsdl_libturbojpeg_archive}"
+    )
+
+    if(CMAKE_CONFIGURATION_TYPES)
+        # Multi-config generators (Visual Studio, Ninja Multi-Config) default
+        # to Debug for ExternalProject unless --config is passed explicitly.
+        list(APPEND _dicomsdl_libturbojpeg_externalproject_args
+            BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> --config $<CONFIG>
+            INSTALL_COMMAND ${CMAKE_COMMAND} --install <BINARY_DIR> --config $<CONFIG>
+        )
+    endif()
+
+    ExternalProject_Add(dicomsdl_libturbojpeg
+        ${_dicomsdl_libturbojpeg_externalproject_args}
     )
 
     if(NOT TARGET dicomsdl_turbojpeg)

@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 
-_DEFAULT_WG04_IMAGES_ROOT = Path("/Users/tsangel/workspace.dev/sample/nema/WG04/IMAGES")
+_DEFAULT_WG04_IMAGES_ROOT = Path(r"C:\Lab\img\WG04\IMAGES")
 _WG04_IMAGES_ENV = "DICOMSDL_WG04_IMAGES_BASE"
 
 _HTJ2K_CODECS: tuple[str, ...] = ("htj2kll", "htj2kly")
@@ -180,6 +180,8 @@ def _build_compression_ratio_maps(
 
 def _import_backend(backend: str) -> Any:
     if backend == "dicomsdl":
+        sys.path.remove('C:\\Lab\\workspace\\test.git\\bindings\\python')
+        sys.path.remove('C:\\Lab\\workspace\\test.git\\benchmarks\\python')
         import dicomsdl as mod
 
         return mod

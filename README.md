@@ -268,6 +268,36 @@ After building, install the wheel:
 pip install dist/dicomsdl-*.whl
 ```
 
+### Static wheel wrappers (`build-wheel-static.bat` / `build-wheel-static.sh`)
+
+Use the static wrapper scripts when you want a clean static wheel build pipeline.
+
+```bash
+# macOS / Linux
+./build-wheel-static.sh
+```
+
+```cmd
+:: Windows (cmd.exe)
+build-wheel-static.bat
+```
+
+Default behavior:
+
+- Pre-clean old outputs before build:
+  - `${BUILD_DIR}` (default: `build-wheel-static`)
+  - `build/temp.*`, `build/lib.*`, `build/bdist.*`
+  - `${WHEEL_DIR}` (default: `dist-static`)
+- Force wheel build to Release (`FORCE_WHEEL_RELEASE=1`, `BUILD_TYPE=Release`).
+- Run `build.sh` / `build.bat` to produce a new wheel.
+- Force-reinstall the newest wheel from `${WHEEL_DIR}` after a successful build.
+
+Useful toggles:
+
+- `STATIC_PRE_CLEAN_OUTPUTS=0`: skip pre-clean stage.
+- `INSTALL_BUILT_WHEEL=0`: skip automatic wheel install.
+- `FORCE_WHEEL_RELEASE=0`: allow non-Release wheel builds.
+
 ### Run Python examples
 
 ```

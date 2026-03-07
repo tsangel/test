@@ -199,6 +199,15 @@ def remove_stale_shared_artifacts(extdir: pathlib.Path) -> None:
                     path.unlink()
 
 
+def remove_windows_debug_sidecars(extdir: pathlib.Path) -> None:
+    if sys.platform != "win32":
+        return
+    for pattern in ("*.ilk", "*.pdb"):
+        for path in extdir.glob(pattern):
+            if path.is_file():
+                path.unlink()
+
+
 class CMakeExtension(Extension):
     def __init__(self, name: str, sourcedir: str = "") -> None:
         super().__init__(name, sources=[])
@@ -211,6 +220,14 @@ class CMakeBuild(build_ext):
         extdir = ext_full_path.parent
         extdir.mkdir(parents=True, exist_ok=True)
         remove_stale_shared_artifacts(extdir)
+
+        if isinstance(self.debug, str):
+            self.debug = self.debug.strip().lower() in TRUTHY_ENV_VALUES
+
+        # For wheel packaging flows, allow env-based forced Release even if
+        # front-end tooling passes a debug build_ext flag unexpectedly.
+        if parse_env_bool("FORCE_WHEEL_RELEASE", False):
+            self.debug = False
 
         cfg = "Debug" if self.debug else "Release"
 
@@ -237,6 +254,7 @@ class CMakeBuild(build_ext):
             "-DDICOMSDL_PIXEL_CORE=ON",
             "-DDICOMSDL_PIXEL_RUNTIME=ON",
             "-DDICOMSDL_PIXEL_RLE_STATIC_PLUGIN=ON",
+            f"-DCMAKE_BUILD_TYPE={cfg}",
         ]
 
         codec_modes = resolve_codec_modes_from_env()
@@ -277,8 +295,6 @@ class CMakeBuild(build_ext):
         if self.compiler.compiler_type == "msvc":
             cmake_args += [f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY_{cfg.upper()}={extdir}"]
             build_args += ["--config", cfg]
-        else:
-            cmake_args += [f"-DCMAKE_BUILD_TYPE={cfg}"]
 
         if sys.platform == "darwin":
             arch_candidate = None
@@ -337,6 +353,7 @@ class CMakeBuild(build_ext):
 
         strip_targets.append(ext_full_path)
         maybe_strip_binary_artifacts(strip_targets)
+        remove_windows_debug_sidecars(extdir)
 
 
 setup(

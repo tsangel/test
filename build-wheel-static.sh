@@ -13,6 +13,12 @@ cd "${ROOT_DIR}"
 : "${DICOM_BUILD_EXAMPLES:=OFF}"
 : "${RUN_TESTS:=0}"
 : "${BUILD_WHEEL:=1}"
+: "${FORCE_WHEEL_RELEASE:=1}"
+: "${BUILD_TYPE:=Release}"
+: "${DEBUG:=0}"
+: "${DISTUTILS_DEBUG:=0}"
+: "${STATIC_PRE_CLEAN_OUTPUTS:=1}"
+: "${INSTALL_BUILT_WHEEL:=1}"
 
 : "${DICOMSDL_PIXEL_DEFAULT_MODE:=none}"
 : "${DICOMSDL_PIXEL_JPEG_MODE:=builtin}"
@@ -36,6 +42,12 @@ export BUILD_TESTING
 export DICOM_BUILD_EXAMPLES
 export RUN_TESTS
 export BUILD_WHEEL
+export FORCE_WHEEL_RELEASE
+export BUILD_TYPE
+export DEBUG
+export DISTUTILS_DEBUG
+export STATIC_PRE_CLEAN_OUTPUTS
+export INSTALL_BUILT_WHEEL
 export DICOMSDL_PIXEL_DEFAULT_MODE
 export DICOMSDL_PIXEL_JPEG_MODE
 export DICOMSDL_PIXEL_JPEGLS_MODE
@@ -45,13 +57,70 @@ export DICOMSDL_PIXEL_JPEGXL_MODE
 export CMAKE_EXTRA_ARGS
 export DICOMSDL_CMAKE_ARGS
 
-if [[ "${CLEAN_BUILD_DIR}" != "0" && -d "${BUILD_DIR}" ]]; then
-	if [[ -z "${BUILD_DIR}" || "${BUILD_DIR}" == "/" || "${BUILD_DIR}" == "${ROOT_DIR}" ]]; then
-		echo "Error: refusing to remove BUILD_DIR='${BUILD_DIR}'" >&2
+normalize_dir_path() {
+	local path="$1"
+	while [[ "${path}" == */ && "${path}" != "/" ]]; do
+		path="${path%/}"
+	done
+	printf "%s" "${path}"
+}
+
+safe_remove_dir_if_exists() {
+	local target="$1"
+	local label="$2"
+	local normalized_target
+	local normalized_root
+	normalized_target="$(normalize_dir_path "${target}")"
+	normalized_root="$(normalize_dir_path "${ROOT_DIR}")"
+	if [[ -z "${normalized_target}" || "${normalized_target}" == "/" || "${normalized_target}" == "${normalized_root}" ]]; then
+		echo "Error: refusing to remove unsafe ${label} path '${target}'" >&2
 		exit 1
 	fi
-	echo "Removing existing build directory: ${BUILD_DIR}"
-	rm -rf "${BUILD_DIR}"
+	if [[ -e "${normalized_target}" ]]; then
+		if [[ ! -d "${normalized_target}" ]]; then
+			echo "Error: ${label} exists but is not a directory: ${normalized_target}" >&2
+			exit 1
+		fi
+		echo "Removing existing ${label}: ${normalized_target}"
+		rm -rf "${normalized_target}"
+	fi
+}
+
+if [[ "${STATIC_PRE_CLEAN_OUTPUTS}" != "0" ]]; then
+	safe_remove_dir_if_exists "${BUILD_DIR}" "build directory"
+	for path in "${ROOT_DIR}"/build/temp.* "${ROOT_DIR}"/build/lib.* "${ROOT_DIR}"/build/bdist.*; do
+		if [[ -d "${path}" ]]; then
+			echo "Removing wheel intermediate directory: ${path}"
+			rm -rf "${path}"
+		fi
+	done
+	safe_remove_dir_if_exists "${WHEEL_DIR}" "wheel directory"
+	mkdir -p "${WHEEL_DIR}"
 fi
 
-exec "${ROOT_DIR}/build.sh" "$@"
+"${ROOT_DIR}/build.sh" "$@"
+
+if [[ "${INSTALL_BUILT_WHEEL}" != "0" ]]; then
+	if [[ ! -d "${WHEEL_DIR}" ]]; then
+		echo "Error: WHEEL_DIR does not exist: ${WHEEL_DIR}" >&2
+		exit 1
+	fi
+
+	shopt -s nullglob
+	wheels=("${WHEEL_DIR}"/*.whl)
+	shopt -u nullglob
+	if (( ${#wheels[@]} == 0 )); then
+		echo "Error: no wheel found in ${WHEEL_DIR} to install." >&2
+		exit 1
+	fi
+
+	latest_wheel="${wheels[0]}"
+	for wheel in "${wheels[@]}"; do
+		if [[ "${wheel}" -nt "${latest_wheel}" ]]; then
+			latest_wheel="${wheel}"
+		fi
+	done
+
+	echo "Installing wheel (force-reinstall): ${latest_wheel}"
+	"${PYTHON_BIN}" -m pip install --force-reinstall --no-deps --no-cache-dir "${latest_wheel}"
+fi

@@ -1,5 +1,5 @@
 @echo off
-setlocal enabledelayedexpansion
+setlocal EnableExtensions EnableDelayedExpansion
 
 set "ROOT_DIR=%~dp0"
 if "%ROOT_DIR:~-1%"=="\" set "ROOT_DIR=%ROOT_DIR:~0,-1%"
@@ -11,8 +11,11 @@ if not defined DICOM_BUILD_EXAMPLES set "DICOM_BUILD_EXAMPLES=ON"
 if not defined BUILD_WHEEL set "BUILD_WHEEL=1"
 if not defined WHEEL_ONLY set "WHEEL_ONLY=0"
 if not defined WHEEL_DIR set "WHEEL_DIR=%ROOT_DIR%\dist"
+set "WHEEL_DIR=%WHEEL_DIR:"=%"
 if not defined PRESERVE_WHEEL_HISTORY set "PRESERVE_WHEEL_HISTORY=1"
 if not defined PIP_WHEEL_VERBOSE set "PIP_WHEEL_VERBOSE=0"
+if not defined VALIDATE_WHEEL_RUNTIME set "VALIDATE_WHEEL_RUNTIME=1"
+if not defined FORCE_WHEEL_RELEASE set "FORCE_WHEEL_RELEASE=1"
 if not defined CTEST_LABEL set "CTEST_LABEL=dicomsdl"
 if not defined PYTHON_BIN (
 	where py >nul 2>&1
@@ -21,6 +24,13 @@ if not defined PYTHON_BIN (
 	) else (
 		set "PYTHON_BIN=py -3"
 	)
+)
+
+if /I "%FORCE_WHEEL_RELEASE%"=="1" (
+	set "DEBUG=0"
+	set "DISTUTILS_DEBUG=0"
+	set "BUILD_TYPE=Release"
+	set "CMAKE_BUILD_TYPE=Release"
 )
 
 where cmake >nul 2>&1
@@ -206,6 +216,10 @@ echo Pixel runtime mode: v2 ^(default^)
 
 if not "%WHEEL_ONLY%"=="0" (
 	echo Wheel-only mode: skipping top-level CMake configure/build and relying on pip wheel.
+	if not "%DICOMSDL_CLEAN_BUILD%"=="0" (
+		call :clean_python_wheel_build_dirs
+		if errorlevel 1 exit /b %errorlevel%
+	)
 	if not "%RUN_TESTS%"=="0" (
 		echo Warning: RUN_TESTS is ignored in WHEEL_ONLY mode.
 	)
@@ -317,11 +331,13 @@ if not "%RUN_TESTS%"=="0" (
 :build_wheel
 if not "%BUILD_WHEEL%"=="0" (
 	echo Building Python wheel into %WHEEL_DIR%
-	if exist "%WHEEL_DIR%\NUL" (
-		rem WHEEL_DIR already exists as a directory.
-	) else if exist "%WHEEL_DIR%" (
-		echo Error: WHEEL_DIR exists but is not a directory: %WHEEL_DIR%.>&2
-		exit /b 1
+	if exist "%WHEEL_DIR%" (
+		pushd "%WHEEL_DIR%" >nul 2>&1
+		if errorlevel 1 (
+			echo Error: WHEEL_DIR exists but is not a directory: %WHEEL_DIR%.>&2
+			exit /b 1
+		)
+		popd
 	) else (
 		mkdir "%WHEEL_DIR%"
 		if errorlevel 1 (
@@ -369,6 +385,13 @@ if not "%BUILD_WHEEL%"=="0" (
 			)
 			move /y "%%~fF" "!TARGET_WHEEL!" >nul
 			echo Saved wheel: !TARGET_WHEEL!
+			if not "%VALIDATE_WHEEL_RUNTIME%"=="0" (
+				call :validate_wheel "!TARGET_WHEEL!"
+				if errorlevel 1 (
+					if exist "!TMP_WHEEL_DIR!" rmdir /s /q "!TMP_WHEEL_DIR!"
+					exit /b !errorlevel!
+				)
+			)
 		)
 	)
 	if "!WHEEL_COUNT!"=="0" (
@@ -379,6 +402,51 @@ if not "%BUILD_WHEEL%"=="0" (
 	if exist "!TMP_WHEEL_DIR!" rmdir /s /q "!TMP_WHEEL_DIR!"
 )
 
+exit /b 0
+
+:clean_python_wheel_build_dirs
+for /d %%D in ("%ROOT_DIR%\build\temp.*") do (
+	if exist "%%~fD" (
+		echo Removing wheel temp build directory: %%~fD
+		rmdir /s /q "%%~fD"
+		if errorlevel 1 (
+			echo Error: failed to remove %%~fD.>&2
+			exit /b 1
+		)
+	)
+)
+for /d %%D in ("%ROOT_DIR%\build\lib.*") do (
+	if exist "%%~fD" (
+		echo Removing wheel lib build directory: %%~fD
+		rmdir /s /q "%%~fD"
+		if errorlevel 1 (
+			echo Error: failed to remove %%~fD.>&2
+			exit /b 1
+		)
+	)
+)
+for /d %%D in ("%ROOT_DIR%\build\bdist.*") do (
+	if exist "%%~fD" (
+		echo Removing wheel bdist directory: %%~fD
+		rmdir /s /q "%%~fD"
+		if errorlevel 1 (
+			echo Error: failed to remove %%~fD.>&2
+			exit /b 1
+		)
+	)
+)
+exit /b 0
+
+:validate_wheel
+if "%~1"=="" (
+	echo Error: validate_wheel requires a wheel path.>&2
+	exit /b 1
+)
+%PYTHON_BIN% -c "exec('import sys,zipfile\np=sys.argv[1]\nz=zipfile.ZipFile(p)\nnames=[i.filename.lower() for i in z.infolist()]\nbad=[n for n in names if n.endswith(\".pdb\") or n.endswith(\".ilk\")]\npyd=[n for n in names if n.endswith(\".pyd\")]\nif bad:\n    print(\"ERROR: debug artifacts in wheel:\", \", \".join(bad))\n    sys.exit(2)\nif not pyd:\n    print(\"ERROR: no .pyd in wheel:\", p)\n    sys.exit(3)\ndata=z.read(pyd[0]).lower()\nhits=[t.decode() for t in (b\"msvcp140d.dll\", b\"vcruntime140d.dll\", b\"vcruntime140_1d.dll\", b\"ucrtbased.dll\") if t in data]\nif hits:\n    print(\"ERROR: debug runtime token in wheel:\", \", \".join(hits))\n    sys.exit(4)\nprint(\"Wheel runtime validation passed:\", p)')" "%~1"
+if errorlevel 1 (
+	echo Error: wheel validation failed for %~1.>&2
+	exit /b 1
+)
 exit /b 0
 
 :resolve_codec_mode

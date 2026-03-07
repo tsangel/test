@@ -10,6 +10,31 @@ pip wheel . --no-build-isolation --no-deps -w dist
 pip install --force-reinstall dist/dicomsdl-*.whl
 ```
 
+2.1 Static wheel wrapper scripts (optional, recommended for static-wheel workflow)
+
+```bash
+# macOS / Linux
+./build-wheel-static.sh
+```
+
+```cmd
+:: Windows (cmd.exe)
+build-wheel-static.bat
+```
+
+Wrapper defaults:
+
+- Remove old outputs at start (`BUILD_DIR`, `build/temp.*`, `build/lib.*`, `build/bdist.*`, `WHEEL_DIR`).
+- Force wheel build to Release (`FORCE_WHEEL_RELEASE=1`, `BUILD_TYPE=Release`).
+- Build a fresh wheel.
+- Force-reinstall the newest wheel from `WHEEL_DIR`.
+
+To disable defaults:
+
+- `STATIC_PRE_CLEAN_OUTPUTS=0` disables pre-clean.
+- `INSTALL_BUILT_WHEEL=0` disables auto-install.
+- `FORCE_WHEEL_RELEASE=0` allows non-Release wheel builds.
+
 3. Five-line example
 
 ```python
