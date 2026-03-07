@@ -1518,6 +1518,10 @@ private:
 struct ElementRef {
 	Tag tag{};
 	DataElement* element{nullptr};
+
+	constexpr ElementRef() noexcept = default;
+	constexpr ElementRef(Tag tag_value, DataElement* element_ptr) noexcept
+	    : tag(tag_value), element(element_ptr) {}
 };
 
 
