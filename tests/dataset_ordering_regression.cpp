@@ -60,7 +60,7 @@ int main() {
 	constexpr std::uint32_t kTag30 = 0x00100030u;
 	constexpr std::uint32_t kTag40 = 0x00100040u;
 
-	// Case 1) vector middle remove: tombstone must be skipped by iterator/size.
+	// Case 1) middle remove: removed tag must disappear from iteration/size.
 	{
 		dicom::DataSet ds;
 		add_elem(ds, kTag10);
@@ -74,7 +74,7 @@ int main() {
 		require_missing(ds, dicom::Tag::from_value(kTag20), "case1 remove-middle");
 	}
 
-	// Case 2) vector middle remove -> re-add same tag: must restore original order.
+	// Case 2) middle remove -> re-add same tag: must restore original order.
 	{
 		dicom::DataSet ds;
 		add_elem(ds, kTag10);
@@ -90,7 +90,7 @@ int main() {
 		    "case2 readd-middle payload mismatch");
 	}
 
-	// Case 3) vector front remove -> re-add same tag.
+	// Case 3) front remove -> re-add same tag.
 	{
 		dicom::DataSet ds;
 		add_elem(ds, kTag10);
@@ -104,7 +104,7 @@ int main() {
 		require_order(ds, {kTag10, kTag20, kTag30, kTag40}, "case3 readd-front");
 	}
 
-	// Case 4) vector back remove -> re-add same tag.
+	// Case 4) back remove -> re-add same tag.
 	{
 		dicom::DataSet ds;
 		add_elem(ds, kTag10);
@@ -118,36 +118,35 @@ int main() {
 		require_order(ds, {kTag10, kTag20, kTag30, kTag40}, "case4 readd-back");
 	}
 
-	// Case 5) map insert (out-of-order add): iterator must merge in sorted order.
+	// Case 5) out-of-order add: iterator must stay sorted.
 	{
 		dicom::DataSet ds;
 		add_elem(ds, kTag10);
 		add_elem(ds, kTag30);
 		add_elem(ds, kTag40);
-		add_elem(ds, kTag20);  // out-of-order => map storage
-		require_order(ds, {kTag10, kTag20, kTag30, kTag40}, "case5 map-insert-order");
+		add_elem(ds, kTag20);  // out-of-order insert
+		require_order(ds, {kTag10, kTag20, kTag30, kTag40}, "case5 out-of-order-insert");
 	}
 
-	// Case 6) map remove -> re-add same tag: order must remain stable.
+	// Case 6) out-of-order remove -> re-add same tag: order must remain stable.
 	{
 		dicom::DataSet ds;
 		add_elem(ds, kTag10);
 		add_elem(ds, kTag30);
 		add_elem(ds, kTag40);
-		add_elem(ds, kTag20);  // map
-		ds.remove_dataelement(dicom::Tag::from_value(kTag20));  // erase map entry
-		require_order(ds, {kTag10, kTag30, kTag40}, "case6 map-remove");
-		require_missing(ds, dicom::Tag::from_value(kTag20), "case6 map-remove");
+		add_elem(ds, kTag20);  // out-of-order insert
+		ds.remove_dataelement(dicom::Tag::from_value(kTag20));
+		require_order(ds, {kTag10, kTag30, kTag40}, "case6 remove");
+		require_missing(ds, dicom::Tag::from_value(kTag20), "case6 remove");
 
 		add_elem(ds, kTag20, 999, 11);
-		require_order(ds, {kTag10, kTag20, kTag30, kTag40}, "case6 map-readd");
+		require_order(ds, {kTag10, kTag20, kTag30, kTag40}, "case6 readd");
 		auto* elem = ds.get_dataelement(dicom::Tag::from_value(kTag20));
 		require(elem->is_present() && elem->offset() == 999 && elem->length() == 11,
-		    "case6 map-readd payload mismatch");
+		    "case6 readd payload mismatch");
 	}
 
-	// Case 7) vector tombstone + map coexistence:
-	//         middle remove, map insert, then middle re-add must keep global sort.
+	// Case 7) middle remove, out-of-order insert, then middle re-add must keep global sort.
 	{
 		dicom::DataSet ds;
 		add_elem(ds, kTag10);
@@ -155,11 +154,11 @@ int main() {
 		add_elem(ds, kTag30);
 		add_elem(ds, kTag40);
 
-		ds.remove_dataelement(dicom::Tag::from_value(kTag20));  // vector tombstone
-		add_elem(ds, kTag25);  // map insert
-		require_order(ds, {kTag10, kTag25, kTag30, kTag40}, "case7 tombstone+map");
+		ds.remove_dataelement(dicom::Tag::from_value(kTag20));
+		add_elem(ds, kTag25);  // out-of-order insert
+		require_order(ds, {kTag10, kTag25, kTag30, kTag40}, "case7 remove+insert");
 
-		add_elem(ds, kTag20);  // revive tombstone slot
+		add_elem(ds, kTag20);
 		require_order(ds, {kTag10, kTag20, kTag25, kTag30, kTag40}, "case7 revive-middle");
 	}
 

@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+ cmake_minimum_required(VERSION 3.16)
 
 if(APPLE)
     if(DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
@@ -206,6 +206,7 @@ target_compile_features(dicomsdl PUBLIC cxx_std_20)
 include(DicomsdlPixelTargets)
 dicomsdl_apply_pixel_static_plugin_defines(dicomsdl)
 
+include(DicomsdlBenchmarks)
 include(DicomsdlExamples)
 include(DicomsdlPython)
 include(DicomsdlTests)

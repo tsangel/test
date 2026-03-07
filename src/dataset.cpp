@@ -29,8 +29,8 @@ namespace dicom {
 DataElement* NullElement();
 namespace {
 
-constexpr std::size_t kRootElementsReserveHintInitial = 16;
-constexpr std::size_t kRootElementsReserveHintMax = 256;
+constexpr std::size_t kRootElementsReserveHintInitial = 64;
+constexpr std::size_t kRootElementsReserveHintMax = 1024;
 static_assert(kRootElementsReserveHintInitial <= kRootElementsReserveHintMax,
     "Initial reserve hint must not exceed max reserve hint");
 std::atomic<std::size_t> root_elements_reserve_hint{kRootElementsReserveHintInitial};
@@ -42,6 +42,15 @@ void update_root_elements_reserve_hint(std::size_t parsed_elements) noexcept {
 	       !root_elements_reserve_hint.compare_exchange_weak(observed, bounded,
 	           std::memory_order_relaxed, std::memory_order_relaxed)) {
 	}
+}
+
+template <typename IndexIter>
+IndexIter lower_bound_element_index(
+    IndexIter begin, IndexIter end, std::uint32_t tag_value) {
+	return std::lower_bound(begin, end, tag_value,
+	    [](const ElementRef& ref, std::uint32_t value) {
+		return ref.tag.value() < value;
+	});
 }
 
 } // namespace
@@ -274,19 +283,15 @@ DataSet* DataSet::root_dataset() const noexcept {
 }
 
 std::size_t DataSet::size() const {
-	std::size_t count = 0;
-	for (auto it = cbegin(); it != cend(); ++it) {
-		++count;
-	}
-	return count;
+	return element_index_.size();
 }
 
 DataSet::iterator DataSet::begin() {
-	return iterator(elements_.begin(), elements_.end(), element_map_.begin(), element_map_.end());
+	return iterator(element_index_.begin(), element_index_.end());
 }
 
 DataSet::iterator DataSet::end() {
-	return iterator(elements_.end(), elements_.end(), element_map_.end(), element_map_.end());
+	return iterator(element_index_.end(), element_index_.end());
 }
 
 DataSet::const_iterator DataSet::begin() const {
@@ -298,17 +303,15 @@ DataSet::const_iterator DataSet::end() const {
 }
 
 DataSet::const_iterator DataSet::cbegin() const {
-	return const_iterator(elements_.cbegin(), elements_.cend(),
-	    element_map_.cbegin(), element_map_.cend());
+	return const_iterator(element_index_.cbegin(), element_index_.cend());
 }
 
 DataSet::const_iterator DataSet::cend() const {
-	return const_iterator(elements_.cend(), elements_.cend(),
-	    element_map_.cend(), element_map_.cend());
+	return const_iterator(element_index_.cend(), element_index_.cend());
 }
 
-// Keeps elements_ strictly sorted for common sequential inserts, while element_map_
-// stores out-of-order tags so we never duplicate storage for the same tag.
+// Stores stable DataElement bodies in deque storage and keeps a sorted
+// tag/pointer index for lookup and iteration.
 DataElement* DataSet::add_dataelement(Tag tag, VR vr) {
 	return add_dataelement(tag, vr, 0, 0);
 }
@@ -326,54 +329,34 @@ DataElement* DataSet::add_dataelement(Tag tag, VR vr, std::size_t offset, std::s
 		vr = VR(vr_value);
 	}
 
-	if (elements_.empty() || elements_.back().tag().value() < tag_value) {
+	if (element_index_.empty() || element_index_.back().tag.value() < tag_value) {
 		elements_.emplace_back(tag, vr, length, offset, this);
-		return &elements_.back();
+		auto* element = &elements_.back();
+		element_index_.emplace_back(tag, element);
+		return element;
 	}
 
-	const auto find_in_elements = [&](std::uint32_t value) -> DataElement* {
-		auto it = std::lower_bound(elements_.begin(), elements_.end(), value,
-		    [](const DataElement& element, std::uint32_t v) {
-			return element.tag().value() < v;
-		});
-		if (it != elements_.end() && it->tag().value() == value) {
-			return &(*it);
-		}
-		return nullptr;
-	};
-
-	if (auto* elem = find_in_elements(tag_value)) {
-		*elem = DataElement(tag, vr, length, offset, this);
-		return elem;
+	auto index_it = lower_bound_element_index(
+	    element_index_.begin(), element_index_.end(), tag_value);
+	if (index_it != element_index_.end() && index_it->tag.value() == tag_value) {
+		*(index_it->element) = DataElement(tag, vr, length, offset, this);
+		index_it->tag = tag;
+		return index_it->element;
 	}
 
-	auto map_it = element_map_.lower_bound(tag_value);
-	if (map_it != element_map_.end() && map_it->first == tag_value) {
-		map_it->second = DataElement(tag, vr, length, offset, this);
-		return &map_it->second;
-	}
-
-	auto insert_it = element_map_.emplace_hint(
-	    map_it, tag_value, DataElement(tag, vr, length, offset, this));
-	return &insert_it->second;
+	elements_.emplace_back(tag, vr, length, offset, this);
+	auto* element = &elements_.back();
+	element_index_.insert(index_it, ElementRef{tag, element});
+	return element;
 }
 
 DataElement* DataSet::get_dataelement(Tag tag) {
 	const auto tag_value = tag.value();
 
-	auto it = std::lower_bound(elements_.begin(), elements_.end(), tag_value,
-  	    [](const DataElement& element, std::uint32_t value) {
-		return element.tag().value() < value;
-	});
-	if (it != elements_.end() && it->tag().value() == tag_value) {
-		if (it->vr() != VR::None)
-			return &(*it);
-		else
-			return NullElement();
-	}
-
-	if (auto map_it = element_map_.find(tag_value); map_it != element_map_.end()) {
-		return &map_it->second;
+	auto index_it = lower_bound_element_index(
+	    element_index_.begin(), element_index_.end(), tag_value);
+	if (index_it != element_index_.end() && index_it->tag.value() == tag_value) {
+		return index_it->element;
 	}
 	return NullElement();
 }
@@ -381,19 +364,10 @@ DataElement* DataSet::get_dataelement(Tag tag) {
 const DataElement* DataSet::get_dataelement(Tag tag) const {
 	const auto tag_value = tag.value();
 
-	auto it = std::lower_bound(elements_.begin(), elements_.end(), tag_value,
-	    [](const DataElement& element, std::uint32_t value) {
-		return element.tag().value() < value;
-	});
-	if (it != elements_.end() && it->tag().value() == tag_value) {
-		if (it->vr() != VR::None)
-			return &(*it);
-		else
-			return NullElement();
-	}
-
-	if (auto map_it = element_map_.find(tag_value); map_it != element_map_.end()) {
-		return &map_it->second;
+	auto index_it = lower_bound_element_index(
+	    element_index_.cbegin(), element_index_.cend(), tag_value);
+	if (index_it != element_index_.cend() && index_it->tag.value() == tag_value) {
+		return index_it->element;
 	}
 	return NullElement();
 }
@@ -537,16 +511,12 @@ const DataElement& DataSet::operator[](Tag tag) const {
 void DataSet::remove_dataelement(Tag tag) {
 	const auto tag_value = tag.value();
 
-	auto vec_it = std::lower_bound(elements_.begin(), elements_.end(), tag_value,
-	    [](const DataElement& element, std::uint32_t value) {
-		return element.tag().value() < value;
-	});
-	if (vec_it != elements_.end() && vec_it->tag().value() == tag_value) {
-		// just set VR::None instead remove from elements_
-		*vec_it = DataElement(tag, VR::None, 0, 0, this);
-	} else
-	if (auto map_it = element_map_.find(tag_value); map_it != element_map_.end()) {
-		element_map_.erase(map_it);
+	auto index_it = lower_bound_element_index(
+	    element_index_.begin(), element_index_.end(), tag_value);
+	if (index_it != element_index_.end() && index_it->tag.value() == tag_value) {
+		auto* element = index_it->element;
+		*element = DataElement(tag, VR::None, 0, 0, this);
+		element_index_.erase(index_it);
 	}
 }
 
@@ -560,8 +530,8 @@ void DataSet::read_attached_stream(const ReadOptions& options) {
 	}
 
 	elements_.clear();
-	element_map_.clear();
-	elements_.reserve(load_root_elements_reserve_hint());
+	element_index_.clear();
+	element_index_.reserve(load_root_elements_reserve_hint());
 	last_tag_loaded_ = Tag::from_value(0);
 	if (root_file_) {
 		root_file_->set_transfer_syntax_state_only("ExplicitVRLittleEndian"_uid);
@@ -634,7 +604,7 @@ void DataSet::read_attached_stream(const ReadOptions& options) {
 	}
 
 	read_elements_until(options.load_until, stream_.get());
-	update_root_elements_reserve_hint(elements_.size());
+	update_root_elements_reserve_hint(element_index_.size());
 }
 
 void DataSet::read_elements_until(Tag load_until, InStream* stream) {
@@ -860,9 +830,11 @@ void DataSet::dump_elements() const {
 	for (const auto& element : elements_) {
 		std::cout << element.tag().value() << " VR=" << element.vr().str() << " len=" << element.length() << " off=" << element.offset() << "\n";
 	}
-	std::cout << "-- element_map_ --\n";
-	for (const auto& kv : element_map_) {
-		std::cout << kv.first << " VR=" << kv.second.vr().str() << " len=" << kv.second.length() << " off=" << kv.second.offset() << "\n";
+	std::cout << "-- element_index_ --\n";
+	for (const auto& ref : element_index_) {
+		std::cout << ref.tag.value() << " VR=" << ref.element->vr().str()
+		          << " len=" << ref.element->length() << " off=" << ref.element->offset()
+		          << "\n";
 	}
 }
 

@@ -5,10 +5,10 @@
 #include <compare>
 #include <cstdint>
 #include <cstring>
+#include <deque>
 #include <limits>
 #include <iterator>
 #include <iosfwd>
-#include <map>
 #include <memory>
 #include <cstdio>
 #include <span>
@@ -1454,8 +1454,8 @@ private:
 	}
 };
 
-template <typename VecIter, typename MapIter, typename Ref, typename Ptr>
-/// Forward iterator that merges vector- and map-backed element storage.
+template <typename IndexIter, typename Ref, typename Ptr>
+/// Forward iterator over the sorted active element index.
 class DataElementIterator {
 public:
 	using iterator_category = std::forward_iterator_tag;
@@ -1466,22 +1466,22 @@ public:
 
 	constexpr DataElementIterator() = default;
 
-	DataElementIterator(VecIter vec_it, VecIter vec_end, MapIter map_it, MapIter map_end)
-	    : vec_it_(vec_it), vec_end_(vec_end), map_it_(map_it), map_end_(map_end) {
-		select_source();
+	DataElementIterator(IndexIter index_it, IndexIter index_end)
+	    : index_it_(index_it), index_end_(index_end) {
+		skip_inactive();
 	}
 
 	reference operator*() const {
-		return use_vector_ ? *vec_it_ : map_it_->second;
+		return *(index_it_->element);
 	}
 
 	pointer operator->() const {
-		return &(**this);
+		return index_it_->element;
 	}
 
 	DataElementIterator& operator++() {
-		advance_active();
-		select_source();
+		++index_it_;
+		skip_inactive();
 		return *this;
 	}
 
@@ -1492,7 +1492,7 @@ public:
 	}
 
 	friend bool operator==(const DataElementIterator& lhs, const DataElementIterator& rhs) {
-		return lhs.vec_it_ == rhs.vec_it_ && lhs.map_it_ == rhs.map_it_;
+		return lhs.index_it_ == rhs.index_it_;
 	}
 
 	friend bool operator!=(const DataElementIterator& lhs, const DataElementIterator& rhs) {
@@ -1500,51 +1500,23 @@ public:
 	}
 
 private:
-	void advance_active() {
-		if (use_vector_) {
-			if (vec_it_ != vec_end_) {
-				++vec_it_;
+	void skip_inactive() {
+		while (index_it_ != index_end_) {
+			const auto* element = index_it_->element;
+			if (element != nullptr && element->vr() != VR::None) {
+				return;
 			}
-		} else if (map_it_ != map_end_) {
-			++map_it_;
+			++index_it_;
 		}
 	}
 
-	void select_source() {
-		while (true) {
-			const bool vec_done = vec_it_ == vec_end_;
-			const bool map_done = map_it_ == map_end_;
+	IndexIter index_it_{};
+	IndexIter index_end_{};
+};
 
-			if (vec_done && map_done) {
-				use_vector_ = false;
-				return;
-			}
-
-			if (!vec_done && (map_done || vec_it_->tag().value() <= map_it_->first)) {
-				if (vec_it_->vr() == VR::None) {
-					++vec_it_;
-					continue;
-				}
-				use_vector_ = true;
-				return;
-			}
-
-			if (!map_done) {
-				if (map_it_->second.vr() == VR::None) {
-					++map_it_;
-					continue;
-				}
-				use_vector_ = false;
-				return;
-			}
-		}
-	}
-
-	VecIter vec_it_{};
-	VecIter vec_end_{};
-	MapIter map_it_{};
-	MapIter map_end_{};
-	bool use_vector_{false};
+struct ElementRef {
+	Tag tag{};
+	DataElement* element{nullptr};
 };
 
 
@@ -1552,10 +1524,10 @@ private:
 /// and supports lazy reading/iteration of elements.
 class DataSet {
 public:
-	using iterator = DataElementIterator<std::vector<DataElement>::iterator,
-	    std::map<std::uint32_t, DataElement>::iterator, DataElement&, DataElement*>;
-	using const_iterator = DataElementIterator<std::vector<DataElement>::const_iterator,
-	    std::map<std::uint32_t, DataElement>::const_iterator, const DataElement&, const DataElement*>;
+	using iterator = DataElementIterator<std::vector<ElementRef>::iterator,
+	    DataElement&, DataElement*>;
+	using const_iterator = DataElementIterator<std::vector<ElementRef>::const_iterator,
+	    const DataElement&, const DataElement*>;
 
 	/// Construct an empty root dataset.
 	DataSet();
@@ -1686,7 +1658,7 @@ public:
 	/// Number of active DataElements currently available in this dataset.
 	[[nodiscard]] std::size_t size() const;
 
-	/// Begin iterator over active elements (vector + map merge).
+	/// Begin iterator over active elements in tag order.
 	iterator begin();
 
 	/// End iterator over active elements.
@@ -1714,8 +1686,8 @@ private:
 	Tag last_tag_loaded_{Tag::from_value(0)};
 	bool explicit_vr_{true};
 	std::size_t offset_{0};  // absolute offset within the root stream where this dataset starts
-	std::vector<DataElement> elements_;
-	std::map<std::uint32_t, DataElement> element_map_;
+	std::deque<DataElement> elements_;
+	std::vector<ElementRef> element_index_;
 };
 
 /// Owns root DataSet and file-level parse/decode session state.
