@@ -19,9 +19,9 @@
 ## Notes
 - Preferred user-facing access pattern for plain tags:
   `long rows = dataset["Rows"_tag].to_long().value_or(0);`
-- Use `if (auto& e = dataset[tag]; e)` only when you need to distinguish missing from present.
+- Use `if (auto& e = dataset[tag]; e)` only when element presence itself matters.
 - No implicit loading: callers must ensure the needed elements are present via `ensure_loaded(tag)` or an earlier `read_attached_stream()`.
-- The function returns a non-null `DataElement*`; callers should check `if (*elem)` before consuming values.
+- The function returns `DataElement&`. If you need to distinguish missing from present, use `if (elem)` or `elem.is_missing()`. If you just need a fallback value, `get_dataelement(...).to_xxx().value_or(default)` is fine.
 - Errors (malformed path, non-sequence traversal, bad index) throw and include the offending tag string.
 
 ## Examples

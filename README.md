@@ -249,8 +249,9 @@ long row_count = dataset["Rows"_tag].to_long().value_or(1);
 ```
 
 - Prefer `dataset[tag].to_xxx().value_or(default)` for user-facing reads with defaults.
-- Use `if (auto& e = dataset[tag]; e)` only when missing/present distinction matters.
-- Keep `get_dataelement(...)` for low-level pointer workflows and tag-path parsing.
+- Use `if (auto& e = dataset[tag]; e)` only when element presence itself matters.
+- Use `get_dataelement(...)` when you want an explicitly named lookup API or tag-path parsing.
+  It returns `DataElement&` and yields a falsey element (`VR::None`) on miss.
 
 ## Python Wheel
 

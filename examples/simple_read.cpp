@@ -23,8 +23,11 @@ int main(int argc, char* argv[]) {
     auto& dataset = file->dataset();
     const long row_count = dataset["Rows"_tag].to_long().value_or(0);
     const long col_count = dataset["Columns"_tag].to_long().value_or(0);
+    const auto& transfer_syntax = dataset.get_dataelement("TransferSyntaxUID"_tag);
     std::cout << "Rows: " << row_count << "\n";
     std::cout << "Columns: " << col_count << "\n";
+    std::cout << "TransferSyntaxUID: "
+              << transfer_syntax.to_uid_string().value_or("<missing>") << "\n";
 
     return 0;
 }

@@ -20,12 +20,18 @@ int main() {
 ## Preferred DataElement access pattern
 
 - Use `dataset[tag].to_xxx().value_or(default)` for regular reads with defaults.
-- Use `if (auto& e = dataset[tag]; e)` only when missing/present distinction matters.
-- Keep `get_dataelement(...)` for low-level pointer workflows and tag-path parsing.
+- Use `if (auto& e = dataset[tag]; e)` only when element presence itself matters.
+- Use `get_dataelement(...)` when you want an explicitly named lookup API or tag-path parsing.
+  It returns `DataElement&` and yields a falsey element (`VR::None`) on miss.
 
 ```cpp
 long rows = ds["Rows"_tag].to_long().value_or(0);
 double slope = ds["RescaleSlope"_tag].to_double().value_or(1.0);
+const auto& dose =
+    ds.get_dataelement("RadiopharmaceuticalInformationSequence.0.RadionuclideTotalDose");
+if (dose) {
+  // consume dose
+}
 ```
 
 ## Raw value bytes (no copy)
@@ -57,9 +63,9 @@ auto reporter = std::make_shared<dicom::diag::BufferingReporter>(256);
 dicom::diag::set_thread_reporter(reporter);
 
 bool ok = true;
-ok &= ds.add_dataelement("Rows"_tag, dicom::VR::US)->from_long(512);
-ok &= ds.add_dataelement("Columns"_tag, dicom::VR::US)->from_long(-1);
-ok &= ds.add_dataelement("BitsAllocated"_tag, dicom::VR::US)->from_long(16);
+ok &= ds.add_dataelement("Rows"_tag, dicom::VR::US).from_long(512);
+ok &= ds.add_dataelement("Columns"_tag, dicom::VR::US).from_long(-1);
+ok &= ds.add_dataelement("BitsAllocated"_tag, dicom::VR::US).from_long(16);
 
 if (!ok) {
   auto messages = reporter->take_messages();
@@ -69,7 +75,7 @@ if (!ok) {
 dicom::diag::set_thread_reporter(nullptr);
 ```
 
-Note: `add_dataelement(...)` itself can throw on validation/allocation errors.
+Note: `add_dataelement(...)` returns `DataElement&` and can still throw on validation/allocation errors.
 
 ## DataSet attachment methods
 
@@ -103,7 +109,7 @@ Note: These attachment calls are intended for the root `DataSet` (the object ret
 
 :::{doxygenclass} dicom::DataElement
 :project: dicomsdl
-:members: DataElement, tag, vr, length, offset, value_span, as_sequence, as_pixel_sequence, set_tag, set_vr, set_length, set_offset, set_data, set_sequence, set_pixel_sequence
+:members: DataElement, tag, vr, length, offset, parent, is_present, is_missing, value_span, vm, storage_kind, sequence, pixel_sequence, as_sequence, as_pixel_sequence, reserve_value_bytes, set_value_bytes, adopt_value_bytes, from_long, from_uid_string, to_long, to_double, to_string_view, to_uid_string
 :undoc-members:
 :::
 

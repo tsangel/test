@@ -440,11 +440,11 @@ struct VR {
 	}
 
 	constexpr bool is_sequence() const noexcept {
-		return is_known() && value == SQ_val;
+		return value == SQ_val;
 	}
 
 	constexpr bool is_pixel_sequence() const noexcept {
-		return is_known() && value == PX_val;
+		return value == PX_val;
 	}
 
     // ------------------------------------------------------------
@@ -1211,15 +1211,8 @@ public:
 
 	DataElement(const DataElement&) = delete;
 	DataElement& operator=(const DataElement&) = delete;
-
-	DataElement(DataElement&& other) noexcept { move_from(std::move(other)); }
-	DataElement& operator=(DataElement&& other) noexcept {
-		if (this != &other) {
-			release_storage();
-			move_from(std::move(other));
-		}
-		return *this;
-	}
+	DataElement(DataElement&&) = delete;
+	DataElement& operator=(DataElement&&) = delete;
 
 	DataElement(Tag tag, VR vr, std::size_t length, std::size_t offset,
 	    DataSet* parent = nullptr) noexcept;
@@ -1259,12 +1252,6 @@ public:
 	const Sequence* as_sequence() const;
 	PixelSequence* as_pixel_sequence();
 	const PixelSequence* as_pixel_sequence() const;
-
-	constexpr void set_tag(Tag tag) noexcept { tag_ = tag; }
-	constexpr void set_vr(VR vr) noexcept { vr_ = vr; }
-	constexpr void set_length(std::size_t length) noexcept { length_ = length; }
-	void set_offset(std::size_t offset) noexcept;
-	constexpr void set_parent(DataSet* parent) noexcept { parent_ = parent; }
 
 	/// Copy raw value bytes into inline/heap storage depending on length.
 	/// For odd-length values, one VR-specific padding byte is appended automatically.
@@ -1439,20 +1426,12 @@ private:
 	} storage_{};
 	DataSet* parent_{nullptr};
 
+	friend class DataSet;
+	constexpr void set_length(std::size_t length) noexcept { length_ = length; }
 	void release_storage() noexcept;
-
-	void move_from(DataElement&& other) noexcept {
-		tag_ = other.tag_;
-		vr_ = other.vr_;
-		storage_kind_ = other.storage_kind_;
-		length_ = other.length_;
-		static_assert(std::is_trivially_copyable_v<Storage>,
-		    "DataElement::Storage must remain trivially copyable");
-		storage_ = other.storage_;
-		parent_ = other.parent_;
-		other.storage_kind_ = StorageKind::none;
-		other.storage_.ptr = nullptr;
-	}
+	void initialize_storage(std::size_t offset, bool bind_to_parent_stream) noexcept;
+	void reset(Tag tag, VR vr, std::size_t length, std::size_t offset,
+	    DataSet* parent, bool bind_to_parent_stream) noexcept;
 };
 
 template <typename IndexIter, typename Ref, typename Ptr>
@@ -1593,39 +1572,39 @@ public:
 	[[nodiscard]] std::size_t offset() const { return offset_; }
 
 	/// Add or replace a data element with no stream binding (offset/length = 0).
-	/// @return Pointer to the inserted/replaced element. Never nullptr on success.
+	/// @return Reference to the inserted/replaced element.
 	/// @throws Exception on validation errors (for example: VR::None with unknown tag)
 	///         or allocation failures.
-	DataElement* add_dataelement(Tag tag, VR vr = VR::None);
+	DataElement& add_dataelement(Tag tag, VR vr = VR::None);
 
 	/// Add or replace a data element with explicit stream binding metadata.
-	/// @return Pointer to the inserted/replaced element. Never nullptr on success.
+	/// @return Reference to the inserted/replaced element.
 	/// @throws Exception on validation errors (for example: VR::None with unknown tag)
 	///         or allocation failures.
-	DataElement* add_dataelement(Tag tag, VR vr, std::size_t offset, std::size_t length);
+	DataElement& add_dataelement(Tag tag, VR vr, std::size_t offset, std::size_t length);
 
 	/// Remove a data element by tag (no-op if missing).
 	void remove_dataelement(Tag tag);
 
-	/// Low-level lookup by tag (pointer form). For most user-facing code, prefer operator[].
+	/// Low-level lookup by tag (reference form). For most user-facing code, prefer operator[].
 	/// Does not load implicitly; call ensure_loaded(tag) or read_attached_stream() first.
-	/// Never returns nullptr; missing lookups return a falsey DataElement (VR::None).
-	DataElement* get_dataelement(Tag tag);
+	/// Missing lookups return a falsey DataElement (VR::None).
+	DataElement& get_dataelement(Tag tag);
 
-	/// Low-level const lookup by tag (pointer form). For most user-facing code, prefer operator[].
+	/// Low-level const lookup by tag (reference form). For most user-facing code, prefer operator[].
 	/// Does not load implicitly; call ensure_loaded(tag) or read_attached_stream() first.
-	/// Never returns nullptr; missing lookups return a falsey DataElement (VR::None).
-	const DataElement* get_dataelement(Tag tag) const;
+	/// Missing lookups return a falsey DataElement (VR::None).
+	const DataElement& get_dataelement(Tag tag) const;
 
 	/// Low-level dotted tag-path resolver (e.g., "00540016.0.00181075").
 	/// Caller must ensure_loaded() the needed prefixes.
-	/// Never returns nullptr; missing lookups return a falsey DataElement (VR::None).
-	DataElement* get_dataelement(std::string_view tag_path);
+	/// Missing lookups return a falsey DataElement (VR::None).
+	DataElement& get_dataelement(std::string_view tag_path);
 
 	/// Low-level const dotted tag-path resolver.
 	/// Caller must ensure_loaded() the needed prefixes.
-	/// Never returns nullptr; missing lookups return a falsey DataElement (VR::None).
-	const DataElement* get_dataelement(std::string_view tag_path) const;
+	/// Missing lookups return a falsey DataElement (VR::None).
+	const DataElement& get_dataelement(std::string_view tag_path) const;
 
 	/// Preferred map-style access by tag. Missing lookups return a falsey DataElement (VR::None).
 	DataElement& operator[](Tag tag);
@@ -1722,18 +1701,18 @@ public:
 	[[nodiscard]] std::vector<std::uint8_t> write_bytes(const WriteOptions& options = {});
 	void write_file(const std::string& path, const WriteOptions& options = {});
 	/// Forwarding helper to the root DataSet::add_dataelement.
-	/// @return Pointer to the inserted/replaced element. Never nullptr on success.
+	/// @return Reference to the inserted/replaced element.
 	/// @throws Exception under the same conditions as DataSet::add_dataelement.
-	DataElement* add_dataelement(Tag tag, VR vr = VR::None);
+	DataElement& add_dataelement(Tag tag, VR vr = VR::None);
 	/// Forwarding helper to the root DataSet::add_dataelement with stream metadata.
-	/// @return Pointer to the inserted/replaced element. Never nullptr on success.
+	/// @return Reference to the inserted/replaced element.
 	/// @throws Exception under the same conditions as DataSet::add_dataelement.
-	DataElement* add_dataelement(Tag tag, VR vr, std::size_t offset, std::size_t length);
+	DataElement& add_dataelement(Tag tag, VR vr, std::size_t offset, std::size_t length);
 	void remove_dataelement(Tag tag);
-	DataElement* get_dataelement(Tag tag);
-	const DataElement* get_dataelement(Tag tag) const;
-	DataElement* get_dataelement(std::string_view tag_path);
-	const DataElement* get_dataelement(std::string_view tag_path) const;
+	DataElement& get_dataelement(Tag tag);
+	const DataElement& get_dataelement(Tag tag) const;
+	DataElement& get_dataelement(std::string_view tag_path);
+	const DataElement& get_dataelement(std::string_view tag_path) const;
 	DataElement& operator[](Tag tag);
 	const DataElement& operator[](Tag tag) const;
 	iterator begin();
@@ -1983,6 +1962,11 @@ inline DataElement::DataElement(Tag tag, VR vr, std::size_t length, std::size_t 
     DataSet* parent) noexcept
     : tag_(tag), vr_(vr), storage_kind_(StorageKind::none), length_(length),
       storage_(), parent_(parent) {
+	initialize_storage(offset, false);
+}
+
+inline void DataElement::initialize_storage(
+    std::size_t offset, bool bind_to_parent_stream) noexcept {
 	if (vr_.is_sequence()) {
 		storage_.seq = new Sequence(parent_);
 		storage_.seq->set_value_offset(offset);
@@ -1992,10 +1976,22 @@ inline DataElement::DataElement(Tag tag, VR vr, std::size_t length, std::size_t 
 		storage_.pixseq = new PixelSequence(parent_, ts);
 		storage_.pixseq->set_value_offset(offset);
 		storage_kind_ = StorageKind::pixel_sequence;
-	} else if (parent_) {
+	} else if (bind_to_parent_stream && parent_) {
 		storage_.offset_ = offset;
 		storage_kind_ = StorageKind::stream;
 	}
+}
+
+inline void DataElement::reset(Tag tag, VR vr, std::size_t length, std::size_t offset,
+    DataSet* parent, bool bind_to_parent_stream) noexcept {
+	release_storage();
+	tag_ = tag;
+	vr_ = vr;
+	length_ = length;
+	parent_ = parent;
+	storage_.ptr = nullptr;
+	storage_kind_ = StorageKind::none;
+	initialize_storage(offset, bind_to_parent_stream);
 }
 
 inline void DataElement::release_storage() noexcept {
@@ -2035,27 +2031,6 @@ inline std::size_t DataElement::offset() const noexcept {
 		return storage_.pixseq ? storage_.pixseq->value_offset() : 0;
 	default:
 		return 0;
-	}
-}
-
-inline void DataElement::set_offset(std::size_t offset) noexcept {
-	switch (storage_kind_) {
-	case StorageKind::stream:
-	case StorageKind::none:
-		storage_.offset_ = offset;
-		break;
-	case StorageKind::sequence:
-		if (storage_.seq) {
-			storage_.seq->set_value_offset(offset);
-		}
-		break;
-	case StorageKind::pixel_sequence:
-		if (storage_.pixseq) {
-			storage_.pixseq->set_value_offset(offset);
-		}
-		break;
-	default:
-		break;
 	}
 }
 

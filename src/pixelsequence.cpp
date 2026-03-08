@@ -427,9 +427,11 @@ void PixelSequence::read_attached_stream() {
     	stream->seek(last_frame_end);
 	} else {
 		const DataElement* extended_offset_table =
-		    root_dataset_ ? root_dataset_->get_dataelement("ExtendedOffsetTable"_tag) : nullptr;
+		    root_dataset_ ? &root_dataset_->get_dataelement("ExtendedOffsetTable"_tag) : nullptr;
 		const DataElement* extended_offset_table_lengths =
-		    root_dataset_ ? root_dataset_->get_dataelement("ExtendedOffsetTableLengths"_tag) : nullptr;
+		    root_dataset_
+		        ? &root_dataset_->get_dataelement("ExtendedOffsetTableLengths"_tag)
+		        : nullptr;
 		const bool has_extended_offset_table =
 		    extended_offset_table && !extended_offset_table->is_missing();
 		const bool has_extended_offset_table_lengths =

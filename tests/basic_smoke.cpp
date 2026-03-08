@@ -214,6 +214,22 @@ int main() {
 			}
 		}
 		{
+			DataSet ds;
+			auto& no_binding = ds.add_dataelement("Rows"_tag, dicom::VR::US);
+			if (no_binding.storage_kind() != dicom::DataElement::StorageKind::none) {
+				fail("DataSet::add_dataelement(tag, vr) should keep storage_kind none");
+			}
+			auto& bound = ds.add_dataelement("Rows"_tag, dicom::VR::US, 123, 2);
+			if (bound.storage_kind() != dicom::DataElement::StorageKind::stream ||
+			    bound.offset() != 123) {
+				fail("DataSet::add_dataelement(tag, vr, offset, length) should bind stream metadata");
+			}
+			auto& rebound = ds.add_dataelement("Rows"_tag, dicom::VR::US);
+			if (rebound.storage_kind() != dicom::DataElement::StorageKind::none) {
+				fail("DataSet::add_dataelement(tag, vr) should clear prior stream binding on replace");
+			}
+		}
+		{
 			dicom::DataElement padded_move_elem("Rows"_tag, dicom::VR::OB, 0, 0, nullptr);
 			std::vector<std::uint8_t> odd_bytes{0x11u, 0x22u, 0x33u};
 			padded_move_elem.adopt_value_bytes(std::move(odd_bytes));
@@ -639,18 +655,18 @@ int main() {
 			fail("DicomFile dump(include_offset=false) should hide OFFSET column");
 		}
 
-		auto* rows = file->add_dataelement("Rows"_tag, dicom::VR::US, 0, 2);
-		if (!rows || !(*rows)) fail("DicomFile add_dataelement failed");
+		auto& rows = file->add_dataelement("Rows"_tag, dicom::VR::US, 0, 2);
+		if (!rows) fail("DicomFile add_dataelement failed");
 		const auto file_dump_after_add = file->dump();
 		if (file_dump_after_add.find("'00280010'") == std::string::npos) {
 			fail("DicomFile dump should include Rows");
 		}
 		const std::size_t long_desc_size = 256;
 		std::vector<std::uint8_t> long_desc_value(long_desc_size, static_cast<std::uint8_t>('A'));
-		auto* study_desc =
+		auto& study_desc =
 		    file->add_dataelement("StudyDescription"_tag, dicom::VR::LO, 0, long_desc_size);
-		if (!study_desc || !(*study_desc)) fail("DicomFile add StudyDescription failed");
-		study_desc->set_value_bytes(long_desc_value);
+		if (!study_desc) fail("DicomFile add StudyDescription failed");
+		study_desc.set_value_bytes(long_desc_value);
 		const auto truncated_dump = file->dump();
 		const auto study_desc_pos = truncated_dump.find("'00081030'");
 		if (study_desc_pos == std::string::npos) fail("DicomFile dump should include StudyDescription");
@@ -673,18 +689,18 @@ int main() {
 		if (wide_line.find("...") != std::string::npos) {
 			fail("DicomFile dump(max_print_chars) should relax truncation");
 		}
-		const auto* rows_by_tag = file->get_dataelement("Rows"_tag);
-		if (rows_by_tag->is_missing()) {
+		const auto& rows_by_tag = file->get_dataelement("Rows"_tag);
+		if (rows_by_tag.is_missing()) {
 			fail("DicomFile get_dataelement(Tag) failed");
 		}
-		const auto* rows_by_keyword = file->get_dataelement("Rows");
-		if (rows_by_keyword->is_missing()) {
+		const auto& rows_by_keyword = file->get_dataelement("Rows");
+		if (rows_by_keyword.is_missing()) {
 			fail("DicomFile get_dataelement(string_view) failed");
 		}
 		const auto& rows_ref = (*file)["Rows"_tag];
 		if (rows_ref.tag().value() != "Rows"_tag.value()) fail("DicomFile operator[] failed");
 		file->remove_dataelement("Rows"_tag);
-		if (file->get_dataelement("Rows"_tag)->is_present()) {
+		if (file->get_dataelement("Rows"_tag).is_present()) {
 			fail("DicomFile remove_dataelement failed");
 		}
 
@@ -752,20 +768,20 @@ int main() {
 
 	dicom::DicomFile native_pixels;
 	{
-		auto* bits_allocated = native_pixels.add_dataelement("BitsAllocated"_tag, dicom::VR::US);
-		if (!bits_allocated || !bits_allocated->from_long(16)) {
+		auto& bits_allocated = native_pixels.add_dataelement("BitsAllocated"_tag, dicom::VR::US);
+		if (!bits_allocated.from_long(16)) {
 			fail("failed to set BitsAllocated for native pixel API test");
 		}
 		std::vector<std::uint8_t> native_pixel_bytes{0x34, 0x12, 0x78, 0x56};
 		native_pixels.set_native_pixel_data(std::move(native_pixel_bytes));
-		const auto* native_pixel_elem = native_pixels.get_dataelement("PixelData"_tag);
-		if (!native_pixel_elem || native_pixel_elem->is_missing()) {
+		const auto& native_pixel_elem = native_pixels.get_dataelement("PixelData"_tag);
+		if (native_pixel_elem.is_missing()) {
 			fail("set_native_pixel_data should create PixelData");
 		}
-		if (native_pixel_elem->vr() != dicom::VR::OW) {
+		if (native_pixel_elem.vr() != dicom::VR::OW) {
 			fail("set_native_pixel_data should infer OW for BitsAllocated=16");
 		}
-		const auto span = native_pixel_elem->value_span();
+		const auto span = native_pixel_elem.value_span();
 		if (span.size() != 4 || span[0] != 0x34 || span[1] != 0x12 || span[2] != 0x78 || span[3] != 0x56) {
 			fail("set_native_pixel_data payload mismatch");
 		}
@@ -800,14 +816,14 @@ int main() {
 		set_pixel_data_file.set_pixel_data(
 		    "ExplicitVRLittleEndian"_uid, source);
 
-		const auto* pixel_data = set_pixel_data_file.get_dataelement("PixelData"_tag);
-		if (!pixel_data || pixel_data->is_missing()) {
+		const auto& pixel_data = set_pixel_data_file.get_dataelement("PixelData"_tag);
+		if (pixel_data.is_missing()) {
 			fail("set_pixel_data should create PixelData");
 		}
-		if (pixel_data->vr() != dicom::VR::OW) {
+		if (pixel_data.vr() != dicom::VR::OW) {
 			fail("set_pixel_data should create OW for 16-bit source");
 		}
-		const auto pixel_bytes = pixel_data->value_span();
+		const auto pixel_bytes = pixel_data.value_span();
 		const std::vector<std::uint8_t> expected{
 		    0x01u, 0x00u, 0x02u, 0x00u, 0x03u, 0x00u,
 		    0x04u, 0x00u, 0x05u, 0x00u, 0x06u, 0x00u,
@@ -858,9 +874,9 @@ int main() {
 			        "ExplicitVRLittleEndian"_uid.value()) {
 				fail("set_pixel_data should update runtime transfer syntax");
 			}
-			const auto* transfer_syntax_elem =
+			const auto& transfer_syntax_elem =
 			    set_pixel_data_file.get_dataelement("TransferSyntaxUID"_tag);
-			const auto ts_uid = transfer_syntax_elem->to_transfer_syntax_uid();
+			const auto ts_uid = transfer_syntax_elem.to_transfer_syntax_uid();
 			if (!ts_uid || ts_uid->value() != "ExplicitVRLittleEndian"_uid.value()) {
 				fail("set_pixel_data should synchronize TransferSyntaxUID in file meta");
 			}
@@ -920,14 +936,14 @@ int main() {
 		set_pixel_data_rle_file.set_pixel_data(
 		    "RLELossless"_uid, source);
 
-		const auto* pixel_data = set_pixel_data_rle_file.get_dataelement("PixelData"_tag);
-		if (!pixel_data || pixel_data->is_missing()) {
+		const auto& pixel_data = set_pixel_data_rle_file.get_dataelement("PixelData"_tag);
+		if (pixel_data.is_missing()) {
 			fail("RLE set_pixel_data should create PixelData");
 		}
-		if (!pixel_data->vr().is_pixel_sequence()) {
+		if (!pixel_data.vr().is_pixel_sequence()) {
 			fail("RLE set_pixel_data should create encapsulated PixelData");
 		}
-		const auto* pixel_sequence = pixel_data->as_pixel_sequence();
+		const auto* pixel_sequence = pixel_data.as_pixel_sequence();
 		if (!pixel_sequence || pixel_sequence->number_of_frames() != 2) {
 			fail("RLE set_pixel_data should create expected frame count");
 		}
@@ -936,9 +952,9 @@ int main() {
 		        "RLELossless"_uid.value()) {
 			fail("RLE set_pixel_data should update runtime transfer syntax");
 		}
-		const auto* transfer_syntax_elem =
+		const auto& transfer_syntax_elem =
 		    set_pixel_data_rle_file.get_dataelement("TransferSyntaxUID"_tag);
-		const auto ts_uid = transfer_syntax_elem->to_transfer_syntax_uid();
+		const auto ts_uid = transfer_syntax_elem.to_transfer_syntax_uid();
 		if (!ts_uid || ts_uid->value() != "RLELossless"_uid.value()) {
 			fail("RLE set_pixel_data should synchronize TransferSyntaxUID in file meta");
 		}
@@ -975,9 +991,9 @@ int main() {
 			    "ExplicitVRLittleEndian"_uid, source);
 			transcode_with_context_file.set_transfer_syntax(
 			    "RLELossless"_uid, rle_encoder_context);
-			const auto* transcoded_pixel_data =
+			const auto& transcoded_pixel_data =
 			    transcode_with_context_file.get_dataelement("PixelData"_tag);
-			if (!transcoded_pixel_data || !transcoded_pixel_data->vr().is_pixel_sequence()) {
+			if (!transcoded_pixel_data.vr().is_pixel_sequence()) {
 				fail("set_transfer_syntax with encoder context should produce encapsulated PixelData");
 			}
 
@@ -1053,14 +1069,14 @@ int main() {
 		set_pixel_data_encap_uncompressed_file.set_pixel_data(
 		    "EncapsulatedUncompressedExplicitVRLittleEndian"_uid, source);
 
-		auto* pixel_data = set_pixel_data_encap_uncompressed_file.get_dataelement("PixelData"_tag);
-		if (!pixel_data || pixel_data->is_missing()) {
+		auto& pixel_data = set_pixel_data_encap_uncompressed_file.get_dataelement("PixelData"_tag);
+		if (pixel_data.is_missing()) {
 			fail("EncapsulatedUncompressed set_pixel_data should create PixelData");
 		}
-		if (!pixel_data->vr().is_pixel_sequence()) {
+		if (!pixel_data.vr().is_pixel_sequence()) {
 			fail("EncapsulatedUncompressed set_pixel_data should create encapsulated PixelData");
 		}
-		auto* pixel_sequence = pixel_data->as_pixel_sequence();
+		auto* pixel_sequence = pixel_data.as_pixel_sequence();
 		if (!pixel_sequence || pixel_sequence->number_of_frames() != 2) {
 			fail("EncapsulatedUncompressed set_pixel_data should create expected frame count");
 		}
@@ -1085,9 +1101,9 @@ int main() {
 		        "EncapsulatedUncompressedExplicitVRLittleEndian"_uid.value()) {
 			fail("EncapsulatedUncompressed set_pixel_data should update runtime transfer syntax");
 		}
-		const auto* transfer_syntax_elem =
+		const auto& transfer_syntax_elem =
 		    set_pixel_data_encap_uncompressed_file.get_dataelement("TransferSyntaxUID"_tag);
-		const auto ts_uid = transfer_syntax_elem->to_transfer_syntax_uid();
+		const auto ts_uid = transfer_syntax_elem.to_transfer_syntax_uid();
 		if (!ts_uid ||
 		    ts_uid->value() != "EncapsulatedUncompressedExplicitVRLittleEndian"_uid.value()) {
 			fail("EncapsulatedUncompressed set_pixel_data should synchronize TransferSyntaxUID in file meta");
@@ -1133,14 +1149,14 @@ int main() {
 		set_pixel_data_j2k_file.set_pixel_data(
 		    "JPEG2000Lossless"_uid, source);
 
-		const auto* pixel_data = set_pixel_data_j2k_file.get_dataelement("PixelData"_tag);
-		if (!pixel_data || pixel_data->is_missing()) {
+		const auto& pixel_data = set_pixel_data_j2k_file.get_dataelement("PixelData"_tag);
+		if (pixel_data.is_missing()) {
 			fail("J2K set_pixel_data should create PixelData");
 		}
-		if (!pixel_data->vr().is_pixel_sequence()) {
+		if (!pixel_data.vr().is_pixel_sequence()) {
 			fail("J2K set_pixel_data should create encapsulated PixelData");
 		}
-		const auto* pixel_sequence = pixel_data->as_pixel_sequence();
+		const auto* pixel_sequence = pixel_data.as_pixel_sequence();
 		if (!pixel_sequence || pixel_sequence->number_of_frames() != 2) {
 			fail("J2K set_pixel_data should create expected frame count");
 		}
@@ -1149,9 +1165,9 @@ int main() {
 		        "JPEG2000Lossless"_uid.value()) {
 			fail("J2K set_pixel_data should update runtime transfer syntax");
 		}
-		const auto* transfer_syntax_elem =
+		const auto& transfer_syntax_elem =
 		    set_pixel_data_j2k_file.get_dataelement("TransferSyntaxUID"_tag);
-		const auto ts_uid = transfer_syntax_elem->to_transfer_syntax_uid();
+		const auto ts_uid = transfer_syntax_elem.to_transfer_syntax_uid();
 		if (!ts_uid || ts_uid->value() != "JPEG2000Lossless"_uid.value()) {
 			fail("J2K set_pixel_data should synchronize TransferSyntaxUID in file meta");
 		}
@@ -1203,14 +1219,14 @@ int main() {
 		set_pixel_data_htj2k_file.set_pixel_data(
 		    "HTJ2KLossless"_uid, source);
 
-		const auto* pixel_data = set_pixel_data_htj2k_file.get_dataelement("PixelData"_tag);
-		if (!pixel_data || pixel_data->is_missing()) {
+		const auto& pixel_data = set_pixel_data_htj2k_file.get_dataelement("PixelData"_tag);
+		if (pixel_data.is_missing()) {
 			fail("HTJ2K set_pixel_data should create PixelData");
 		}
-		if (!pixel_data->vr().is_pixel_sequence()) {
+		if (!pixel_data.vr().is_pixel_sequence()) {
 			fail("HTJ2K set_pixel_data should create encapsulated PixelData");
 		}
-		const auto* pixel_sequence = pixel_data->as_pixel_sequence();
+		const auto* pixel_sequence = pixel_data.as_pixel_sequence();
 		if (!pixel_sequence || pixel_sequence->number_of_frames() != 2) {
 			fail("HTJ2K set_pixel_data should create expected frame count");
 		}
@@ -1219,9 +1235,9 @@ int main() {
 		        "HTJ2KLossless"_uid.value()) {
 			fail("HTJ2K set_pixel_data should update runtime transfer syntax");
 		}
-		const auto* transfer_syntax_elem =
+		const auto& transfer_syntax_elem =
 		    set_pixel_data_htj2k_file.get_dataelement("TransferSyntaxUID"_tag);
-		const auto ts_uid = transfer_syntax_elem->to_transfer_syntax_uid();
+		const auto ts_uid = transfer_syntax_elem.to_transfer_syntax_uid();
 		if (!ts_uid || ts_uid->value() != "HTJ2KLossless"_uid.value()) {
 			fail("HTJ2K set_pixel_data should synchronize TransferSyntaxUID in file meta");
 		}
@@ -1282,12 +1298,11 @@ int main() {
 
 			const auto first_encoded_frame_size = [&fail](const dicom::DicomFile& file,
 			                                     std::string_view label) -> std::size_t {
-					const auto* pixel_data = file.get_dataelement("PixelData"_tag);
-					if (!pixel_data || pixel_data->is_missing() ||
-					    !pixel_data->vr().is_pixel_sequence()) {
+					const auto& pixel_data = file.get_dataelement("PixelData"_tag);
+					if (pixel_data.is_missing() || !pixel_data.vr().is_pixel_sequence()) {
 						fail(std::string(label) + " should create encapsulated PixelData");
 					}
-					const auto* pixel_sequence = pixel_data->as_pixel_sequence();
+					const auto* pixel_sequence = pixel_data.as_pixel_sequence();
 					if (!pixel_sequence || pixel_sequence->number_of_frames() != 1) {
 						fail(std::string(label) + " should create exactly one frame");
 					}
@@ -1545,14 +1560,14 @@ int main() {
 		set_pixel_data_jpegls_file.set_pixel_data(
 		    "JPEGLSLossless"_uid, source);
 
-		const auto* pixel_data = set_pixel_data_jpegls_file.get_dataelement("PixelData"_tag);
-		if (!pixel_data || pixel_data->is_missing()) {
+		const auto& pixel_data = set_pixel_data_jpegls_file.get_dataelement("PixelData"_tag);
+		if (pixel_data.is_missing()) {
 			fail("JPEG-LS set_pixel_data should create PixelData");
 		}
-		if (!pixel_data->vr().is_pixel_sequence()) {
+		if (!pixel_data.vr().is_pixel_sequence()) {
 			fail("JPEG-LS set_pixel_data should create encapsulated PixelData");
 		}
-		const auto* pixel_sequence = pixel_data->as_pixel_sequence();
+		const auto* pixel_sequence = pixel_data.as_pixel_sequence();
 		if (!pixel_sequence || pixel_sequence->number_of_frames() != 2) {
 			fail("JPEG-LS set_pixel_data should create expected frame count");
 		}
@@ -1561,9 +1576,9 @@ int main() {
 		        "JPEGLSLossless"_uid.value()) {
 			fail("JPEG-LS set_pixel_data should update runtime transfer syntax");
 		}
-		const auto* transfer_syntax_elem =
+		const auto& transfer_syntax_elem =
 		    set_pixel_data_jpegls_file.get_dataelement("TransferSyntaxUID"_tag);
-		const auto ts_uid = transfer_syntax_elem->to_transfer_syntax_uid();
+		const auto ts_uid = transfer_syntax_elem.to_transfer_syntax_uid();
 		if (!ts_uid || ts_uid->value() != "JPEGLSLossless"_uid.value()) {
 			fail("JPEG-LS set_pixel_data should synchronize TransferSyntaxUID in file meta");
 		}
@@ -1615,14 +1630,14 @@ int main() {
 		set_pixel_data_jpeg_file.set_pixel_data(
 		    "JPEGLosslessSV1"_uid, source);
 
-		const auto* pixel_data = set_pixel_data_jpeg_file.get_dataelement("PixelData"_tag);
-		if (!pixel_data || pixel_data->is_missing()) {
+		const auto& pixel_data = set_pixel_data_jpeg_file.get_dataelement("PixelData"_tag);
+		if (pixel_data.is_missing()) {
 			fail("JPEG set_pixel_data should create PixelData");
 		}
-		if (!pixel_data->vr().is_pixel_sequence()) {
+		if (!pixel_data.vr().is_pixel_sequence()) {
 			fail("JPEG set_pixel_data should create encapsulated PixelData");
 		}
-		const auto* pixel_sequence = pixel_data->as_pixel_sequence();
+		const auto* pixel_sequence = pixel_data.as_pixel_sequence();
 		if (!pixel_sequence || pixel_sequence->number_of_frames() != 2) {
 			fail("JPEG set_pixel_data should create expected frame count");
 		}
@@ -1631,9 +1646,9 @@ int main() {
 		        "JPEGLosslessSV1"_uid.value()) {
 			fail("JPEG set_pixel_data should update runtime transfer syntax");
 		}
-		const auto* transfer_syntax_elem =
+		const auto& transfer_syntax_elem =
 		    set_pixel_data_jpeg_file.get_dataelement("TransferSyntaxUID"_tag);
-		const auto ts_uid = transfer_syntax_elem->to_transfer_syntax_uid();
+		const auto ts_uid = transfer_syntax_elem.to_transfer_syntax_uid();
 		if (!ts_uid || ts_uid->value() != "JPEGLosslessSV1"_uid.value()) {
 			fail("JPEG set_pixel_data should synchronize TransferSyntaxUID in file meta");
 		}
@@ -1731,13 +1746,11 @@ int main() {
 		}
 	}
 
-		dicom::DicomFile generated;
-	auto add_text_element = [&](dicom::Tag tag, dicom::VR vr, std::string_view value) {
-		auto* element = generated.add_dataelement(tag, vr, 0, value.size());
-		if (!element) {
-			fail("failed to add generated text element");
-		}
-		element->set_value_bytes(std::span<const std::uint8_t>(
+	dicom::DicomFile generated;
+	auto add_text_element = [&](dicom::Tag tag, dicom::VR vr, std::string_view value)
+	    -> dicom::DataElement& {
+		auto& element = generated.add_dataelement(tag, vr, 0, value.size());
+		element.set_value_bytes(std::span<const std::uint8_t>(
 		    reinterpret_cast<const std::uint8_t*>(value.data()), value.size()));
 		return element;
 	};
@@ -1746,18 +1759,19 @@ int main() {
 	add_text_element("SOPInstanceUID"_tag, dicom::VR::UI, dicom::uid::generate_sop_instance_uid().value());
 	add_text_element("PatientName"_tag, dicom::VR::PN, "WRITE^ROUNDTRIP");
 
-	auto* sequence_element = generated.add_dataelement("ReferencedStudySequence"_tag, dicom::VR::SQ);
-	if (!sequence_element || !(*sequence_element)) fail("failed to add sequence element");
-	auto* sequence = sequence_element->as_sequence();
+	auto& sequence_element =
+	    generated.add_dataelement("ReferencedStudySequence"_tag, dicom::VR::SQ);
+	if (!sequence_element) fail("failed to add sequence element");
+	auto* sequence = sequence_element.as_sequence();
 	if (!sequence) fail("sequence pointer is null");
 	auto* sequence_item = sequence->add_dataset();
 	if (!sequence_item) fail("failed to append sequence item");
 	{
-		auto* referenced_uid = sequence_item->add_dataelement("ReferencedSOPInstanceUID"_tag, dicom::VR::UI, 0, 12);
-		if (!referenced_uid) fail("failed to add sequence item UID");
+		auto& referenced_uid =
+		    sequence_item->add_dataelement("ReferencedSOPInstanceUID"_tag, dicom::VR::UI, 0, 12);
 		const std::array<std::uint8_t, 12> uid_value{
 		    '1', '.', '2', '.', '3', '.', '4', '.', '5', '.', '6', '\0'};
-		referenced_uid->set_value_bytes(uid_value);
+		referenced_uid.set_value_bytes(uid_value);
 	}
 
 	generated.reset_encapsulated_pixel_data(1);
@@ -1778,22 +1792,22 @@ int main() {
 
 	auto generated_roundtrip = read_bytes("generated-roundtrip", generated_bytes.data(), generated_bytes.size());
 	if (!generated_roundtrip) fail("generated read_bytes returned null");
-	const auto* seq_roundtrip = generated_roundtrip->get_dataelement("ReferencedStudySequence"_tag);
-	if (seq_roundtrip->is_missing()) fail("roundtrip missing sequence");
-	const auto* seq_value = seq_roundtrip->as_sequence();
+	const auto& seq_roundtrip = generated_roundtrip->get_dataelement("ReferencedStudySequence"_tag);
+	if (seq_roundtrip.is_missing()) fail("roundtrip missing sequence");
+	const auto* seq_value = seq_roundtrip.as_sequence();
 	if (!seq_value || seq_value->size() != 1) fail("roundtrip sequence item count mismatch");
-	auto* pix_roundtrip = generated_roundtrip->get_dataelement("PixelData"_tag);
-	if (pix_roundtrip->is_missing()) fail("roundtrip missing pixel data");
-	if (!pix_roundtrip->vr().is_pixel_sequence()) fail("roundtrip pixel data should be pixel sequence");
-	auto* pix_value = pix_roundtrip->as_pixel_sequence();
+	auto& pix_roundtrip = generated_roundtrip->get_dataelement("PixelData"_tag);
+	if (pix_roundtrip.is_missing()) fail("roundtrip missing pixel data");
+	if (!pix_roundtrip.vr().is_pixel_sequence()) fail("roundtrip pixel data should be pixel sequence");
+	auto* pix_value = pix_roundtrip.as_pixel_sequence();
 	if (!pix_value || pix_value->number_of_frames() != 1) fail("roundtrip pixel frame count mismatch");
 	if (pix_value->basic_offset_table_count() != 1) {
 		fail("roundtrip pixel sequence should include basic offset table entry");
 	}
-	if (!generated_roundtrip->get_dataelement("ExtendedOffsetTable"_tag)->is_missing()) {
+	if (!generated_roundtrip->get_dataelement("ExtendedOffsetTable"_tag).is_missing()) {
 		fail("roundtrip should not emit ExtendedOffsetTable for small encapsulated payload");
 	}
-	if (!generated_roundtrip->get_dataelement("ExtendedOffsetTableLengths"_tag)->is_missing()) {
+	if (!generated_roundtrip->get_dataelement("ExtendedOffsetTableLengths"_tag).is_missing()) {
 		fail("roundtrip should not emit ExtendedOffsetTableLengths for small encapsulated payload");
 	}
 	const auto encoded_span = pix_value->frame_encoded_span(0);
@@ -1807,7 +1821,7 @@ int main() {
 	generated.write_file(roundtrip_path, write_opts);
 	const auto generated_roundtrip_file = read_file(roundtrip_path);
 	if (!generated_roundtrip_file) fail("write_file roundtrip read returned null");
-	if (generated_roundtrip_file->get_dataelement("PixelData"_tag)->is_missing()) {
+	if (generated_roundtrip_file->get_dataelement("PixelData"_tag).is_missing()) {
 		fail("write_file roundtrip missing pixel data");
 	}
 	std::remove(roundtrip_path.c_str());

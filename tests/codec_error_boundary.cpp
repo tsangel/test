@@ -35,8 +35,8 @@ void expect_not_contains(std::string_view haystack, std::string_view needle,
 
 void set_long_element(dicom::DicomFile& df, dicom::Tag tag, dicom::VR vr, long value,
     std::string_view label) {
-	auto* elem = df.add_dataelement(tag, vr);
-	if (!elem || !elem->from_long(value)) {
+	auto& elem = df.add_dataelement(tag, vr);
+	if (!elem.from_long(value)) {
 		fail(std::string("failed to set ") + std::string(label));
 	}
 }

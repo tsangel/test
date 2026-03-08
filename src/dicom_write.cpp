@@ -425,9 +425,9 @@ void write_data_element(const DataElement& element, Writer& writer,
 template <typename Writer>
 void write_dataset(const DataSet& dataset, Writer& writer, bool explicit_vr,
     bool skip_group_0002) {
-	const DataElement* pixel_data_element = dataset.get_dataelement(kPixelDataTag);
-	const bool has_encapsulated_pixel_data = pixel_data_element &&
-	    !pixel_data_element->is_missing() && pixel_data_element->vr().is_pixel_sequence();
+	const auto& pixel_data_element = dataset.get_dataelement(kPixelDataTag);
+	const bool has_encapsulated_pixel_data =
+	    !pixel_data_element.is_missing() && pixel_data_element.vr().is_pixel_sequence();
 	for (const auto& element : dataset) {
 		if (skip_group_0002 && element.tag().group() == 0x0002u) {
 			continue;
@@ -536,12 +536,8 @@ void for_each_file_meta_element(const DataSet& dataset, Fn&& fn) {
 }
 
 void set_dataelement_uid(DataSet& dataset, Tag tag, std::string_view value) {
-	DataElement* element = dataset.add_dataelement(tag, VR::UI);
-	if (!element || !(*element)) {
-		diag::error_and_throw("rebuild_file_meta reason=failed to add UID element tag={}",
-		    tag.to_string());
-	}
-	if (!element->from_uid_string(value)) {
+	DataElement& element = dataset.add_dataelement(tag, VR::UI);
+	if (!element.from_uid_string(value)) {
 		diag::error_and_throw(
 		    "rebuild_file_meta reason=invalid UID tag={} value={}", tag.to_string(), value);
 	}
@@ -693,16 +689,17 @@ void DicomFile::rebuild_file_meta() {
 	clear_existing_meta_group(dataset);
 	dataset.add_dataelement(kFileMetaGroupLengthTag, VR::UL);
 	const std::array<std::uint8_t, 2> meta_version{{0x00u, 0x01u}};
-	dataset.add_dataelement(kFileMetaInformationVersionTag, VR::OB)->set_value_bytes(meta_version);
+	dataset.add_dataelement(kFileMetaInformationVersionTag, VR::OB)
+	    .set_value_bytes(meta_version);
 	set_dataelement_uid(dataset, kMediaStorageSopClassUidTag, sop_class_uid);
 	set_dataelement_uid(dataset, kMediaStorageSopInstanceUidTag, sop_instance_uid);
 	set_dataelement_uid(dataset, kTransferSyntaxUidTag, transfer_syntax_uid);
 	set_dataelement_uid(dataset, kImplementationClassUidTag, uid::implementation_class_uid());
-	dataset.add_dataelement(kImplementationVersionNameTag, VR::SH)->from_string_view(
+	dataset.add_dataelement(kImplementationVersionNameTag, VR::SH).from_string_view(
 	    uid::implementation_version_name());
 
 	const auto meta_group_length = measure_meta_group_length(dataset);
-	dataset.get_dataelement(kFileMetaGroupLengthTag)->from_long(meta_group_length);
+	dataset.get_dataelement(kFileMetaGroupLengthTag).from_long(meta_group_length);
 }
 
 void DicomFile::write_to_stream(std::ostream& os, const WriteOptions& options) {

@@ -1,7 +1,7 @@
 # Quickstart
 
 ## Python (recommended)
-1. Requirements: Python 3.8+, `pip`, `cmake`.
+1. Requirements: Python 3.9+, `pip`, `cmake`.
 2. Build/install
 
 ```bash
@@ -99,7 +99,7 @@ int main() {
   long rows = ds["Rows"_tag].to_long().value_or(0);
   // process rows
 
-  // Need missing/present distinction? Use:
+  // Need presence distinction, not just a default fallback? Use:
   // if (auto& e = ds["Rows"_tag]; e) { ... }
 }
 ```
@@ -118,10 +118,10 @@ int main() {
   dicom::diag::set_thread_reporter(reporter);
 
   bool ok = true;
-  ok &= ds.add_dataelement("Rows"_tag, dicom::VR::US)->from_long(512);
-  ok &= ds.add_dataelement("Columns"_tag, dicom::VR::US)->from_long(-1); // failure example
+  ok &= ds.add_dataelement("Rows"_tag, dicom::VR::US).from_long(512);
+  ok &= ds.add_dataelement("Columns"_tag, dicom::VR::US).from_long(-1); // failure example
   ok &= ds.add_dataelement("SOPInstanceUID"_tag, dicom::VR::UI)
-            ->from_uid_string("1.2.840.10008.5.1.4.1.1.2");
+            .from_uid_string("1.2.840.10008.5.1.4.1.1.2");
 
   if (!ok) {
     for (const auto& msg : reporter->take_messages()) {
@@ -133,6 +133,7 @@ int main() {
 ```
 
 - Full runnable example: `examples/batch_assign_with_error_check.cpp`
+- `add_dataelement(...)` returns `DataElement&`, so write helpers chain with `.`.
 
 ## Quick build/test commands
 - Python tests: `pytest -q tests/python`

@@ -180,11 +180,11 @@ std::optional<Tag> parse_private_creator_tag(DataSetPtr* dataset, std::string_vi
 		const auto desired_creator = std::string(creator_sv);
 		for (std::uint32_t block = 0x10; block <= 0xFF; ++block) {
 			Tag creator_tag(static_cast<std::uint16_t>(group), static_cast<std::uint16_t>(block));
-			auto* creator_el = dataset->get_dataelement(creator_tag);
-			if (creator_el->is_missing()) {
+			auto& creator_el = dataset->get_dataelement(creator_tag);
+			if (creator_el.is_missing()) {
 				continue;
 			}
-			auto value = creator_el->to_string_view();
+			auto value = creator_el.to_string_view();
 			if (value && *value == desired_creator) {
 				const auto element = static_cast<std::uint16_t>((block << 8) | element_low);
 				return Tag(static_cast<std::uint16_t>(group), element);
@@ -312,11 +312,7 @@ DataSet::const_iterator DataSet::cend() const {
 
 // Stores stable DataElement bodies in deque storage and keeps a sorted
 // tag/pointer index for lookup and iteration.
-DataElement* DataSet::add_dataelement(Tag tag, VR vr) {
-	return add_dataelement(tag, vr, 0, 0);
-}
-
-DataElement* DataSet::add_dataelement(Tag tag, VR vr, std::size_t offset, std::size_t length) {
+DataElement& DataSet::add_dataelement(Tag tag, VR vr) {
 	const auto tag_value = tag.value();
 
 	if (vr == VR::None) {
@@ -330,46 +326,85 @@ DataElement* DataSet::add_dataelement(Tag tag, VR vr, std::size_t offset, std::s
 	}
 
 	if (element_index_.empty() || element_index_.back().tag.value() < tag_value) {
-		elements_.emplace_back(tag, vr, length, offset, this);
+		elements_.emplace_back();
 		auto* element = &elements_.back();
+		element->reset(tag, vr, 0, 0, this, false);
 		element_index_.emplace_back(tag, element);
-		return element;
+		return *element;
 	}
 
 	auto index_it = lower_bound_element_index(
 	    element_index_.begin(), element_index_.end(), tag_value);
 	if (index_it != element_index_.end() && index_it->tag.value() == tag_value) {
-		*(index_it->element) = DataElement(tag, vr, length, offset, this);
+		index_it->element->reset(tag, vr, 0, 0, this, false);
 		index_it->tag = tag;
-		return index_it->element;
+		return *index_it->element;
 	}
 
-	elements_.emplace_back(tag, vr, length, offset, this);
+	elements_.emplace_back();
 	auto* element = &elements_.back();
+	element->reset(tag, vr, 0, 0, this, false);
 	element_index_.insert(index_it, ElementRef{tag, element});
-	return element;
+	return *element;
 }
 
-DataElement* DataSet::get_dataelement(Tag tag) {
+DataElement& DataSet::add_dataelement(
+    Tag tag, VR vr, std::size_t offset, std::size_t length) {
+	const auto tag_value = tag.value();
+
+	if (vr == VR::None) {
+		const auto vr_value = lookup::tag_to_vr(tag_value);
+		if (vr_value == 0) {
+			diag::error_and_throw(
+			    "DataSet::add_dataelement file={} tag={} reason=VR required for unknown tag",
+			    root_dataset()->path(), tag.to_string());
+		}
+		vr = VR(vr_value);
+	}
+
+	if (element_index_.empty() || element_index_.back().tag.value() < tag_value) {
+		elements_.emplace_back();
+		auto* element = &elements_.back();
+		element->reset(tag, vr, length, offset, this, true);
+		element_index_.emplace_back(tag, element);
+		return *element;
+	}
+
+	auto index_it = lower_bound_element_index(
+	    element_index_.begin(), element_index_.end(), tag_value);
+	if (index_it != element_index_.end() && index_it->tag.value() == tag_value) {
+		index_it->element->reset(tag, vr, length, offset, this, true);
+		index_it->tag = tag;
+		return *index_it->element;
+	}
+
+	elements_.emplace_back();
+	auto* element = &elements_.back();
+	element->reset(tag, vr, length, offset, this, true);
+	element_index_.insert(index_it, ElementRef{tag, element});
+	return *element;
+}
+
+DataElement& DataSet::get_dataelement(Tag tag) {
 	const auto tag_value = tag.value();
 
 	auto index_it = lower_bound_element_index(
 	    element_index_.begin(), element_index_.end(), tag_value);
 	if (index_it != element_index_.end() && index_it->tag.value() == tag_value) {
-		return index_it->element;
+		return *index_it->element;
 	}
-	return NullElement();
+	return *NullElement();
 }
 
-const DataElement* DataSet::get_dataelement(Tag tag) const {
+const DataElement& DataSet::get_dataelement(Tag tag) const {
 	const auto tag_value = tag.value();
 
 	auto index_it = lower_bound_element_index(
 	    element_index_.cbegin(), element_index_.cend(), tag_value);
 	if (index_it != element_index_.cend() && index_it->tag.value() == tag_value) {
-		return index_it->element;
+		return *index_it->element;
 	}
-	return NullElement();
+	return *NullElement();
 }
 
 // Parse a tag path expressed as text and resolve it to a DataElement.
@@ -384,7 +419,7 @@ const DataElement* DataSet::get_dataelement(Tag tag) const {
 // Behavior:
 //   - Returns a falsey DataElement (VR::None) when the tag (or nested dataset) is missing
 //   - Uses diag::error_and_throw for malformed strings, non-sequence traversal, bad indices, etc.
-DataElement* DataSet::get_dataelement(std::string_view tag_path) {
+DataElement& DataSet::get_dataelement(std::string_view tag_path) {
 	DataSet* current = this;
 	std::string_view remaining = trim(tag_path);
 
@@ -399,13 +434,13 @@ DataElement* DataSet::get_dataelement(std::string_view tag_path) {
 		} catch (const std::invalid_argument&) {
 			auto private_tag = parse_private_creator_tag(current, tag_token);
 			if (!private_tag) {
-				return NullElement();
+				return *NullElement();
 			}
 			tag = *private_tag;
 		}
 
-		DataElement* element = current->get_dataelement(tag);
-		if (element->is_missing()) {
+		DataElement& element = current->get_dataelement(tag);
+		if (element.is_missing()) {
 			return element;
 		}
 		if (dot_pos == std::string_view::npos) {
@@ -416,14 +451,14 @@ DataElement* DataSet::get_dataelement(std::string_view tag_path) {
 		auto index_token = trim(remaining.substr(0, next_dot));
 		remaining = (next_dot == std::string_view::npos) ? std::string_view{} : remaining.substr(next_dot + 1);
 
-		if (!element->vr().is_sequence()) {
+		if (!element.vr().is_sequence()) {
 			diag::error_and_throw("Element {} is not a sequence; cannot index into it",
-			    element->tag().to_string());
+			    element.tag().to_string());
 		}
 
-		auto* seq = element->as_sequence();
+		auto* seq = element.as_sequence();
 		if (!seq) {
-			return NullElement();
+			return *NullElement();
 		}
 
 		std::size_t idx = 0;
@@ -435,14 +470,14 @@ DataElement* DataSet::get_dataelement(std::string_view tag_path) {
 
 		current = seq->get_dataset(idx);
 		if (!current) {
-			return NullElement();
+			return *NullElement();
 		}
 	}
 
-	return NullElement();
+	return *NullElement();
 }
 
-const DataElement* DataSet::get_dataelement(std::string_view tag_path) const {
+const DataElement& DataSet::get_dataelement(std::string_view tag_path) const {
 	const DataSet* current = this;
 	std::string_view remaining = trim(tag_path);
 
@@ -457,13 +492,13 @@ const DataElement* DataSet::get_dataelement(std::string_view tag_path) const {
 		} catch (const std::invalid_argument&) {
 			auto private_tag = parse_private_creator_tag(current, tag_token);
 			if (!private_tag) {
-				return NullElement();
+				return *NullElement();
 			}
 			tag = *private_tag;
 		}
 
-		const DataElement* element = current->get_dataelement(tag);
-		if (element->is_missing()) {
+		const DataElement& element = current->get_dataelement(tag);
+		if (element.is_missing()) {
 			return element;
 		}
 		if (dot_pos == std::string_view::npos) {
@@ -474,14 +509,14 @@ const DataElement* DataSet::get_dataelement(std::string_view tag_path) const {
 		auto index_token = trim(remaining.substr(0, next_dot));
 		remaining = (next_dot == std::string_view::npos) ? std::string_view{} : remaining.substr(next_dot + 1);
 
-		if (!element->vr().is_sequence()) {
+		if (!element.vr().is_sequence()) {
 			diag::error_and_throw("Element {} is not a sequence; cannot index into it",
-			    element->tag().to_string());
+			    element.tag().to_string());
 		}
 
-		auto* seq = element->as_sequence();
+		auto* seq = element.as_sequence();
 		if (!seq) {
-			return NullElement();
+			return *NullElement();
 		}
 
 		std::size_t idx = 0;
@@ -493,19 +528,19 @@ const DataElement* DataSet::get_dataelement(std::string_view tag_path) const {
 
 		current = seq->get_dataset(idx);
 		if (!current) {
-			return NullElement();
+			return *NullElement();
 		}
 	}
 
-	return NullElement();
+	return *NullElement();
 }
 
 DataElement& DataSet::operator[](Tag tag) {
-	return *get_dataelement(tag);
+	return get_dataelement(tag);
 }
 
 const DataElement& DataSet::operator[](Tag tag) const {
-	return *get_dataelement(tag);
+	return get_dataelement(tag);
 }
 
 void DataSet::remove_dataelement(Tag tag) {
@@ -515,7 +550,7 @@ void DataSet::remove_dataelement(Tag tag) {
 	    element_index_.begin(), element_index_.end(), tag_value);
 	if (index_it != element_index_.end() && index_it->tag.value() == tag_value) {
 		auto* element = index_it->element;
-		*element = DataElement(tag, VR::None, 0, 0, this);
+		element->reset(tag, VR::None, 0, 0, this, false);
 		element_index_.erase(index_it);
 	}
 }
@@ -552,14 +587,14 @@ void DataSet::read_attached_stream(const ReadOptions& options) {
 
 	read_elements_until("(0002,FFFF)"_tag, stream_.get());
 
-	const auto* transfer_syntax = get_dataelement("(0002,0010)"_tag);
-	if (auto well_known = transfer_syntax->to_transfer_syntax_uid()) {
+	const auto& transfer_syntax = get_dataelement("(0002,0010)"_tag);
+	if (auto well_known = transfer_syntax.to_transfer_syntax_uid()) {
 		if (root_file_) {
 			root_file_->set_transfer_syntax_state_only(*well_known);
 		} else {
 			explicit_vr_ = transfer_syntax_uses_explicit_vr(*well_known);
 		}
-	} else if (auto uid_value = transfer_syntax->to_uid_string()) {
+	} else if (auto uid_value = transfer_syntax.to_uid_string()) {
 		diag::error(
 		    "DataSet::read_attached_stream file={} transfer_syntax_uid={} reason=unknown transfer syntax UID",
 		    path(), *uid_value);
@@ -568,10 +603,10 @@ void DataSet::read_attached_stream(const ReadOptions& options) {
 	if (transfer_syntax_uid() == "DeflatedExplicitVRLittleEndian"_uid ||
 	    transfer_syntax_uid() == "ExplicitVRBigEndian"_uid) {
 		std::size_t dataset_start_offset = stream_->tell();
-		const auto* meta_group_length = get_dataelement("(0002,0000)"_tag);
-		if (auto group_length = meta_group_length->to_long(); group_length && *group_length >= 0) {
+		const auto& meta_group_length = get_dataelement("(0002,0000)"_tag);
+		if (auto group_length = meta_group_length.to_long(); group_length && *group_length >= 0) {
 			const auto offset_candidate =
-			    meta_group_length->offset() + meta_group_length->length() +
+			    meta_group_length.offset() + meta_group_length.length() +
 			    static_cast<std::size_t>(*group_length);
 			if (offset_candidate <= stream_->end_offset()) {
 				dataset_start_offset = offset_candidate;
@@ -738,20 +773,20 @@ void DataSet::read_elements_until(Tag load_until, InStream* stream) {
 				length = stream->bytes_remaining();
 			}
 
-			DataElement *elem = add_dataelement(tag, VR::SQ, offset, length);
-			Sequence *seq = elem->as_sequence();
+			DataElement& elem = add_dataelement(tag, VR::SQ, offset, length);
+			Sequence *seq = elem.as_sequence();
 			InSubStream subs(stream, length);
 
 			size_t offset_end;
 			seq->read_from_stream(&subs);
 			offset_end= subs.tell();
 			length = offset_end - offset;
-			elem->set_length(length);
+			elem.set_length(length);
 			stream->skip(length);
 		}
 		else if (tag == "7fe0,0010"_tag) {
 			if (length != 0xffffffff) {
-				if ((get_dataelement("BitsAllocated"_tag)->to_long().value_or(0) > 8) && (vr == VR::OB))
+				if ((get_dataelement("BitsAllocated"_tag).to_long().value_or(0) > 8) && (vr == VR::OB))
 					vr = VR::OW;
 				add_dataelement(tag, vr, offset, length);
 				if (stream->skip(length) != length) {
@@ -762,15 +797,15 @@ void DataSet::read_elements_until(Tag load_until, InStream* stream) {
 			} else {
 				vr = VR::PX;
 
-				DataElement *elem = add_dataelement(tag, VR::PX, offset, length);
-				PixelSequence *pixseq = elem->as_pixel_sequence();
+				DataElement& elem = add_dataelement(tag, VR::PX, offset, length);
+				PixelSequence *pixseq = elem.as_pixel_sequence();
 
 				// process basic offset table of the pixel sequence
 				pixseq->attach_to_stream(stream, stream->bytes_remaining());
 				pixseq->read_attached_stream();
 				size_t offset_end = pixseq->stream()->tell();
 				length = offset_end - offset;
-				elem->set_length(length);
+				elem.set_length(length);
 				stream->skip(length);
 			}
 		}
@@ -789,15 +824,15 @@ void DataSet::read_elements_until(Tag load_until, InStream* stream) {
 				length = stream->bytes_remaining();
 				vr = VR::SQ;
 				
-				DataElement *elem = add_dataelement(tag, VR::SQ, offset, length);
-				Sequence *seq = elem->as_sequence();
+				DataElement& elem = add_dataelement(tag, VR::SQ, offset, length);
+				Sequence *seq = elem.as_sequence();
 				InSubStream subs(stream, length);
 
 				size_t offset_end;
 				seq->read_from_stream(&subs);
 				offset_end= subs.tell();
 				length = offset_end - offset;
-				elem->set_length(length);
+				elem.set_length(length);
 				stream->skip(length);
 			}
 		}

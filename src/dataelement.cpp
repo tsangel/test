@@ -505,7 +505,7 @@ std::span<const std::uint8_t> DataElement::value_span() const {
 }
 
 void DataElement::reserve_value_bytes(std::size_t length) {
-	if (vr_.is_sequence() || vr_.is_pixel_sequence()) {
+	if (vr_ == dicom::VR::SQ || vr_ == dicom::VR::PX || vr_ == dicom::VR::None) {
 		diag::error_and_throw(
 		    "DataElement::reserve_value_bytes reason=cannot reserve raw value bytes for sequence storage vr={}",
 		    vr_.str());
@@ -559,7 +559,7 @@ void DataElement::reserve_value_bytes(std::size_t length) {
 }
 
 void DataElement::set_value_bytes(std::span<const std::uint8_t> bytes) {
-	if (vr_.is_sequence() || vr_.is_pixel_sequence()) {
+	if (vr_ == dicom::VR::SQ || vr_ == dicom::VR::PX || vr_ == dicom::VR::None) {
 		diag::error_and_throw(
 		    "DataElement::set_value_bytes reason=cannot assign raw bytes to sequence storage vr={}",
 		    vr_.str());
@@ -572,7 +572,7 @@ void DataElement::set_value_bytes(std::vector<std::uint8_t>&& bytes) {
 }
 
 void DataElement::adopt_value_bytes(std::vector<std::uint8_t>&& bytes) {
-	if (vr_.is_sequence() || vr_.is_pixel_sequence()) {
+	if (vr_ == dicom::VR::SQ || vr_ == dicom::VR::PX || vr_ == dicom::VR::None) {
 		diag::error_and_throw(
 		    "DataElement::adopt_value_bytes reason=cannot assign raw bytes to sequence storage vr={}",
 		    vr_.str());
@@ -606,11 +606,6 @@ void DataElement::adopt_value_bytes(std::vector<std::uint8_t>&& bytes) {
 }
 
 bool DataElement::from_int(int value) {
-	if (vr_.is_sequence() || vr_.is_pixel_sequence()) {
-		return report_from_assignment_failure(
-		    "DataElement::from_int", *this, "numeric assignment is not supported for SQ/PX");
-	}
-
 	bool ok = false;
 	switch (static_cast<std::uint16_t>(vr_)) {
 	case VR::SS_val:
@@ -648,11 +643,6 @@ bool DataElement::from_int(int value) {
 }
 
 bool DataElement::from_int_vector(std::span<const int> values) {
-	if (vr_.is_sequence() || vr_.is_pixel_sequence()) {
-		return report_from_assignment_failure(
-		    "DataElement::from_int_vector", *this, "numeric assignment is not supported for SQ/PX");
-	}
-
 	bool ok = false;
 	switch (static_cast<std::uint16_t>(vr_)) {
 	case VR::SS_val:
@@ -690,11 +680,6 @@ bool DataElement::from_int_vector(std::span<const int> values) {
 }
 
 bool DataElement::from_long(long value) {
-	if (vr_.is_sequence() || vr_.is_pixel_sequence()) {
-		return report_from_assignment_failure(
-		    "DataElement::from_long", *this, "numeric assignment is not supported for SQ/PX");
-	}
-
 	bool ok = false;
 	switch (static_cast<std::uint16_t>(vr_)) {
 	case VR::SS_val:
@@ -732,11 +717,6 @@ bool DataElement::from_long(long value) {
 }
 
 bool DataElement::from_long_vector(std::span<const long> values) {
-	if (vr_.is_sequence() || vr_.is_pixel_sequence()) {
-		return report_from_assignment_failure(
-		    "DataElement::from_long_vector", *this, "numeric assignment is not supported for SQ/PX");
-	}
-
 	bool ok = false;
 	switch (static_cast<std::uint16_t>(vr_)) {
 	case VR::SS_val:
@@ -774,11 +754,6 @@ bool DataElement::from_long_vector(std::span<const long> values) {
 }
 
 bool DataElement::from_longlong(long long value) {
-	if (vr_.is_sequence() || vr_.is_pixel_sequence()) {
-		return report_from_assignment_failure(
-		    "DataElement::from_longlong", *this, "numeric assignment is not supported for SQ/PX");
-	}
-
 	bool ok = false;
 	switch (static_cast<std::uint16_t>(vr_)) {
 	case VR::SS_val:
@@ -816,11 +791,6 @@ bool DataElement::from_longlong(long long value) {
 }
 
 bool DataElement::from_longlong_vector(std::span<const long long> values) {
-	if (vr_.is_sequence() || vr_.is_pixel_sequence()) {
-		return report_from_assignment_failure(
-		    "DataElement::from_longlong_vector", *this, "numeric assignment is not supported for SQ/PX");
-	}
-
 	bool ok = false;
 	switch (static_cast<std::uint16_t>(vr_)) {
 	case VR::SS_val:
@@ -858,11 +828,6 @@ bool DataElement::from_longlong_vector(std::span<const long long> values) {
 }
 
 bool DataElement::from_double(double value) {
-	if (vr_.is_sequence() || vr_.is_pixel_sequence()) {
-		return report_from_assignment_failure(
-		    "DataElement::from_double", *this, "floating-point assignment is not supported for SQ/PX");
-	}
-
 	bool ok = false;
 	switch (static_cast<std::uint16_t>(vr_)) {
 	case VR::FL_val:
@@ -887,12 +852,6 @@ bool DataElement::from_double(double value) {
 }
 
 bool DataElement::from_double_vector(std::span<const double> values) {
-	if (vr_.is_sequence() || vr_.is_pixel_sequence()) {
-		return report_from_assignment_failure(
-		    "DataElement::from_double_vector", *this,
-		    "floating-point assignment is not supported for SQ/PX");
-	}
-
 	bool ok = false;
 	switch (static_cast<std::uint16_t>(vr_)) {
 	case VR::FL_val:
@@ -918,10 +877,6 @@ bool DataElement::from_double_vector(std::span<const double> values) {
 }
 
 bool DataElement::from_tag(Tag value) {
-	if (vr_.is_sequence() || vr_.is_pixel_sequence()) {
-		return report_from_assignment_failure(
-		    "DataElement::from_tag", *this, "tag assignment is not supported for SQ/PX");
-	}
 	if (vr_ != dicom::VR::AT) {
 		return report_from_assignment_failure(
 		    "DataElement::from_tag", *this, "AT VR required for from_tag");
@@ -936,10 +891,6 @@ bool DataElement::from_tag(Tag value) {
 }
 
 bool DataElement::from_tag_vector(std::span<const Tag> values) {
-	if (vr_.is_sequence() || vr_.is_pixel_sequence()) {
-		return report_from_assignment_failure(
-		    "DataElement::from_tag_vector", *this, "tag assignment is not supported for SQ/PX");
-	}
 	if (vr_ != dicom::VR::AT) {
 		return report_from_assignment_failure(
 		    "DataElement::from_tag_vector", *this, "AT VR required for from_tag_vector");
@@ -967,10 +918,6 @@ bool DataElement::from_tag_vector(std::span<const Tag> values) {
 }
 
 bool DataElement::from_string_view(std::string_view value) {
-	if (vr_.is_sequence() || vr_.is_pixel_sequence()) {
-		return report_from_assignment_failure(
-		    "DataElement::from_string_view", *this, "string assignment is not supported for SQ/PX");
-	}
 	if (vr_ == dicom::VR::UI) {
 		return from_uid_string(value);
 	}
@@ -985,10 +932,6 @@ bool DataElement::from_string_view(std::string_view value) {
 }
 
 bool DataElement::from_string_views(std::span<const std::string_view> values) {
-	if (vr_.is_sequence() || vr_.is_pixel_sequence()) {
-		return report_from_assignment_failure(
-		    "DataElement::from_string_views", *this, "string assignment is not supported for SQ/PX");
-	}
 	if (values.empty()) {
 		reserve_value_bytes(0);
 		return true;

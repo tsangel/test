@@ -355,9 +355,9 @@ void transcode_encapsulated_pixel_data_to_encapsulated(DicomFile& file,
 	const auto source_transfer_syntax = file.transfer_syntax_uid();
 	DataSet& dataset = file.dataset();
 	dataset.ensure_loaded(Tag(0xFFFFu, 0xFFFFu));
-	const auto* pixel_data = dataset.get_dataelement("PixelData"_tag);
-	const bool has_pixel_data_element = !pixel_data->is_missing();
-	const bool has_encapsulated_pixel_data = pixel_data->vr().is_pixel_sequence();
+	const auto& pixel_data = dataset.get_dataelement("PixelData"_tag);
+	const bool has_pixel_data_element = !pixel_data.is_missing();
+	const bool has_encapsulated_pixel_data = pixel_data.vr().is_pixel_sequence();
 	const bool target_uses_encapsulated_pixel_data = transfer_syntax.is_encapsulated();
 
 	if (target_uses_encapsulated_pixel_data && has_pixel_data_element) {
@@ -475,11 +475,12 @@ std::size_t DicomFile::size() const {
 	return root_dataset_.size();
 }
 
-DataElement* DicomFile::add_dataelement(Tag tag, VR vr) {
+DataElement& DicomFile::add_dataelement(Tag tag, VR vr) {
 	return root_dataset_.add_dataelement(tag, vr);
 }
 
-DataElement* DicomFile::add_dataelement(Tag tag, VR vr, std::size_t offset, std::size_t length) {
+DataElement& DicomFile::add_dataelement(
+    Tag tag, VR vr, std::size_t offset, std::size_t length) {
 	return root_dataset_.add_dataelement(tag, vr, offset, length);
 }
 
@@ -487,19 +488,19 @@ void DicomFile::remove_dataelement(Tag tag) {
 	root_dataset_.remove_dataelement(tag);
 }
 
-DataElement* DicomFile::get_dataelement(Tag tag) {
+DataElement& DicomFile::get_dataelement(Tag tag) {
 	return root_dataset_.get_dataelement(tag);
 }
 
-const DataElement* DicomFile::get_dataelement(Tag tag) const {
+const DataElement& DicomFile::get_dataelement(Tag tag) const {
 	return root_dataset_.get_dataelement(tag);
 }
 
-DataElement* DicomFile::get_dataelement(std::string_view tag_path) {
+DataElement& DicomFile::get_dataelement(std::string_view tag_path) {
 	return root_dataset_.get_dataelement(tag_path);
 }
 
-const DataElement* DicomFile::get_dataelement(std::string_view tag_path) const {
+const DataElement& DicomFile::get_dataelement(std::string_view tag_path) const {
 	return root_dataset_.get_dataelement(tag_path);
 }
 
@@ -772,13 +773,8 @@ void DicomFile::set_native_pixel_data(std::vector<std::uint8_t>&& native_pixel_d
 		    path());
 	}
 
-	DataElement* pixel_data = root_dataset_.add_dataelement("PixelData"_tag, native_vr);
-	if (!pixel_data) {
-		diag::error_and_throw(
-		    "DicomFile::set_native_pixel_data file={} reason=failed to replace PixelData",
-		    path());
-	}
-	pixel_data->set_value_bytes(std::move(native_pixel_data));
+	auto& pixel_data = root_dataset_.add_dataelement("PixelData"_tag, native_vr);
+	pixel_data.set_value_bytes(std::move(native_pixel_data));
 }
 
 void DicomFile::reset_encapsulated_pixel_data(std::size_t frame_count) {
@@ -787,13 +783,8 @@ void DicomFile::reset_encapsulated_pixel_data(std::size_t frame_count) {
 	root_dataset_.remove_dataelement("ExtendedOffsetTable"_tag);
 	root_dataset_.remove_dataelement("ExtendedOffsetTableLengths"_tag);
 
-	DataElement* pixel_data = root_dataset_.add_dataelement("PixelData"_tag, VR::PX);
-	if (!pixel_data) {
-		diag::error_and_throw(
-		    "DicomFile::reset_encapsulated_pixel_data file={} reason=failed to replace PixelData with pixel sequence",
-		    path());
-	}
-	auto* pixel_sequence = pixel_data->as_pixel_sequence();
+	auto& pixel_data = root_dataset_.add_dataelement("PixelData"_tag, VR::PX);
+	auto* pixel_sequence = pixel_data.as_pixel_sequence();
 	if (!pixel_sequence) {
 		diag::error_and_throw(
 		    "DicomFile::reset_encapsulated_pixel_data file={} reason=PixelData is not an encapsulated sequence",
@@ -814,9 +805,9 @@ void DicomFile::reset_encapsulated_pixel_data(std::size_t frame_count) {
 			    "DicomFile::reset_encapsulated_pixel_data file={} reason=frame count exceeds long range",
 			    path());
 		}
-		DataElement* frame_count_element = root_dataset_.add_dataelement("NumberOfFrames"_tag, VR::IS);
-		if (!frame_count_element ||
-		    !frame_count_element->from_long(static_cast<long>(frame_count))) {
+		auto& frame_count_element =
+		    root_dataset_.add_dataelement("NumberOfFrames"_tag, VR::IS);
+		if (!frame_count_element.from_long(static_cast<long>(frame_count))) {
 			diag::error_and_throw(
 			    "DicomFile::reset_encapsulated_pixel_data file={} reason=failed to set NumberOfFrames",
 			    path());
@@ -828,13 +819,13 @@ void DicomFile::reset_encapsulated_pixel_data(std::size_t frame_count) {
 
 void DicomFile::set_encoded_pixel_frame(std::size_t frame_index,
     std::vector<std::uint8_t>&& encoded_frame) {
-	DataElement* pixel_data = root_dataset_.get_dataelement("PixelData"_tag);
-	if (!pixel_data || pixel_data->is_missing() || !pixel_data->vr().is_pixel_sequence()) {
+	auto& pixel_data = root_dataset_.get_dataelement("PixelData"_tag);
+	if (pixel_data.is_missing() || !pixel_data.vr().is_pixel_sequence()) {
 		diag::error_and_throw(
 		    "DicomFile::set_encoded_pixel_frame file={} frame_index={} reason=PixelData is not an encapsulated sequence; call reset_encapsulated_pixel_data(frame_count) first",
 		    path(), frame_index);
 	}
-	auto* pixel_sequence = pixel_data->as_pixel_sequence();
+	auto* pixel_sequence = pixel_data.as_pixel_sequence();
 	if (!pixel_sequence) {
 		diag::error_and_throw(
 		    "DicomFile::set_encoded_pixel_frame file={} frame_index={} reason=PixelData is not an encapsulated sequence",
@@ -852,17 +843,17 @@ void DicomFile::set_encoded_pixel_frame(std::size_t frame_index,
 }
 
 PixelFrame* DicomFile::add_encoded_pixel_frame(std::vector<std::uint8_t>&& encoded_frame) {
-	DataElement* pixel_data = root_dataset_.get_dataelement("PixelData"_tag);
-	if (!pixel_data || pixel_data->is_missing() || !pixel_data->vr().is_pixel_sequence()) {
+	auto& pixel_data_before = root_dataset_.get_dataelement("PixelData"_tag);
+	if (pixel_data_before.is_missing() || !pixel_data_before.vr().is_pixel_sequence()) {
 		reset_encapsulated_pixel_data(0);
-		pixel_data = root_dataset_.get_dataelement("PixelData"_tag);
 	}
-	if (!pixel_data || pixel_data->is_missing()) {
+	auto& pixel_data = root_dataset_.get_dataelement("PixelData"_tag);
+	if (pixel_data.is_missing()) {
 		diag::error_and_throw(
 		    "DicomFile::add_encoded_pixel_frame file={} reason=PixelData is missing after reset",
 		    path());
 	}
-	auto* pixel_sequence = pixel_data->as_pixel_sequence();
+	auto* pixel_sequence = pixel_data.as_pixel_sequence();
 	if (!pixel_sequence) {
 		diag::error_and_throw(
 		    "DicomFile::add_encoded_pixel_frame file={} reason=PixelData is not an encapsulated sequence",
@@ -884,8 +875,9 @@ PixelFrame* DicomFile::add_encoded_pixel_frame(std::vector<std::uint8_t>&& encod
 		    "DicomFile::add_encoded_pixel_frame file={} reason=frame count exceeds long range",
 		    path());
 	}
-	DataElement* frame_count_element = root_dataset_.add_dataelement("NumberOfFrames"_tag, VR::IS);
-	if (!frame_count_element || !frame_count_element->from_long(static_cast<long>(frame_count))) {
+	auto& frame_count_element =
+	    root_dataset_.add_dataelement("NumberOfFrames"_tag, VR::IS);
+	if (!frame_count_element.from_long(static_cast<long>(frame_count))) {
 		diag::error_and_throw(
 		    "DicomFile::add_encoded_pixel_frame file={} reason=failed to update NumberOfFrames",
 		    path());
@@ -905,8 +897,8 @@ void DicomFile::apply_transfer_syntax(uid::WellKnown transfer_syntax) {
 		return;
 	}
 	set_transfer_syntax_state_only(transfer_syntax);
-	DataElement* transfer_syntax_element = add_dataelement("(0002,0010)"_tag, VR::UI);
-	if (!transfer_syntax_element || !transfer_syntax_element->from_transfer_syntax_uid(transfer_syntax)) {
+	auto& transfer_syntax_element = add_dataelement("(0002,0010)"_tag, VR::UI);
+	if (!transfer_syntax_element.from_transfer_syntax_uid(transfer_syntax)) {
 		diag::error_and_throw(
 		    "DicomFile::apply_transfer_syntax reason=failed to update (0002,0010) TransferSyntaxUID");
 	}
@@ -920,8 +912,8 @@ void DicomFile::apply_transfer_syntax(uid::WellKnown transfer_syntax,
 		return;
 	}
 	set_transfer_syntax_state_only(transfer_syntax);
-	DataElement* transfer_syntax_element = add_dataelement("(0002,0010)"_tag, VR::UI);
-	if (!transfer_syntax_element || !transfer_syntax_element->from_transfer_syntax_uid(transfer_syntax)) {
+	auto& transfer_syntax_element = add_dataelement("(0002,0010)"_tag, VR::UI);
+	if (!transfer_syntax_element.from_transfer_syntax_uid(transfer_syntax)) {
 		diag::error_and_throw(
 		    "DicomFile::apply_transfer_syntax reason=failed to update (0002,0010) TransferSyntaxUID");
 	}
@@ -935,8 +927,8 @@ void DicomFile::apply_transfer_syntax(uid::WellKnown transfer_syntax,
 		return;
 	}
 	set_transfer_syntax_state_only(transfer_syntax);
-	DataElement* transfer_syntax_element = add_dataelement("(0002,0010)"_tag, VR::UI);
-	if (!transfer_syntax_element || !transfer_syntax_element->from_transfer_syntax_uid(transfer_syntax)) {
+	auto& transfer_syntax_element = add_dataelement("(0002,0010)"_tag, VR::UI);
+	if (!transfer_syntax_element.from_transfer_syntax_uid(transfer_syntax)) {
 		diag::error_and_throw(
 		    "DicomFile::apply_transfer_syntax reason=failed to update (0002,0010) TransferSyntaxUID");
 	}

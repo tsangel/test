@@ -323,11 +323,11 @@ void require_transfer_syntax(const dicom::DataSet& ds, dicom::uid::WellKnown exp
 
 void require_nested_patient_name(const dicom::DataSet& ds, std::string_view expected,
     const char* context) {
-	const auto* nested_name = ds.get_dataelement("00081111.0.00100010");
-	if (nested_name->is_missing()) {
+	const auto& nested_name = ds.get_dataelement("00081111.0.00100010");
+	if (nested_name.is_missing()) {
 		fail(std::string(context) + ": nested PatientName not found");
 	}
-	const auto nested_name_sv = nested_name->to_string_view();
+	const auto nested_name_sv = nested_name.to_string_view();
 	if (!nested_name_sv || *nested_name_sv != expected) {
 		fail(std::string(context) + ": nested PatientName mismatch");
 	}
@@ -335,11 +335,11 @@ void require_nested_patient_name(const dicom::DataSet& ds, std::string_view expe
 
 void require_patient_name_rows_cols(const dicom::DicomFile& file, std::string_view expected_name,
     long expected_rows, long expected_cols, const char* context) {
-	const auto* name = file.get_dataelement("PatientName"_tag);
-	if (name->is_missing()) {
+	const auto& name = file.get_dataelement("PatientName"_tag);
+	if (name.is_missing()) {
 		fail(std::string(context) + ": PatientName missing");
 	}
-	const auto name_sv = name->to_string_view();
+	const auto name_sv = name.to_string_view();
 	if (!name_sv || *name_sv != expected_name) {
 		fail(std::string(context) + ": PatientName mismatch");
 	}
@@ -366,11 +366,11 @@ int main() {
 	auto& deflated_ds = deflated_file->dataset();
 	require_transfer_syntax(deflated_ds, "DeflatedExplicitVRLittleEndian"_uid, "deflated initial");
 
-	const auto* patient_name = deflated_ds.get_dataelement("PatientName"_tag);
-	if (patient_name->is_missing()) {
+	const auto& patient_name = deflated_ds.get_dataelement("PatientName"_tag);
+	if (patient_name.is_missing()) {
 		fail("deflated: missing PatientName");
 	}
-	const auto patient_name_sv = patient_name->to_string_view();
+	const auto patient_name_sv = patient_name.to_string_view();
 	if (!patient_name_sv || *patient_name_sv != "DOE^JOHN") {
 		fail("deflated: PatientName mismatch");
 	}
@@ -406,12 +406,12 @@ int main() {
 	}
 	require_transfer_syntax(
 	    deflated_roundtrip->dataset(), "DeflatedExplicitVRLittleEndian"_uid, "deflated write");
-	const auto* deflated_roundtrip_name =
+	const auto& deflated_roundtrip_name =
 	    deflated_roundtrip->get_dataelement("PatientName"_tag);
-	if (deflated_roundtrip_name->is_missing()) {
+	if (deflated_roundtrip_name.is_missing()) {
 		fail("deflated write: missing PatientName");
 	}
-	const auto deflated_roundtrip_name_sv = deflated_roundtrip_name->to_string_view();
+	const auto deflated_roundtrip_name_sv = deflated_roundtrip_name.to_string_view();
 	if (!deflated_roundtrip_name_sv || *deflated_roundtrip_name_sv != "DOE^JOHN") {
 		fail("deflated write: PatientName mismatch");
 	}
@@ -440,11 +440,11 @@ int main() {
 	auto& be_seq_ds = be_seq->dataset();
 	require_transfer_syntax(be_seq_ds, "ExplicitVRBigEndian"_uid, "be sequence");
 
-	const auto* nested_name = be_seq_ds.get_dataelement("00081111.0.00100010");
-	if (nested_name->is_missing()) {
+	const auto& nested_name = be_seq_ds.get_dataelement("00081111.0.00100010");
+	if (nested_name.is_missing()) {
 		fail("be sequence: nested PatientName not found");
 	}
-	const auto nested_name_sv = nested_name->to_string_view();
+	const auto nested_name_sv = nested_name.to_string_view();
 	if (!nested_name_sv || *nested_name_sv != "NEST^BE") {
 		fail("be sequence: nested PatientName mismatch");
 	}
@@ -457,12 +457,12 @@ int main() {
 	}
 	auto& be_seq_roundtrip_ds = be_seq_roundtrip->dataset();
 	require_transfer_syntax(be_seq_roundtrip_ds, "ExplicitVRBigEndian"_uid, "be sequence write");
-	const auto* nested_name_roundtrip =
+	const auto& nested_name_roundtrip =
 	    be_seq_roundtrip_ds.get_dataelement("00081111.0.00100010");
-	if (nested_name_roundtrip->is_missing()) {
+	if (nested_name_roundtrip.is_missing()) {
 		fail("be sequence write: nested PatientName not found");
 	}
-	const auto nested_name_roundtrip_sv = nested_name_roundtrip->to_string_view();
+	const auto nested_name_roundtrip_sv = nested_name_roundtrip.to_string_view();
 	if (!nested_name_roundtrip_sv || *nested_name_roundtrip_sv != "NEST^BE") {
 		fail("be sequence write: nested PatientName mismatch");
 	}
@@ -526,8 +526,8 @@ int main() {
 	}
 	be_raw_to_rle->set_transfer_syntax("RLELossless"_uid);
 	require_transfer_syntax(be_raw_to_rle->dataset(), "RLELossless"_uid, "be raw to rle");
-	const auto* be_raw_to_rle_pixel = be_raw_to_rle->get_dataelement("PixelData"_tag);
-	if (be_raw_to_rle_pixel->is_missing() || !be_raw_to_rle_pixel->vr().is_pixel_sequence()) {
+	const auto& be_raw_to_rle_pixel = be_raw_to_rle->get_dataelement("PixelData"_tag);
+	if (be_raw_to_rle_pixel.is_missing() || !be_raw_to_rle_pixel.vr().is_pixel_sequence()) {
 		fail("be raw to rle: expected encapsulated PixelData");
 	}
 	const auto be_raw_to_rle_decoded = be_raw_to_rle->pixel_data(0);
@@ -563,11 +563,11 @@ int main() {
 	be_raw_to_rle->set_transfer_syntax("ExplicitVRLittleEndian"_uid);
 	require_transfer_syntax(
 	    be_raw_to_rle->dataset(), "ExplicitVRLittleEndian"_uid, "be raw rle to native");
-	const auto* be_raw_to_native_pixel = be_raw_to_rle->get_dataelement("PixelData"_tag);
-	if (be_raw_to_native_pixel->is_missing() || be_raw_to_native_pixel->vr().is_pixel_sequence()) {
+	const auto& be_raw_to_native_pixel = be_raw_to_rle->get_dataelement("PixelData"_tag);
+	if (be_raw_to_native_pixel.is_missing() || be_raw_to_native_pixel.vr().is_pixel_sequence()) {
 		fail("be raw rle to native: expected native PixelData");
 	}
-	const auto be_raw_to_native_bytes = be_raw_to_native_pixel->value_span();
+	const auto be_raw_to_native_bytes = be_raw_to_native_pixel.value_span();
 	if (be_raw_to_native_bytes.size() != 2 ||
 	    be_raw_to_native_bytes[0] != 0x34u ||
 	    be_raw_to_native_bytes[1] != 0x12u) {
@@ -585,8 +585,8 @@ int main() {
 		be_raw_to_j2k->set_transfer_syntax("JPEG2000Lossless"_uid);
 		require_transfer_syntax(
 		    be_raw_to_j2k->dataset(), "JPEG2000Lossless"_uid, "be raw to j2k");
-		const auto* be_raw_to_j2k_pixel = be_raw_to_j2k->get_dataelement("PixelData"_tag);
-		if (be_raw_to_j2k_pixel->is_missing() || !be_raw_to_j2k_pixel->vr().is_pixel_sequence()) {
+		const auto& be_raw_to_j2k_pixel = be_raw_to_j2k->get_dataelement("PixelData"_tag);
+		if (be_raw_to_j2k_pixel.is_missing() || !be_raw_to_j2k_pixel.vr().is_pixel_sequence()) {
 			fail("be raw to j2k: expected encapsulated PixelData");
 		}
 		const auto be_raw_to_j2k_decoded = be_raw_to_j2k->pixel_data(0);
@@ -622,12 +622,12 @@ int main() {
 		be_raw_to_j2k->set_transfer_syntax("ExplicitVRLittleEndian"_uid);
 		require_transfer_syntax(
 		    be_raw_to_j2k->dataset(), "ExplicitVRLittleEndian"_uid, "be raw j2k to native");
-		const auto* be_raw_j2k_to_native_pixel = be_raw_to_j2k->get_dataelement("PixelData"_tag);
-		if (be_raw_j2k_to_native_pixel->is_missing() ||
-		    be_raw_j2k_to_native_pixel->vr().is_pixel_sequence()) {
+		const auto& be_raw_j2k_to_native_pixel = be_raw_to_j2k->get_dataelement("PixelData"_tag);
+		if (be_raw_j2k_to_native_pixel.is_missing() ||
+		    be_raw_j2k_to_native_pixel.vr().is_pixel_sequence()) {
 			fail("be raw j2k to native: expected native PixelData");
 		}
-		const auto be_raw_j2k_to_native_bytes = be_raw_j2k_to_native_pixel->value_span();
+		const auto be_raw_j2k_to_native_bytes = be_raw_j2k_to_native_pixel.value_span();
 		if (be_raw_j2k_to_native_bytes.size() != 2 ||
 		    be_raw_j2k_to_native_bytes[0] != 0x34u ||
 		    be_raw_j2k_to_native_bytes[1] != 0x12u) {
@@ -643,8 +643,9 @@ int main() {
 		be_raw_to_j2k_lossy->set_transfer_syntax("JPEG2000"_uid);
 		require_transfer_syntax(
 		    be_raw_to_j2k_lossy->dataset(), "JPEG2000"_uid, "be raw to lossy j2k");
-		const auto* be_raw_to_j2k_lossy_pixel = be_raw_to_j2k_lossy->get_dataelement("PixelData"_tag);
-		if (be_raw_to_j2k_lossy_pixel->is_missing() || !be_raw_to_j2k_lossy_pixel->vr().is_pixel_sequence()) {
+		const auto& be_raw_to_j2k_lossy_pixel =
+		    be_raw_to_j2k_lossy->get_dataelement("PixelData"_tag);
+		if (be_raw_to_j2k_lossy_pixel.is_missing() || !be_raw_to_j2k_lossy_pixel.vr().is_pixel_sequence()) {
 			fail("be raw to lossy j2k: expected encapsulated PixelData");
 		}
 		const auto be_raw_to_j2k_lossy_decoded = be_raw_to_j2k_lossy->pixel_data(0);
@@ -654,12 +655,13 @@ int main() {
 		be_raw_to_j2k_lossy->set_transfer_syntax("ExplicitVRLittleEndian"_uid);
 		require_transfer_syntax(
 		    be_raw_to_j2k_lossy->dataset(), "ExplicitVRLittleEndian"_uid, "be raw lossy j2k to native");
-		const auto* be_raw_lossy_j2k_to_native_pixel = be_raw_to_j2k_lossy->get_dataelement("PixelData"_tag);
-		if (be_raw_lossy_j2k_to_native_pixel->is_missing() ||
-		    be_raw_lossy_j2k_to_native_pixel->vr().is_pixel_sequence()) {
+		const auto& be_raw_lossy_j2k_to_native_pixel =
+		    be_raw_to_j2k_lossy->get_dataelement("PixelData"_tag);
+		if (be_raw_lossy_j2k_to_native_pixel.is_missing() ||
+		    be_raw_lossy_j2k_to_native_pixel.vr().is_pixel_sequence()) {
 			fail("be raw lossy j2k to native: expected native PixelData");
 		}
-		if (be_raw_lossy_j2k_to_native_pixel->value_span().size() != sizeof(std::uint16_t)) {
+		if (be_raw_lossy_j2k_to_native_pixel.value_span().size() != sizeof(std::uint16_t)) {
 			fail("be raw lossy j2k to native: native PixelData byte length mismatch");
 		}
 	}
@@ -677,9 +679,10 @@ int main() {
 		be_raw_encap_chain->set_transfer_syntax("JPEG2000Lossless"_uid);
 		require_transfer_syntax(
 		    be_raw_encap_chain->dataset(), "JPEG2000Lossless"_uid, "be raw rle to j2k chain");
-		const auto* be_raw_rle_to_j2k_pixel = be_raw_encap_chain->get_dataelement("PixelData"_tag);
-		if (be_raw_rle_to_j2k_pixel->is_missing() ||
-		    !be_raw_rle_to_j2k_pixel->vr().is_pixel_sequence()) {
+		const auto& be_raw_rle_to_j2k_pixel =
+		    be_raw_encap_chain->get_dataelement("PixelData"_tag);
+		if (be_raw_rle_to_j2k_pixel.is_missing() ||
+		    !be_raw_rle_to_j2k_pixel.vr().is_pixel_sequence()) {
 			fail("be raw rle to j2k chain: expected encapsulated PixelData");
 		}
 		const auto be_raw_rle_to_j2k_decoded = be_raw_encap_chain->pixel_data(0);
@@ -695,9 +698,10 @@ int main() {
 		be_raw_encap_chain->set_transfer_syntax("JPEGLSLossless"_uid);
 		require_transfer_syntax(
 		    be_raw_encap_chain->dataset(), "JPEGLSLossless"_uid, "be raw j2k to jpegls chain");
-		const auto* be_raw_j2k_to_jpegls_pixel = be_raw_encap_chain->get_dataelement("PixelData"_tag);
-		if (be_raw_j2k_to_jpegls_pixel->is_missing() ||
-		    !be_raw_j2k_to_jpegls_pixel->vr().is_pixel_sequence()) {
+		const auto& be_raw_j2k_to_jpegls_pixel =
+		    be_raw_encap_chain->get_dataelement("PixelData"_tag);
+		if (be_raw_j2k_to_jpegls_pixel.is_missing() ||
+		    !be_raw_j2k_to_jpegls_pixel.vr().is_pixel_sequence()) {
 			fail("be raw j2k to jpegls chain: expected encapsulated PixelData");
 		}
 		const auto be_raw_j2k_to_jpegls_decoded = be_raw_encap_chain->pixel_data(0);
@@ -722,19 +726,19 @@ int main() {
 	}
 	require_transfer_syntax(encapsulated_uncompressed->dataset(),
 	    "EncapsulatedUncompressedExplicitVRLittleEndian"_uid, "encap-uncompressed initial");
-	const auto* pixel_data_before = encapsulated_uncompressed->get_dataelement("PixelData"_tag);
-	if (pixel_data_before->is_missing() || !pixel_data_before->vr().is_pixel_sequence()) {
+	const auto& pixel_data_before = encapsulated_uncompressed->get_dataelement("PixelData"_tag);
+	if (pixel_data_before.is_missing() || !pixel_data_before.vr().is_pixel_sequence()) {
 		fail("encap-uncompressed: expected encapsulated PixelData before conversion");
 	}
 	encapsulated_uncompressed->set_transfer_syntax("ExplicitVRLittleEndian"_uid);
 	auto& encapsulated_uncompressed_ds = encapsulated_uncompressed->dataset();
 	require_transfer_syntax(
 	    encapsulated_uncompressed_ds, "ExplicitVRLittleEndian"_uid, "encap-uncompressed converted");
-	const auto* pixel_data_after = encapsulated_uncompressed_ds.get_dataelement("PixelData"_tag);
-	if (pixel_data_after->is_missing() || pixel_data_after->vr().is_pixel_sequence()) {
+	const auto& pixel_data_after = encapsulated_uncompressed_ds.get_dataelement("PixelData"_tag);
+	if (pixel_data_after.is_missing() || pixel_data_after.vr().is_pixel_sequence()) {
 		fail("encap-uncompressed: expected native PixelData after conversion");
 	}
-	const auto pixel_bytes_after = pixel_data_after->value_span();
+	const auto pixel_bytes_after = pixel_data_after.value_span();
 	if (pixel_bytes_after.size() != 2 || pixel_bytes_after[0] != 0x34u || pixel_bytes_after[1] != 0x12u) {
 		fail("encap-uncompressed: native PixelData bytes mismatch");
 	}
@@ -765,11 +769,11 @@ int main() {
 	if (!encapsulated_eot) {
 		fail("encap-uncompressed-eot read_bytes returned null");
 	}
-	auto* eot_pixel_data = encapsulated_eot->get_dataelement("PixelData"_tag);
-	if (eot_pixel_data->is_missing() || !eot_pixel_data->vr().is_pixel_sequence()) {
+	auto& eot_pixel_data = encapsulated_eot->get_dataelement("PixelData"_tag);
+	if (eot_pixel_data.is_missing() || !eot_pixel_data.vr().is_pixel_sequence()) {
 		fail("encap-uncompressed-eot: expected encapsulated PixelData");
 	}
-	auto* eot_pixel_sequence = eot_pixel_data->as_pixel_sequence();
+	auto* eot_pixel_sequence = eot_pixel_data.as_pixel_sequence();
 	if (!eot_pixel_sequence) {
 		fail("encap-uncompressed-eot: expected pixel sequence");
 	}

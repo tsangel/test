@@ -1127,6 +1127,9 @@ nb::object dicomfile_decode_into_array(const DicomFile& self, nb::handle out,
     long frame, bool to_modality_value, int threads, bool decode_mct, nb::handle scaled) {
 	const auto effective_to_modality_value =
 	    resolve_to_modality_value_option(to_modality_value, scaled);
+	if (threads < -1) {
+		throw nb::value_error("threads must be -1, 0, or positive");
+	}
 	const auto direct =
 	    try_build_direct_raw_array_access(self, frame, effective_to_modality_value);
 	const auto layout =
@@ -1728,13 +1731,9 @@ NB_MODULE(_dicomsdl, m) {
 		    "Number of active DataElements currently available in this DataSet")
 		.def("add_dataelement",
 		    [](DataSet& self, const Tag& tag, std::optional<VR> vr,
-		        std::size_t offset, std::size_t length) {
+		        std::size_t offset, std::size_t length) -> DataElement& {
 		        const VR resolved = vr.value_or(VR::None);
-		        DataElement* element = self.add_dataelement(tag, resolved, offset, length);
-		        if (!element) {
-			        throw std::runtime_error("Failed to add DataElement");
-		        }
-		        return element;
+		        return self.add_dataelement(tag, resolved, offset, length);
 		    },
 		    nb::arg("tag"), nb::arg("vr") = nb::none(),
 		    nb::arg("offset") = 0, nb::arg("length") = 0,
@@ -1754,21 +1753,21 @@ NB_MODULE(_dicomsdl, m) {
 		    "Return a human-readable DataSet dump as text")
 		.def("get_dataelement",
 		    [](DataSet& self, const Tag& tag) -> DataElement& {
-		        return *self.get_dataelement(tag);
+		        return self.get_dataelement(tag);
 		    },
 		    nb::arg("tag"), nb::rv_policy::reference_internal,
 		    "Return the DataElement for a tag; missing lookups return a falsey DataElement (VR::None)")
 		.def("get_dataelement",
 		    [](DataSet& self, std::uint32_t packed) -> DataElement& {
 			    const Tag tag(packed);
-			    return *self.get_dataelement(tag);
+			    return self.get_dataelement(tag);
 		    },
 		    nb::arg("packed_tag"),
 		    nb::rv_policy::reference_internal,
 		    "Overload: pass packed 0xGGGEEEE integer; missing lookups return a falsey DataElement")
 		.def("get_dataelement",
 		    [](DataSet& self, const std::string& tag_str) -> DataElement& {
-			    return *self.get_dataelement(tag_str);
+			    return self.get_dataelement(tag_str);
 		    },
 		    nb::arg("tag_str"),
 		    nb::rv_policy::reference_internal,
@@ -1783,23 +1782,24 @@ NB_MODULE(_dicomsdl, m) {
 		    "Returns a DataElement; missing lookups return a falsey DataElement (VR::None); malformed paths raise.")
 		.def("__getitem__",
 		    [](DataSet& self, nb::object key) -> nb::object {
-			    DataElement* el = nullptr;
-
-			    if (nb::isinstance<Tag>(key)) {
-				    el = self.get_dataelement(nb::cast<Tag>(key));
-			    } else if (nb::isinstance<nb::int_>(key)) {
-				    el = self.get_dataelement(Tag(nb::cast<std::uint32_t>(key)));
-			    } else if (nb::isinstance<nb::str>(key)) {
-				    // Allow full tag-path strings (including sequences)
-				    el = self.get_dataelement(nb::cast<std::string>(key));
-			    } else {
+			    DataElement& el = [&]() -> DataElement& {
+				    if (nb::isinstance<Tag>(key)) {
+					    return self.get_dataelement(nb::cast<Tag>(key));
+				    }
+				    if (nb::isinstance<nb::int_>(key)) {
+					    return self.get_dataelement(Tag(nb::cast<std::uint32_t>(key)));
+				    }
+				    if (nb::isinstance<nb::str>(key)) {
+					    // Allow full tag-path strings (including sequences)
+					    return self.get_dataelement(nb::cast<std::string>(key));
+				    }
 				    throw nb::type_error("DataSet indices must be Tag, int (0xGGGEEEE), or str");
-			    }
+			    }();
 
-			    if (el->is_missing()) {
+			    if (el.is_missing()) {
 				    return nb::none();
 			    }
-			    return dataelement_get_value_py(*el, nb::cast(&self, nb::rv_policy::reference));
+			    return dataelement_get_value_py(el, nb::cast(&self, nb::rv_policy::reference));
 		    },
 		    nb::arg("key"),
 		    "Index syntax: ds[tag|packed_int|tag_str] -> element.get_value(); returns None if missing")
@@ -1809,9 +1809,9 @@ NB_MODULE(_dicomsdl, m) {
 			    if (!name.empty() && name.size() >= 2 && name[0] != '_') {
 				    try {
 					    Tag tag(name);
-					    DataElement* el = self.get_dataelement(tag);
-					    if (el->is_present()) {
-						    return dataelement_get_value_py(*el, nb::cast(&self, nb::rv_policy::reference));
+					    DataElement& el = self.get_dataelement(tag);
+					    if (el.is_present()) {
+						    return dataelement_get_value_py(el, nb::cast(&self, nb::rv_policy::reference));
 					    }
 				    } catch (const std::exception&) {
 					    // fall through to AttributeError
@@ -2175,22 +2175,23 @@ NB_MODULE(_dicomsdl, m) {
 		.def("__getitem__",
 		    [](DicomFile& self, nb::object key) -> nb::object {
 			    DataSet& dataset = self.dataset();
-			    DataElement* el = nullptr;
-
-			    if (nb::isinstance<Tag>(key)) {
-				    el = dataset.get_dataelement(nb::cast<Tag>(key));
-			    } else if (nb::isinstance<nb::int_>(key)) {
-				    el = dataset.get_dataelement(Tag(nb::cast<std::uint32_t>(key)));
-			    } else if (nb::isinstance<nb::str>(key)) {
-				    el = dataset.get_dataelement(nb::cast<std::string>(key));
-			    } else {
+			    DataElement& el = [&]() -> DataElement& {
+				    if (nb::isinstance<Tag>(key)) {
+					    return dataset.get_dataelement(nb::cast<Tag>(key));
+				    }
+				    if (nb::isinstance<nb::int_>(key)) {
+					    return dataset.get_dataelement(Tag(nb::cast<std::uint32_t>(key)));
+				    }
+				    if (nb::isinstance<nb::str>(key)) {
+					    return dataset.get_dataelement(nb::cast<std::string>(key));
+				    }
 				    throw nb::type_error("DicomFile indices must be Tag, int (0xGGGEEEE), or str");
-			    }
+			    }();
 
-			    if (el->is_missing()) {
+			    if (el.is_missing()) {
 				    return nb::none();
 			    }
-			    return dataelement_get_value_py(*el, nb::cast(&dataset, nb::rv_policy::reference));
+			    return dataelement_get_value_py(el, nb::cast(&dataset, nb::rv_policy::reference));
 		    },
 		    nb::arg("key"),
 		    "Index syntax delegated to root DataSet")

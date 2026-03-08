@@ -115,9 +115,8 @@ void update_lossy_compression_metadata_for_set_pixel_data(DataSet& dataset,
 
 	bool ok = true;
 	if (!current_encode_is_lossy) {
-		auto* lossy_elem = dataset.add_dataelement("LossyImageCompression"_tag, VR::CS);
-		ok &= lossy_elem &&
-		    lossy_elem->from_string_view(had_prior_lossy ? "01" : "00");
+		auto& lossy_elem = dataset.add_dataelement("LossyImageCompression"_tag, VR::CS);
+		ok &= lossy_elem.from_string_view(had_prior_lossy ? "01" : "00");
 		if (!had_prior_lossy) {
 			dataset.remove_dataelement("LossyImageCompressionRatio"_tag);
 			dataset.remove_dataelement("LossyImageCompressionMethod"_tag);
@@ -170,17 +169,16 @@ void update_lossy_compression_metadata_for_set_pixel_data(DataSet& dataset,
 		method_views.emplace_back(value);
 	}
 
-	auto* lossy_elem = dataset.add_dataelement("LossyImageCompression"_tag, VR::CS);
-	ok &= lossy_elem && lossy_elem->from_string_view("01");
+	auto& lossy_elem = dataset.add_dataelement("LossyImageCompression"_tag, VR::CS);
+	ok &= lossy_elem.from_string_view("01");
 
-	auto* ratio_elem = dataset.add_dataelement("LossyImageCompressionRatio"_tag, VR::DS);
-	ok &= ratio_elem &&
-	    ratio_elem->from_double_vector(std::span<const double>(ratios.data(), ratios.size()));
+	auto& ratio_elem = dataset.add_dataelement("LossyImageCompressionRatio"_tag, VR::DS);
+	ok &= ratio_elem.from_double_vector(
+	    std::span<const double>(ratios.data(), ratios.size()));
 
-	auto* method_elem = dataset.add_dataelement("LossyImageCompressionMethod"_tag, VR::CS);
-	ok &= method_elem &&
-	    method_elem->from_string_views(std::span<const std::string_view>(
-	        method_views.data(), method_views.size()));
+	auto& method_elem = dataset.add_dataelement("LossyImageCompressionMethod"_tag, VR::CS);
+	ok &= method_elem.from_string_views(
+	    std::span<const std::string_view>(method_views.data(), method_views.size()));
 
 	if (!ok) {
 		diag::error_and_throw(
@@ -196,27 +194,27 @@ void update_pixel_metadata_for_set_pixel_data(DataSet& dataset, std::string_view
     std::size_t source_row_stride, std::size_t source_frame_stride) {
 	bool ok = true;
 	ok &= dataset.add_dataelement("Rows"_tag, VR::US)
-	          ->from_long(static_cast<long>(source.rows));
+	          .from_long(static_cast<long>(source.rows));
 	ok &= dataset.add_dataelement("Columns"_tag, VR::US)
-	          ->from_long(static_cast<long>(source.cols));
+	          .from_long(static_cast<long>(source.cols));
 	ok &= dataset.add_dataelement("SamplesPerPixel"_tag, VR::US)
-	          ->from_long(static_cast<long>(source.samples_per_pixel));
+	          .from_long(static_cast<long>(source.samples_per_pixel));
 	ok &= dataset.add_dataelement("BitsAllocated"_tag, VR::US)
-	          ->from_long(static_cast<long>(bits_allocated));
+	          .from_long(static_cast<long>(bits_allocated));
 	ok &= dataset.add_dataelement("BitsStored"_tag, VR::US)
-	          ->from_long(static_cast<long>(bits_stored));
+	          .from_long(static_cast<long>(bits_stored));
 	ok &= dataset.add_dataelement("HighBit"_tag, VR::US)
-	          ->from_long(static_cast<long>(high_bit));
+	          .from_long(static_cast<long>(high_bit));
 	ok &= dataset.add_dataelement("PixelRepresentation"_tag, VR::US)
-	          ->from_long(static_cast<long>(pixel_representation));
+	          .from_long(static_cast<long>(pixel_representation));
 
 	const auto photometric_text = to_photometric_text(output_photometric);
 	ok &= dataset.add_dataelement("PhotometricInterpretation"_tag, VR::CS)
-	          ->from_string_view(photometric_text);
+	          .from_string_view(photometric_text);
 
 	if (source.frames > 1) {
 		ok &= dataset.add_dataelement("NumberOfFrames"_tag, VR::IS)
-		          ->from_long(static_cast<long>(source.frames));
+		          .from_long(static_cast<long>(source.frames));
 	} else {
 		dataset.remove_dataelement("NumberOfFrames"_tag);
 	}
@@ -225,7 +223,7 @@ void update_pixel_metadata_for_set_pixel_data(DataSet& dataset, std::string_view
 		                                      ? 1L
 		                                      : (source.planar == pixel::Planar::planar ? 1L : 0L);
 		ok &= dataset.add_dataelement("PlanarConfiguration"_tag, VR::US)
-		          ->from_long(planar_configuration);
+		          .from_long(planar_configuration);
 	} else {
 		dataset.remove_dataelement("PlanarConfiguration"_tag);
 	}
@@ -242,10 +240,9 @@ void update_pixel_metadata_for_set_pixel_data(DataSet& dataset, std::string_view
 
 void update_transfer_syntax_uid_element_after_set_pixel_data_or_throw(
     DicomFile& file, uid::WellKnown transfer_syntax) {
-	DataElement* transfer_syntax_element =
+	DataElement& transfer_syntax_element =
 	    file.add_dataelement("(0002,0010)"_tag, VR::UI);
-	if (!transfer_syntax_element ||
-	    !transfer_syntax_element->from_transfer_syntax_uid(transfer_syntax)) {
+	if (!transfer_syntax_element.from_transfer_syntax_uid(transfer_syntax)) {
 		diag::error_and_throw(
 		    "DicomFile::set_pixel_data file={} reason=failed to update (0002,0010) TransferSyntaxUID",
 		    file.path());
