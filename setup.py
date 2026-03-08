@@ -283,6 +283,10 @@ class CMakeBuild(build_ext):
         if jpegxl_mode_requested:
             cmake_args.append("-DDICOMSDL_ENABLE_JPEGXL=ON")
 
+        msvc_ltcg_mode = os.environ.get("DICOMSDL_MSVC_ENABLE_LTCG", "").strip()
+        if msvc_ltcg_mode:
+            cmake_args.append(f"-DDICOMSDL_MSVC_ENABLE_LTCG={msvc_ltcg_mode}")
+
         extra_cmake_args = os.environ.get("DICOMSDL_CMAKE_ARGS") or os.environ.get("CMAKE_ARGS")
         if extra_cmake_args:
             cmake_args += shlex.split(extra_cmake_args)

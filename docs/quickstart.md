@@ -32,6 +32,7 @@ To disable defaults:
 
 - `STATIC_PRE_CLEAN_OUTPUTS=0` disables pre-clean.
 - `FORCE_WHEEL_RELEASE=0` allows non-Release wheel builds.
+- `DICOMSDL_MSVC_ENABLE_LTCG=OFF` disables MSVC `/GL` + `/LTCG` for the wheel build.
 
 Then install the built wheel manually:
 

@@ -99,6 +99,25 @@ If you switch generator/toolchain while reusing the same `BUILD_DIR`, set:
 set RESET_CMAKE_CACHE=1
 ```
 
+### MSVC LTCG toggle (`/GL`, `/LTCG`)
+
+`DICOMSDL_MSVC_ENABLE_LTCG` controls MSVC whole-program optimization flags
+for `Release`/`RelWithDebInfo` builds (`ON` by default). This option applies to
+MSVC `cl.exe` builds and is ignored for `clang-cl` and non-MSVC toolchains.
+
+```cmd
+:: Disable /GL and /LTCG for MSVC builds
+set DICOMSDL_MSVC_ENABLE_LTCG=OFF
+build
+```
+
+```bash
+# Disable /GL and /LTCG for MSVC wheel/source builds
+DICOMSDL_MSVC_ENABLE_LTCG=OFF ./build.sh
+```
+
+The same environment variable is honored by wheel builds (`setup.py`) as well.
+
 ### MSYS2 clang64 prerequisites
 
 Run the following in an `MSYS2 clang64` shell:
