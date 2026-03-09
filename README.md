@@ -118,6 +118,35 @@ DICOMSDL_MSVC_ENABLE_LTCG=OFF ./build.sh
 
 The same environment variable is honored by wheel builds (`setup.py`) as well.
 
+### MSVC PGO (`OFF|GEN|USE`)
+
+MSVC PGO can be controlled with:
+
+- `DICOMSDL_MSVC_PGO=OFF|GEN|USE` (default: `OFF`)
+- `DICOMSDL_MSVC_PGO_DIR` (default: `build-pgo/msvc`)
+
+`GEN` builds with profile instrumentation and writes profile artifacts
+(`.pgd/.pgc`) under `DICOMSDL_MSVC_PGO_DIR`.  
+`USE` consumes that profile for optimized code generation.
+
+```cmd
+:: 1) Instrumented build
+set DICOMSDL_MSVC_PGO=GEN
+set DICOMSDL_MSVC_PGO_DIR=C:\Lab\workspace\test.git\build-pgo\msvc
+build-wheel-static.bat
+
+:: 2) Run representative workload (WG04 benchmark, app flow, etc.) to produce .pgc/.pgd
+
+:: 3) Profile-use build
+set DICOMSDL_MSVC_PGO=USE
+build-wheel-static.bat
+```
+
+Notes:
+
+- `DICOMSDL_MSVC_PGO=GEN|USE` requires `DICOMSDL_MSVC_ENABLE_LTCG=ON`.
+- `USE` fails fast when `${DICOMSDL_MSVC_PGO_DIR}/dicomsdl.pgd` is missing.
+
 ### MSYS2 clang64 prerequisites
 
 Run the following in an `MSYS2 clang64` shell:

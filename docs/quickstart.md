@@ -33,6 +33,8 @@ To disable defaults:
 - `STATIC_PRE_CLEAN_OUTPUTS=0` disables pre-clean.
 - `FORCE_WHEEL_RELEASE=0` allows non-Release wheel builds.
 - `DICOMSDL_MSVC_ENABLE_LTCG=OFF` disables MSVC `/GL` + `/LTCG` for the wheel build.
+- `DICOMSDL_MSVC_PGO=OFF|GEN|USE` controls MSVC PGO mode (`OFF` default).
+- `DICOMSDL_MSVC_PGO_DIR=...` chooses where `.pgd/.pgc` profile data is stored.
 
 Then install the built wheel manually:
 

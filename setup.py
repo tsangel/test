@@ -287,6 +287,17 @@ class CMakeBuild(build_ext):
         if msvc_ltcg_mode:
             cmake_args.append(f"-DDICOMSDL_MSVC_ENABLE_LTCG={msvc_ltcg_mode}")
 
+        msvc_pgo_mode = os.environ.get("DICOMSDL_MSVC_PGO", "").strip()
+        if msvc_pgo_mode:
+            cmake_args.append(f"-DDICOMSDL_MSVC_PGO={msvc_pgo_mode}")
+            msvc_pgo_dir = os.environ.get("DICOMSDL_MSVC_PGO_DIR", "").strip()
+            if msvc_pgo_dir:
+                cmake_args.append(f"-DDICOMSDL_MSVC_PGO_DIR={msvc_pgo_dir}")
+            elif msvc_pgo_mode.upper() != "OFF":
+                cmake_args.append(
+                    f"-DDICOMSDL_MSVC_PGO_DIR={ROOT_DIR / 'build-pgo' / 'msvc'}"
+                )
+
         extra_cmake_args = os.environ.get("DICOMSDL_CMAKE_ARGS") or os.environ.get("CMAKE_ARGS")
         if extra_cmake_args:
             cmake_args += shlex.split(extra_cmake_args)
