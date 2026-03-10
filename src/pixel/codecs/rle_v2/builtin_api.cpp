@@ -1,7 +1,7 @@
 #include "internal.hpp"
 #include "builtin_api.hpp"
 
-namespace pixel::rle_plugin_v2 {
+namespace pixel::rle_codec_v2 {
 
 const pixel_decoder_plugin_api_v2& decoder_builtin_api() noexcept {
   static const pixel_decoder_plugin_api_v2 api = [] {
@@ -41,4 +41,4 @@ const pixel_encoder_plugin_api_v2& encoder_builtin_api() noexcept {
   return api;
 }
 
-}  // namespace pixel::rle_plugin_v2
+}  // namespace pixel::rle_codec_v2

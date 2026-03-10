@@ -10,7 +10,7 @@
 
 #include "internal.hpp"
 
-namespace pixel::jpegls_plugin_v2 {
+namespace pixel::jpegls_codec_v2 {
 
 namespace {
 
@@ -544,4 +544,4 @@ uint32_t encoder_copy_last_error_detail(
       static_cast<const EncoderCtx*>(ctx), out_detail, out_detail_capacity);
 }
 
-}  // namespace pixel::jpegls_plugin_v2
+}  // namespace pixel::jpegls_codec_v2

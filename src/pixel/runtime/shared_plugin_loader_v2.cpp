@@ -184,7 +184,7 @@ void unload_shared_plugin_v2(LoadedSharedPluginV2* plugin) noexcept {
   *plugin = {};
 }
 
-uint32_t register_loaded_shared_plugins_v2(PluginRegistryV2* registry,
+uint32_t register_loaded_shared_plugins_v2(BindingRegistryV2* registry,
     const LoadedSharedPluginV2* loaded_plugins, uint32_t loaded_plugin_count) {
   if (registry == nullptr || loaded_plugins == nullptr || loaded_plugin_count == 0) {
     return 0;

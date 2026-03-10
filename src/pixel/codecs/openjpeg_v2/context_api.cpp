@@ -5,7 +5,7 @@
 
 #include "internal.hpp"
 
-namespace pixel::openjpeg_plugin_v2 {
+namespace pixel::openjpeg_codec_v2 {
 
 pixel_error_code_v2 parse_decoder_options(
     DecoderCtx* ctx, const pixel_option_list_v2* options) {
@@ -192,4 +192,4 @@ uint32_t encoder_copy_last_error_detail(
       static_cast<const EncoderCtx*>(ctx), out_detail, out_detail_capacity);
 }
 
-}  // namespace pixel::openjpeg_plugin_v2
+}  // namespace pixel::openjpeg_codec_v2

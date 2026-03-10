@@ -19,7 +19,7 @@
 
 #include "internal.hpp"
 
-namespace pixel::jpeg_plugin_v2 {
+namespace pixel::jpeg_codec_v2 {
 
 namespace {
 
@@ -534,4 +534,4 @@ pixel_error_code_v2 encoder_encode_frame(
   }
 }
 
-}  // namespace pixel::jpeg_plugin_v2
+}  // namespace pixel::jpeg_codec_v2

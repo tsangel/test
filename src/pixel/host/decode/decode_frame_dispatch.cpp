@@ -52,7 +52,7 @@ constexpr int kNoThreadOption = std::numeric_limits<int>::min();
 // cost on every frame decode when the registry/options are unchanged.
 struct DecoderContextCache {
 	::pixel::runtime_v2::HostDecoderContextV2 ctx{};
-	const ::pixel::runtime_v2::PluginRegistryV2* registry{nullptr};
+	const ::pixel::runtime_v2::BindingRegistryV2* registry{nullptr};
 	std::uint64_t registry_generation{0};
 	std::uint32_t transfer_syntax_index{0};
 	int thread_option{kNoThreadOption};
@@ -74,7 +74,7 @@ struct DecoderContextCache {
 }
 
 // Return the current process-wide runtime registry, if one is installed.
-[[nodiscard]] const ::pixel::runtime_v2::PluginRegistryV2* get_runtime_registry() {
+[[nodiscard]] const ::pixel::runtime_v2::BindingRegistryV2* get_runtime_registry() {
 	// Runtime dispatch is optional, so callers must handle a null registry.
 	return ::pixel::runtime_v2::current_registry();
 }

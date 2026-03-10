@@ -5,7 +5,7 @@
 
 #include "internal.hpp"
 
-namespace pixel::openjpeg_plugin_v2 {
+namespace pixel::openjpeg_codec_v2 {
 
 namespace {
 
@@ -117,4 +117,4 @@ pixel_error_code_v2 fail_detail_u32(EncoderCtx* ctx, pixel_error_code_v2 code,
   return fail_detail_u32_impl(ctx, code, stage, reason_fmt, value);
 }
 
-}  // namespace pixel::openjpeg_plugin_v2
+}  // namespace pixel::openjpeg_codec_v2

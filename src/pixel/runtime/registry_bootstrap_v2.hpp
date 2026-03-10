@@ -16,8 +16,8 @@ struct RegistryBootstrapResultV2 {
   uint32_t registered_plugin_count{0};
 };
 
-struct PluginRegistryRuntimeV2 {
-  PluginRegistryV2 registry{};
+struct BindingRegistryRuntimeV2 {
+  BindingRegistryV2 registry{};
   std::vector<LoadedSharedPluginV2> loaded_shared_plugins{};
 
   RegistryBootstrapResultV2 last_result{};
@@ -28,9 +28,9 @@ struct PluginRegistryRuntimeV2 {
 };
 
 bool initialize_registry_v2(const std::vector<std::string>& plugin_paths,
-    PluginRegistryRuntimeV2* state,
+    BindingRegistryRuntimeV2* state,
     RegistryBootstrapResultV2* out_result = nullptr);
 
-void shutdown_registry_v2(PluginRegistryRuntimeV2* state) noexcept;
+void shutdown_registry_v2(BindingRegistryRuntimeV2* state) noexcept;
 
 }  // namespace pixel::runtime_v2

@@ -62,7 +62,7 @@ std::string encoder_detail(const pixel::runtime_v2::HostEncoderContextV2& ctx) {
 int main() {
   using namespace dicom::literals;
 
-  pixel::runtime_v2::PluginRegistryV2 registry{};
+  pixel::runtime_v2::BindingRegistryV2 registry{};
   pixel::runtime_v2::init_builtin_registry_v2(&registry);
 
   pixel::runtime_v2::HostEncoderContextV2 encoder_ctx{};

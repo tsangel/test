@@ -5,7 +5,7 @@ namespace pixel::runtime_v2 {
 namespace {
 
 RegistryBootstrapResultV2 initialize_once_impl(
-    const std::vector<std::string>& plugin_paths, PluginRegistryRuntimeV2* state) {
+    const std::vector<std::string>& plugin_paths, BindingRegistryRuntimeV2* state) {
   RegistryBootstrapResultV2 result{};
   result.requested_plugin_count = static_cast<uint32_t>(plugin_paths.size());
 
@@ -37,7 +37,7 @@ RegistryBootstrapResultV2 initialize_once_impl(
 }  // namespace
 
 bool initialize_registry_v2(const std::vector<std::string>& plugin_paths,
-    PluginRegistryRuntimeV2* state, RegistryBootstrapResultV2* out_result) {
+    BindingRegistryRuntimeV2* state, RegistryBootstrapResultV2* out_result) {
   if (state == nullptr) {
     return false;
   }
@@ -77,7 +77,7 @@ bool initialize_registry_v2(const std::vector<std::string>& plugin_paths,
   return state->initialized && !state->shutdown_called;
 }
 
-void shutdown_registry_v2(PluginRegistryRuntimeV2* state) noexcept {
+void shutdown_registry_v2(BindingRegistryRuntimeV2* state) noexcept {
   if (state == nullptr) {
     return;
   }

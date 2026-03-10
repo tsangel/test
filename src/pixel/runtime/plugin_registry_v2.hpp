@@ -48,7 +48,7 @@ struct LoadedPluginApisV2 {
   const pixel_encoder_plugin_api_v2* encoder_api{nullptr};
 };
 
-class PluginRegistryV2 {
+class BindingRegistryV2 {
 public:
   static constexpr uint32_t kSlotCount = 32u;
 
@@ -79,10 +79,10 @@ private:
 };
 
 void init_builtin_registry_v2(
-    PluginRegistryV2* registry,
+    BindingRegistryV2* registry,
     Htj2kDecoderBackendPreference htj2k_decoder_preference =
         Htj2kDecoderBackendPreference::kAuto);
-uint32_t register_loaded_plugins_v2(PluginRegistryV2* registry,
+uint32_t register_loaded_plugins_v2(BindingRegistryV2* registry,
     const LoadedPluginApisV2* loaded_plugins, uint32_t loaded_plugin_count);
 
 }  // namespace pixel::runtime_v2

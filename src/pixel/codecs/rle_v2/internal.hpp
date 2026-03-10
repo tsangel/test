@@ -6,7 +6,7 @@
 #include "pixel_decoder_plugin_abi_v2.h"
 #include "pixel_encoder_plugin_abi_v2.h"
 
-namespace pixel::rle_plugin_v2 {
+namespace pixel::rle_codec_v2 {
 
 constexpr std::size_t kLastErrorDetailCapacity = 512;
 
@@ -84,4 +84,4 @@ pixel_error_code_v2 encoder_encode_frame(
 uint32_t encoder_copy_last_error_detail(
     const void* ctx, char* out_detail, uint32_t out_detail_capacity);
 
-}  // namespace pixel::rle_plugin_v2
+}  // namespace pixel::rle_codec_v2

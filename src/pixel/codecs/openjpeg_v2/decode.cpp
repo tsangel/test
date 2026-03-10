@@ -10,7 +10,7 @@
 #include "../common/decode_fastpath_v2.hpp"
 #include "internal.hpp"
 
-namespace pixel::openjpeg_plugin_v2 {
+namespace pixel::openjpeg_codec_v2 {
 
 namespace {
 
@@ -445,4 +445,4 @@ pixel_error_code_v2 decoder_decode_frame(
   }
 }
 
-}  // namespace pixel::openjpeg_plugin_v2
+}  // namespace pixel::openjpeg_codec_v2

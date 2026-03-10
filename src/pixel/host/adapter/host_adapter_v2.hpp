@@ -45,12 +45,12 @@ bool codec_profile_code_from_transfer_syntax(
 
 // Fully reset and configure one host decoder context for the given transfer syntax and options.
 pixel_error_code_v2 configure_host_decoder_context_v2(HostDecoderContextV2* ctx,
-    const PluginRegistryV2* registry, dicom::uid::WellKnown transfer_syntax,
+    const BindingRegistryV2* registry, dicom::uid::WellKnown transfer_syntax,
     const pixel_option_list_v2* options = nullptr);
 
 // Fully reset and configure one host encoder context for the given transfer syntax and options.
 pixel_error_code_v2 configure_host_encoder_context_v2(HostEncoderContextV2* ctx,
-    const PluginRegistryV2* registry, dicom::uid::WellKnown transfer_syntax,
+    const BindingRegistryV2* registry, dicom::uid::WellKnown transfer_syntax,
     const pixel_option_list_v2* options = nullptr);
 
 void destroy_host_decoder_context_v2(HostDecoderContextV2* ctx) noexcept;

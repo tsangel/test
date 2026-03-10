@@ -38,7 +38,7 @@ int main(int argc, char** argv) {
   std::vector<std::string> plugin_paths;
   plugin_paths.emplace_back(argv[1]);
 
-  pixel::runtime_v2::PluginRegistryRuntimeV2 state{};
+  pixel::runtime_v2::BindingRegistryRuntimeV2 state{};
   pixel::runtime_v2::RegistryBootstrapResultV2 result{};
   expect_true(
       pixel::runtime_v2::initialize_registry_v2(plugin_paths, &state, &result),

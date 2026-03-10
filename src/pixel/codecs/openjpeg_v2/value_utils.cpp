@@ -10,7 +10,7 @@
 
 #include "internal.hpp"
 
-namespace pixel::openjpeg_plugin_v2 {
+namespace pixel::openjpeg_codec_v2 {
 
 namespace {
 
@@ -335,4 +335,4 @@ OPJ_COLOR_SPACE resolve_color_space(std::size_t samples_per_pixel) {
   }
 }
 
-}  // namespace pixel::openjpeg_plugin_v2
+}  // namespace pixel::openjpeg_codec_v2

@@ -29,7 +29,7 @@ struct RuntimeRegistryStateV2 {
   Htj2kDecoderBackendPreference htj2k_decoder_backend_preference{
       Htj2kDecoderBackendPreference::kAuto};
   std::uint64_t generation{0};
-  PluginRegistryV2 registry{};
+  BindingRegistryV2 registry{};
   std::vector<ExternalPluginEntryV2> external_plugins{};
 };
 
@@ -97,7 +97,7 @@ std::vector<ExternalPluginEntryV2>::iterator find_library_plugin_entry(
 
 }  // namespace
 
-const PluginRegistryV2* current_registry() noexcept {
+const BindingRegistryV2* current_registry() noexcept {
   auto& state = runtime_registry_state_v2();
   std::lock_guard<std::mutex> lock(state.mutex);
   ensure_initialized_locked(state);

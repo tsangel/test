@@ -85,7 +85,7 @@ struct EncapsulatedEncodeInput {
 	bool source_aliases_current_native_pixel_data{false};
 };
 
-[[nodiscard]] const ::pixel::runtime_v2::PluginRegistryV2* get_runtime_registry() {
+[[nodiscard]] const ::pixel::runtime_v2::BindingRegistryV2* get_runtime_registry() {
 	return ::pixel::runtime_v2::current_registry();
 }
 

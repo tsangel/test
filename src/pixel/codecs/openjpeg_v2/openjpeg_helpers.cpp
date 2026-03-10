@@ -8,7 +8,7 @@
 
 #include "internal.hpp"
 
-namespace pixel::openjpeg_plugin_v2 {
+namespace pixel::openjpeg_codec_v2 {
 
 namespace {
 
@@ -286,4 +286,4 @@ bool decode_with_openjpeg_auto(const uint8_t* data, std::size_t size,
   return false;
 }
 
-}  // namespace pixel::openjpeg_plugin_v2
+}  // namespace pixel::openjpeg_codec_v2

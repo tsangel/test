@@ -16,7 +16,7 @@
 #include "../common/decode_fastpath_v2.hpp"
 #include "internal.hpp"
 
-namespace pixel::htj2k_plugin_v2 {
+namespace pixel::htj2k_codec_v2 {
 
 namespace {
 
@@ -617,4 +617,4 @@ pixel_error_code_v2 decoder_decode_frame(
   }
 }
 
-}  // namespace pixel::htj2k_plugin_v2
+}  // namespace pixel::htj2k_codec_v2

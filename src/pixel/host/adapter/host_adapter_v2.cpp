@@ -289,7 +289,7 @@ void destroy_host_encoder_context_v2(HostEncoderContextV2* ctx) noexcept {
 // Configure one decoder context end-to-end: resolve profile, select binding, and
 // create/configure plugin state when the binding is plugin-backed.
 pixel_error_code_v2 configure_host_decoder_context_v2(HostDecoderContextV2* ctx,
-    const PluginRegistryV2* registry, dicom::uid::WellKnown transfer_syntax,
+    const BindingRegistryV2* registry, dicom::uid::WellKnown transfer_syntax,
     const pixel_option_list_v2* options) {
   // Validate required inputs before touching decoder state.
   if (ctx == nullptr || registry == nullptr) {
@@ -358,7 +358,7 @@ pixel_error_code_v2 configure_host_decoder_context_v2(HostDecoderContextV2* ctx,
 // Configure one encoder context end-to-end: resolve profile, select binding, and
 // create/configure plugin state when the binding is plugin-backed.
 pixel_error_code_v2 configure_host_encoder_context_v2(HostEncoderContextV2* ctx,
-    const PluginRegistryV2* registry, dicom::uid::WellKnown transfer_syntax,
+    const BindingRegistryV2* registry, dicom::uid::WellKnown transfer_syntax,
     const pixel_option_list_v2* options) {
   // Validate required inputs before touching encoder state.
   if (ctx == nullptr || registry == nullptr) {

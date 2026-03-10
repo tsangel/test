@@ -7,7 +7,7 @@
 
 #include "internal.hpp"
 
-namespace pixel::rle_plugin_v2 {
+namespace pixel::rle_codec_v2 {
 
 namespace {
 
@@ -366,4 +366,4 @@ pixel_error_code_v2 encoder_encode_frame(
   return PIXEL_CODEC_ERR_OK;
 }
 
-}  // namespace pixel::rle_plugin_v2
+}  // namespace pixel::rle_codec_v2

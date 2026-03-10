@@ -28,7 +28,7 @@ SharedPluginLoadStatusV2 load_shared_plugin_v2(
 
 void unload_shared_plugin_v2(LoadedSharedPluginV2* plugin) noexcept;
 
-uint32_t register_loaded_shared_plugins_v2(PluginRegistryV2* registry,
+uint32_t register_loaded_shared_plugins_v2(BindingRegistryV2* registry,
     const LoadedSharedPluginV2* loaded_plugins, uint32_t loaded_plugin_count);
 
 }  // namespace pixel::runtime_v2

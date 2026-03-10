@@ -15,7 +15,7 @@
 
 #include "internal.hpp"
 
-namespace pixel::jpegxl_plugin_v2 {
+namespace pixel::jpegxl_codec_v2 {
 
 namespace {
 
@@ -742,4 +742,4 @@ pixel_error_code_v2 decoder_decode_frame(
   }
 }
 
-}  // namespace pixel::jpegxl_plugin_v2
+}  // namespace pixel::jpegxl_codec_v2
