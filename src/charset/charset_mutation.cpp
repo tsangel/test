@@ -383,10 +383,7 @@ bool encode_utf8_for_element(DataElement& element,
 
 	const DataSet* dataset = nullptr;
 	if (auto* parent = element.parent()) {
-		dataset = parent->root_dataset();
-		if (!dataset) {
-			dataset = parent;
-		}
+		dataset = parent;
 	}
 	auto target_charset =
 	    dataset ? detail::parse_dataset_charset(*dataset, out_error)

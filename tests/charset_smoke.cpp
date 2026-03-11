@@ -1,4 +1,4 @@
-﻿#include <algorithm>
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdlib>
@@ -59,10 +59,7 @@ int main() {
 		    term + " write should encode the expected single-byte repertoire");
 
 		dicom::DicomFile raw_file;
-		auto& raw_charset = raw_file.add_dataelement("SpecificCharacterSet"_tag, dicom::VR::CS);
-		if (!raw_charset.from_string_view(term)) {
-			fail(term + " SpecificCharacterSet raw assignment should succeed");
-		}
+		raw_file.set_declared_specific_charset(charset);
 		auto& raw_name = raw_file.add_dataelement("PatientName"_tag, dicom::VR::PN);
 		const std::string raw_value(reinterpret_cast<const char*>(raw_bytes.data()), raw_bytes.size());
 		if (!raw_name.from_string_view(raw_value)) {
@@ -169,10 +166,7 @@ int main() {
 		    "ISO_IR 100 write should encode Latin-1 bytes");
 
 		dicom::DicomFile raw_latin1_file;
-		auto& raw_charset = raw_latin1_file.add_dataelement("SpecificCharacterSet"_tag, dicom::VR::CS);
-		if (!raw_charset.from_string_view("ISO_IR 100")) {
-			fail("ISO_IR 100 SpecificCharacterSet raw assignment should succeed");
-		}
+		raw_latin1_file.set_declared_specific_charset(dicom::SpecificCharacterSet::ISO_IR_100);
 		auto& raw_patient_name = raw_latin1_file.add_dataelement("PatientName"_tag, dicom::VR::PN);
 		if (!raw_patient_name.from_string_view(latin1_name)) {
 			fail("raw ISO_IR 100 PatientName assignment should succeed");
@@ -242,6 +236,119 @@ int main() {
 	{
 		const std::string utf8_latin1_name("Gr\xC3\xB6\xC3\x9F" "e", 7);
 		const std::string latin1_name("Gr\xF6\xDF" "e", 5);
+		const std::string utf8_korean("\xED\x99\x8D\xEA\xB8\xB8\xEB\x8F\x99", 9);
+
+		dicom::DicomFile inherited_item_file;
+		inherited_item_file.set_declared_specific_charset(dicom::SpecificCharacterSet::ISO_IR_100);
+		auto& inherited_seq_element =
+		    inherited_item_file.add_dataelement(dicom::Tag(0x0008u, 0x1110u), dicom::VR::SQ);
+		auto* inherited_seq = inherited_seq_element.as_sequence();
+		if (!inherited_seq) {
+			fail("nested charset inheritance test should create a sequence");
+		}
+		auto* inherited_item = inherited_seq->add_dataset();
+		if (!inherited_item) {
+			fail("nested charset inheritance test should create an item dataset");
+		}
+		auto& inherited_name = inherited_item->add_dataelement("PatientName"_tag, dicom::VR::PN);
+		if (!inherited_name.from_string_view(latin1_name)) {
+			fail("nested item raw Latin-1 assignment should succeed");
+		}
+		const auto inherited_decoded = inherited_name.to_utf8_string();
+		if (!inherited_decoded || *inherited_decoded != utf8_latin1_name) {
+			fail("nested item should inherit root SpecificCharacterSet for UTF-8 decode");
+		}
+
+		dicom::DicomFile override_item_file;
+		override_item_file.set_declared_specific_charset(dicom::SpecificCharacterSet::ISO_IR_100);
+		auto& override_seq_element =
+		    override_item_file.add_dataelement(dicom::Tag(0x0008u, 0x1110u), dicom::VR::SQ);
+		auto* override_seq = override_seq_element.as_sequence();
+		if (!override_seq) {
+			fail("nested charset override test should create a sequence");
+		}
+		auto* override_item = override_seq->add_dataset();
+		if (!override_item) {
+			fail("nested charset override test should create an item dataset");
+		}
+		override_item->set_declared_specific_charset(dicom::SpecificCharacterSet::ISO_IR_192);
+		auto& override_name = override_item->add_dataelement("PatientName"_tag, dicom::VR::PN);
+		if (!override_name.from_string_view(utf8_korean)) {
+			fail("nested item raw UTF-8 assignment should succeed");
+		}
+		const auto override_decoded = override_name.to_utf8_string();
+		if (!override_decoded || *override_decoded != utf8_korean) {
+			fail("nested item local SpecificCharacterSet should override root charset for decode");
+		}
+
+		dicom::DicomFile encode_item_file;
+		encode_item_file.set_declared_specific_charset(dicom::SpecificCharacterSet::ISO_IR_192);
+		auto& encode_seq_element =
+		    encode_item_file.add_dataelement(dicom::Tag(0x0008u, 0x1110u), dicom::VR::SQ);
+		auto* encode_seq = encode_seq_element.as_sequence();
+		if (!encode_seq) {
+			fail("nested item encode test should create a sequence");
+		}
+		auto* encode_item = encode_seq->add_dataset();
+		if (!encode_item) {
+			fail("nested item encode test should create an item dataset");
+		}
+		encode_item->set_declared_specific_charset(dicom::SpecificCharacterSet::ISO_IR_100);
+		auto& encode_name = encode_item->add_dataelement("PatientName"_tag, dicom::VR::PN);
+		if (!encode_name.from_utf8_view(utf8_latin1_name)) {
+			fail("nested item from_utf8_view should use local SpecificCharacterSet");
+		}
+		const auto encoded_raw = encode_name.to_string_view();
+		if (!encoded_raw || *encoded_raw != latin1_name) {
+			fail("nested item from_utf8_view should encode using local item charset");
+		}
+		const auto encoded_roundtrip = encode_name.to_utf8_string();
+		if (!encoded_roundtrip || *encoded_roundtrip != utf8_latin1_name) {
+			fail("nested item local charset encode/decode roundtrip mismatch");
+		}
+
+		dicom::DicomFile transcode_item_file;
+		transcode_item_file.set_declared_specific_charset(dicom::SpecificCharacterSet::ISO_IR_192);
+		auto& transcode_seq_element =
+		    transcode_item_file.add_dataelement(dicom::Tag(0x0008u, 0x1110u), dicom::VR::SQ);
+		auto* transcode_seq = transcode_seq_element.as_sequence();
+		if (!transcode_seq) {
+			fail("nested item transcode test should create a sequence");
+		}
+		auto* transcode_item = transcode_seq->add_dataset();
+		if (!transcode_item) {
+			fail("nested item transcode test should create an item dataset");
+		}
+		transcode_item->set_declared_specific_charset(dicom::SpecificCharacterSet::ISO_IR_100);
+		auto& transcode_name = transcode_item->add_dataelement("PatientName"_tag, dicom::VR::PN);
+		if (!transcode_name.from_string_view(latin1_name)) {
+			fail("nested item raw Latin-1 assignment should succeed");
+		}
+		bool replaced = false;
+		transcode_item_file.set_specific_charset(
+		    dicom::SpecificCharacterSet::ISO_IR_192,
+		    dicom::CharsetEncodeErrorPolicy::strict, &replaced);
+		if (replaced) {
+			fail("nested item strict transcode to UTF-8 should not require replacement");
+		}
+		const auto transcoded_name = transcode_name.to_utf8_string();
+		if (!transcoded_name || *transcoded_name != utf8_latin1_name) {
+			fail("root set_specific_charset should transcode nested item using the item's local charset");
+		}
+		const auto transcoded_raw = transcode_name.to_string_view();
+		if (!transcoded_raw || *transcoded_raw != utf8_latin1_name) {
+			fail("nested item raw bytes should be rewritten to UTF-8 after subtree transcode");
+		}
+		const auto item_charset =
+		    transcode_item->get_dataelement("SpecificCharacterSet"_tag).to_string_view();
+		if (!item_charset || *item_charset != "ISO_IR 192") {
+			fail("subtree transcode should update nested item local SpecificCharacterSet");
+		}
+	}
+
+	{
+		const std::string utf8_latin1_name("Gr\xC3\xB6\xC3\x9F" "e", 7);
+		const std::string latin1_name("Gr\xF6\xDF" "e", 5);
 		const std::array<std::uint8_t, 6> expected_name{
 		    static_cast<std::uint8_t>('G'), static_cast<std::uint8_t>('r'), 0xF6u, 0xDFu,
 		    static_cast<std::uint8_t>('e'), 0x20u};
@@ -264,10 +371,7 @@ int main() {
 		    "ISO 2022 IR 100 should omit the initial G1 escape");
 
 		dicom::DicomFile raw_file;
-		auto& raw_charset = raw_file.add_dataelement("SpecificCharacterSet"_tag, dicom::VR::CS);
-		if (!raw_charset.from_string_view("ISO 2022 IR 100")) {
-			fail("ISO 2022 IR 100 SpecificCharacterSet raw assignment should succeed");
-		}
+		raw_file.set_declared_specific_charset(dicom::SpecificCharacterSet::ISO_2022_IR_100);
 		auto& raw_patient_name = raw_file.add_dataelement("PatientName"_tag, dicom::VR::PN);
 		if (!raw_patient_name.from_string_view(latin1_name)) {
 			fail("raw ISO 2022 IR 100 PatientName assignment should succeed");
@@ -278,10 +382,7 @@ int main() {
 		}
 
 		dicom::DicomFile escaped_file;
-		auto& escaped_charset = escaped_file.add_dataelement("SpecificCharacterSet"_tag, dicom::VR::CS);
-		if (!escaped_charset.from_string_view("ISO 2022 IR 100")) {
-			fail("escaped ISO 2022 IR 100 SpecificCharacterSet assignment should succeed");
-		}
+		escaped_file.set_declared_specific_charset(dicom::SpecificCharacterSet::ISO_2022_IR_100);
 		auto& escaped_patient_name = escaped_file.add_dataelement("PatientName"_tag, dicom::VR::PN);
 		const std::string escaped_latin1_name("\x1B\x2D\x41Gr\xF6\xDF" "e", 8);
 		if (!escaped_patient_name.from_string_view(escaped_latin1_name)) {
@@ -293,11 +394,8 @@ int main() {
 		}
 
 		dicom::DicomFile undeclared_escape_file;
-		auto& undeclared_charset =
-		    undeclared_escape_file.add_dataelement("SpecificCharacterSet"_tag, dicom::VR::CS);
-		if (!undeclared_charset.from_string_view("ISO 2022 IR 100")) {
-			fail("undeclared escape charset assignment should succeed");
-		}
+		undeclared_escape_file.set_declared_specific_charset(
+		    dicom::SpecificCharacterSet::ISO_2022_IR_100);
 		auto& undeclared_name =
 		    undeclared_escape_file.add_dataelement("PatientName"_tag, dicom::VR::PN);
 		const std::string utf8_cyrillic_name(
@@ -312,11 +410,8 @@ int main() {
 		}
 
 		dicom::DicomFile unknown_escape_file;
-		auto& unknown_escape_charset =
-		    unknown_escape_file.add_dataelement("SpecificCharacterSet"_tag, dicom::VR::CS);
-		if (!unknown_escape_charset.from_string_view("ISO 2022 IR 100")) {
-			fail("unknown escape charset assignment should succeed");
-		}
+		unknown_escape_file.set_declared_specific_charset(
+		    dicom::SpecificCharacterSet::ISO_2022_IR_100);
 		auto& unknown_escape_name =
 		    unknown_escape_file.add_dataelement("PatientName"_tag, dicom::VR::PN);
 		const std::string unknown_escape_raw("\x1B\x25\x47" "A", 4);
@@ -459,11 +554,7 @@ int main() {
 		    "ISO_IR 144 write should encode Cyrillic bytes");
 
 		dicom::DicomFile raw_cyrillic_file;
-		auto& raw_charset =
-		    raw_cyrillic_file.add_dataelement("SpecificCharacterSet"_tag, dicom::VR::CS);
-		if (!raw_charset.from_string_view("ISO_IR 144")) {
-			fail("ISO_IR 144 SpecificCharacterSet raw assignment should succeed");
-		}
+		raw_cyrillic_file.set_declared_specific_charset(dicom::SpecificCharacterSet::ISO_IR_144);
 		auto& raw_patient_name = raw_cyrillic_file.add_dataelement("PatientName"_tag, dicom::VR::PN);
 		if (!raw_patient_name.from_string_view(cyrillic_name)) {
 			fail("raw ISO_IR 144 PatientName assignment should succeed");
@@ -517,10 +608,7 @@ int main() {
 		    "ISO 2022 IR 149 should omit the initial G1 escape");
 
 		dicom::DicomFile raw_file;
-		auto& raw_charset = raw_file.add_dataelement("SpecificCharacterSet"_tag, dicom::VR::CS);
-		if (!raw_charset.from_string_view("ISO 2022 IR 149")) {
-			fail("ISO 2022 IR 149 SpecificCharacterSet raw assignment should succeed");
-		}
+		raw_file.set_declared_specific_charset(dicom::SpecificCharacterSet::ISO_2022_IR_149);
 		auto& raw_patient_name = raw_file.add_dataelement("PatientName"_tag, dicom::VR::PN);
 		if (!raw_patient_name.from_string_view(
 		        std::string(reinterpret_cast<const char*>(ksx1001_bytes.data()), ksx1001_bytes.size()))) {
@@ -548,10 +636,7 @@ int main() {
 		    "ISO 2022 IR 58 should omit the initial G1 escape");
 
 		dicom::DicomFile raw_file;
-		auto& raw_charset = raw_file.add_dataelement("SpecificCharacterSet"_tag, dicom::VR::CS);
-		if (!raw_charset.from_string_view("ISO 2022 IR 58")) {
-			fail("ISO 2022 IR 58 SpecificCharacterSet raw assignment should succeed");
-		}
+		raw_file.set_declared_specific_charset(dicom::SpecificCharacterSet::ISO_2022_IR_58);
 		auto& raw_patient_name = raw_file.add_dataelement("PatientName"_tag, dicom::VR::PN);
 		if (!raw_patient_name.from_string_view(
 		        std::string(reinterpret_cast<const char*>(gb2312_bytes.data()), gb2312_bytes.size()))) {
@@ -580,6 +665,28 @@ int main() {
 		const auto decoded_name = roundtrip->get_dataelement("PatientName"_tag).to_utf8_string();
 		if (!decoded_name || *decoded_name != utf8_jis0208) {
 			fail("ISO 2022 IR 87 roundtrip mismatch");
+		}
+
+		dicom::DicomFile raw_jis_punct_file;
+		raw_jis_punct_file.set_declared_specific_charset(dicom::SpecificCharacterSet::ISO_2022_IR_87);
+		auto& raw_jis_punct =
+		    raw_jis_punct_file.add_dataelement(dicom::Tag(0x0008u, 0x1030u), dicom::VR::LO);
+		const std::string raw_fullwidth_plus("\x21\x5C", 2);
+		if (!raw_jis_punct.from_string_view(raw_fullwidth_plus)) {
+			fail("raw ISO 2022 IR 87 LO assignment should succeed");
+		}
+		const std::string utf8_fullwidth_plus("\xEF\xBC\x8B", 3);
+		const auto decoded_punct = raw_jis_punct.to_utf8_string();
+		if (!decoded_punct || *decoded_punct != utf8_fullwidth_plus) {
+			fail("to_utf8_string should not split raw ISO 2022 IR 87 multibyte text on 0x5C");
+		}
+		if (raw_jis_punct.to_string_views()) {
+			fail("to_string_views should not split raw ISO 2022 IR 87 multibyte text on 0x5C");
+		}
+		const auto decoded_punct_values = raw_jis_punct.to_utf8_strings();
+		if (!decoded_punct_values || decoded_punct_values->size() != 1 ||
+		    decoded_punct_values->front() != utf8_fullwidth_plus) {
+			fail("to_utf8_strings should preserve single-valued ISO 2022 IR 87 text containing raw 0x5C");
 		}
 
 		const std::string utf8_jis0212("\xE4\xB8\x82", 3);
@@ -632,10 +739,7 @@ int main() {
 		    "ISO 2022 IR 13 should omit the initial G1 escape");
 
 		dicom::DicomFile escaped_file;
-		auto& escaped_charset = escaped_file.add_dataelement("SpecificCharacterSet"_tag, dicom::VR::CS);
-		if (!escaped_charset.from_string_view("ISO 2022 IR 13")) {
-			fail("ISO 2022 IR 13 SpecificCharacterSet assignment should succeed");
-		}
+		escaped_file.set_declared_specific_charset(dicom::SpecificCharacterSet::ISO_2022_IR_13);
 		auto& escaped_patient_name = escaped_file.add_dataelement("PatientName"_tag, dicom::VR::PN);
 		const std::string escaped_katakana_name("\x1B\x29\x49\xB6\xC5", 5);
 		if (!escaped_patient_name.from_string_view(escaped_katakana_name)) {
@@ -657,10 +761,9 @@ int main() {
 		    "ISO 2022 IR 13", "ISO 2022 IR 87"};
 
 		dicom::DicomFile japanese_file;
-		auto& charset = japanese_file.add_dataelement("SpecificCharacterSet"_tag, dicom::VR::CS);
-		if (!charset.from_string_views(expected_charsets)) {
-			fail("multi-term SpecificCharacterSet assignment should succeed");
-		}
+		japanese_file.set_declared_specific_charset({
+		    dicom::SpecificCharacterSet::ISO_2022_IR_13,
+		    dicom::SpecificCharacterSet::ISO_2022_IR_87});
 		auto& patient_name = japanese_file.add_dataelement("PatientName"_tag, dicom::VR::PN);
 		if (!patient_name.from_utf8_view(utf8_japanese_name)) {
 			fail("multi-term Japanese UTF-8 input assignment should succeed");
@@ -712,10 +815,9 @@ int main() {
 		const std::array<std::uint8_t, 4> expected_bytes{0xB6u, 0x5Cu, 0xC5u, 0x20u};
 
 		dicom::DicomFile japanese_file;
-		auto& charset = japanese_file.add_dataelement("SpecificCharacterSet"_tag, dicom::VR::CS);
-		if (!charset.from_string_views(japanese_charsets)) {
-			fail("multi-term reset SpecificCharacterSet assignment should succeed");
-		}
+		japanese_file.set_declared_specific_charset({
+		    dicom::SpecificCharacterSet::ISO_2022_IR_13,
+		    dicom::SpecificCharacterSet::ISO_2022_IR_87});
 		auto& patient_name = japanese_file.add_dataelement("PatientName"_tag, dicom::VR::PN);
 		if (!patient_name.from_utf8_views(japanese_values)) {
 			fail("multi-term reset UTF-8 multi-value assignment should succeed");
@@ -741,11 +843,9 @@ int main() {
 		const std::string raw_name("\x47\x72\x1B\x2D\x4C\xBF\x5E\xF1", 8);
 
 		dicom::DicomFile latin_cyrillic_file;
-		auto& charset =
-		    latin_cyrillic_file.add_dataelement("SpecificCharacterSet"_tag, dicom::VR::CS);
-		if (!charset.from_string_views(latin_cyrillic_charsets)) {
-			fail("Latin/Cyrillic multi-term SpecificCharacterSet assignment should succeed");
-		}
+		latin_cyrillic_file.set_declared_specific_charset({
+		    dicom::SpecificCharacterSet::ISO_2022_IR_100,
+		    dicom::SpecificCharacterSet::ISO_2022_IR_144});
 		auto& patient_name =
 		    latin_cyrillic_file.add_dataelement("PatientName"_tag, dicom::VR::PN);
 		if (!patient_name.from_string_view(raw_name)) {
@@ -774,10 +874,7 @@ int main() {
 		    "GBK write should encode GBK bytes");
 
 		dicom::DicomFile raw_gbk_file;
-		auto& raw_charset = raw_gbk_file.add_dataelement("SpecificCharacterSet"_tag, dicom::VR::CS);
-		if (!raw_charset.from_string_view("GBK")) {
-			fail("GBK SpecificCharacterSet raw assignment should succeed");
-		}
+		raw_gbk_file.set_declared_specific_charset(dicom::SpecificCharacterSet::GBK);
 		auto& raw_patient_name = raw_gbk_file.add_dataelement("PatientName"_tag, dicom::VR::PN);
 		if (!raw_patient_name.from_string_view(
 		        std::string(reinterpret_cast<const char*>(gbk_bytes.data()), gbk_bytes.size()))) {
@@ -786,6 +883,22 @@ int main() {
 		const auto decoded_name = raw_patient_name.to_utf8_string();
 		if (!decoded_name || *decoded_name != utf8_chinese) {
 			fail("to_utf8_string should decode raw GBK text");
+		}
+		dicom::DicomFile raw_gbk_punct_file;
+		raw_gbk_punct_file.set_declared_specific_charset(dicom::SpecificCharacterSet::GBK);
+		auto& raw_gbk_punct =
+		    raw_gbk_punct_file.add_dataelement(dicom::Tag(0x0008u, 0x1030u), dicom::VR::LO);
+		const std::string raw_gbk_hyphen("\xA9\x5C", 2);
+		if (!raw_gbk_punct.from_string_view(raw_gbk_hyphen)) {
+			fail("raw GBK LO assignment should succeed");
+		}
+		const std::string utf8_hyphen("\xE2\x80\x90", 3);
+		if (raw_gbk_punct.to_string_views()) {
+			fail("to_string_views should reject raw GBK value splitting when 0x5C can be a trail byte");
+		}
+		const auto decoded_hyphen = raw_gbk_punct.to_utf8_string();
+		if (!decoded_hyphen || *decoded_hyphen != utf8_hyphen) {
+			fail("to_utf8_string should decode raw GBK text containing trail-byte 0x5C");
 		}
 
 		dicom::DicomFile failing_file;
@@ -814,10 +927,7 @@ int main() {
 		    "GB18030 write should encode four-byte sequence");
 
 		dicom::DicomFile raw_file;
-		auto& raw_charset = raw_file.add_dataelement("SpecificCharacterSet"_tag, dicom::VR::CS);
-		if (!raw_charset.from_string_view("GB18030")) {
-			fail("GB18030 SpecificCharacterSet raw assignment should succeed");
-		}
+		raw_file.set_declared_specific_charset(dicom::SpecificCharacterSet::GB18030);
 		auto& raw_patient_name = raw_file.add_dataelement("PatientName"_tag, dicom::VR::PN);
 		if (!raw_patient_name.from_string_view(
 		        std::string(reinterpret_cast<const char*>(gb18030_bytes.data()), gb18030_bytes.size()))) {
@@ -827,16 +937,29 @@ int main() {
 		if (!decoded_name || *decoded_name != utf8_extension_b) {
 			fail("to_utf8_string should decode raw GB18030 text");
 		}
+		dicom::DicomFile raw_gb18030_punct_file;
+		raw_gb18030_punct_file.set_declared_specific_charset(dicom::SpecificCharacterSet::GB18030);
+		auto& raw_gb18030_punct =
+		    raw_gb18030_punct_file.add_dataelement(dicom::Tag(0x0008u, 0x1030u), dicom::VR::LO);
+		const std::string raw_gb18030_hyphen("\xA9\x5C", 2);
+		if (!raw_gb18030_punct.from_string_view(raw_gb18030_hyphen)) {
+			fail("raw GB18030 LO assignment should succeed");
+		}
+		const std::string utf8_hyphen("\xE2\x80\x90", 3);
+		if (raw_gb18030_punct.to_string_views()) {
+			fail("to_string_views should reject raw GB18030 value splitting when 0x5C can be a trail byte");
+		}
+		const auto decoded_hyphen = raw_gb18030_punct.to_utf8_string();
+		if (!decoded_hyphen || *decoded_hyphen != utf8_hyphen) {
+			fail("to_utf8_string should decode raw GB18030 text containing trail-byte 0x5C");
+		}
 	}
 
 	{
 		const std::string utf8_name_with_spaces(
 		    "\xED\x99\x8D\xEA\xB8\xB8\xEB\x8F\x99  ", 11);
 		dicom::DicomFile raw_utf8_file;
-		auto& charset = raw_utf8_file.add_dataelement("SpecificCharacterSet"_tag, dicom::VR::CS);
-		if (!charset.from_string_view("ISO_IR 192")) {
-			fail("ISO_IR 192 SpecificCharacterSet raw assignment should succeed");
-		}
+		raw_utf8_file.set_declared_specific_charset(dicom::SpecificCharacterSet::ISO_IR_192);
 		auto& patient_name = raw_utf8_file.add_dataelement("PatientName"_tag, dicom::VR::PN);
 		if (!patient_name.from_string_view(utf8_name_with_spaces)) {
 			fail("raw ISO_IR 192 PatientName assignment should succeed");
@@ -855,5 +978,3 @@ int main() {
 
 	return 0;
 }
-
-

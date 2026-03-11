@@ -9,8 +9,30 @@
 #include <algorithm>
 #include <bit>
 #include <fmt/format.h>
+#include <memory>
+#include <mutex>
+#include <unordered_map>
 
 namespace dicom::charset::detail {
+
+namespace {
+
+struct CharsetTermsHash {
+	std::size_t operator()(const std::vector<SpecificCharacterSet>& terms) const noexcept {
+		std::size_t seed = terms.size();
+		for (const auto term : terms) {
+			const auto value = static_cast<std::size_t>(static_cast<std::uint32_t>(term));
+			seed ^= value + 0x9E3779B97F4A7C15ull + (seed << 6u) + (seed >> 2u);
+		}
+		return seed;
+	}
+};
+
+std::mutex charset_spec_pool_mutex;
+std::unordered_map<std::vector<SpecificCharacterSet>, std::unique_ptr<CharsetSpec>, CharsetTermsHash>
+    charset_spec_pool;
+
+}  // namespace
 
 bool is_supported_passthrough_charset(SpecificCharacterSet charset) noexcept {
 	switch (charset) {
@@ -70,6 +92,30 @@ bool is_supported_iso_2022_single_byte_charset(SpecificCharacterSet charset) noe
 
 ParsedSpecificCharacterSet default_specific_character_set_plan() {
 	return ParsedSpecificCharacterSet{{SpecificCharacterSet::NONE}, SpecificCharacterSet::NONE};
+}
+
+const CharsetSpec* default_charset_spec() noexcept {
+	static const CharsetSpec kDefault = default_specific_character_set_plan();
+	return &kDefault;
+}
+
+const CharsetSpec* intern_charset_spec(CharsetSpec spec) {
+	if (spec.terms.empty()) {
+		spec = default_specific_character_set_plan();
+	}
+	if (spec.primary == SpecificCharacterSet::Unknown) {
+		spec.primary = spec.terms.front();
+	}
+
+	std::lock_guard<std::mutex> lock(charset_spec_pool_mutex);
+	if (const auto it = charset_spec_pool.find(spec.terms); it != charset_spec_pool.end()) {
+		return it->second.get();
+	}
+
+	auto owned = std::make_unique<CharsetSpec>(std::move(spec));
+	const auto* ptr = owned.get();
+	charset_spec_pool.emplace(ptr->terms, std::move(owned));
+	return ptr;
 }
 
 std::optional<ParsedSpecificCharacterSet> parse_charset_terms(
@@ -133,11 +179,11 @@ std::optional<ParsedSpecificCharacterSet> parse_charset_element(
 
 std::optional<ParsedSpecificCharacterSet> parse_dataset_charset(
     const DataSet& dataset, std::string* out_error) {
-	const DataElement& element = dataset[kSpecificCharacterSetTag];
-	if (element.is_missing()) {
-		return default_specific_character_set_plan();
+	const auto* effective = dataset.effective_charset_spec(out_error);
+	if (!effective) {
+		return std::nullopt;
 	}
-	return parse_charset_element(element, out_error);
+	return *effective;
 }
 
 bool same_charset_terms(

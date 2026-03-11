@@ -1,6 +1,6 @@
 # Dictionary Generator Usage
 
-`misc/dictionary`는 DICOM dictionary 계열 산출물을 갱신하는 경로다.  
+`misc/dictionary`는 DICOM dictionary 계열 산출물을 갱신하는 경로다.
 `misc/charset`와 달리 dictionary 쪽은 표준 개정 시 갱신 빈도가 높아서, 업데이트 절차와 일상적인 재생성 절차를 분리해서 관리한다.
 
 ## 대상 산출물
@@ -131,7 +131,7 @@ python misc/dictionary/extract_part03_specific_character_sets.py
 
 - `misc/dictionary/_specific_character_sets.tsv`
 
-기본 동작은 `current` DICOM XML을 내려받아 `misc/dictionary/part06.xml`, `misc/dictionary/part03.xml`로 저장한 뒤 추출한다.  
+기본 동작은 `current` DICOM XML을 내려받아 `misc/dictionary/part06.xml`, `misc/dictionary/part03.xml`로 저장한 뒤 추출한다.
 원하면 XML 경로를 직접 인자로 넘길 수 있다.
 
 예시:
@@ -157,7 +157,7 @@ ctest --test-dir build-msyscheck -R dictionary_generator_regression --output-on-
 - `_uid_registry.tsv -> uid_lookup_tables.hpp`
 - `_specific_character_sets.tsv -> specific_character_set_registry.hpp`
 
-즉, 네트워크 다운로드나 표준 추출 단계는 회귀 테스트 범위에 넣지 않는다.  
+즉, 네트워크 다운로드나 표준 추출 단계는 회귀 테스트 범위에 넣지 않는다.
 회귀 테스트는 deterministic한 TSV -> header 생성만 본다.
 
 ## 권장 작업 흐름

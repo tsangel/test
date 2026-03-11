@@ -47,7 +47,7 @@
 #
 #	1. JIS X 0212 apparently unified the following two symbols
 #	   into a single character at 0x2922:
-#	
+#
 #	   LATIN CAPITAL LETTER D WITH STROKE
 #	   LATIN CAPITAL LETTER ETH
 #
@@ -74,7 +74,7 @@
 #
 #  Use the Unicode reporting form <http://www.unicode.org/reporting.html>
 #    for any questions or comments or to report errors in the data.
-#	  
+#
 0x222F	0x02D8	# BREVE
 0x2230	0x02C7	# CARON (Mandarin Chinese third tone)
 0x2231	0x00B8	# CEDILLA

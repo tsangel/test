@@ -1,6 +1,7 @@
 #include <dicom.h>
 #include <dicom_endian.h>
 #include "charset/charset_decode.hpp"
+#include "charset/charset_detail.hpp"
 #include "charset/charset_mutation.hpp"
 #include <diagnostics.h>
 
@@ -33,6 +34,34 @@ bool report_from_assignment_failure(
 	diag::error("{} tag={} vr={} reason={}",
 	    function_name, element.tag().to_string(), element.vr().str(), reason);
 	return false;
+}
+
+bool raw_string_splitting_is_safe(const DataElement& element) {
+	if (!element.vr().uses_specific_character_set()) {
+		return true;
+	}
+	const auto* parent = element.parent();
+	if (!parent) {
+		return true;
+	}
+	auto parsed = charset::detail::parse_dataset_charset(*parent, nullptr);
+	if (!parsed) {
+		return true;
+	}
+	if (parsed->is_multi_term()) {
+		return false;
+	}
+	switch (parsed->primary) {
+	case SpecificCharacterSet::GBK:
+	case SpecificCharacterSet::GB18030:
+	case SpecificCharacterSet::ISO_2022_IR_149:
+	case SpecificCharacterSet::ISO_2022_IR_58:
+	case SpecificCharacterSet::ISO_2022_IR_87:
+	case SpecificCharacterSet::ISO_2022_IR_159:
+		return false;
+	default:
+		return true;
+	}
 }
 
 template <typename T>
@@ -1745,6 +1774,9 @@ std::optional<std::string_view> DataElement::to_string_view() const {
 
 std::optional<std::vector<std::string_view>> DataElement::to_string_views() const {
 	if (!vr_.is_string()) {
+		return std::nullopt;
+	}
+	if (!raw_string_splitting_is_safe(*this)) {
 		return std::nullopt;
 	}
 	const auto span = value_span();

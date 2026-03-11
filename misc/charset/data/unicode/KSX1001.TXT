@@ -32,11 +32,11 @@
 # and Unicode 2.0. Hence, in this pacakge, I renamed it as UHC.TXT
 #
 # Please, note that there was a change in naming scheme of
-# Korean standard for information exchange. 
-# What used to be in KS C 5[6-8]xx are now in KS X xxxx. 
+# Korean standard for information exchange.
+# What used to be in KS C 5[6-8]xx are now in KS X xxxx.
 # See http://pantheon.yale.edu/~jshin/faq/qa8.html for more details.
 #
-# The Unix command  used is 
+# The Unix command  used is
 # egrep '^0x' < KSC5601.TXT |   \
 # egrep -v '^0x([8-9]...|A0..|..[4-9].|..A0)' | perl tab.pl
 #
@@ -55,9 +55,9 @@
 #            in hex as 0xXXXX
 # Column #2 : the Unicode (in hex as 0xXXXX)
 # Column #3 : the Unicode name (following a comment sign, '#')
-# The number of characters enumerated in this table is 8824, 
+# The number of characters enumerated in this table is 8824,
 # as listed in KS X 1001
-# 
+#
 # The entries are in KS X 1001 order
 # You can use the following algorithms to convert the hex form
 # of KS X 1001 to other forms
@@ -79,7 +79,7 @@
 #
 #  Use the Unicode reporting form <http://www.unicode.org/reporting.html>
 #    for any questions or comments or to report errors in the data.
-# 
+#
 0x2121  0x3000  # IDEOGRAPHIC SPACE
 0x2122  0x3001  # IDEOGRAPHIC COMMA
 0x2123  0x3002  # IDEOGRAPHIC FULL STOP

@@ -2,17 +2,11 @@
 
 #include <span>
 #include <string>
-#include <unordered_map>
-#include <vector>
 
 #include "charset/charset_detail.hpp"
 #include "dicom.h"
 
 namespace dicom::charset::detail {
-
-struct PreparedCharsetMutation {
-	std::unordered_map<DataElement*, std::vector<std::uint8_t>> encoded_values{};
-};
 
 [[nodiscard]] bool validate_declared_charset(
     const ParsedSpecificCharacterSet& parsed, std::string* out_error);
@@ -42,19 +36,15 @@ struct PreparedCharsetMutation {
     const ParsedSpecificCharacterSet& target_charset, CharsetEncodeErrorPolicy errors,
     std::string* out_error, bool* out_replaced);
 
-[[nodiscard]] bool prepare_charset_mutation(DataSet& dataset,
-    const ParsedSpecificCharacterSet& source_charset,
-    const ParsedSpecificCharacterSet& target_charset, bool reuse_raw_values,
-    CharsetEncodeErrorPolicy errors,
-    PreparedCharsetMutation& prepared, std::string* out_error, bool* out_replaced);
+[[nodiscard]] bool validate_charset_values(DataSet& dataset,
+    const ParsedSpecificCharacterSet& target_charset, std::string* out_error,
+    bool* out_replaced);
 [[nodiscard]] bool rewrite_charset_values(DataSet& dataset,
-    const ParsedSpecificCharacterSet& source_charset,
-    const ParsedSpecificCharacterSet& target_charset, bool reuse_raw_values,
-    CharsetEncodeErrorPolicy errors,
+    const ParsedSpecificCharacterSet& target_charset, CharsetEncodeErrorPolicy errors,
     std::string* out_error, bool* out_replaced);
 
 [[nodiscard]] bool apply_declared_charset(
     DataSet& dataset, const ParsedSpecificCharacterSet& parsed, std::string* out_error);
-DataSet& root_dataset_for_edit(DataSet& dataset);
+DataSet& ensure_dataset_loaded_for_edit(DataSet& dataset);
 
 }  // namespace dicom::charset::detail

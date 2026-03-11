@@ -8,158 +8,222 @@
 
 namespace dicom::charset::detail {
 
+namespace {
+
+constexpr bool is_trim_char(char ch) noexcept {
+	return ch == ' ' || ch == '\0';
+}
+
+void trim_leading(std::string_view& view) noexcept {
+	while (!view.empty() && is_trim_char(view.front())) {
+		view.remove_prefix(1);
+	}
+}
+
+void trim_trailing(std::string_view& view) noexcept {
+	while (!view.empty() && is_trim_char(view.back())) {
+		view.remove_suffix(1);
+	}
+}
+
+std::string_view trim_decoded_component(std::string_view value, bool trim_front) noexcept {
+	if (trim_front) {
+		trim_leading(value);
+	}
+	trim_trailing(value);
+	return value;
+}
+
+std::optional<std::vector<std::string>> split_decoded_text_values(
+    VR vr, const std::string& decoded) {
+	std::vector<std::string> values;
+	const auto push_single = [&](bool trim_front) -> std::optional<std::vector<std::string>> {
+		auto view = trim_decoded_component(decoded, trim_front);
+		values.emplace_back(view);
+		return values;
+	};
+
+	switch (static_cast<std::uint16_t>(vr)) {
+	case VR::AE_val:
+	case VR::AS_val:
+	case VR::CS_val:
+	case VR::DA_val:
+	case VR::DS_val:
+	case VR::DT_val:
+	case VR::IS_val:
+	case VR::LO_val:
+	case VR::PN_val:
+	case VR::SH_val:
+	case VR::TM_val:
+	case VR::UI_val:
+	case VR::UC_val: {
+		const bool trim_front = vr != VR::UC;
+		std::size_t start = 0;
+		while (start <= decoded.size()) {
+			const auto next = decoded.find('\\', start);
+			const auto len =
+			    (next == std::string::npos) ? (decoded.size() - start) : (next - start);
+			auto token = std::string_view(decoded).substr(start, len);
+			token = trim_decoded_component(token, trim_front);
+			values.emplace_back(token);
+			if (next == std::string::npos) {
+				break;
+			}
+			start = next + 1;
+		}
+		return values;
+	}
+	case VR::UR_val:
+		return push_single(true);
+	case VR::LT_val:
+	case VR::ST_val:
+	case VR::UT_val:
+		return push_single(false);
+	default:
+		return std::nullopt;
+	}
+}
+
+std::string_view raw_text_bytes(const DataElement& element) noexcept {
+	const auto span = element.value_span();
+	return std::string_view(reinterpret_cast<const char*>(span.data()), span.size());
+}
+
+std::optional<std::string> decode_raw_text_to_utf8(
+    const DataElement& element, const ParsedSpecificCharacterSet& source_charset_plan,
+    DecodeReplacementMode decode_mode, std::string* out_error, bool* out_replaced) {
+	const auto raw_value = raw_text_bytes(element);
+	if (source_charset_plan.is_multi_term()) {
+		auto converted = decode_iso_2022_charset_plan_to_utf8(
+		    raw_value, source_charset_plan, element.vr(), decode_mode, out_error, out_replaced);
+		if (!converted) {
+			if (out_error && !out_error->empty()) {
+				*out_error =
+				    fmt::format("CHARSET_UNSUPPORTED tag={} {}", element.tag().to_string(), *out_error);
+			}
+			return std::nullopt;
+		}
+		return converted;
+	}
+
+	const auto source_charset = source_charset_plan.primary;
+	if (is_iso2022_charset(source_charset)) {
+		ParsedSpecificCharacterSet single_term_plan{{source_charset}, source_charset};
+		auto converted = decode_iso_2022_charset_plan_to_utf8(
+		    raw_value, single_term_plan, element.vr(), decode_mode, out_error, out_replaced);
+		if (!converted) {
+			if (out_error && !out_error->empty()) {
+				*out_error =
+				    fmt::format("CHARSET_UNSUPPORTED tag={} {}", element.tag().to_string(), *out_error);
+			}
+			return std::nullopt;
+		}
+		return converted;
+	}
+
+	switch (source_charset) {
+	case SpecificCharacterSet::NONE:
+	case SpecificCharacterSet::ISO_IR_6:
+		if (decode_mode == DecodeReplacementMode::strict && !validate_ascii(raw_value)) {
+			set_error(out_error,
+			    fmt::format(
+			        "CHARSET_UNSUPPORTED tag={} reason=element value is not valid for source charset",
+			        element.tag().to_string()));
+			return std::nullopt;
+		}
+		if (decode_mode == DecodeReplacementMode::strict) {
+			return std::string(raw_value);
+		}
+		return decode_sbcs_raw_to_utf8(raw_value, source_charset, decode_mode, out_error, out_replaced);
+	case SpecificCharacterSet::ISO_IR_192:
+	{
+		if (decode_mode == DecodeReplacementMode::strict && !validate_utf8(raw_value)) {
+			set_error(out_error,
+			    fmt::format(
+			        "CHARSET_UNSUPPORTED tag={} reason=element value is not valid for source charset",
+			        element.tag().to_string()));
+			return std::nullopt;
+		}
+		if (decode_mode == DecodeReplacementMode::strict) {
+			return std::string(raw_value);
+		}
+		std::string converted;
+		converted.reserve(raw_value.size() * 3u);
+		std::size_t offset = 0;
+		while (offset < raw_value.size()) {
+			const auto start = offset;
+			std::uint32_t codepoint = 0;
+			if (decode_utf8_codepoint(raw_value, offset, codepoint)) {
+				converted.append(raw_value.substr(start, offset - start));
+				continue;
+			}
+			const auto byte = static_cast<std::uint8_t>(raw_value[start]);
+			append_decode_replacement(
+			    converted, decode_mode, std::span<const std::uint8_t>(&byte, 1), out_replaced);
+			offset = start + 1u;
+		}
+		return converted;
+	}
+	case SpecificCharacterSet::ISO_IR_100:
+	case SpecificCharacterSet::ISO_IR_101:
+	case SpecificCharacterSet::ISO_IR_109:
+	case SpecificCharacterSet::ISO_IR_110:
+	case SpecificCharacterSet::ISO_IR_144:
+	case SpecificCharacterSet::ISO_IR_127:
+	case SpecificCharacterSet::ISO_IR_126:
+	case SpecificCharacterSet::ISO_IR_138:
+	case SpecificCharacterSet::ISO_IR_148:
+	case SpecificCharacterSet::ISO_IR_203:
+	case SpecificCharacterSet::ISO_IR_13:
+	case SpecificCharacterSet::ISO_IR_166: {
+		auto converted =
+		    decode_sbcs_raw_to_utf8(raw_value, source_charset, decode_mode, out_error, out_replaced);
+		if (!converted && out_error && !out_error->empty()) {
+			*out_error =
+			    fmt::format("CHARSET_UNSUPPORTED tag={} {}", element.tag().to_string(), *out_error);
+		}
+		return converted;
+	}
+	case SpecificCharacterSet::GB18030: {
+		auto converted =
+		    gb18030_to_utf8_string(raw_value, true, "GB18030", decode_mode, out_error, out_replaced);
+		if (!converted && out_error && !out_error->empty()) {
+			*out_error =
+			    fmt::format("CHARSET_UNSUPPORTED tag={} {}", element.tag().to_string(), *out_error);
+		}
+		return converted;
+	}
+	case SpecificCharacterSet::GBK: {
+		auto converted =
+		    gb18030_to_utf8_string(raw_value, false, "GBK", decode_mode, out_error, out_replaced);
+		if (!converted && out_error && !out_error->empty()) {
+			*out_error =
+			    fmt::format("CHARSET_UNSUPPORTED tag={} {}", element.tag().to_string(), *out_error);
+		}
+		return converted;
+	}
+	default:
+		set_error(out_error,
+		    fmt::format("CHARSET_UNSUPPORTED tag={} term={} reason=read charset is not implemented",
+		        element.tag().to_string(),
+		        specific_character_set_info(source_charset)
+		            ? specific_character_set_info(source_charset)->defined_term
+		            : std::string_view{"unknown"}));
+		return std::nullopt;
+	}
+}
+
+}  // namespace
+
 std::optional<std::vector<std::string>> decode_text_values(
     const DataElement& element, const ParsedSpecificCharacterSet& source_charset_plan,
     DecodeReplacementMode decode_mode, std::string* out_error, bool* out_replaced) {
-	const auto values = element.to_string_views();
-	if (!values) {
+	auto converted =
+	    decode_raw_text_to_utf8(element, source_charset_plan, decode_mode, out_error, out_replaced);
+	if (!converted) {
 		return std::nullopt;
 	}
-
-	std::vector<std::string> utf8_values;
-	utf8_values.reserve(values->size());
-	for (const auto raw_value : *values) {
-		if (source_charset_plan.is_multi_term()) {
-			auto converted = decode_iso_2022_charset_plan_to_utf8(
-			    raw_value, source_charset_plan, element.vr(), decode_mode, out_error, out_replaced);
-			if (!converted) {
-				if (out_error && !out_error->empty()) {
-					*out_error = fmt::format(
-					    "CHARSET_UNSUPPORTED tag={} {}", element.tag().to_string(), *out_error);
-				}
-				return std::nullopt;
-			}
-			utf8_values.push_back(std::move(*converted));
-			continue;
-		}
-
-		const auto source_charset = source_charset_plan.primary;
-		if (is_iso2022_charset(source_charset)) {
-			ParsedSpecificCharacterSet single_term_plan{{source_charset}, source_charset};
-			auto converted = decode_iso_2022_charset_plan_to_utf8(
-			    raw_value, single_term_plan, element.vr(), decode_mode, out_error, out_replaced);
-			if (!converted) {
-				if (out_error && !out_error->empty()) {
-					*out_error = fmt::format(
-					    "CHARSET_UNSUPPORTED tag={} {}", element.tag().to_string(), *out_error);
-				}
-				return std::nullopt;
-			}
-			utf8_values.push_back(std::move(*converted));
-			continue;
-		}
-
-		switch (source_charset) {
-		case SpecificCharacterSet::NONE:
-		case SpecificCharacterSet::ISO_IR_6:
-			if (decode_mode == DecodeReplacementMode::strict && !validate_ascii(raw_value)) {
-				set_error(out_error,
-				    fmt::format(
-				        "CHARSET_UNSUPPORTED tag={} reason=element value is not valid for source charset",
-				        element.tag().to_string()));
-				return std::nullopt;
-			}
-			if (decode_mode == DecodeReplacementMode::strict) {
-				utf8_values.emplace_back(raw_value);
-			} else {
-				auto converted = decode_sbcs_raw_to_utf8(
-				    raw_value, source_charset, decode_mode, out_error, out_replaced);
-				if (!converted) {
-					return std::nullopt;
-				}
-				utf8_values.push_back(std::move(*converted));
-			}
-			break;
-		case SpecificCharacterSet::ISO_IR_192:
-			if (decode_mode == DecodeReplacementMode::strict && !validate_utf8(raw_value)) {
-				set_error(out_error,
-				    fmt::format(
-				        "CHARSET_UNSUPPORTED tag={} reason=element value is not valid for source charset",
-				        element.tag().to_string()));
-				return std::nullopt;
-			}
-			if (decode_mode == DecodeReplacementMode::strict) {
-				utf8_values.emplace_back(raw_value);
-			} else {
-				std::string converted;
-				converted.reserve(raw_value.size() * 3u);
-				std::size_t offset = 0;
-				while (offset < raw_value.size()) {
-					const auto start = offset;
-					std::uint32_t codepoint = 0;
-					if (decode_utf8_codepoint(raw_value, offset, codepoint)) {
-						converted.append(raw_value.substr(start, offset - start));
-						continue;
-					}
-					const auto byte = static_cast<std::uint8_t>(raw_value[start]);
-					append_decode_replacement(
-					    converted, decode_mode, std::span<const std::uint8_t>(&byte, 1), out_replaced);
-					offset = start + 1u;
-				}
-				utf8_values.push_back(std::move(converted));
-			}
-			break;
-		case SpecificCharacterSet::ISO_IR_100:
-		case SpecificCharacterSet::ISO_IR_101:
-		case SpecificCharacterSet::ISO_IR_109:
-		case SpecificCharacterSet::ISO_IR_110:
-		case SpecificCharacterSet::ISO_IR_144:
-		case SpecificCharacterSet::ISO_IR_127:
-		case SpecificCharacterSet::ISO_IR_126:
-		case SpecificCharacterSet::ISO_IR_138:
-		case SpecificCharacterSet::ISO_IR_148:
-		case SpecificCharacterSet::ISO_IR_203:
-		case SpecificCharacterSet::ISO_IR_13:
-		case SpecificCharacterSet::ISO_IR_166: {
-			auto converted =
-			    decode_sbcs_raw_to_utf8(raw_value, source_charset, decode_mode, out_error, out_replaced);
-			if (!converted) {
-				if (out_error && !out_error->empty()) {
-					*out_error = fmt::format(
-					    "CHARSET_UNSUPPORTED tag={} {}", element.tag().to_string(), *out_error);
-				}
-				return std::nullopt;
-			}
-			utf8_values.push_back(std::move(*converted));
-			break;
-		}
-		case SpecificCharacterSet::GB18030: {
-			auto converted = gb18030_to_utf8_string(
-			    raw_value, true, "GB18030", decode_mode, out_error, out_replaced);
-			if (!converted) {
-				if (out_error && !out_error->empty()) {
-					*out_error = fmt::format(
-					    "CHARSET_UNSUPPORTED tag={} {}", element.tag().to_string(), *out_error);
-				}
-				return std::nullopt;
-			}
-			utf8_values.push_back(std::move(*converted));
-			break;
-		}
-		case SpecificCharacterSet::GBK: {
-			auto converted =
-			    gb18030_to_utf8_string(raw_value, false, "GBK", decode_mode, out_error, out_replaced);
-			if (!converted) {
-				if (out_error && !out_error->empty()) {
-					*out_error = fmt::format(
-					    "CHARSET_UNSUPPORTED tag={} {}", element.tag().to_string(), *out_error);
-				}
-				return std::nullopt;
-			}
-			utf8_values.push_back(std::move(*converted));
-			break;
-		}
-		default:
-			set_error(out_error,
-			    fmt::format("CHARSET_UNSUPPORTED tag={} term={} reason=read charset is not implemented",
-			        element.tag().to_string(),
-			        specific_character_set_info(source_charset)
-			            ? specific_character_set_info(source_charset)->defined_term
-			            : std::string_view{"unknown"}));
-			return std::nullopt;
-		}
-	}
-	return utf8_values;
+	return split_decoded_text_values(element.vr(), *converted);
 }
 
 std::optional<std::vector<std::string>> decode_text_values(
@@ -167,10 +231,7 @@ std::optional<std::vector<std::string>> decode_text_values(
     bool* out_replaced) {
 	const DataSet* dataset = nullptr;
 	if (auto* parent = element.parent()) {
-		dataset = parent->root_dataset();
-		if (!dataset) {
-			dataset = parent;
-		}
+		dataset = parent;
 	}
 	auto source_charset_plan =
 	    dataset ? parse_dataset_charset(*dataset, out_error)
@@ -240,11 +301,15 @@ std::optional<std::vector<std::uint8_t>> transcode_element_text(
 	return encoded;
 }
 
-bool prepare_charset_mutation(DataSet& dataset,
-    const ParsedSpecificCharacterSet& source_charset,
-    const ParsedSpecificCharacterSet& target_charset, bool reuse_raw_values,
-    CharsetEncodeErrorPolicy errors,
-    PreparedCharsetMutation& prepared, std::string* out_error, bool* out_replaced) {
+bool validate_charset_values(DataSet& dataset,
+    const ParsedSpecificCharacterSet& target_charset, std::string* out_error,
+    bool* out_replaced) {
+	auto source_charset = parse_dataset_charset(dataset, out_error);
+	if (!source_charset || !validate_declared_charset(*source_charset, out_error)) {
+		return false;
+	}
+	const bool reuse_raw_values = should_reuse_raw_values(*source_charset, target_charset);
+
 	for (auto& element : dataset) {
 		if (element.tag() == kSpecificCharacterSetTag) {
 			continue;
@@ -252,8 +317,7 @@ bool prepare_charset_mutation(DataSet& dataset,
 		if (auto* sequence = element.as_sequence()) {
 			for (const auto& item_dataset_ptr : *sequence) {
 				if (item_dataset_ptr &&
-				    !prepare_charset_mutation(*item_dataset_ptr, source_charset, target_charset,
-				        reuse_raw_values, errors, prepared, out_error, out_replaced)) {
+				    !validate_charset_values(*item_dataset_ptr, target_charset, out_error, out_replaced)) {
 					return false;
 				}
 			}
@@ -262,21 +326,24 @@ bool prepare_charset_mutation(DataSet& dataset,
 		if (!element.vr().uses_specific_character_set() || reuse_raw_values) {
 			continue;
 		}
-		auto encoded = transcode_element_text(
-		    element, source_charset, target_charset, errors, out_error, out_replaced);
-		if (!encoded) {
+		if (!transcode_element_text(
+		        element, *source_charset, target_charset, CharsetEncodeErrorPolicy::strict,
+		        out_error, out_replaced)) {
 			return false;
 		}
-		prepared.encoded_values.emplace(&element, std::move(*encoded));
 	}
 	return true;
 }
 
 bool rewrite_charset_values(DataSet& dataset,
-    const ParsedSpecificCharacterSet& source_charset,
-    const ParsedSpecificCharacterSet& target_charset, bool reuse_raw_values,
-    CharsetEncodeErrorPolicy errors,
+    const ParsedSpecificCharacterSet& target_charset, CharsetEncodeErrorPolicy errors,
     std::string* out_error, bool* out_replaced) {
+	auto source_charset = parse_dataset_charset(dataset, out_error);
+	if (!source_charset || !validate_declared_charset(*source_charset, out_error)) {
+		return false;
+	}
+	const bool reuse_raw_values = should_reuse_raw_values(*source_charset, target_charset);
+
 	for (auto& element : dataset) {
 		if (element.tag() == kSpecificCharacterSetTag) {
 			continue;
@@ -284,8 +351,8 @@ bool rewrite_charset_values(DataSet& dataset,
 		if (auto* sequence = element.as_sequence()) {
 			for (const auto& item_dataset_ptr : *sequence) {
 				if (item_dataset_ptr &&
-				    !rewrite_charset_values(*item_dataset_ptr, source_charset, target_charset,
-				        reuse_raw_values, errors, out_error, out_replaced)) {
+				    !rewrite_charset_values(
+				        *item_dataset_ptr, target_charset, errors, out_error, out_replaced)) {
 					return false;
 				}
 			}
@@ -295,13 +362,13 @@ bool rewrite_charset_values(DataSet& dataset,
 			continue;
 		}
 		auto encoded = transcode_element_text(
-		    element, source_charset, target_charset, errors, out_error, out_replaced);
+		    element, *source_charset, target_charset, errors, out_error, out_replaced);
 		if (!encoded) {
 			return false;
 		}
 		element.set_value_bytes(std::move(*encoded));
 	}
-	return true;
+	return apply_declared_charset(dataset, target_charset, out_error);
 }
 
 bool apply_declared_charset(
@@ -320,11 +387,7 @@ bool apply_declared_charset(
 	return true;
 }
 
-DataSet& root_dataset_for_edit(DataSet& dataset) {
-	if (auto* root = dataset.root_dataset()) {
-		root->ensure_loaded(Tag(0xFFFFu, 0xFFFFu));
-		return *root;
-	}
+DataSet& ensure_dataset_loaded_for_edit(DataSet& dataset) {
 	dataset.ensure_loaded(Tag(0xFFFFu, 0xFFFFu));
 	return dataset;
 }
@@ -355,13 +418,13 @@ std::optional<std::vector<std::string>> raw_element_as_owned_utf8_values(
 
 bool set_dataset_declared_charset(DataSet& dataset,
     std::span<const SpecificCharacterSet> charsets, std::string* out_error) {
-	auto& root_dataset = detail::root_dataset_for_edit(dataset);
+	auto& target_dataset = detail::ensure_dataset_loaded_for_edit(dataset);
 
 	auto parsed = detail::parse_charset_terms(charsets, "DataSet", out_error);
 	if (!parsed || !detail::validate_declared_charset(*parsed, out_error)) {
 		return false;
 	}
-	return detail::apply_declared_charset(root_dataset, *parsed, out_error);
+	return detail::apply_declared_charset(target_dataset, *parsed, out_error);
 }
 
 bool transcode_dataset_charset(DataSet& dataset, std::span<const SpecificCharacterSet> charsets,
@@ -369,39 +432,28 @@ bool transcode_dataset_charset(DataSet& dataset, std::span<const SpecificCharact
 	if (out_replaced) {
 		*out_replaced = false;
 	}
-	auto& root_dataset = detail::root_dataset_for_edit(dataset);
+	auto& target_dataset = detail::ensure_dataset_loaded_for_edit(dataset);
 
 	auto target_charset = detail::parse_charset_terms(charsets, "DataSet", out_error);
 	if (!target_charset || !detail::validate_declared_charset(*target_charset, out_error)) {
 		return false;
 	}
 
-	auto source_charset = detail::parse_dataset_charset(root_dataset, out_error);
-	if (!source_charset || !detail::validate_declared_charset(*source_charset, out_error)) {
-		return false;
-	}
-
-	const bool reuse_raw_values = detail::should_reuse_raw_values(*source_charset, *target_charset);
-	if (reuse_raw_values) {
-		return detail::apply_declared_charset(root_dataset, *target_charset, out_error);
-	}
-
 	if (errors == CharsetEncodeErrorPolicy::strict) {
-		detail::PreparedCharsetMutation prepared{};
-		if (!detail::prepare_charset_mutation(root_dataset, *source_charset, *target_charset,
-		        reuse_raw_values, errors, prepared, out_error, out_replaced)) {
+		if (!detail::validate_charset_values(target_dataset, *target_charset, out_error, out_replaced)) {
 			return false;
 		}
-		for (auto& [element, encoded] : prepared.encoded_values) {
-			element->set_value_bytes(std::move(encoded));
+		if (!detail::rewrite_charset_values(
+		        target_dataset, *target_charset, errors, out_error, out_replaced)) {
+			return false;
 		}
 	} else {
-		if (!detail::rewrite_charset_values(root_dataset, *source_charset, *target_charset,
-		        reuse_raw_values, errors, out_error, out_replaced)) {
+		if (!detail::rewrite_charset_values(
+		        target_dataset, *target_charset, errors, out_error, out_replaced)) {
 			return false;
 		}
 	}
-	return detail::apply_declared_charset(root_dataset, *target_charset, out_error);
+	return true;
 }
 
 }  // namespace dicom::charset

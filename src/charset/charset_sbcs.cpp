@@ -1,4 +1,4 @@
-﻿#include "charset/charset_detail.hpp"
+#include "charset/charset_detail.hpp"
 
 #include "charset/generated/sbcs_to_unicode_selected.hpp"
 #include "charset/text_validation.hpp"

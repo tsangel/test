@@ -1,4 +1,4 @@
-﻿#include "charset/charset_detail.hpp"
+#include "charset/charset_detail.hpp"
 
 #include "charset/generated/gb18030_tables.hpp"
 #include "charset/text_validation.hpp"

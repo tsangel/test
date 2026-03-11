@@ -1,4 +1,4 @@
-﻿import dicomsdl as dicom
+import dicomsdl as dicom
 
 
 def test_dataelement_utf8_helpers_roundtrip():
@@ -104,6 +104,17 @@ def test_write_bytes_omits_initial_iso2022_g0_designation():
 	assert roundtrip.get_dataelement("PatientName").to_utf8_string() == jis_name
 
 
+def test_to_string_views_rejects_raw_iso2022_splitting():
+	df = dicom.DicomFile()
+	df.set_declared_specific_charset("ISO 2022 IR 87")
+	lo_elem = df.dataset.add_dataelement(dicom.Tag(0x0008, 0x1030), dicom.VR.LO)
+	assert lo_elem.from_string_view(b"\x21\x5c".decode("latin1"))
+
+	assert lo_elem.to_string_views() is None
+	assert lo_elem.to_utf8_string() == "\uff0b"
+	assert lo_elem.to_utf8_strings() == ["\uff0b"]
+
+
 def test_write_bytes_omits_initial_iso2022_g1_designation():
 	latin1_name = "\u00f6"
 	df = dicom.DicomFile()
@@ -162,4 +173,3 @@ def test_set_specific_charset_errors_replacement_modes():
 	assert unicode_elem.from_utf8_view(korean_name)
 	unicode_df.set_specific_charset("ISO_IR 100", errors="replace_unicode_escape")
 	assert unicode_df.get_dataelement("PatientName").to_string_view() == "(U+D64D)(U+AE38)(U+B3D9)"
-

@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <array>
 #include <cstdint>
@@ -30,6 +30,8 @@ struct ParsedSpecificCharacterSet {
 	}
 };
 
+using CharsetSpec = ParsedSpecificCharacterSet;
+
 struct EncodedTextValue {
 	std::string bytes{};
 	bool ended_designated{false};
@@ -46,6 +48,8 @@ void set_error(std::string* out_error, std::string message);
     SpecificCharacterSet charset) noexcept;
 
 [[nodiscard]] ParsedSpecificCharacterSet default_specific_character_set_plan();
+[[nodiscard]] const CharsetSpec* default_charset_spec() noexcept;
+[[nodiscard]] const CharsetSpec* intern_charset_spec(CharsetSpec spec);
 [[nodiscard]] std::optional<ParsedSpecificCharacterSet> parse_charset_terms(
     std::span<const SpecificCharacterSet> terms, std::string_view origin, std::string* out_error);
 [[nodiscard]] std::optional<ParsedSpecificCharacterSet> parse_charset_values(

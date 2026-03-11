@@ -979,11 +979,7 @@ void DicomFile::set_declared_specific_charset(SpecificCharacterSet charset) {
 }
 
 void DicomFile::set_declared_specific_charset(std::span<const SpecificCharacterSet> charsets) {
-	std::string error;
-	if (charset::set_dataset_declared_charset(root_dataset_, charsets, &error)) {
-		return;
-	}
-	diag::error_and_throw("DicomFile::set_declared_specific_charset reason={}", error);
+	root_dataset_.set_declared_specific_charset(charsets);
 }
 
 void DicomFile::set_specific_charset(
@@ -995,12 +991,7 @@ void DicomFile::set_specific_charset(
 void DicomFile::set_specific_charset(
     std::span<const SpecificCharacterSet> charsets, CharsetEncodeErrorPolicy errors,
     bool* out_replaced) {
-	std::string error;
-	if (charset::transcode_dataset_charset(
-	        root_dataset_, charsets, errors, &error, out_replaced)) {
-		return;
-	}
-	diag::error_and_throw("DicomFile::set_specific_charset reason={}", error);
+	root_dataset_.set_specific_charset(charsets, errors, out_replaced);
 }
 
 std::unique_ptr<DicomFile> read_file(const std::string& path, ReadOptions options) {
