@@ -1288,6 +1288,119 @@ std::string generated_uid_to_string(const dicom::uid::Generated& uid) {
 	return std::string(value.data(), value.size());
 }
 
+std::optional<dicom::SpecificCharacterSet> parse_specific_character_set_option(
+    nb::handle value, const char* argument_name) {
+	if (value.is_none()) {
+		return std::nullopt;
+	}
+	if (!nb::isinstance<nb::str>(value)) {
+		throw nb::type_error((std::string(argument_name) + " must be str or None").c_str());
+	}
+	const auto term = nb::cast<std::string>(value);
+	if (term.empty()) {
+		return dicom::SpecificCharacterSet::NONE;
+	}
+	const auto charset = dicom::specific_character_set_from_term(term);
+	if (charset == dicom::SpecificCharacterSet::Unknown) {
+		const auto message = std::string("Unknown Specific Character Set: ") + term;
+		throw nb::value_error(message.c_str());
+	}
+	return charset;
+}
+
+std::vector<dicom::SpecificCharacterSet> parse_specific_character_sets_option(
+    nb::handle value, const char* argument_name) {
+	if (value.is_none()) {
+		return {};
+	}
+	if (nb::isinstance<nb::str>(value)) {
+		throw nb::type_error(
+		    (std::string(argument_name) + " must be a sequence of strings or None").c_str());
+	}
+	const auto terms = nb::cast<std::vector<std::string>>(value);
+	if (terms.empty()) {
+		throw nb::value_error((std::string(argument_name) + " must not be empty").c_str());
+	}
+	std::vector<dicom::SpecificCharacterSet> parsed_terms;
+	parsed_terms.reserve(terms.size());
+	for (const auto& term : terms) {
+		if (term.empty()) {
+			throw nb::value_error(
+			    (std::string(argument_name) + " must not contain empty terms").c_str());
+		}
+		const auto charset = dicom::specific_character_set_from_term(term);
+		if (charset == dicom::SpecificCharacterSet::Unknown) {
+			const auto message = std::string("Unknown Specific Character Set: ") + term;
+			throw nb::value_error(message.c_str());
+		}
+		parsed_terms.push_back(charset);
+	}
+	return parsed_terms;
+}
+
+std::vector<dicom::SpecificCharacterSet> parse_specific_character_set_argument(
+    nb::handle value, const char* argument_name) {
+	if (value.is_none()) {
+		return {dicom::SpecificCharacterSet::NONE};
+	}
+	if (nb::isinstance<nb::str>(value)) {
+		const auto single = parse_specific_character_set_option(value, argument_name);
+		if (single.has_value()) {
+			return {*single};
+		}
+		return {dicom::SpecificCharacterSet::NONE};
+	}
+	return parse_specific_character_sets_option(value, argument_name);
+}
+
+dicom::CharsetEncodeErrorPolicy parse_charset_encode_error_policy(
+    nb::handle value, const char* argument_name) {
+	if (value.is_none()) {
+		return dicom::CharsetEncodeErrorPolicy::strict;
+	}
+	if (!nb::isinstance<nb::str>(value)) {
+		throw nb::type_error((std::string(argument_name) + " must be str or None").c_str());
+	}
+	const auto text = nb::cast<std::string>(value);
+	if (text == "strict") {
+		return dicom::CharsetEncodeErrorPolicy::strict;
+	}
+	if (text == "replace_qmark") {
+		return dicom::CharsetEncodeErrorPolicy::replace_qmark;
+	}
+	if (text == "replace_unicode_escape") {
+		return dicom::CharsetEncodeErrorPolicy::replace_unicode_escape;
+	}
+	throw nb::value_error(
+	    (std::string(argument_name) +
+	        " must be one of: 'strict', 'replace_qmark', 'replace_unicode_escape'")
+	        .c_str());
+}
+
+dicom::CharsetDecodeErrorPolicy parse_charset_decode_error_policy(
+    nb::handle value, const char* argument_name) {
+	if (value.is_none()) {
+		return dicom::CharsetDecodeErrorPolicy::strict;
+	}
+	if (!nb::isinstance<nb::str>(value)) {
+		throw nb::type_error((std::string(argument_name) + " must be str or None").c_str());
+	}
+	const auto text = nb::cast<std::string>(value);
+	if (text == "strict") {
+		return dicom::CharsetDecodeErrorPolicy::strict;
+	}
+	if (text == "replace_fffd") {
+		return dicom::CharsetDecodeErrorPolicy::replace_fffd;
+	}
+	if (text == "replace_hex_escape") {
+		return dicom::CharsetDecodeErrorPolicy::replace_hex_escape;
+	}
+	throw nb::value_error(
+	    (std::string(argument_name) +
+	        " must be one of: 'strict', 'replace_fffd', 'replace_hex_escape'")
+	        .c_str());
+}
+
 dicom::WriteOptions make_write_options(
     bool include_preamble, bool write_file_meta, bool keep_existing_meta) {
 	dicom::WriteOptions options;
@@ -1499,6 +1612,49 @@ NB_MODULE(_dicomsdl, m) {
 		    },
 		    nb::arg("values"),
 		    "Encode and store multiple textual values according to this element VR.")
+		.def("from_utf8_view",
+		    [](DataElement& element, const std::string& value, nb::handle errors,
+		        bool return_replaced) -> nb::object {
+			    bool replaced = false;
+			    const auto ok = element.from_utf8_view(
+			        value, parse_charset_encode_error_policy(errors, "errors"),
+			        return_replaced ? &replaced : nullptr);
+			    if (return_replaced) {
+				    return nb::make_tuple(ok, replaced);
+			    }
+			    return nb::cast(ok);
+		    },
+		    nb::arg("value"),
+		    nb::kw_only(),
+		    nb::arg("errors") = nb::str("strict"),
+		    nb::arg("return_replaced") = false,
+		    "Encode and store a UTF-8 textual value according to this element VR.\n"
+		    "errors: 'strict', 'replace_qmark', or 'replace_unicode_escape'.\n"
+		    "When return_replaced=True, returns (ok, replaced).")
+		.def("from_utf8_views",
+		    [](DataElement& element, const std::vector<std::string>& values, nb::handle errors,
+		        bool return_replaced) -> nb::object {
+			    std::vector<std::string_view> views;
+			    views.reserve(values.size());
+			    for (const auto& value : values) {
+				    views.push_back(value);
+			    }
+			    bool replaced = false;
+			    const auto ok = element.from_utf8_views(
+			        views, parse_charset_encode_error_policy(errors, "errors"),
+			        return_replaced ? &replaced : nullptr);
+			    if (return_replaced) {
+				    return nb::make_tuple(ok, replaced);
+			    }
+			    return nb::cast(ok);
+		    },
+		    nb::arg("values"),
+		    nb::kw_only(),
+		    nb::arg("errors") = nb::str("strict"),
+		    nb::arg("return_replaced") = false,
+		    "Encode and store multiple UTF-8 textual values according to this element VR.\n"
+		    "errors: 'strict', 'replace_qmark', or 'replace_unicode_escape'.\n"
+		    "When return_replaced=True, returns (ok, replaced).")
 		.def("to_uid_string",
 		    [](const DataElement& element) -> nb::object {
 		        auto v = element.to_uid_string();
@@ -1530,28 +1686,52 @@ NB_MODULE(_dicomsdl, m) {
 	        return out;
 	    },
 	    "Return a list of trimmed raw strings for multi-valued VRs, or None if unsupported.")
-		.def("to_utf8_view",
-	    [](const DataElement& element) -> nb::object {
-	        auto v = element.to_utf8_view();
-	        if (v) {
-	            return nb::str(v->data(), v->size());
+		.def("to_utf8_string",
+	    [](const DataElement& element, nb::handle errors, bool return_replaced) -> nb::object {
+	        bool replaced = false;
+	        auto value = element.to_utf8_string(
+	            parse_charset_decode_error_policy(errors, "errors"),
+	            return_replaced ? &replaced : nullptr);
+	        if (return_replaced) {
+	            if (value) {
+	                return nb::make_tuple(nb::cast(*value), replaced);
+	            }
+	            return nb::make_tuple(nb::none(), replaced);
+	        }
+	        if (value) {
+	            return nb::cast(*value);
 	        }
 	        return nb::none();
 	    },
-	    "Return a charset-decoded UTF-8 string when available, else None.")
-		.def("to_utf8_views",
-	    [](const DataElement& element) -> nb::object {
-	        auto values = element.to_utf8_views();
+	    nb::kw_only(),
+	    nb::arg("errors") = nb::str("strict"),
+	    nb::arg("return_replaced") = false,
+	    "Return a charset-decoded owned UTF-8 string when available, else None.\n"
+	    "errors: 'strict', 'replace_fffd', or 'replace_hex_escape'.\n"
+	    "When return_replaced=True, returns (value_or_none, replaced).")
+		.def("to_utf8_strings",
+	    [](const DataElement& element, nb::handle errors, bool return_replaced) -> nb::object {
+	        bool replaced = false;
+	        auto values = element.to_utf8_strings(
+	            parse_charset_decode_error_policy(errors, "errors"),
+	            return_replaced ? &replaced : nullptr);
+	        if (return_replaced) {
+	            if (!values) {
+	                return nb::make_tuple(nb::none(), replaced);
+	            }
+	            return nb::make_tuple(nb::cast(*values), replaced);
+	        }
 	        if (!values) {
 	            return nb::none();
 	        }
-	        nb::list out;
-	        for (const auto& item : *values) {
-	            out.append(nb::str(item.data(), item.size()));
-	        }
-		return out;
+	        return nb::cast(*values);
 	    },
-	    "Return a list of UTF-8 strings for multi-valued VRs, or None if unsupported.")
+	    nb::kw_only(),
+	    nb::arg("errors") = nb::str("strict"),
+	    nb::arg("return_replaced") = false,
+	    "Return a list of charset-decoded owned UTF-8 strings when available, else None.\n"
+	    "errors: 'strict', 'replace_fffd', or 'replace_hex_escape'.\n"
+	    "When return_replaced=True, returns (values_or_none, replaced).")
 	.def("to_transfer_syntax_uid",
 	    [](const DataElement& element) -> nb::object {
 	        auto uid = element.to_transfer_syntax_uid();
@@ -1906,6 +2086,7 @@ NB_MODULE(_dicomsdl, m) {
 
 	nb::class_<DicomFile>(m, "DicomFile",
 	    "DICOM file/session object that owns the root DataSet.")
+		.def(nb::init<>())
 		.def_prop_ro("path", &DicomFile::path,
 		    "Identifier of the attached root stream (file path or provided memory name)")
 		.def_prop_ro("transfer_syntax_uid",
@@ -1994,6 +2175,38 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::kw_only(),
 		    nb::arg("encoder_context"),
 		    "Set transfer syntax using transfer syntax text and a preconfigured EncoderContext.")
+		.def("set_declared_specific_charset",
+		    [](DicomFile& self, nb::handle value) {
+			    const auto charsets =
+			        parse_specific_character_set_argument(value, "specific_charset");
+			    self.set_declared_specific_charset(charsets);
+		    },
+		    nb::arg("specific_charset"),
+		    "Update only the declared (0008,0005) Specific Character Set.\n"
+		    "Accepts a defined-term string such as 'ISO_IR 192', an empty/None value for the default repertoire,\n"
+		    "or a non-empty sequence of defined-term strings for ISO 2022 multi-term declarations.")
+		.def("set_specific_charset",
+		    [](DicomFile& self, nb::handle value, nb::handle errors,
+		        bool return_replaced) -> nb::object {
+			    const auto charsets =
+			        parse_specific_character_set_argument(value, "specific_charset");
+			    bool replaced = false;
+			    self.set_specific_charset(charsets,
+			        parse_charset_encode_error_policy(errors, "errors"),
+			        return_replaced ? &replaced : nullptr);
+			    if (return_replaced) {
+				    return nb::cast(replaced);
+			    }
+			    return nb::none();
+		    },
+		    nb::arg("specific_charset"),
+		    nb::kw_only(),
+		    nb::arg("errors") = nb::str("strict"),
+		    nb::arg("return_replaced") = false,
+		    "Transcode text value bytes to a new Specific Character Set and update (0008,0005).\n"
+		    "Accepts the same forms as set_declared_specific_charset().\n"
+		    "errors: 'strict', 'replace_qmark', or 'replace_unicode_escape'.\n"
+		    "When return_replaced=True, returns whether replacement occurred.")
 		.def("set_pixel_data",
 		    [](DicomFile& self, const Uid& transfer_syntax, nb::handle source,
 		        nb::handle options) {
@@ -2050,27 +2263,26 @@ NB_MODULE(_dicomsdl, m) {
 		.def("write_file",
 		    [](DicomFile& self, const std::string& path, bool include_preamble,
 		        bool write_file_meta, bool keep_existing_meta) {
-			    self.write_file(
-			        path, make_write_options(include_preamble, write_file_meta, keep_existing_meta));
+			    self.write_file(path,
+			        make_write_options(include_preamble, write_file_meta, keep_existing_meta));
 		    },
 		    nb::arg("path"),
 		    nb::kw_only(),
 		    nb::arg("include_preamble") = true,
 		    nb::arg("write_file_meta") = true,
 		    nb::arg("keep_existing_meta") = true,
-		    "Write this DicomFile to `path`.")
+		    "Write this DicomFile to `path` using the current dataset state.")
 		.def("write_bytes",
 		    [](DicomFile& self, bool include_preamble, bool write_file_meta,
 		        bool keep_existing_meta) {
 			    return to_python_bytes(self.write_bytes(
-			        make_write_options(
-			                  include_preamble, write_file_meta, keep_existing_meta)));
+			        make_write_options(include_preamble, write_file_meta, keep_existing_meta)));
 		    },
 		    nb::kw_only(),
 		    nb::arg("include_preamble") = true,
 		    nb::arg("write_file_meta") = true,
 		    nb::arg("keep_existing_meta") = true,
-		    "Serialize this DicomFile to bytes.")
+		    "Serialize this DicomFile to bytes using the current dataset state.")
 		.def("__iter__",
 		    [](DicomFile& self) {
 			    return PyDataElementIterator(self.dataset());
@@ -2520,6 +2732,8 @@ m.def("clear_external_codec_plugins",
 		.def("is_binary", &VR::is_binary)
 		.def("is_sequence", &VR::is_sequence)
 		.def("is_pixel_sequence", &VR::is_pixel_sequence)
+		.def("uses_specific_character_set", &VR::uses_specific_character_set)
+		.def("allows_multiple_text_values", &VR::allows_multiple_text_values)
 		.def("padding_byte", &VR::padding_byte)
 		.def("uses_explicit_16bit_vl", &VR::uses_explicit_16bit_vl)
 		.def("fixed_length", &VR::fixed_length)

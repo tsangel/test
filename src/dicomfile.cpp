@@ -12,6 +12,8 @@
 #include <optional>
 #include <utility>
 
+#include "charset/charset_mutation.hpp"
+
 namespace dicom {
 using namespace dicom::literals;
 
@@ -969,6 +971,36 @@ void DicomFile::set_transfer_syntax(uid::WellKnown transfer_syntax,
 		    "DicomFile::set_transfer_syntax reason=uid must be a valid Transfer Syntax UID");
 	}
 	apply_transfer_syntax(transfer_syntax, codec_opt);
+}
+
+void DicomFile::set_declared_specific_charset(SpecificCharacterSet charset) {
+	const std::array<SpecificCharacterSet, 1> charsets{charset};
+	set_declared_specific_charset(std::span<const SpecificCharacterSet>(charsets));
+}
+
+void DicomFile::set_declared_specific_charset(std::span<const SpecificCharacterSet> charsets) {
+	std::string error;
+	if (charset::set_dataset_declared_charset(root_dataset_, charsets, &error)) {
+		return;
+	}
+	diag::error_and_throw("DicomFile::set_declared_specific_charset reason={}", error);
+}
+
+void DicomFile::set_specific_charset(
+    SpecificCharacterSet charset, CharsetEncodeErrorPolicy errors, bool* out_replaced) {
+	const std::array<SpecificCharacterSet, 1> charsets{charset};
+	set_specific_charset(std::span<const SpecificCharacterSet>(charsets), errors, out_replaced);
+}
+
+void DicomFile::set_specific_charset(
+    std::span<const SpecificCharacterSet> charsets, CharsetEncodeErrorPolicy errors,
+    bool* out_replaced) {
+	std::string error;
+	if (charset::transcode_dataset_charset(
+	        root_dataset_, charsets, errors, &error, out_replaced)) {
+		return;
+	}
+	diag::error_and_throw("DicomFile::set_specific_charset reason={}", error);
 }
 
 std::unique_ptr<DicomFile> read_file(const std::string& path, ReadOptions options) {

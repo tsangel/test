@@ -1,5 +1,7 @@
 #include <dicom.h>
 #include <dicom_endian.h>
+#include "charset/charset_decode.hpp"
+#include "charset/charset_mutation.hpp"
 #include <diagnostics.h>
 
 #include <cctype>
@@ -992,6 +994,29 @@ bool DataElement::from_string_views(std::span<const std::string_view> values) {
 	return true;
 }
 
+bool DataElement::from_utf8_view(
+    std::string_view value, CharsetEncodeErrorPolicy errors, bool* out_replaced) {
+	return from_utf8_views(std::span<const std::string_view>(&value, 1), errors, out_replaced);
+}
+
+bool DataElement::from_utf8_views(
+    std::span<const std::string_view> values, CharsetEncodeErrorPolicy errors,
+    bool* out_replaced) {
+	if (values.empty()) {
+		if (out_replaced) {
+			*out_replaced = false;
+		}
+		return from_string_views(values);
+	}
+	std::string error;
+	if (charset::encode_utf8_for_element(
+	        *this, values, errors, &error, out_replaced)) {
+		return true;
+	}
+	return report_from_assignment_failure(
+	    "DataElement::from_utf8_views", *this, error.empty() ? "failed to encode UTF-8 text" : error);
+}
+
 bool DataElement::from_uid(uid::WellKnown uid) {
 	if (!uid.valid()) {
 		return report_from_assignment_failure(
@@ -1751,12 +1776,24 @@ std::optional<std::vector<std::string_view>> DataElement::to_string_views() cons
 	}
 }
 
-std::optional<std::string_view> DataElement::to_utf8_view() const {
-	return to_string_view();
+std::optional<std::string> DataElement::to_utf8_string(
+    CharsetDecodeErrorPolicy errors, bool* out_replaced) const {
+	const auto values = to_utf8_strings(errors, out_replaced);
+	if (!values || values->empty()) {
+		return std::nullopt;
+	}
+	return values->front();
 }
 
-std::optional<std::vector<std::string_view>> DataElement::to_utf8_views() const {
-	return to_string_views();
+std::optional<std::vector<std::string>> DataElement::to_utf8_strings(
+    CharsetDecodeErrorPolicy errors, bool* out_replaced) const {
+	if (!vr_.is_string()) {
+		if (out_replaced) {
+			*out_replaced = false;
+		}
+		return std::nullopt;
+	}
+	return charset::raw_element_as_owned_utf8_values(*this, errors, nullptr, out_replaced);
 }
 
 

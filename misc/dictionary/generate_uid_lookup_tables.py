@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Sequence
 
+from _generator_common import write_text_if_changed
+
 SENTINEL = 0xFFFF
 GOLDEN_RATIO32 = 0x9E3779B1
 HASH_OFFSET64 = 0x6A09E667F3BCC909
@@ -247,7 +249,7 @@ def main() -> None:
 
     header = render(value_chd, keyword_chd, value_chd.slots, keyword_chd.slots)
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(header, encoding="utf-8")
+    write_text_if_changed(args.output, header)
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstring>
 #include <deque>
+#include <initializer_list>
 #include <limits>
 #include <iterator>
 #include <iosfwd>
@@ -445,6 +446,35 @@ struct VR {
 
 	constexpr bool is_pixel_sequence() const noexcept {
 		return value == PX_val;
+	}
+
+	constexpr bool uses_specific_character_set() const noexcept {
+		if (!is_known() || !is_string()) return false;
+		switch (value) {
+			case LO_val:
+			case LT_val:
+			case PN_val:
+			case SH_val:
+			case ST_val:
+			case UC_val:
+			case UT_val:
+				return true;
+			default:
+				return false;
+		}
+	}
+
+	constexpr bool allows_multiple_text_values() const noexcept {
+		if (!is_known() || !is_string()) return false;
+		switch (value) {
+			case LT_val:
+			case ST_val:
+			case UT_val:
+			case UR_val:
+				return false;
+			default:
+				return true;
+		}
 	}
 
     // ------------------------------------------------------------
@@ -969,6 +999,18 @@ struct WriteOptions {
 	bool keep_existing_meta{true};
 };
 
+enum class CharsetEncodeErrorPolicy : std::uint8_t {
+	strict = 0,
+	replace_qmark,
+	replace_unicode_escape,
+};
+
+enum class CharsetDecodeErrorPolicy : std::uint8_t {
+	strict = 0,
+	replace_fffd,
+	replace_hex_escape,
+};
+
 namespace pixel {
 
 enum class Planar : std::uint8_t {
@@ -1299,6 +1341,16 @@ public:
 	/// Encode and store multiple textual values for string VRs.
 	/// Values are joined with '\' for delimited string VRs.
 	bool from_string_views(std::span<const std::string_view> values);
+	/// Encode UTF-8 text into the current dataset charset declaration.
+	/// When out_replaced is non-null, it is set when replace_* policy actually substituted characters.
+	bool from_utf8_view(std::string_view value,
+	    CharsetEncodeErrorPolicy errors = CharsetEncodeErrorPolicy::strict,
+	    bool* out_replaced = nullptr);
+	/// Encode multiple UTF-8 text values into the current dataset charset declaration.
+	/// When out_replaced is non-null, it is set when replace_* policy actually substituted characters.
+	bool from_utf8_views(std::span<const std::string_view> values,
+	    CharsetEncodeErrorPolicy errors = CharsetEncodeErrorPolicy::strict,
+	    bool* out_replaced = nullptr);
 	/// Encode and store a well-known UID value (UI VR only).
 	bool from_uid(uid::WellKnown uid);
 	/// Encode and store a generated UID value (UI VR only).
@@ -1341,10 +1393,16 @@ public:
 	[[nodiscard]] std::optional<std::string_view> to_string_view() const;
 	/// Parse value as multiple string_views (backed by internal storage).
 	[[nodiscard]] std::optional<std::vector<std::string_view>> to_string_views() const;
-	/// Parse value as UTF-8 string_view (using Specific Character Set when applicable).
-	[[nodiscard]] std::optional<std::string_view> to_utf8_view() const;
-	/// Parse value as multiple UTF-8 string_views.
-	[[nodiscard]] std::optional<std::vector<std::string_view>> to_utf8_views() const;
+	/// Parse first string component as owned UTF-8 text.
+	/// When out_replaced is non-null, it is set when replace_* policy actually substituted input bytes.
+	[[nodiscard]] std::optional<std::string> to_utf8_string(
+	    CharsetDecodeErrorPolicy errors = CharsetDecodeErrorPolicy::strict,
+	    bool* out_replaced = nullptr) const;
+	/// Parse all string components as owned UTF-8 text.
+	/// When out_replaced is non-null, it is set when replace_* policy actually substituted input bytes.
+	[[nodiscard]] std::optional<std::vector<std::string>> to_utf8_strings(
+	    CharsetDecodeErrorPolicy errors = CharsetDecodeErrorPolicy::strict,
+	    bool* out_replaced = nullptr) const;
 
 	/*
 	VR trimming/charset rules (for string helpers like to_string_view):
@@ -1740,6 +1798,28 @@ public:
 	    const pixel::EncoderContext& encoder_ctx);
 	void set_transfer_syntax(uid::WellKnown transfer_syntax,
 	    std::span<const pixel::CodecOptionTextKv> codec_opt);
+	/// Update only the declared (0008,0005) Specific Character Set metadata.
+	/// Existing text value bytes are left untouched.
+	void set_declared_specific_charset(SpecificCharacterSet charset);
+	void set_declared_specific_charset(std::span<const SpecificCharacterSet> charsets);
+	void set_declared_specific_charset(std::initializer_list<SpecificCharacterSet> charsets) {
+		set_declared_specific_charset(
+		    std::span<const SpecificCharacterSet>(charsets.begin(), charsets.size()));
+	}
+	/// Transcode text VR values to a new Specific Character Set and synchronize (0008,0005).
+	/// When out_replaced is non-null, it is set when replace_* policy actually substituted data.
+	void set_specific_charset(SpecificCharacterSet charset,
+	    CharsetEncodeErrorPolicy errors = CharsetEncodeErrorPolicy::strict,
+	    bool* out_replaced = nullptr);
+	void set_specific_charset(std::span<const SpecificCharacterSet> charsets,
+	    CharsetEncodeErrorPolicy errors = CharsetEncodeErrorPolicy::strict,
+	    bool* out_replaced = nullptr);
+	void set_specific_charset(std::initializer_list<SpecificCharacterSet> charsets,
+	    CharsetEncodeErrorPolicy errors = CharsetEncodeErrorPolicy::strict,
+	    bool* out_replaced = nullptr) {
+		set_specific_charset(std::span<const SpecificCharacterSet>(charsets.begin(), charsets.size()),
+		    errors, out_replaced);
+	}
 	[[nodiscard]] uid::WellKnown transfer_syntax_uid() const { return transfer_syntax_uid_; }
 	[[nodiscard]] pixel::PixelDataInfo pixeldata_info() const;
 	[[nodiscard]] pixel::DecodePlan create_decode_plan(

@@ -8,6 +8,8 @@ import argparse
 import csv
 from pathlib import Path
 
+from _generator_common import write_text_if_changed
+
 
 HEADER_TEMPLATE = r"""
 // Auto-generated from {source}
@@ -125,34 +127,35 @@ def parse_vr_value(vr: str) -> int:
     return 0
 
 
+def render_header(rows: list[list[str]], source_path: Path) -> str:
+    lines: list[str] = [
+        HEADER_TEMPLATE.format(source=source_path.as_posix(), count=len(rows)).rstrip("\n")
+    ]
+    for idx, row in enumerate(rows):
+        raw_tag, raw_name, raw_keyword, raw_vr, raw_vm, raw_retired = row
+        tag_value = parse_tag_value(raw_tag)
+        vr_value = parse_vr_value(raw_vr)
+        tag_literal = f"0x{tag_value:08X}u" if tag_value is not None else "0u"
+        vr_literal = f"{vr_value}u"
+        tag, name, keyword, vr, vm, retired = (
+            escape(raw_tag),
+            escape(raw_name),
+            escape(raw_keyword),
+            escape(raw_vr),
+            escape(raw_vm),
+            escape(raw_retired),
+        )
+        lines.append(
+            f'    /* {idx:4d} */ DataElementEntry{{{tag_literal}, {vr_literal}, "{tag}", "{name}", "{keyword}", "{vr}", "{vm}", "{retired}"}},'
+        )
+    lines.append(FOOTER.rstrip("\n"))
+    lines.append("")
+    return "\n".join(lines)
+
+
 def write_header(rows: list[list[str]], dest: Path, source_path: Path) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
-    with dest.open("w", encoding="utf-8") as fh:
-        fh.write(
-            HEADER_TEMPLATE.format(
-                source=source_path.as_posix(), count=len(rows)
-            )
-        )
-        for idx, row in enumerate(rows):
-            raw_tag, raw_name, raw_keyword, raw_vr, raw_vm, raw_retired = row
-            tag_value = parse_tag_value(raw_tag)
-            vr_value = parse_vr_value(raw_vr)
-            tag_literal = (
-                f"0x{tag_value:08X}u" if tag_value is not None else "0u"
-            )
-            vr_literal = f"{vr_value}u"
-            tag, name, keyword, vr, vm, retired = (
-                escape(raw_tag),
-                escape(raw_name),
-                escape(raw_keyword),
-                escape(raw_vr),
-                escape(raw_vm),
-                escape(raw_retired),
-            )
-            fh.write(
-                f'    /* {idx:4d} */ DataElementEntry{{{tag_literal}, {vr_literal}, "{tag}", "{name}", "{keyword}", "{vr}", "{vm}", "{retired}"}},\n'
-            )
-        fh.write(FOOTER)
+    write_text_if_changed(dest, render_header(rows, source_path))
 
 
 def main() -> None:

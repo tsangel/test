@@ -116,6 +116,13 @@ add_library(dicomsdl STATIC
     src/diagnostics.cpp
     src/dataset_deflate_codec.cpp
     src/dataset_endian_converter.cpp
+    src/charset/charset_mutation.cpp
+    src/charset/charset_transcode.cpp
+    src/charset/charset_sbcs.cpp
+    src/charset/charset_gb.cpp
+    src/charset/charset_iso2022.cpp
+    src/charset/charset_iso2022_decode.cpp
+    src/charset/charset_codec.cpp
     src/dumpdataset.cpp
     src/dicomfile.cpp
     src/dicomfile_pixel_encode.cpp
