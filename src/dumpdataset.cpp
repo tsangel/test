@@ -1,4 +1,5 @@
 #include <dicom.h>
+#include "charset/text_validation.hpp"
 
 #include <algorithm>
 #include <fmt/format.h>
@@ -28,12 +29,15 @@ std::string dump_tag_token(Tag tag) {
 std::string dump_escape_text(std::string_view text) {
 	std::string out;
 	out.reserve(text.size() + 8);
+	const bool is_valid_utf8 = charset::validate_utf8(text);
 	for (unsigned char ch : text) {
 		if (ch == '\\') {
 			out += "\\\\";
 		} else if (ch == '\'') {
 			out += "\\'";
 		} else if (ch >= 0x20 && ch <= 0x7e) {
+			out.push_back(static_cast<char>(ch));
+		} else if (ch >= 0x80 && is_valid_utf8) {
 			out.push_back(static_cast<char>(ch));
 		} else {
 			out += fmt::format("\\x{:02x}", static_cast<unsigned int>(ch));
@@ -187,16 +191,27 @@ std::string dump_tag_values(const DataElement& element) {
 }
 
 std::string dump_string_values(const DataElement& element) {
-	auto values = element.to_string_views();
-	if (!values || values->empty()) {
-		return "(no value)";
-	}
 	std::string joined;
-	for (std::size_t i = 0; i < values->size(); ++i) {
-		if (i) {
-			joined.push_back('\\');
+	// Dump prefers the owned UTF-8 path so charset-aware decode is reflected in
+	// output even when the stored bytes use ISO 2022 or other non-UTF-8 encodings.
+	if (auto utf8_values = element.to_utf8_strings(); utf8_values && !utf8_values->empty()) {
+		for (std::size_t i = 0; i < utf8_values->size(); ++i) {
+			if (i) {
+				joined.push_back('\\');
+			}
+			joined.append((*utf8_values)[i].data(), (*utf8_values)[i].size());
 		}
-		joined.append((*values)[i].data(), (*values)[i].size());
+	} else {
+		auto values = element.to_string_views();
+		if (!values || values->empty()) {
+			return "(no value)";
+		}
+		for (std::size_t i = 0; i < values->size(); ++i) {
+			if (i) {
+				joined.push_back('\\');
+			}
+			joined.append((*values)[i].data(), (*values)[i].size());
+		}
 	}
 	if (joined.empty()) {
 		return "(no value)";

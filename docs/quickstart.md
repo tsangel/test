@@ -139,7 +139,7 @@ int main() {
 - `add_dataelement(...)` returns `DataElement&`, so write helpers chain with `.`.
 
 ## Quick build/test commands
-- Python tests: `pytest -q tests/python`
+- Python tests: build `_dicomsdl`, install `tests/python/requirements.txt`, then run `py -3.14 -m pytest tests/python -q`
 - CTest: `cmake -S . -B build && cmake --build build && ctest --test-dir build`
 
 ## Related docs

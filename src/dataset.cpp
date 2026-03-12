@@ -1,6 +1,9 @@
 #include <dicom.h>
 #include <dicom_endian.h>
 #include <diagnostics.h>
+#include "charset/charset_detail.hpp"
+#include "charset/charset_mutation.hpp"
+#include "charset/charset_mutation_detail.hpp"
 #include "dataset_deflate_codec.h"
 #include "dataset_endian_converter.h"
 #include <instream.h>
@@ -196,22 +199,58 @@ std::optional<Tag> parse_private_creator_tag(DataSetPtr* dataset, std::string_vi
 }
 DataSet::DataSet() : root_dataset_(this) {
 	explicit_vr_ = transfer_syntax_uses_explicit_vr("ExplicitVRLittleEndian"_uid);
+	effective_charset_ = charset::detail::default_charset_spec();
 }
 
-DataSet::DataSet(DataSet* root_dataset)
-    : root_file_(root_dataset ? root_dataset->root_file_ : nullptr),
-      root_dataset_(root_dataset ? root_dataset->root_dataset_ : this) {
+DataSet::DataSet(DataSet* parent_dataset)
+    : root_file_(parent_dataset ? parent_dataset->root_file_ : nullptr),
+      root_dataset_(parent_dataset ? parent_dataset->root_dataset_ : this),
+      parent_dataset_(parent_dataset) {
 	explicit_vr_ = transfer_syntax_uses_explicit_vr("ExplicitVRLittleEndian"_uid);
-	if (root_dataset_ && root_dataset_ != this) {
-		explicit_vr_ = root_dataset_->explicit_vr_;
+	if (parent_dataset_) {
+		explicit_vr_ = parent_dataset_->explicit_vr_;
+		effective_charset_ = parent_dataset_->effective_charset_;
+	} else {
+		effective_charset_ = charset::detail::default_charset_spec();
 	}
 }
 
 DataSet::DataSet(DicomFile* root_file) : root_file_(root_file), root_dataset_(this) {
 	explicit_vr_ = transfer_syntax_uses_explicit_vr("ExplicitVRLittleEndian"_uid);
+	effective_charset_ = charset::detail::default_charset_spec();
 }
 
 DataSet::~DataSet() = default;
+
+void DataSet::set_declared_specific_charset(SpecificCharacterSet charset) {
+	const std::array<SpecificCharacterSet, 1> charsets{charset};
+	set_declared_specific_charset(std::span<const SpecificCharacterSet>(charsets));
+}
+
+void DataSet::set_declared_specific_charset(std::span<const SpecificCharacterSet> charsets) {
+	std::string error;
+	if (charset::set_dataset_declared_charset(*this, charsets, &error)) {
+		on_specific_character_set_changed();
+		return;
+	}
+	diag::error_and_throw("DataSet::set_declared_specific_charset reason={}", error);
+}
+
+void DataSet::set_specific_charset(
+    SpecificCharacterSet charset, CharsetEncodeErrorPolicy errors, bool* out_replaced) {
+	const std::array<SpecificCharacterSet, 1> charsets{charset};
+	set_specific_charset(std::span<const SpecificCharacterSet>(charsets), errors, out_replaced);
+}
+
+void DataSet::set_specific_charset(std::span<const SpecificCharacterSet> charsets,
+    CharsetEncodeErrorPolicy errors, bool* out_replaced) {
+	std::string error;
+	if (charset::transcode_dataset_charset(*this, charsets, errors, &error, out_replaced)) {
+		on_specific_character_set_changed();
+		return;
+	}
+	diag::error_and_throw("DataSet::set_specific_charset reason={}", error);
+}
 
 void DataSet::attach_to_file(const std::string& path) {
 	auto stream = make_file_stream(path);
@@ -282,6 +321,73 @@ DataSet* DataSet::root_dataset() const noexcept {
 	return root_dataset_ ? root_dataset_ : const_cast<DataSet*>(this);
 }
 
+const charset::detail::CharsetSpec* DataSet::effective_charset_spec(std::string* out_error) const {
+	if (effective_charset_) {
+		return effective_charset_;
+	}
+
+	const DataElement& element = get_dataelement(charset::detail::kSpecificCharacterSetTag);
+	if (!element.is_missing()) {
+		if (element.length() == 0) {
+			effective_charset_ = charset::detail::default_charset_spec();
+			return effective_charset_;
+		}
+		auto parsed = charset::detail::parse_charset_element(element, out_error);
+		if (!parsed || !charset::detail::validate_declared_charset(*parsed, out_error)) {
+			return nullptr;
+		}
+		effective_charset_ = charset::detail::intern_charset_spec(std::move(*parsed));
+		return effective_charset_;
+	}
+
+	if (parent_dataset_) {
+		effective_charset_ = parent_dataset_->effective_charset_spec(out_error);
+		return effective_charset_;
+	}
+
+	effective_charset_ = charset::detail::default_charset_spec();
+	return effective_charset_;
+}
+
+void DataSet::on_specific_character_set_changed() noexcept {
+	const auto* inherited = parent_dataset_ ? parent_dataset_->effective_charset_spec(nullptr) : nullptr;
+	(void)refresh_effective_charset_cache(inherited, nullptr);
+}
+
+bool DataSet::refresh_effective_charset_cache(
+    const charset::detail::CharsetSpec* inherited, std::string* out_error) {
+	const DataElement& element = get_dataelement(charset::detail::kSpecificCharacterSetTag);
+	const charset::detail::CharsetSpec* effective = inherited;
+	if (!element.is_missing()) {
+		if (element.length() == 0) {
+			effective = charset::detail::default_charset_spec();
+		} else {
+			auto parsed = charset::detail::parse_charset_element(element, out_error);
+			if (!parsed || !charset::detail::validate_declared_charset(*parsed, out_error)) {
+				effective_charset_ = nullptr;
+				return false;
+			}
+			effective = charset::detail::intern_charset_spec(std::move(*parsed));
+		}
+	}
+	if (!effective) {
+		effective = charset::detail::default_charset_spec();
+	}
+	effective_charset_ = effective;
+
+	for (auto& element : *this) {
+		if (auto* sequence = element.as_sequence()) {
+			for (auto& item_dataset_ptr : *sequence) {
+				if (item_dataset_ptr &&
+				    !item_dataset_ptr->refresh_effective_charset_cache(effective, out_error)) {
+					return false;
+				}
+			}
+		}
+	}
+	return true;
+}
+
 std::size_t DataSet::size() const {
 	return element_index_.size();
 }
@@ -312,7 +418,7 @@ DataSet::const_iterator DataSet::cend() const {
 
 // Stores stable DataElement bodies in deque storage and keeps a sorted
 // tag/pointer index for lookup and iteration.
-DataElement& DataSet::add_dataelement(Tag tag, VR vr) {
+DataElement& DataSet::add_dataelement_nocheck(Tag tag, VR vr) {
 	const auto tag_value = tag.value();
 
 	if (vr == VR::None) {
@@ -348,7 +454,15 @@ DataElement& DataSet::add_dataelement(Tag tag, VR vr) {
 	return *element;
 }
 
-DataElement& DataSet::add_dataelement(
+DataElement& DataSet::add_dataelement(Tag tag, VR vr) {
+	auto& element = add_dataelement_nocheck(tag, vr);
+	if (tag == charset::detail::kSpecificCharacterSetTag) {
+		on_specific_character_set_changed();
+	}
+	return element;
+}
+
+DataElement& DataSet::add_dataelement_nocheck(
     Tag tag, VR vr, std::size_t offset, std::size_t length) {
 	const auto tag_value = tag.value();
 
@@ -383,6 +497,15 @@ DataElement& DataSet::add_dataelement(
 	element->reset(tag, vr, length, offset, this, true);
 	element_index_.insert(index_it, ElementRef{tag, element});
 	return *element;
+}
+
+DataElement& DataSet::add_dataelement(
+    Tag tag, VR vr, std::size_t offset, std::size_t length) {
+	auto& element = add_dataelement_nocheck(tag, vr, offset, length);
+	if (tag == charset::detail::kSpecificCharacterSetTag) {
+		on_specific_character_set_changed();
+	}
+	return element;
 }
 
 DataElement& DataSet::get_dataelement(Tag tag) {
@@ -543,7 +666,7 @@ const DataElement& DataSet::operator[](Tag tag) const {
 	return get_dataelement(tag);
 }
 
-void DataSet::remove_dataelement(Tag tag) {
+void DataSet::remove_dataelement_nocheck(Tag tag) {
 	const auto tag_value = tag.value();
 
 	auto index_it = lower_bound_element_index(
@@ -552,6 +675,13 @@ void DataSet::remove_dataelement(Tag tag) {
 		auto* element = index_it->element;
 		element->reset(tag, VR::None, 0, 0, this, false);
 		element_index_.erase(index_it);
+	}
+}
+
+void DataSet::remove_dataelement(Tag tag) {
+	remove_dataelement_nocheck(tag);
+	if (tag == charset::detail::kSpecificCharacterSetTag) {
+		on_specific_character_set_changed();
 	}
 }
 
@@ -567,6 +697,7 @@ void DataSet::read_attached_stream(const ReadOptions& options) {
 	elements_.clear();
 	element_index_.clear();
 	element_index_.reserve(load_root_elements_reserve_hint());
+	effective_charset_ = charset::detail::default_charset_spec();
 	last_tag_loaded_ = Tag::from_value(0);
 	if (root_file_) {
 		root_file_->set_transfer_syntax_state_only("ExplicitVRLittleEndian"_uid);
@@ -639,6 +770,7 @@ void DataSet::read_attached_stream(const ReadOptions& options) {
 	}
 
 	read_elements_until(options.load_until, stream_.get());
+	(void)refresh_effective_charset_cache(nullptr, nullptr);
 	update_root_elements_reserve_hint(element_index_.size());
 }
 
@@ -773,7 +905,7 @@ void DataSet::read_elements_until(Tag load_until, InStream* stream) {
 				length = stream->bytes_remaining();
 			}
 
-			DataElement& elem = add_dataelement(tag, VR::SQ, offset, length);
+			DataElement& elem = add_dataelement_nocheck(tag, VR::SQ, offset, length);
 			Sequence *seq = elem.as_sequence();
 			InSubStream subs(stream, length);
 
@@ -788,7 +920,7 @@ void DataSet::read_elements_until(Tag load_until, InStream* stream) {
 			if (length != 0xffffffff) {
 				if ((get_dataelement("BitsAllocated"_tag).to_long().value_or(0) > 8) && (vr == VR::OB))
 					vr = VR::OW;
-				add_dataelement(tag, vr, offset, length);
+				add_dataelement_nocheck(tag, vr, offset, length);
 				if (stream->skip(length) != length) {
 					diag::error_and_throw(
 					    "DataSet::read_elements_until file={} offset=0x{:X} tag={} vr={} length={} reason=failed to skip pixel data bytes",
@@ -797,7 +929,7 @@ void DataSet::read_elements_until(Tag load_until, InStream* stream) {
 			} else {
 				vr = VR::PX;
 
-				DataElement& elem = add_dataelement(tag, VR::PX, offset, length);
+				DataElement& elem = add_dataelement_nocheck(tag, VR::PX, offset, length);
 				PixelSequence *pixseq = elem.as_pixel_sequence();
 
 				// process basic offset table of the pixel sequence
@@ -811,7 +943,7 @@ void DataSet::read_elements_until(Tag load_until, InStream* stream) {
 		}
 		else {
 			if (length != 0xffffffff) {
-				add_dataelement(tag, vr, offset, length);
+				add_dataelement_nocheck(tag, vr, offset, length);
 				auto n = stream->skip(length);
 				if (n != length) {
 					diag::error_and_throw(
@@ -824,7 +956,7 @@ void DataSet::read_elements_until(Tag load_until, InStream* stream) {
 				length = stream->bytes_remaining();
 				vr = VR::SQ;
 				
-				DataElement& elem = add_dataelement(tag, VR::SQ, offset, length);
+				DataElement& elem = add_dataelement_nocheck(tag, VR::SQ, offset, length);
 				Sequence *seq = elem.as_sequence();
 				InSubStream subs(stream, length);
 

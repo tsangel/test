@@ -1,5 +1,4 @@
 #include "dicom.h"
-
 #include "dataset_endian_converter.h"
 #include "dicom_endian.h"
 #include "dataset_deflate_codec.h"
@@ -38,6 +37,7 @@ constexpr Tag kTransferSyntaxUidTag{0x0002u, 0x0010u};
 constexpr Tag kImplementationClassUidTag{0x0002u, 0x0012u};
 constexpr Tag kImplementationVersionNameTag{0x0002u, 0x0013u};
 
+constexpr Tag kSpecificCharacterSetTag{0x0008u, 0x0005u};
 constexpr Tag kSopClassUidTag{0x0008u, 0x0016u};
 constexpr Tag kSopInstanceUidTag{0x0008u, 0x0018u};
 
@@ -309,12 +309,11 @@ void write_non_sequence_element(Writer& writer, Tag tag, VR vr, std::span<const 
 }
 
 template <typename Writer>
-void write_dataset(const DataSet& dataset, Writer& writer, bool explicit_vr,
-    bool skip_group_0002);
+void write_dataset(
+    const DataSet& dataset, Writer& writer, bool explicit_vr, bool skip_group_0002);
 
 template <typename Writer>
-void write_sequence_element(const DataElement& element, Writer& writer,
-    bool explicit_vr) {
+void write_sequence_element(const DataElement& element, Writer& writer, bool explicit_vr) {
 	const Sequence* sequence = element.as_sequence();
 	if (!sequence) {
 		diag::error_and_throw("write_to_stream reason=SQ element has null sequence pointer");
@@ -407,8 +406,7 @@ void write_pixel_sequence_element(const DataElement& element, Writer& writer,
 }
 
 template <typename Writer>
-void write_data_element(const DataElement& element, Writer& writer,
-    bool explicit_vr) {
+void write_data_element(const DataElement& element, Writer& writer, bool explicit_vr) {
 	if (element.vr().is_sequence()) {
 		write_sequence_element(element, writer, explicit_vr);
 		return;
@@ -418,13 +416,12 @@ void write_data_element(const DataElement& element, Writer& writer,
 		return;
 	}
 
-	write_non_sequence_element(
-	    writer, element.tag(), element.vr(), element.value_span(), explicit_vr);
+	write_non_sequence_element(writer, element.tag(), element.vr(), element.value_span(), explicit_vr);
 }
 
 template <typename Writer>
-void write_dataset(const DataSet& dataset, Writer& writer, bool explicit_vr,
-    bool skip_group_0002) {
+void write_dataset(
+    const DataSet& dataset, Writer& writer, bool explicit_vr, bool skip_group_0002) {
 	const auto& pixel_data_element = dataset.get_dataelement(kPixelDataTag);
 	const bool has_encapsulated_pixel_data =
 	    !pixel_data_element.is_missing() && pixel_data_element.vr().is_pixel_sequence();

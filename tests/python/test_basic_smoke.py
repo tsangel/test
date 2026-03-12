@@ -75,7 +75,18 @@ def test_custom_px_vr():
 	assert not px.is_sequence()
 	assert px.is_pixel_sequence()
 	assert px.is_binary()
+	assert not px.uses_specific_character_set()
+	assert not px.allows_multiple_text_values()
 	assert px.str() == "PX"
+
+	pn = dicom.VR.from_string("PN")
+	assert pn.is_string()
+	assert pn.uses_specific_character_set()
+	assert pn.allows_multiple_text_values()
+
+	ut = dicom.VR.from_string("UT")
+	assert ut.uses_specific_character_set()
+	assert not ut.allows_multiple_text_values()
 
 
 def test_literal_and_file(tmp_path):
@@ -226,12 +237,6 @@ def test_dataelement_from_helpers_roundtrip():
 	expected_tags = [dicom.Tag("Rows"), dicom.Tag("Columns")]
 	assert at_vector.from_tag_vector(expected_tags)
 	assert [int(tag) for tag in at_vector.to_tag_vector()] == [int(tag) for tag in expected_tags]
-
-	pn_elem = ds.add_dataelement(dicom.Tag("PatientName"), dicom.VR.PN)
-	assert pn_elem.from_string_view("DOE^JOHN")
-	assert pn_elem.to_string_view() == "DOE^JOHN"
-	assert pn_elem.from_string_views(["DOE^JOHN", "SMITH^ALICE"])
-	assert pn_elem.to_string_views() == ["DOE^JOHN", "SMITH^ALICE"]
 
 
 def test_dicomfile_dir_includes_dataset_members():

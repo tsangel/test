@@ -12,6 +12,8 @@
 #include <optional>
 #include <utility>
 
+#include "charset/charset_mutation.hpp"
+
 namespace dicom {
 using namespace dicom::literals;
 
@@ -969,6 +971,27 @@ void DicomFile::set_transfer_syntax(uid::WellKnown transfer_syntax,
 		    "DicomFile::set_transfer_syntax reason=uid must be a valid Transfer Syntax UID");
 	}
 	apply_transfer_syntax(transfer_syntax, codec_opt);
+}
+
+void DicomFile::set_declared_specific_charset(SpecificCharacterSet charset) {
+	const std::array<SpecificCharacterSet, 1> charsets{charset};
+	set_declared_specific_charset(std::span<const SpecificCharacterSet>(charsets));
+}
+
+void DicomFile::set_declared_specific_charset(std::span<const SpecificCharacterSet> charsets) {
+	root_dataset_.set_declared_specific_charset(charsets);
+}
+
+void DicomFile::set_specific_charset(
+    SpecificCharacterSet charset, CharsetEncodeErrorPolicy errors, bool* out_replaced) {
+	const std::array<SpecificCharacterSet, 1> charsets{charset};
+	set_specific_charset(std::span<const SpecificCharacterSet>(charsets), errors, out_replaced);
+}
+
+void DicomFile::set_specific_charset(
+    std::span<const SpecificCharacterSet> charsets, CharsetEncodeErrorPolicy errors,
+    bool* out_replaced) {
+	root_dataset_.set_specific_charset(charsets, errors, out_replaced);
 }
 
 std::unique_ptr<DicomFile> read_file(const std::string& path, ReadOptions options) {

@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Sequence
 
+from _generator_common import write_text_if_changed
 from generate_dataelement_registry import parse_rows
 
 RET_YEAR_RE = re.compile(r"RET\s*\((\d{4})")
@@ -331,9 +332,9 @@ def main() -> None:
         raise ValueError("No entries have numeric tag values for tag lookup generation")
     tag_chd = build_tag_chd(tag_entries)
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(
+    write_text_if_changed(
+        args.output,
         render(keyword_entries, keyword_chd, tag_entries, tag_chd, wildcard_entries),
-        encoding="utf-8",
     )
 
 

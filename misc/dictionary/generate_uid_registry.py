@@ -7,6 +7,8 @@ import argparse
 import csv
 from pathlib import Path
 
+from _generator_common import write_text_if_changed
+
 
 HEADER_TEMPLATE = """// Auto-generated from {source}
 #pragma once
@@ -97,13 +99,14 @@ def write_header(
     max_transfer_index: int,
 ) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
-    with dest.open("w", encoding="utf-8") as fh:
-        fh.write(HEADER_TEMPLATE.format(source=source.as_posix(), count=len(rows)))
-        for idx, (value, name, keyword, uid_type) in enumerate(rows):
-            fh.write(
-                f'    UidEntry{{"{escape(value)}", "{escape(name)}", "{escape(keyword)}", "{escape(uid_type)}", {encode_uid_type(uid_type)}}},\n'
-            )
-        fh.write(FOOTER_TEMPLATE.format(max_transfer_index=max_transfer_index))
+    lines = [HEADER_TEMPLATE.format(source=source.as_posix(), count=len(rows)).rstrip("\n")]
+    for value, name, keyword, uid_type in rows:
+        lines.append(
+            f'    UidEntry{{"{escape(value)}", "{escape(name)}", "{escape(keyword)}", "{escape(uid_type)}", {encode_uid_type(uid_type)}}},'
+        )
+    lines.append(FOOTER_TEMPLATE.format(max_transfer_index=max_transfer_index).rstrip("\n"))
+    lines.append("")
+    write_text_if_changed(dest, "\n".join(lines))
 
 
 def main() -> None:

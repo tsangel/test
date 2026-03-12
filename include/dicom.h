@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstring>
 #include <deque>
+#include <initializer_list>
 #include <limits>
 #include <iterator>
 #include <iosfwd>
@@ -29,6 +30,27 @@
 #include "uid_lookup_detail.hpp"
 
 namespace dicom {
+
+class DataSet;
+class DataElement;
+enum class CharsetEncodeErrorPolicy : std::uint8_t;
+
+namespace charset {
+bool encode_utf8_for_element(DataElement& element, std::span<const std::string_view> values,
+    CharsetEncodeErrorPolicy errors, std::string* out_error, bool* out_replaced);
+}
+
+namespace charset::detail {
+struct ParsedSpecificCharacterSet;
+using CharsetSpec = ParsedSpecificCharacterSet;
+[[nodiscard]] std::optional<ParsedSpecificCharacterSet> parse_dataset_charset(
+    const DataSet& dataset, std::string* out_error);
+[[nodiscard]] bool apply_declared_charset(
+    DataSet& dataset, const ParsedSpecificCharacterSet& parsed, std::string* out_error);
+[[nodiscard]] bool rewrite_charset_values(
+    DataSet& dataset, const ParsedSpecificCharacterSet& target_charset,
+    CharsetEncodeErrorPolicy errors, std::string* out_error, bool* out_replaced);
+}
 
 using std::uint8_t;
 using std::uint16_t;
@@ -447,6 +469,35 @@ struct VR {
 		return value == PX_val;
 	}
 
+	constexpr bool uses_specific_character_set() const noexcept {
+		if (!is_known() || !is_string()) return false;
+		switch (value) {
+			case LO_val:
+			case LT_val:
+			case PN_val:
+			case SH_val:
+			case ST_val:
+			case UC_val:
+			case UT_val:
+				return true;
+			default:
+				return false;
+		}
+	}
+
+	constexpr bool allows_multiple_text_values() const noexcept {
+		if (!is_known() || !is_string()) return false;
+		switch (value) {
+			case LT_val:
+			case ST_val:
+			case UT_val:
+			case UR_val:
+				return false;
+			default:
+				return true;
+		}
+	}
+
     // ------------------------------------------------------------
     // Padding rules
     // ------------------------------------------------------------
@@ -664,7 +715,7 @@ constexpr std::string_view tag_to_keyword(std::uint32_t tag_value) {
 	if (const auto* entry = tag_to_entry(tag_value)) {
 		return entry->keyword;
 	}
-	
+
 	if (element == 0) {
 		return "(Group Length)";
 	}
@@ -967,6 +1018,18 @@ struct WriteOptions {
 	bool write_file_meta{true};
 	// When false, write_* rebuilds (0002,eeee) before serialization.
 	bool keep_existing_meta{true};
+};
+
+enum class CharsetEncodeErrorPolicy : std::uint8_t {
+	strict = 0,
+	replace_qmark,
+	replace_unicode_escape,
+};
+
+enum class CharsetDecodeErrorPolicy : std::uint8_t {
+	strict = 0,
+	replace_fffd,
+	replace_hex_escape,
 };
 
 namespace pixel {
@@ -1299,6 +1362,16 @@ public:
 	/// Encode and store multiple textual values for string VRs.
 	/// Values are joined with '\' for delimited string VRs.
 	bool from_string_views(std::span<const std::string_view> values);
+	/// Encode UTF-8 text into the current dataset charset declaration.
+	/// When out_replaced is non-null, it is set when replace_* policy actually substituted characters.
+	bool from_utf8_view(std::string_view value,
+	    CharsetEncodeErrorPolicy errors = CharsetEncodeErrorPolicy::strict,
+	    bool* out_replaced = nullptr);
+	/// Encode multiple UTF-8 text values into the current dataset charset declaration.
+	/// When out_replaced is non-null, it is set when replace_* policy actually substituted characters.
+	bool from_utf8_views(std::span<const std::string_view> values,
+	    CharsetEncodeErrorPolicy errors = CharsetEncodeErrorPolicy::strict,
+	    bool* out_replaced = nullptr);
 	/// Encode and store a well-known UID value (UI VR only).
 	bool from_uid(uid::WellKnown uid);
 	/// Encode and store a generated UID value (UI VR only).
@@ -1340,11 +1413,20 @@ public:
 	/// Parse value as string_view after VR trimming/charset handling.
 	[[nodiscard]] std::optional<std::string_view> to_string_view() const;
 	/// Parse value as multiple string_views (backed by internal storage).
+	/// For declared multibyte text charsets (for example ISO 2022 JIS, GBK, GB18030) this
+	/// returns nullopt because raw byte splitting on '\' can corrupt multibyte characters
+	/// before charset decode.
 	[[nodiscard]] std::optional<std::vector<std::string_view>> to_string_views() const;
-	/// Parse value as UTF-8 string_view (using Specific Character Set when applicable).
-	[[nodiscard]] std::optional<std::string_view> to_utf8_view() const;
-	/// Parse value as multiple UTF-8 string_views.
-	[[nodiscard]] std::optional<std::vector<std::string_view>> to_utf8_views() const;
+	/// Parse first string component as owned UTF-8 text.
+	/// When out_replaced is non-null, it is set when replace_* policy actually substituted input bytes.
+	[[nodiscard]] std::optional<std::string> to_utf8_string(
+	    CharsetDecodeErrorPolicy errors = CharsetDecodeErrorPolicy::strict,
+	    bool* out_replaced = nullptr) const;
+	/// Parse all string components as owned UTF-8 text.
+	/// When out_replaced is non-null, it is set when replace_* policy actually substituted input bytes.
+	[[nodiscard]] std::optional<std::vector<std::string>> to_utf8_strings(
+	    CharsetDecodeErrorPolicy errors = CharsetDecodeErrorPolicy::strict,
+	    bool* out_replaced = nullptr) const;
 
 	/*
 	VR trimming/charset rules (for string helpers like to_string_view):
@@ -1427,11 +1509,24 @@ private:
 	DataSet* parent_{nullptr};
 
 	friend class DataSet;
+	friend bool charset::detail::apply_declared_charset(
+	    DataSet& dataset, const charset::detail::ParsedSpecificCharacterSet& parsed,
+	    std::string* out_error);
+	friend bool charset::encode_utf8_for_element(DataElement& element,
+	    std::span<const std::string_view> values, CharsetEncodeErrorPolicy errors,
+	    std::string* out_error, bool* out_replaced);
+	friend bool charset::detail::rewrite_charset_values(
+	    DataSet& dataset, const charset::detail::ParsedSpecificCharacterSet& target_charset,
+	    CharsetEncodeErrorPolicy errors, std::string* out_error, bool* out_replaced);
 	constexpr void set_length(std::size_t length) noexcept { length_ = length; }
 	void release_storage() noexcept;
 	void initialize_storage(std::size_t offset, bool bind_to_parent_stream) noexcept;
 	void reset(Tag tag, VR vr, std::size_t length, std::size_t offset,
 	    DataSet* parent, bool bind_to_parent_stream) noexcept;
+	void set_value_bytes_nocheck(std::vector<std::uint8_t>&& bytes);
+	void adopt_value_bytes_nocheck(std::vector<std::uint8_t>&& bytes);
+	void adopt_value_bytes_impl(
+	    std::vector<std::uint8_t>&& bytes, bool notify_charset_parent);
 };
 
 template <typename IndexIter, typename Ref, typename Ptr>
@@ -1515,8 +1610,8 @@ public:
 
 	/// Construct an empty root dataset.
 	DataSet();
-	/// Construct a child dataset inheriting parse/file context from an existing dataset tree.
-	explicit DataSet(DataSet* root_dataset);
+	/// Construct a child dataset inheriting parse/file context from its parent dataset.
+	explicit DataSet(DataSet* parent_dataset);
 	/// Construct a root dataset owned by DicomFile.
 	explicit DataSet(DicomFile* root_file);
 	~DataSet();
@@ -1571,19 +1666,55 @@ public:
 	/// Absolute offset of this dataset within the root stream.
 	[[nodiscard]] std::size_t offset() const { return offset_; }
 
+	/// Update only the local (0008,0005) Specific Character Set metadata for this dataset.
+	/// Existing text value bytes are left untouched.
+	/// Prefer this API over directly editing the raw (0008,0005) element so the effective
+	/// charset cache for nested sequence items stays synchronized.
+	void set_declared_specific_charset(SpecificCharacterSet charset);
+	void set_declared_specific_charset(std::span<const SpecificCharacterSet> charsets);
+	void set_declared_specific_charset(std::initializer_list<SpecificCharacterSet> charsets) {
+		set_declared_specific_charset(
+		    std::span<const SpecificCharacterSet>(charsets.begin(), charsets.size()));
+	}
+
+	/// Transcode this dataset's text VR values to a new Specific Character Set and synchronize
+	/// the local (0008,0005) tag for this dataset and nested item datasets in the subtree.
+	/// Prefer this API over directly editing the raw (0008,0005) element so the effective
+	/// charset cache for nested sequence items stays synchronized.
+	void set_specific_charset(SpecificCharacterSet charset,
+	    CharsetEncodeErrorPolicy errors = CharsetEncodeErrorPolicy::strict,
+	    bool* out_replaced = nullptr);
+	void set_specific_charset(std::span<const SpecificCharacterSet> charsets,
+	    CharsetEncodeErrorPolicy errors = CharsetEncodeErrorPolicy::strict,
+	    bool* out_replaced = nullptr);
+	void set_specific_charset(std::initializer_list<SpecificCharacterSet> charsets,
+	    CharsetEncodeErrorPolicy errors = CharsetEncodeErrorPolicy::strict,
+	    bool* out_replaced = nullptr) {
+		set_specific_charset(std::span<const SpecificCharacterSet>(charsets.begin(), charsets.size()),
+		    errors, out_replaced);
+	}
+
 	/// Add or replace a data element with no stream binding (offset/length = 0).
+	/// Direct edits to `(0008,0005) Specific Character Set` keep the effective charset
+	/// cache synchronized, but the charset-specific setter APIs remain preferred because
+	/// they make intent clearer and validate multi-term combinations explicitly.
 	/// @return Reference to the inserted/replaced element.
 	/// @throws Exception on validation errors (for example: VR::None with unknown tag)
 	///         or allocation failures.
 	DataElement& add_dataelement(Tag tag, VR vr = VR::None);
 
 	/// Add or replace a data element with explicit stream binding metadata.
+	/// Direct edits to `(0008,0005) Specific Character Set` keep the effective charset
+	/// cache synchronized, but the charset-specific setter APIs remain preferred because
+	/// they make intent clearer and validate multi-term combinations explicitly.
 	/// @return Reference to the inserted/replaced element.
 	/// @throws Exception on validation errors (for example: VR::None with unknown tag)
 	///         or allocation failures.
 	DataElement& add_dataelement(Tag tag, VR vr, std::size_t offset, std::size_t length);
 
 	/// Remove a data element by tag (no-op if missing).
+	/// Removing `(0008,0005)` through this API also refreshes the effective charset cache,
+	/// though `set_declared_specific_charset()` is still preferred for clarity.
 	void remove_dataelement(Tag tag);
 
 	/// Low-level lookup by tag (reference form). For most user-facing code, prefer operator[].
@@ -1637,6 +1768,8 @@ public:
 	[[nodiscard]] uid::WellKnown transfer_syntax_uid() const;
 	/// Root dataset context for this dataset tree.
 	[[nodiscard]] DataSet* root_dataset() const noexcept;
+	/// Direct parent dataset for nested sequence items, or nullptr for the root dataset.
+	[[nodiscard]] DataSet* parent_dataset() const noexcept { return parent_dataset_; }
 	/// Root file/session context (nullptr for standalone DataSet).
 	[[nodiscard]] DicomFile* root_file() const noexcept { return root_file_; }
 	/// Number of active DataElements currently available in this dataset.
@@ -1662,11 +1795,28 @@ public:
 
 private:
 	friend class DicomFile;
+	friend class DataElement;
+	friend class Sequence;
+	friend std::optional<charset::detail::ParsedSpecificCharacterSet>
+	charset::detail::parse_dataset_charset(const DataSet& dataset, std::string* out_error);
+	friend bool charset::detail::apply_declared_charset(
+	    DataSet& dataset, const charset::detail::ParsedSpecificCharacterSet& parsed,
+	    std::string* out_error);
+	DataElement& add_dataelement_nocheck(Tag tag, VR vr);
+	DataElement& add_dataelement_nocheck(Tag tag, VR vr, std::size_t offset, std::size_t length);
+	void remove_dataelement_nocheck(Tag tag);
 	void attach_to_stream(std::string identifier, std::unique_ptr<InStream> stream);
 	void set_root_file(DicomFile* root_file) noexcept { root_file_ = root_file; }
+	void on_specific_character_set_changed() noexcept;
+	[[nodiscard]] bool refresh_effective_charset_cache(
+	    const charset::detail::CharsetSpec* inherited, std::string* out_error = nullptr);
+	[[nodiscard]] const charset::detail::CharsetSpec* effective_charset_spec(
+	    std::string* out_error = nullptr) const;
 	std::unique_ptr<InStream> stream_;
 	DicomFile* root_file_{nullptr};
 	DataSet* root_dataset_{nullptr};
+	DataSet* parent_dataset_{nullptr};
+	mutable const charset::detail::CharsetSpec* effective_charset_{nullptr};
 	Tag last_tag_loaded_{Tag::from_value(0)};
 	bool explicit_vr_{true};
 	std::size_t offset_{0};  // absolute offset within the root stream where this dataset starts
@@ -1740,6 +1890,33 @@ public:
 	    const pixel::EncoderContext& encoder_ctx);
 	void set_transfer_syntax(uid::WellKnown transfer_syntax,
 	    std::span<const pixel::CodecOptionTextKv> codec_opt);
+	/// Update only the declared (0008,0005) Specific Character Set metadata.
+	/// Existing text value bytes are left untouched.
+	/// Prefer this API over directly editing the raw (0008,0005) element so the effective
+	/// charset cache stays synchronized.
+	void set_declared_specific_charset(SpecificCharacterSet charset);
+	void set_declared_specific_charset(std::span<const SpecificCharacterSet> charsets);
+	void set_declared_specific_charset(std::initializer_list<SpecificCharacterSet> charsets) {
+		set_declared_specific_charset(
+		    std::span<const SpecificCharacterSet>(charsets.begin(), charsets.size()));
+	}
+	/// Transcode text VR values to a new Specific Character Set and synchronize (0008,0005)
+	/// across the root dataset subtree.
+	/// Prefer this API over directly editing the raw (0008,0005) element so the effective
+	/// charset cache stays synchronized.
+	/// When out_replaced is non-null, it is set when replace_* policy actually substituted data.
+	void set_specific_charset(SpecificCharacterSet charset,
+	    CharsetEncodeErrorPolicy errors = CharsetEncodeErrorPolicy::strict,
+	    bool* out_replaced = nullptr);
+	void set_specific_charset(std::span<const SpecificCharacterSet> charsets,
+	    CharsetEncodeErrorPolicy errors = CharsetEncodeErrorPolicy::strict,
+	    bool* out_replaced = nullptr);
+	void set_specific_charset(std::initializer_list<SpecificCharacterSet> charsets,
+	    CharsetEncodeErrorPolicy errors = CharsetEncodeErrorPolicy::strict,
+	    bool* out_replaced = nullptr) {
+		set_specific_charset(std::span<const SpecificCharacterSet>(charsets.begin(), charsets.size()),
+		    errors, out_replaced);
+	}
 	[[nodiscard]] uid::WellKnown transfer_syntax_uid() const { return transfer_syntax_uid_; }
 	[[nodiscard]] pixel::PixelDataInfo pixeldata_info() const;
 	[[nodiscard]] pixel::DecodePlan create_decode_plan(
@@ -1813,8 +1990,8 @@ private:
 /// Represents a DICOM SQ element value: an ordered list of nested DataSets.
 class Sequence {
 public:
-	/// Construct a sequence tied to the given root dataset context.
-	explicit Sequence(DataSet* root_dataset);
+	/// Construct a sequence tied to the owning dataset context.
+	explicit Sequence(DataSet* owner_dataset);
 	~Sequence();
 	Sequence(const Sequence&) = delete;
 	Sequence& operator=(const Sequence&) = delete;
@@ -1856,6 +2033,7 @@ public:
 	std::vector<std::unique_ptr<DataSet>>::const_iterator cend() const;
 
 private:
+	DataSet* owner_dataset_{nullptr};
 	DataSet* root_dataset_{nullptr};
 	std::size_t value_offset_{0};
 	std::vector<std::unique_ptr<DataSet>> seq_;

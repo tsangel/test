@@ -10,8 +10,9 @@ namespace diag = dicom::diag;
 
 namespace dicom {
 
-Sequence::Sequence(DataSet* root_dataset)
-    : root_dataset_(root_dataset ? root_dataset->root_dataset() : nullptr) {}
+Sequence::Sequence(DataSet* owner_dataset)
+    : owner_dataset_(owner_dataset),
+      root_dataset_(owner_dataset ? owner_dataset->root_dataset() : nullptr) {}
 
 Sequence::~Sequence() = default;
 
@@ -58,6 +59,7 @@ void Sequence::read_from_stream(InStream* stream) {
 			size_t offset_start, offset_end;
 			offset_start = subs.tell();
 			dataset->read_elements_until("ffff,ffff"_tag, &subs);
+			dataset->on_specific_character_set_changed();
 			offset_end = subs.tell();
 			stream->skip(offset_end - offset_start);
 		}
@@ -65,10 +67,10 @@ void Sequence::read_from_stream(InStream* stream) {
 }
 
 DataSet* Sequence::add_dataset() {
-	if (!root_dataset_) {
-		diag::error_and_throw("Sequence::add_dataset reason=no root dataset context");
+	if (!owner_dataset_) {
+		diag::error_and_throw("Sequence::add_dataset reason=no owning dataset context");
 	}
-	seq_.push_back(std::make_unique<DataSet>(root_dataset_));
+	seq_.push_back(std::make_unique<DataSet>(owner_dataset_));
 	return seq_.back().get();
 }
 

@@ -9,6 +9,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from _generator_common import write_text_if_changed
+
 
 @dataclass
 class CharacterSetRow:
@@ -27,6 +29,7 @@ HEADER = """// Auto-generated from {source}
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string_view>
 
@@ -37,10 +40,20 @@ enum class SpecificCharacterSet : std::uint16_t {{
 {enum_entries}
 }};
 
+enum class SpecificCharacterSetCodeElement : std::uint8_t {{
+    none = 0,
+    G0 = 1,
+    G1 = 2,
+}};
+
 struct SpecificCharacterSetInfo {{
     SpecificCharacterSet value;
     std::string_view defined_term;
     std::string_view description;
+    bool uses_iso_2022;
+    SpecificCharacterSet base_character_set;
+    SpecificCharacterSetCodeElement code_element;
+    std::string_view escape_sequence_bytes;
 }};
 
 inline constexpr std::array<SpecificCharacterSetInfo, {count}> kSpecificCharacterSetInfo = {{{{
@@ -153,16 +166,77 @@ def esc(value: str) -> str:
     return value.replace("\\", r"\\").replace('"', r"\"")
 
 
+def parse_escape_sequence(value: str) -> list[int]:
+    tokens = value.split()
+    if not tokens:
+        return []
+    result: list[int] = []
+    for token in tokens:
+        if token == "ESC":
+            result.append(0x1B)
+            continue
+        if "/" not in token:
+            raise ValueError(f"unsupported escape token: {token}")
+        hi, lo = token.split("/", 1)
+        result.append((int(hi, 10) << 4) | int(lo, 10))
+    return result
+
+
+def format_escape_sequence_literal(value: str) -> str:
+    octets = parse_escape_sequence(value)
+    if not octets:
+        return '""'
+    return '"' + "".join(f"\\x{octet:02x}" for octet in octets) + '"'
+
+
+def code_element_literal(value: str) -> str:
+    if value == "G0":
+        return "SpecificCharacterSetCodeElement::G0"
+    if value == "G1":
+        return "SpecificCharacterSetCodeElement::G1"
+    return "SpecificCharacterSetCodeElement::none"
+
+
+def build_base_charset_map(rows: list[CharacterSetRow]) -> dict[str, str]:
+    plain_by_iso_registration: dict[str, str] = {}
+    for row in rows:
+        if row.standard:
+            continue
+        if not row.iso_registration:
+            continue
+        plain_by_iso_registration[row.iso_registration] = row.defined_term
+
+    base_map: dict[str, str] = {}
+    for row in rows:
+        if not row.standard:
+            base_map[row.defined_term] = row.defined_term
+            continue
+        base_term = plain_by_iso_registration.get(row.iso_registration, "")
+        base_map[row.defined_term] = base_term
+    return base_map
+
+
 def format_entries(rows: list[CharacterSetRow]) -> tuple[str, str]:
     enum_lines = []
     info_lines = []
+    base_charset_map = build_base_charset_map(rows)
     for idx, row in enumerate(rows, start=1):
         enum_lines.append(f"    {make_enum_name(row.defined_term)} = {idx},")
+        base_term = base_charset_map.get(row.defined_term, "")
+        base_value = (
+            f"SpecificCharacterSet::{make_enum_name(base_term)}"
+            if base_term
+            else "SpecificCharacterSet::Unknown"
+        )
         info_lines.append(
             "    {" +
             f"SpecificCharacterSet::{make_enum_name(row.defined_term)}, "
             f"\"{esc(row.defined_term)}\", "
-            f"\"{esc(row.description)}\"" +
+            f"\"{esc(row.description)}\", "
+            f"{'true' if row.standard == 'ISO 2022' else 'false'}, "
+            f"{base_value}, "
+            f"{code_element_literal(row.code_element)}, "
+            f"{format_escape_sequence_literal(row.esc_sequence)}" +
             "},"
         )
     return "\n".join(enum_lines), "\n".join(info_lines)
@@ -177,9 +251,14 @@ def main() -> None:
     rows = ensure_iso_ir_6(dedupe_rows(load_rows(args.source)))
     enum_entries, info_entries = format_entries(rows)
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(
-        HEADER.format(source=args.source.as_posix(), enum_entries=enum_entries, info_entries=info_entries, count=len(rows)),
-        encoding="utf-8",
+    write_text_if_changed(
+        args.output,
+        HEADER.format(
+            source=args.source.as_posix(),
+            enum_entries=enum_entries,
+            info_entries=info_entries,
+            count=len(rows),
+        ),
     )
 
 

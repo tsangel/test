@@ -1,5 +1,6 @@
 from collections.abc import Callable, Sequence as _Sequence
 import enum
+import typing
 from typing import overload
 
 from dicomsdl._image import _dicomfile_to_pil_image as to_pil_image
@@ -96,15 +97,51 @@ class DataElement:
 
     def from_string_views(self, values: _Sequence[str]) -> bool: ...
 
+    @typing.overload
+    def from_utf8_view(
+        self, value: str, *, errors: str = ..., return_replaced: typing.Literal[False] = ...
+    ) -> bool: ...
+
+    @typing.overload
+    def from_utf8_view(
+        self, value: str, *, errors: str = ..., return_replaced: typing.Literal[True]
+    ) -> tuple[bool, bool]: ...
+
+    @typing.overload
+    def from_utf8_views(
+        self, values: _Sequence[str], *, errors: str = ..., return_replaced: typing.Literal[False] = ...
+    ) -> bool: ...
+
+    @typing.overload
+    def from_utf8_views(
+        self, values: _Sequence[str], *, errors: str = ..., return_replaced: typing.Literal[True]
+    ) -> tuple[bool, bool]: ...
+
     def to_uid_string(self) -> object: ...
 
     def to_string_view(self) -> object: ...
 
     def to_string_views(self) -> object: ...
 
-    def to_utf8_view(self) -> object: ...
+    @typing.overload
+    def to_utf8_string(
+        self, *, errors: str = ..., return_replaced: typing.Literal[False] = ...
+    ) -> object: ...
 
-    def to_utf8_views(self) -> object: ...
+    @typing.overload
+    def to_utf8_string(
+        self, *, errors: str = ..., return_replaced: typing.Literal[True]
+    ) -> tuple[object, bool]: ...
+
+    @typing.overload
+    def to_utf8_strings(
+        self, *, errors: str = ..., return_replaced: typing.Literal[False] = ...
+    ) -> object: ...
+
+    @typing.overload
+    def to_utf8_strings(
+        self, *, errors: str = ..., return_replaced: typing.Literal[True]
+    ) -> tuple[object, bool]: ...
 
     def to_transfer_syntax_uid(self) -> object: ...
 
@@ -208,6 +245,8 @@ class EncoderContext:
     def transfer_syntax_uid(self) -> object: ...
 
 class DicomFile:
+    def __init__(self) -> None: ...
+
     @property
     def path(self) -> str: ...
 
@@ -240,6 +279,26 @@ class DicomFile:
 
     @overload
     def set_transfer_syntax(self, transfer_syntax: str, *, encoder_context: EncoderContext) -> None: ...
+
+    def set_declared_specific_charset(self, specific_charset: str | _Sequence[str] | None) -> None: ...
+
+    @typing.overload
+    def set_specific_charset(
+        self,
+        specific_charset: str | _Sequence[str] | None,
+        *,
+        errors: str = ...,
+        return_replaced: typing.Literal[False] = ...,
+    ) -> None: ...
+
+    @typing.overload
+    def set_specific_charset(
+        self,
+        specific_charset: str | _Sequence[str] | None,
+        *,
+        errors: str = ...,
+        return_replaced: typing.Literal[True],
+    ) -> bool: ...
 
     @overload
     def set_pixel_data(self, transfer_syntax: Uid, source: object, *, options: object | None = ...) -> None: ...
@@ -403,6 +462,10 @@ class VR:
     def is_sequence(self) -> bool: ...
 
     def is_pixel_sequence(self) -> bool: ...
+
+    def uses_specific_character_set(self) -> bool: ...
+
+    def allows_multiple_text_values(self) -> bool: ...
 
     def padding_byte(self) -> int: ...
 

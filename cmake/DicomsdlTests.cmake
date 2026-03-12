@@ -1,4 +1,16 @@
 if(BUILD_TESTING)
+    if(WIN32)
+        get_filename_component(_dicomsdl_test_compiler_bin_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+        set(_dicomsdl_test_path_dirs
+            "${_dicomsdl_test_compiler_bin_dir}"
+            "${CMAKE_BINARY_DIR}/_deps/dicomsdl_openjpeg-build/bin"
+            "${CMAKE_BINARY_DIR}/_deps/dicomsdl_charls-build/bin"
+            "${CMAKE_BINARY_DIR}/_deps/dicomsdl_libjpeg_turbo-build/sharedlib"
+            "${CMAKE_BINARY_DIR}/_deps/dicomsdl_libdeflate-build"
+        )
+        list(JOIN _dicomsdl_test_path_dirs ";" _dicomsdl_test_path_prefix)
+    endif()
+
     add_executable(dicomsdl_dictionary_consistency
         tests/dictionary_consistency.cpp
     )
@@ -12,6 +24,51 @@ if(BUILD_TESTING)
     target_link_libraries(dicomsdl_basic_smoke PRIVATE dicomsdl)
     add_test(NAME basic_smoke COMMAND dicomsdl_basic_smoke)
     set_tests_properties(basic_smoke PROPERTIES LABELS "dicomsdl")
+
+    add_executable(dicomsdl_pixel_io_smoke
+        tests/pixel_io_smoke.cpp
+    )
+    target_link_libraries(dicomsdl_pixel_io_smoke PRIVATE dicomsdl)
+    add_test(NAME pixel_io_smoke COMMAND dicomsdl_pixel_io_smoke)
+    set_tests_properties(pixel_io_smoke PROPERTIES LABELS "dicomsdl")
+
+    add_executable(dicomsdl_charset_smoke
+        tests/charset_smoke.cpp
+    )
+    target_link_libraries(dicomsdl_charset_smoke PRIVATE dicomsdl)
+    add_test(NAME charset_smoke COMMAND dicomsdl_charset_smoke)
+    set_tests_properties(charset_smoke PROPERTIES LABELS "dicomsdl")
+
+    add_executable(dicomsdl_charset_generated_tables_smoke
+        tests/charset_generated_tables_smoke.cpp
+    )
+    target_include_directories(dicomsdl_charset_generated_tables_smoke
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    target_link_libraries(dicomsdl_charset_generated_tables_smoke PRIVATE dicomsdl)
+    add_test(NAME charset_generated_tables_smoke COMMAND dicomsdl_charset_generated_tables_smoke)
+    set_tests_properties(charset_generated_tables_smoke PROPERTIES LABELS "dicomsdl")
+
+    add_test(
+        NAME charset_generator_regression
+        COMMAND
+            "${_dicomsdl_python_executable}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/charset_generator_regression.py"
+            --root "${CMAKE_CURRENT_SOURCE_DIR}"
+            --python "${_dicomsdl_python_executable}"
+    )
+    set_tests_properties(charset_generator_regression PROPERTIES LABELS "dicomsdl")
+
+    add_test(
+        NAME dictionary_generator_regression
+        COMMAND
+            "${_dicomsdl_python_executable}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/dictionary_generator_regression.py"
+            --root "${CMAKE_CURRENT_SOURCE_DIR}"
+            --python "${_dicomsdl_python_executable}"
+    )
+    set_tests_properties(dictionary_generator_regression PROPERTIES LABELS "dicomsdl")
 
     add_executable(dicomsdl_htj2k_backend_config_smoke
         tests/htj2k_backend_config_smoke.cpp
@@ -189,6 +246,9 @@ if(BUILD_TESTING)
     foreach(_dicomsdl_test_target IN ITEMS
         dicomsdl_dictionary_consistency
         dicomsdl_basic_smoke
+        dicomsdl_pixel_io_smoke
+        dicomsdl_charset_smoke
+        dicomsdl_charset_generated_tables_smoke
         dicomsdl_htj2k_backend_config_smoke
         dicomsdl_htj2k_threads_ignore_smoke
         dicomsdl_numeric_values
@@ -210,4 +270,40 @@ if(BUILD_TESTING)
         endif()
     endforeach()
     unset(_dicomsdl_test_target)
+
+    if(WIN32)
+        foreach(_dicomsdl_test_target IN ITEMS
+            dicomsdl_dictionary_consistency
+            dicomsdl_basic_smoke
+            dicomsdl_pixel_io_smoke
+            dicomsdl_charset_smoke
+            dicomsdl_charset_generated_tables_smoke
+            dicomsdl_htj2k_backend_config_smoke
+            dicomsdl_htj2k_threads_ignore_smoke
+            dicomsdl_numeric_values
+            dicomsdl_uid_consistency
+            dicomsdl_separation_regression
+            dicomsdl_dataset_ordering_regression
+            dicomsdl_codec_cycle_roundtrip
+            dicomsdl_codec_error_boundary
+            dicomsdl_pixel_core_uncompressed_smoke
+            dicomsdl_pixel_rle_static_plugin_smoke
+            dicomsdl_pixel_jpeg_plugin_smoke
+            dicomsdl_pixel_htj2k_plugin_smoke
+            dicomsdl_pixel_runtime_registry_bootstrap_smoke
+            dicomsdl_pixel_host_adapter_smoke
+        )
+            if(TARGET ${_dicomsdl_test_target})
+                string(REGEX REPLACE "^dicomsdl_" "" _dicomsdl_test_name "${_dicomsdl_test_target}")
+                set_property(TEST ${_dicomsdl_test_name} APPEND PROPERTY
+                    ENVIRONMENT "PATH=${_dicomsdl_test_path_prefix};$ENV{PATH}"
+                )
+            endif()
+        endforeach()
+        unset(_dicomsdl_test_name)
+        unset(_dicomsdl_test_path_prefix)
+        unset(_dicomsdl_test_path_dirs)
+        unset(_dicomsdl_test_compiler_bin_dir)
+        unset(_dicomsdl_test_target)
+    endif()
 endif()

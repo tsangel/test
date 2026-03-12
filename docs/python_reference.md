@@ -19,6 +19,7 @@ Warning: when `copy=False`, the source buffer must remain alive for as long as t
 - Indexing: `ds[tag|packed_int|tag_str]` returns the element's value or `None` if missing.
 - Attribute sugar: `ds.PatientName` resolves keyword → tag and returns the value, raising `AttributeError` if missing.
 - Methods: `add_dataelement`, `remove_dataelement`, `get_dataelement` (returns a falsey `DataElement` with `VR.None` on miss), `dump_elements`, `path`.
+- Charset updates: prefer `set_declared_specific_charset()` / `set_specific_charset()` instead of directly editing `(0008,0005)` as a raw element. Effective charset caches are synchronized by the charset setter APIs.
 - Pixel decode safety: if pixel-affecting metadata changes (transfer syntax,
   rows/cols, samples, bits, pixel representation, planar configuration, frame
   count, pixel data tags), do not reuse old decode layout assumptions; re-query
@@ -27,9 +28,28 @@ Warning: when `copy=False`, the source buffer must remain alive for as long as t
 ### DicomFile
 - Session wrapper that owns the root `DataSet`.
 - Error status after read: `has_error` (bool), `error_message` (`str | None`).
+- `set_declared_specific_charset()` updates only `(0008,0005) Specific Character Set`.
+- `set_specific_charset()` transcodes text VR values and updates `(0008,0005)` together across
+  the selected dataset subtree, including nested sequence-item datasets.
+  Supports `errors='strict'`, `errors='replace_qmark'`, and
+  `errors='replace_unicode_escape'`.
+  With `return_replaced=True`, it returns whether replacement occurred.
+- `write_bytes()` and `write_file()` write the dataset's current raw byte values as-is.
 
 ### DataElement
-- Provides `tag`, `vr`, `length`, `offset`, and helpers to coerce values (`to_long`, `to_double`, `to_string_view`, `to_utf8_view`, etc.).
+- Provides `tag`, `vr`, `length`, `offset`, and helpers to coerce values (`to_long`, `to_double`, `to_string_view`, `to_utf8_string`, `to_utf8_strings`, etc.).
+- `from_utf8_view()` / `from_utf8_views()` encode immediately using the current dataset charset declaration.
+  Supports `errors='strict'`, `errors='replace_qmark'`, and
+  `errors='replace_unicode_escape'`.
+  With `return_replaced=True`, they return `(ok, replaced)`.
+- `to_utf8_string()` / `to_utf8_strings()` decode text using `(0008,0005)` and return owned Python strings.
+  Supports `errors='strict'`, `errors='replace_fffd'`, and
+  `errors='replace_hex_escape'`.
+  With `return_replaced=True`, they return `(value_or_none, replaced)`.
+- `to_string_view()` remains the raw trimmed-string helper for already encoded DICOM bytes.
+- `to_string_views()` remains a raw helper, but returns `None` for declared multibyte text charsets
+  such as ISO 2022 JIS, GBK, and GB18030 because raw-byte splitting on `\` is not safe before
+  charset decode.
 - Raw-byte helper: `value_span()` returns a read-only `memoryview` (no copy).
 - Truthiness: `bool(elem)` is `False` for missing lookups (`VR.None`), otherwise `True`.
 - Presence helpers: `elem.is_present()` / `elem.is_missing()` use the same rule as `bool(elem)`.
@@ -41,6 +61,9 @@ Warning: when `copy=False`, the source buffer must remain alive for as long as t
 
 ### VR
 - Enum-like VR wrapper; string conversion via `str(vr)` or `vr.str()`.
+- Classification helpers include `is_string()`, `is_binary()`, `is_sequence()`,
+  `is_pixel_sequence()`, `uses_specific_character_set()`, and
+  `allows_multiple_text_values()`.
 
 ### Uid
 - Construct from keyword or dotted string; throws on unknown values.
