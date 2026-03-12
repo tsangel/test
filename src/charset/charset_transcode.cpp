@@ -272,7 +272,7 @@ std::optional<std::string> decode_text_value(
     DecodeReplacementMode decode_mode, std::string* out_error, bool* out_replaced) {
 	auto converted = decode_raw_text_to_utf8(
 	    raw_text_bytes(element), element, source_charset_plan, decode_mode, out_error,
-	    out_replaced, true);
+	    out_replaced, element.vr().allows_multiple_text_values());
 	if (!converted) {
 		return std::nullopt;
 	}
@@ -447,7 +447,7 @@ bool rewrite_charset_values(DataSet& dataset,
 		if (!encoded) {
 			return false;
 		}
-		element.set_value_bytes(std::move(*encoded));
+		element.set_value_bytes_nocheck(std::move(*encoded));
 	}
 	return apply_declared_charset(dataset, target_charset, out_error);
 }
@@ -455,7 +455,7 @@ bool rewrite_charset_values(DataSet& dataset,
 bool apply_declared_charset(
     DataSet& dataset, const ParsedSpecificCharacterSet& parsed, std::string* out_error) {
 	if (omit_charset_tag(parsed)) {
-		dataset.remove_dataelement(kSpecificCharacterSetTag);
+		dataset.remove_dataelement_nocheck(kSpecificCharacterSetTag);
 		return true;
 	}
 
@@ -463,8 +463,8 @@ bool apply_declared_charset(
 	if (!encoded_tag_value) {
 		return false;
 	}
-	auto& element = dataset.add_dataelement(kSpecificCharacterSetTag, VR::CS);
-	element.set_value_bytes(std::move(*encoded_tag_value));
+	auto& element = dataset.add_dataelement_nocheck(kSpecificCharacterSetTag, VR::CS);
+	element.set_value_bytes_nocheck(std::move(*encoded_tag_value));
 	return true;
 }
 

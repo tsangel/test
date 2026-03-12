@@ -32,12 +32,24 @@
 namespace dicom {
 
 class DataSet;
+class DataElement;
+enum class CharsetEncodeErrorPolicy : std::uint8_t;
+
+namespace charset {
+bool encode_utf8_for_element(DataElement& element, std::span<const std::string_view> values,
+    CharsetEncodeErrorPolicy errors, std::string* out_error, bool* out_replaced);
+}
 
 namespace charset::detail {
 struct ParsedSpecificCharacterSet;
 using CharsetSpec = ParsedSpecificCharacterSet;
 [[nodiscard]] std::optional<ParsedSpecificCharacterSet> parse_dataset_charset(
     const DataSet& dataset, std::string* out_error);
+[[nodiscard]] bool apply_declared_charset(
+    DataSet& dataset, const ParsedSpecificCharacterSet& parsed, std::string* out_error);
+[[nodiscard]] bool rewrite_charset_values(
+    DataSet& dataset, const ParsedSpecificCharacterSet& target_charset,
+    CharsetEncodeErrorPolicy errors, std::string* out_error, bool* out_replaced);
 }
 
 using std::uint8_t;
@@ -1497,11 +1509,24 @@ private:
 	DataSet* parent_{nullptr};
 
 	friend class DataSet;
+	friend bool charset::detail::apply_declared_charset(
+	    DataSet& dataset, const charset::detail::ParsedSpecificCharacterSet& parsed,
+	    std::string* out_error);
+	friend bool charset::encode_utf8_for_element(DataElement& element,
+	    std::span<const std::string_view> values, CharsetEncodeErrorPolicy errors,
+	    std::string* out_error, bool* out_replaced);
+	friend bool charset::detail::rewrite_charset_values(
+	    DataSet& dataset, const charset::detail::ParsedSpecificCharacterSet& target_charset,
+	    CharsetEncodeErrorPolicy errors, std::string* out_error, bool* out_replaced);
 	constexpr void set_length(std::size_t length) noexcept { length_ = length; }
 	void release_storage() noexcept;
 	void initialize_storage(std::size_t offset, bool bind_to_parent_stream) noexcept;
 	void reset(Tag tag, VR vr, std::size_t length, std::size_t offset,
 	    DataSet* parent, bool bind_to_parent_stream) noexcept;
+	void set_value_bytes_nocheck(std::vector<std::uint8_t>&& bytes);
+	void adopt_value_bytes_nocheck(std::vector<std::uint8_t>&& bytes);
+	void adopt_value_bytes_impl(
+	    std::vector<std::uint8_t>&& bytes, bool notify_charset_parent);
 };
 
 template <typename IndexIter, typename Ref, typename Ptr>
@@ -1774,6 +1799,9 @@ private:
 	friend class Sequence;
 	friend std::optional<charset::detail::ParsedSpecificCharacterSet>
 	charset::detail::parse_dataset_charset(const DataSet& dataset, std::string* out_error);
+	friend bool charset::detail::apply_declared_charset(
+	    DataSet& dataset, const charset::detail::ParsedSpecificCharacterSet& parsed,
+	    std::string* out_error);
 	DataElement& add_dataelement_nocheck(Tag tag, VR vr);
 	DataElement& add_dataelement_nocheck(Tag tag, VR vr, std::size_t offset, std::size_t length);
 	void remove_dataelement_nocheck(Tag tag);

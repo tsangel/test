@@ -131,6 +131,22 @@ def test_to_string_views_rejects_raw_iso2022_splitting():
 	assert lo_elem.to_utf8_strings() == ["\uff0b"]
 
 
+def test_to_utf8_string_keeps_backslash_in_single_valued_gbk_st():
+	df = dicom.DicomFile()
+	df.set_declared_specific_charset("GBK")
+	st_elem = df.dataset.add_dataelement(dicom.Tag(0x4000, 0x4000), dicom.VR.ST)
+	assert st_elem.from_utf8_view("\u4e2d\\B")
+	assert st_elem.to_utf8_string() == "\u4e2d\\B"
+
+
+def test_to_utf8_string_keeps_backslash_in_single_valued_iso2022_st():
+	df = dicom.DicomFile()
+	df.set_declared_specific_charset("ISO 2022 IR 87")
+	st_elem = df.dataset.add_dataelement(dicom.Tag(0x4000, 0x4001), dicom.VR.ST)
+	assert st_elem.from_utf8_view("\u4e9c\\B")
+	assert st_elem.to_utf8_string() == "\u4e9c\\B"
+
+
 def test_write_bytes_omits_initial_iso2022_g1_designation():
 	latin1_name = "\u00f6"
 	df = dicom.DicomFile()

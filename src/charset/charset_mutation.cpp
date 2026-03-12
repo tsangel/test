@@ -3,6 +3,7 @@
 #include "charset/charset_mutation_detail.hpp"
 #include "charset/text_validation.hpp"
 
+#include <cassert>
 #include <fmt/format.h>
 #include <utility>
 
@@ -354,28 +355,11 @@ bool encode_utf8_for_element(DataElement& element,
 	if (values.empty()) {
 		return element.from_string_views(values);
 	}
-	if (element.vr() == VR::UI) {
-		return element.from_string_views(values);
-	}
 	if (!element.vr().is_string()) {
 		detail::set_error(out_error, "reason=unsupported VR for from_utf8_views");
 		return false;
 	}
-	for (const auto value : values) {
-		if (!validate_utf8(value)) {
-			detail::set_error(out_error, "reason=input is not valid UTF-8");
-			return false;
-		}
-	}
-	if (!element.vr().uses_specific_character_set()) {
-		for (const auto value : values) {
-			if (!validate_ascii(value)) {
-				detail::set_error(out_error, "reason=VR requires ASCII-compatible text");
-				return false;
-			}
-		}
-		return element.from_string_views(values);
-	}
+	assert(element.vr().uses_specific_character_set());
 	if (!element.vr().allows_multiple_text_values() && values.size() != 1) {
 		detail::set_error(out_error, "reason=VR requires a single value for from_utf8_views");
 		return false;
@@ -399,7 +383,7 @@ bool encode_utf8_for_element(DataElement& element,
 		if (!encoded) {
 			return false;
 		}
-		element.set_value_bytes(std::move(*encoded));
+		element.set_value_bytes_nocheck(std::move(*encoded));
 		return true;
 	}
 
@@ -421,7 +405,7 @@ bool encode_utf8_for_element(DataElement& element,
 	if (!encoded) {
 		return false;
 	}
-	element.set_value_bytes(std::move(*encoded));
+	element.set_value_bytes_nocheck(std::move(*encoded));
 	return true;
 }
 

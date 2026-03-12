@@ -71,12 +71,13 @@ void set_error(std::string* out_error, std::string message);
 [[nodiscard]] std::string_view iso2022_reset_escape() noexcept;
 [[nodiscard]] inline bool is_iso2022_state_reset_char(VR vr, std::uint32_t codepoint) noexcept {
 	switch (codepoint) {
-	case '\\':
 	case '\n':
 	case '\f':
 	case '\r':
 	case '\t':
 		return true;
+	case '\\':
+		return vr.allows_multiple_text_values();
 	case '^':
 	case '=':
 		return vr == VR::PN;

@@ -3,6 +3,7 @@
 #include "charset/charset_decode.hpp"
 #include "charset/charset_detail.hpp"
 #include "charset/charset_mutation.hpp"
+#include "charset/text_validation.hpp"
 #include <diagnostics.h>
 
 #include <cctype>
@@ -602,10 +603,23 @@ void DataElement::set_value_bytes(std::span<const std::uint8_t> bytes) {
 }
 
 void DataElement::set_value_bytes(std::vector<std::uint8_t>&& bytes) {
-	adopt_value_bytes(std::move(bytes));
+	adopt_value_bytes_impl(std::move(bytes), true);
+}
+
+void DataElement::set_value_bytes_nocheck(std::vector<std::uint8_t>&& bytes) {
+	adopt_value_bytes_nocheck(std::move(bytes));
 }
 
 void DataElement::adopt_value_bytes(std::vector<std::uint8_t>&& bytes) {
+	adopt_value_bytes_impl(std::move(bytes), true);
+}
+
+void DataElement::adopt_value_bytes_nocheck(std::vector<std::uint8_t>&& bytes) {
+	adopt_value_bytes_impl(std::move(bytes), false);
+}
+
+void DataElement::adopt_value_bytes_impl(
+    std::vector<std::uint8_t>&& bytes, bool notify_charset_parent) {
 	if (vr_ == dicom::VR::SQ || vr_ == dicom::VR::PX || vr_ == dicom::VR::None) {
 		diag::error_and_throw(
 		    "DataElement::adopt_value_bytes reason=cannot assign raw bytes to sequence storage vr={}",
@@ -624,7 +638,7 @@ void DataElement::adopt_value_bytes(std::vector<std::uint8_t>&& bytes) {
 
 	if (bytes.empty()) {
 		reserve_value_bytes(0);
-		if (tag_ == charset::detail::kSpecificCharacterSetTag && parent_) {
+		if (notify_charset_parent && tag_ == charset::detail::kSpecificCharacterSetTag && parent_) {
 			parent_->on_specific_character_set_changed();
 		}
 		return;
@@ -633,6 +647,9 @@ void DataElement::adopt_value_bytes(std::vector<std::uint8_t>&& bytes) {
 	if (bytes.size() <= kInlineStorageBytes) {
 		store_padded_value_bytes(*this,
 		    std::span<const std::uint8_t>(bytes.data(), bytes.size()));
+		if (notify_charset_parent && tag_ == charset::detail::kSpecificCharacterSetTag && parent_) {
+			parent_->on_specific_character_set_changed();
+		}
 		return;
 	}
 
@@ -640,7 +657,7 @@ void DataElement::adopt_value_bytes(std::vector<std::uint8_t>&& bytes) {
 	length_ = bytes.size();
 	storage_.vec = new std::vector<std::uint8_t>(std::move(bytes));
 	storage_kind_ = StorageKind::owned_bytes;
-	if (tag_ == charset::detail::kSpecificCharacterSetTag && parent_) {
+	if (notify_charset_parent && tag_ == charset::detail::kSpecificCharacterSetTag && parent_) {
 		parent_->on_specific_character_set_changed();
 	}
 }
@@ -1053,6 +1070,28 @@ bool DataElement::from_utf8_views(
     std::span<const std::string_view> values, CharsetEncodeErrorPolicy errors,
     bool* out_replaced) {
 	if (values.empty()) {
+		if (out_replaced) {
+			*out_replaced = false;
+		}
+		return from_string_views(values);
+	}
+	if (!vr_.is_string()) {
+		return report_from_assignment_failure(
+		    "DataElement::from_utf8_views", *this, "unsupported VR for from_utf8_views");
+	}
+	for (const auto value : values) {
+		if (!charset::validate_utf8(value)) {
+			return report_from_assignment_failure(
+			    "DataElement::from_utf8_views", *this, "input is not valid UTF-8");
+		}
+	}
+	if (!vr_.uses_specific_character_set()) {
+		for (const auto value : values) {
+			if (!charset::validate_ascii(value)) {
+				return report_from_assignment_failure(
+				    "DataElement::from_utf8_views", *this, "VR requires ASCII-compatible text");
+			}
+		}
 		if (out_replaced) {
 			*out_replaced = false;
 		}

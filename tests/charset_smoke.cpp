@@ -300,6 +300,17 @@ int main() {
 			fail("clearing raw SpecificCharacterSet should refresh effective charset cache");
 		}
 
+		dicom::DicomFile raw_charset_vector_file;
+		auto& raw_charset_vector =
+		    raw_charset_vector_file.add_dataelement("SpecificCharacterSet"_tag, dicom::VR::CS);
+		raw_charset_vector.set_value_bytes(std::vector<std::uint8_t>{'G', 'B', 'K'});
+		auto& raw_charset_vector_name =
+		    raw_charset_vector_file.add_dataelement("PatientName"_tag, dicom::VR::PN);
+		const std::string utf8_chinese("\xE4\xB8\xAD\xE6\x96\x87", 6);
+		if (!raw_charset_vector_name.from_utf8_view(utf8_chinese)) {
+			fail("set_value_bytes(vector&&) should refresh SpecificCharacterSet cache for inline values");
+		}
+
 		dicom::DicomFile raw_remove_charset_file;
 		raw_remove_charset_file.set_declared_specific_charset(dicom::SpecificCharacterSet::ISO_IR_192);
 		raw_remove_charset_file.remove_dataelement("SpecificCharacterSet"_tag);
@@ -809,6 +820,19 @@ int main() {
 		if (!decoded_name || *decoded_name != utf8_katakana) {
 			fail("to_utf8_string should decode escaped ISO 2022 IR 13 text");
 		}
+
+		dicom::DicomFile iso2022_st_file;
+		iso2022_st_file.set_declared_specific_charset(dicom::SpecificCharacterSet::ISO_2022_IR_87);
+		auto& iso2022_st =
+		    iso2022_st_file.add_dataelement(dicom::Tag(0x4000u, 0x4001u), dicom::VR::ST);
+		const std::string utf8_iso2022_single_value("\xE4\xBA\x9C\\B", 5);
+		if (!iso2022_st.from_utf8_view(utf8_iso2022_single_value)) {
+			fail("UTF-8 ISO 2022 IR 87 ST assignment should succeed");
+		}
+		const auto decoded_single_value = iso2022_st.to_utf8_string();
+		if (!decoded_single_value || *decoded_single_value != utf8_iso2022_single_value) {
+			fail("to_utf8_string should not truncate single-valued ISO 2022 ST at ASCII backslash");
+		}
 	}
 
 	{
@@ -959,6 +983,20 @@ int main() {
 		const auto decoded_hyphen = raw_gbk_punct.to_utf8_string();
 		if (!decoded_hyphen || *decoded_hyphen != utf8_hyphen) {
 			fail("to_utf8_string should decode raw GBK text containing trail-byte 0x5C");
+		}
+
+		dicom::DicomFile raw_gbk_st_file;
+		raw_gbk_st_file.set_declared_specific_charset(dicom::SpecificCharacterSet::GBK);
+		auto& raw_gbk_st =
+		    raw_gbk_st_file.add_dataelement(dicom::Tag(0x4000u, 0x4000u), dicom::VR::ST);
+		const std::string raw_gbk_single_value("\xD6\xD0\\B", 4);
+		if (!raw_gbk_st.from_string_view(raw_gbk_single_value)) {
+			fail("raw GBK ST assignment should succeed");
+		}
+		const std::string utf8_gbk_single_value("\xE4\xB8\xAD\\B", 5);
+		const auto decoded_single_value = raw_gbk_st.to_utf8_string();
+		if (!decoded_single_value || *decoded_single_value != utf8_gbk_single_value) {
+			fail("to_utf8_string should not truncate single-valued GBK ST at ASCII backslash");
 		}
 
 		dicom::DicomFile failing_file;
