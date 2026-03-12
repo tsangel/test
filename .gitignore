@@ -1,9 +1,0 @@
-build/
-dicomsdl.egg-info/
-build-local-clang-static/
-build-local-clang/
-build-local/
-dist/
-*.pyc
-build-fullcheck/
-build-msyscheck/
