@@ -42,6 +42,23 @@ def test_from_utf8_errors_replacement_modes():
 	assert pn_elem.to_string_view() == "(U+D64D)(U+AE38)(U+B3D9)"
 
 
+def test_raw_specific_character_set_edits_refresh_cache():
+	korean_name = "\ud64d\uae38\ub3d9"
+	df = dicom.DicomFile()
+	cs_elem = df.dataset.add_dataelement(dicom.Tag("SpecificCharacterSet"), dicom.VR.CS)
+	assert cs_elem.from_string_view("ISO_IR 192")
+	pn_elem = df.dataset.add_dataelement(dicom.Tag("PatientName"), dicom.VR.PN)
+	assert pn_elem.from_utf8_view(korean_name)
+	assert cs_elem.from_string_view("")
+	other_elem = df.dataset.add_dataelement(dicom.Tag("OtherPatientNames"), dicom.VR.PN)
+	assert not other_elem.from_utf8_view(korean_name)
+
+	remove_df = dicom.DicomFile()
+	remove_df.set_declared_specific_charset("ISO_IR 192")
+	remove_df.dataset.remove_dataelement(dicom.Tag("SpecificCharacterSet"))
+	retry_elem = remove_df.dataset.add_dataelement(dicom.Tag("PatientID"), dicom.VR.LO)
+	assert not retry_elem.from_utf8_view(korean_name)
+
 def test_write_bytes_uses_declared_specific_character_set():
 	korean_name = "\ud64d\uae38\ub3d9"
 	df = dicom.DicomFile()
@@ -58,8 +75,7 @@ def test_write_bytes_uses_declared_specific_character_set():
 def test_write_bytes_supports_multi_term_iso2022_charset():
 	japanese_name = "\uff76\uff85^\u4e9c"
 	df = dicom.DicomFile()
-	cs_elem = df.dataset.add_dataelement(dicom.Tag("SpecificCharacterSet"), dicom.VR.CS)
-	assert cs_elem.from_string_views(["ISO 2022 IR 13", "ISO 2022 IR 87"])
+	df.set_declared_specific_charset(["ISO 2022 IR 13", "ISO 2022 IR 87"])
 	pn_elem = df.dataset.add_dataelement(dicom.Tag("PatientName"), dicom.VR.PN)
 	assert pn_elem.from_utf8_view(japanese_name)
 
@@ -141,6 +157,17 @@ def test_to_utf8_errors_replacement_modes():
 	value, replaced = pn_elem.to_utf8_string(errors="replace_fffd", return_replaced=True)
 	assert value == "\ufffd"
 	assert replaced is True
+
+
+def test_to_utf8_string_stops_after_first_component():
+	iso2022_df = dicom.DicomFile()
+	iso2022_df.set_declared_specific_charset("ISO 2022 IR 100")
+	iso2022_elem = iso2022_df.dataset.add_dataelement(
+	    dicom.Tag("SeriesDescription"), dicom.VR.LO
+	)
+	assert iso2022_elem.from_string_view("A\\\x1b%GA")
+	assert iso2022_elem.to_utf8_string() == "A"
+	assert iso2022_elem.to_utf8_strings() is None
 
 
 def test_set_specific_charset_errors_replacement_modes():

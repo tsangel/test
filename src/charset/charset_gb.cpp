@@ -170,13 +170,17 @@ std::optional<std::string> utf8_to_gb2312_string(std::string_view value, std::st
 
 std::optional<std::string> gb18030_to_utf8_string(
     std::string_view value, bool allow_four_byte, std::string_view charset_name,
-    DecodeReplacementMode mode, std::string* out_error, bool* out_replaced) {
+    DecodeReplacementMode mode, std::string* out_error, bool* out_replaced,
+    bool stop_at_first_value) {
 	std::string utf8;
 	utf8.reserve(value.size() * 3u);
 	std::size_t offset = 0;
 	while (offset < value.size()) {
 		const auto b1 = static_cast<std::uint8_t>(value[offset]);
 		if (b1 < 0x80u) {
+			if (stop_at_first_value && b1 == '\\') {
+				break;
+			}
 			if (!append_utf8_codepoint(utf8, b1)) {
 				set_error(out_error, "reason=failed to encode source byte as UTF-8");
 				return std::nullopt;

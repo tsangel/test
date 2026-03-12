@@ -596,6 +596,9 @@ void DataElement::set_value_bytes(std::span<const std::uint8_t> bytes) {
 		    vr_.str());
 	}
 	store_padded_value_bytes(*this, bytes);
+	if (tag_ == charset::detail::kSpecificCharacterSetTag && parent_) {
+		parent_->on_specific_character_set_changed();
+	}
 }
 
 void DataElement::set_value_bytes(std::vector<std::uint8_t>&& bytes) {
@@ -621,6 +624,9 @@ void DataElement::adopt_value_bytes(std::vector<std::uint8_t>&& bytes) {
 
 	if (bytes.empty()) {
 		reserve_value_bytes(0);
+		if (tag_ == charset::detail::kSpecificCharacterSetTag && parent_) {
+			parent_->on_specific_character_set_changed();
+		}
 		return;
 	}
 
@@ -634,6 +640,9 @@ void DataElement::adopt_value_bytes(std::vector<std::uint8_t>&& bytes) {
 	length_ = bytes.size();
 	storage_.vec = new std::vector<std::uint8_t>(std::move(bytes));
 	storage_kind_ = StorageKind::owned_bytes;
+	if (tag_ == charset::detail::kSpecificCharacterSetTag && parent_) {
+		parent_->on_specific_character_set_changed();
+	}
 }
 
 bool DataElement::from_int(int value) {
@@ -959,12 +968,18 @@ bool DataElement::from_string_view(std::string_view value) {
 
 	const auto* ptr = reinterpret_cast<const std::uint8_t*>(value.data());
 	store_padded_value_bytes(*this, std::span<const std::uint8_t>(ptr, value.size()));
+	if (tag_ == charset::detail::kSpecificCharacterSetTag && parent_) {
+		parent_->on_specific_character_set_changed();
+	}
 	return true;
 }
 
 bool DataElement::from_string_views(std::span<const std::string_view> values) {
 	if (values.empty()) {
 		reserve_value_bytes(0);
+		if (tag_ == charset::detail::kSpecificCharacterSetTag && parent_) {
+			parent_->on_specific_character_set_changed();
+		}
 		return true;
 	}
 	if (vr_ == dicom::VR::UI) {
@@ -984,6 +999,9 @@ bool DataElement::from_string_views(std::span<const std::string_view> values) {
 		}
 		const auto* ptr = reinterpret_cast<const std::uint8_t*>(text.data());
 		store_padded_value_bytes(*this, std::span<const std::uint8_t>(ptr, text.size()));
+		if (tag_ == charset::detail::kSpecificCharacterSetTag && parent_) {
+			parent_->on_specific_character_set_changed();
+		}
 		return true;
 	}
 	if (!vr_.is_string()) {
@@ -1020,6 +1038,9 @@ bool DataElement::from_string_views(std::span<const std::string_view> values) {
 	}
 	const auto* ptr = reinterpret_cast<const std::uint8_t*>(text.data());
 	store_padded_value_bytes(*this, std::span<const std::uint8_t>(ptr, text.size()));
+	if (tag_ == charset::detail::kSpecificCharacterSetTag && parent_) {
+		parent_->on_specific_character_set_changed();
+	}
 	return true;
 }
 
@@ -1810,11 +1831,7 @@ std::optional<std::vector<std::string_view>> DataElement::to_string_views() cons
 
 std::optional<std::string> DataElement::to_utf8_string(
     CharsetDecodeErrorPolicy errors, bool* out_replaced) const {
-	const auto values = to_utf8_strings(errors, out_replaced);
-	if (!values || values->empty()) {
-		return std::nullopt;
-	}
-	return values->front();
+	return charset::raw_element_as_owned_utf8_value(*this, errors, nullptr, out_replaced);
 }
 
 std::optional<std::vector<std::string>> DataElement::to_utf8_strings(

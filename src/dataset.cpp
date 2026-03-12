@@ -328,6 +328,10 @@ const charset::detail::CharsetSpec* DataSet::effective_charset_spec(std::string*
 
 	const DataElement& element = get_dataelement(charset::detail::kSpecificCharacterSetTag);
 	if (!element.is_missing()) {
+		if (element.length() == 0) {
+			effective_charset_ = charset::detail::default_charset_spec();
+			return effective_charset_;
+		}
 		auto parsed = charset::detail::parse_charset_element(element, out_error);
 		if (!parsed || !charset::detail::validate_declared_charset(*parsed, out_error)) {
 			return nullptr;
@@ -355,12 +359,16 @@ bool DataSet::refresh_effective_charset_cache(
 	const DataElement& element = get_dataelement(charset::detail::kSpecificCharacterSetTag);
 	const charset::detail::CharsetSpec* effective = inherited;
 	if (!element.is_missing()) {
-		auto parsed = charset::detail::parse_charset_element(element, out_error);
-		if (!parsed || !charset::detail::validate_declared_charset(*parsed, out_error)) {
-			effective_charset_ = nullptr;
-			return false;
+		if (element.length() == 0) {
+			effective = charset::detail::default_charset_spec();
+		} else {
+			auto parsed = charset::detail::parse_charset_element(element, out_error);
+			if (!parsed || !charset::detail::validate_declared_charset(*parsed, out_error)) {
+				effective_charset_ = nullptr;
+				return false;
+			}
+			effective = charset::detail::intern_charset_spec(std::move(*parsed));
 		}
-		effective = charset::detail::intern_charset_spec(std::move(*parsed));
 	}
 	if (!effective) {
 		effective = charset::detail::default_charset_spec();
@@ -410,7 +418,7 @@ DataSet::const_iterator DataSet::cend() const {
 
 // Stores stable DataElement bodies in deque storage and keeps a sorted
 // tag/pointer index for lookup and iteration.
-DataElement& DataSet::add_dataelement(Tag tag, VR vr) {
+DataElement& DataSet::add_dataelement_nocheck(Tag tag, VR vr) {
 	const auto tag_value = tag.value();
 
 	if (vr == VR::None) {
@@ -446,7 +454,15 @@ DataElement& DataSet::add_dataelement(Tag tag, VR vr) {
 	return *element;
 }
 
-DataElement& DataSet::add_dataelement(
+DataElement& DataSet::add_dataelement(Tag tag, VR vr) {
+	auto& element = add_dataelement_nocheck(tag, vr);
+	if (tag == charset::detail::kSpecificCharacterSetTag) {
+		on_specific_character_set_changed();
+	}
+	return element;
+}
+
+DataElement& DataSet::add_dataelement_nocheck(
     Tag tag, VR vr, std::size_t offset, std::size_t length) {
 	const auto tag_value = tag.value();
 
@@ -481,6 +497,15 @@ DataElement& DataSet::add_dataelement(
 	element->reset(tag, vr, length, offset, this, true);
 	element_index_.insert(index_it, ElementRef{tag, element});
 	return *element;
+}
+
+DataElement& DataSet::add_dataelement(
+    Tag tag, VR vr, std::size_t offset, std::size_t length) {
+	auto& element = add_dataelement_nocheck(tag, vr, offset, length);
+	if (tag == charset::detail::kSpecificCharacterSetTag) {
+		on_specific_character_set_changed();
+	}
+	return element;
 }
 
 DataElement& DataSet::get_dataelement(Tag tag) {
@@ -641,7 +666,7 @@ const DataElement& DataSet::operator[](Tag tag) const {
 	return get_dataelement(tag);
 }
 
-void DataSet::remove_dataelement(Tag tag) {
+void DataSet::remove_dataelement_nocheck(Tag tag) {
 	const auto tag_value = tag.value();
 
 	auto index_it = lower_bound_element_index(
@@ -650,6 +675,13 @@ void DataSet::remove_dataelement(Tag tag) {
 		auto* element = index_it->element;
 		element->reset(tag, VR::None, 0, 0, this, false);
 		element_index_.erase(index_it);
+	}
+}
+
+void DataSet::remove_dataelement(Tag tag) {
+	remove_dataelement_nocheck(tag);
+	if (tag == charset::detail::kSpecificCharacterSetTag) {
+		on_specific_character_set_changed();
 	}
 }
 
@@ -873,7 +905,7 @@ void DataSet::read_elements_until(Tag load_until, InStream* stream) {
 				length = stream->bytes_remaining();
 			}
 
-			DataElement& elem = add_dataelement(tag, VR::SQ, offset, length);
+			DataElement& elem = add_dataelement_nocheck(tag, VR::SQ, offset, length);
 			Sequence *seq = elem.as_sequence();
 			InSubStream subs(stream, length);
 
@@ -888,7 +920,7 @@ void DataSet::read_elements_until(Tag load_until, InStream* stream) {
 			if (length != 0xffffffff) {
 				if ((get_dataelement("BitsAllocated"_tag).to_long().value_or(0) > 8) && (vr == VR::OB))
 					vr = VR::OW;
-				add_dataelement(tag, vr, offset, length);
+				add_dataelement_nocheck(tag, vr, offset, length);
 				if (stream->skip(length) != length) {
 					diag::error_and_throw(
 					    "DataSet::read_elements_until file={} offset=0x{:X} tag={} vr={} length={} reason=failed to skip pixel data bytes",
@@ -897,7 +929,7 @@ void DataSet::read_elements_until(Tag load_until, InStream* stream) {
 			} else {
 				vr = VR::PX;
 
-				DataElement& elem = add_dataelement(tag, VR::PX, offset, length);
+				DataElement& elem = add_dataelement_nocheck(tag, VR::PX, offset, length);
 				PixelSequence *pixseq = elem.as_pixel_sequence();
 
 				// process basic offset table of the pixel sequence
@@ -911,7 +943,7 @@ void DataSet::read_elements_until(Tag load_until, InStream* stream) {
 		}
 		else {
 			if (length != 0xffffffff) {
-				add_dataelement(tag, vr, offset, length);
+				add_dataelement_nocheck(tag, vr, offset, length);
 				auto n = stream->skip(length);
 				if (n != length) {
 					diag::error_and_throw(
@@ -924,7 +956,7 @@ void DataSet::read_elements_until(Tag load_until, InStream* stream) {
 				length = stream->bytes_remaining();
 				vr = VR::SQ;
 				
-				DataElement& elem = add_dataelement(tag, VR::SQ, offset, length);
+				DataElement& elem = add_dataelement_nocheck(tag, VR::SQ, offset, length);
 				Sequence *seq = elem.as_sequence();
 				InSubStream subs(stream, length);
 

@@ -281,6 +281,34 @@ int main() {
 			fail("nested item local SpecificCharacterSet should override root charset for decode");
 		}
 
+		dicom::DicomFile raw_charset_file;
+		auto& raw_charset =
+		    raw_charset_file.add_dataelement("SpecificCharacterSet"_tag, dicom::VR::CS);
+		if (!raw_charset.from_string_view("ISO_IR 192")) {
+			fail("raw SpecificCharacterSet assignment should succeed");
+		}
+		auto& raw_charset_name = raw_charset_file.add_dataelement("PatientName"_tag, dicom::VR::PN);
+		if (!raw_charset_name.from_utf8_view(utf8_korean)) {
+			fail("raw SpecificCharacterSet mutation should refresh effective charset cache");
+		}
+		if (!raw_charset.from_string_view("")) {
+			fail("raw SpecificCharacterSet reset assignment should succeed");
+		}
+		auto& raw_charset_second_name =
+		    raw_charset_file.add_dataelement("OtherPatientNames"_tag, dicom::VR::PN);
+		if (raw_charset_second_name.from_utf8_view(utf8_korean)) {
+			fail("clearing raw SpecificCharacterSet should refresh effective charset cache");
+		}
+
+		dicom::DicomFile raw_remove_charset_file;
+		raw_remove_charset_file.set_declared_specific_charset(dicom::SpecificCharacterSet::ISO_IR_192);
+		raw_remove_charset_file.remove_dataelement("SpecificCharacterSet"_tag);
+		auto& raw_remove_name =
+		    raw_remove_charset_file.add_dataelement("PatientName"_tag, dicom::VR::PN);
+		if (raw_remove_name.from_utf8_view(utf8_korean)) {
+			fail("remove_dataelement should refresh effective charset cache for SpecificCharacterSet");
+		}
+
 		dicom::DicomFile encode_item_file;
 		encode_item_file.set_declared_specific_charset(dicom::SpecificCharacterSet::ISO_IR_192);
 		auto& encode_seq_element =
@@ -435,6 +463,38 @@ int main() {
 		    unknown_escape_name.to_utf8_string(dicom::CharsetDecodeErrorPolicy::replace_hex_escape);
 		if (!unknown_escape_hex || *unknown_escape_hex != "(0x1B)(0x25)(0x47)(0x41)") {
 			fail("to_utf8_string replace_hex_escape should expose unknown ISO 2022 escape bytes");
+		}
+
+		dicom::DicomFile utf8_multivalue_file;
+		utf8_multivalue_file.set_declared_specific_charset(dicom::SpecificCharacterSet::ISO_IR_192);
+		auto& utf8_multivalue =
+		    utf8_multivalue_file.add_dataelement("SeriesDescription"_tag, dicom::VR::LO);
+		const std::string utf8_first_valid_then_broken("A\\\xC3", 3);
+		if (!utf8_multivalue.from_string_view(utf8_first_valid_then_broken)) {
+			fail("raw UTF-8 LO assignment should succeed");
+		}
+		const auto utf8_first = utf8_multivalue.to_utf8_string();
+		if (!utf8_first || *utf8_first != "A") {
+			fail("to_utf8_string should return the first UTF-8 component without decoding later values");
+		}
+		if (utf8_multivalue.to_utf8_strings().has_value()) {
+			fail("to_utf8_strings should still fail when a later UTF-8 component is invalid");
+		}
+
+		dicom::DicomFile gbk_multivalue_file;
+		gbk_multivalue_file.set_declared_specific_charset(dicom::SpecificCharacterSet::GBK);
+		auto& gbk_multivalue =
+		    gbk_multivalue_file.add_dataelement("SeriesDescription"_tag, dicom::VR::LO);
+		const std::string gbk_first_valid_then_broken("A\\\x81", 3);
+		if (!gbk_multivalue.from_string_view(gbk_first_valid_then_broken)) {
+			fail("raw GBK LO assignment should succeed");
+		}
+		const auto gbk_first = gbk_multivalue.to_utf8_string();
+		if (!gbk_first || *gbk_first != "A") {
+			fail("to_utf8_string should stop at the first GBK delimiter before a broken later value");
+		}
+		if (gbk_multivalue.to_utf8_strings().has_value()) {
+			fail("to_utf8_strings should still fail when a later GBK component is invalid");
 		}
 
 		dicom::DicomFile pn_reset_file;

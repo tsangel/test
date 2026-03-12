@@ -323,7 +323,8 @@ std::optional<std::string> decode_raw_iso2022_bytes_to_utf8(
 
 std::optional<std::string> decode_iso_2022_charset_plan_to_utf8(
     std::string_view value, const ParsedSpecificCharacterSet& parsed, VR vr,
-    DecodeReplacementMode mode, std::string* out_error, bool* out_replaced) {
+    DecodeReplacementMode mode, std::string* out_error, bool* out_replaced,
+    bool stop_at_first_value) {
 	if (!charset_plan_uses_only_iso2022_terms(parsed)) {
 		set_error(out_error,
 		    "reason=multi-term Specific Character Set with non-ISO 2022 terms is not implemented");
@@ -421,6 +422,9 @@ std::optional<std::string> decode_iso_2022_charset_plan_to_utf8(
 		}
 
 		if (ch < 0x80u) {
+			if (stop_at_first_value && ch == '\\') {
+				break;
+			}
 			utf8.push_back(static_cast<char>(ch));
 			if (is_iso2022_state_reset_char(vr, ch)) {
 				active_g0 = initial_g0;

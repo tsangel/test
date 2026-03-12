@@ -89,13 +89,55 @@ std::string_view raw_text_bytes(const DataElement& element) noexcept {
 	return std::string_view(reinterpret_cast<const char*>(span.data()), span.size());
 }
 
+std::string_view raw_prefix_before_delimiter(std::string_view raw_value) noexcept {
+	const auto delimiter = raw_value.find('\\');
+	return delimiter == std::string_view::npos ? raw_value : raw_value.substr(0, delimiter);
+}
+
+std::optional<std::string> normalize_decoded_first_value(VR vr, const std::string& decoded) {
+	switch (static_cast<std::uint16_t>(vr)) {
+	case VR::AE_val:
+	case VR::AS_val:
+	case VR::CS_val:
+	case VR::DA_val:
+	case VR::DS_val:
+	case VR::DT_val:
+	case VR::IS_val:
+	case VR::LO_val:
+	case VR::PN_val:
+	case VR::SH_val:
+	case VR::TM_val:
+	case VR::UI_val:
+	{
+		auto view = trim_decoded_component(decoded, true);
+		return std::string(view);
+	}
+	case VR::UC_val:
+	case VR::LT_val:
+	case VR::ST_val:
+	case VR::UT_val:
+	{
+		auto view = trim_decoded_component(decoded, false);
+		return std::string(view);
+	}
+	case VR::UR_val:
+	{
+		auto view = trim_decoded_component(decoded, true);
+		return std::string(view);
+	}
+	default:
+		return std::nullopt;
+	}
+}
+
 std::optional<std::string> decode_raw_text_to_utf8(
-    const DataElement& element, const ParsedSpecificCharacterSet& source_charset_plan,
-    DecodeReplacementMode decode_mode, std::string* out_error, bool* out_replaced) {
-	const auto raw_value = raw_text_bytes(element);
+    std::string_view raw_value, const DataElement& element,
+    const ParsedSpecificCharacterSet& source_charset_plan, DecodeReplacementMode decode_mode,
+    std::string* out_error, bool* out_replaced, bool stop_at_first_value = false) {
 	if (source_charset_plan.is_multi_term()) {
 		auto converted = decode_iso_2022_charset_plan_to_utf8(
-		    raw_value, source_charset_plan, element.vr(), decode_mode, out_error, out_replaced);
+		    raw_value, source_charset_plan, element.vr(), decode_mode, out_error, out_replaced,
+		    stop_at_first_value);
 		if (!converted) {
 			if (out_error && !out_error->empty()) {
 				*out_error =
@@ -110,7 +152,8 @@ std::optional<std::string> decode_raw_text_to_utf8(
 	if (is_iso2022_charset(source_charset)) {
 		ParsedSpecificCharacterSet single_term_plan{{source_charset}, source_charset};
 		auto converted = decode_iso_2022_charset_plan_to_utf8(
-		    raw_value, single_term_plan, element.vr(), decode_mode, out_error, out_replaced);
+		    raw_value, single_term_plan, element.vr(), decode_mode, out_error, out_replaced,
+		    stop_at_first_value);
 		if (!converted) {
 			if (out_error && !out_error->empty()) {
 				*out_error =
@@ -124,6 +167,9 @@ std::optional<std::string> decode_raw_text_to_utf8(
 	switch (source_charset) {
 	case SpecificCharacterSet::NONE:
 	case SpecificCharacterSet::ISO_IR_6:
+		if (stop_at_first_value && element.vr().allows_multiple_text_values()) {
+			raw_value = raw_prefix_before_delimiter(raw_value);
+		}
 		if (decode_mode == DecodeReplacementMode::strict && !validate_ascii(raw_value)) {
 			set_error(out_error,
 			    fmt::format(
@@ -137,6 +183,9 @@ std::optional<std::string> decode_raw_text_to_utf8(
 		return decode_sbcs_raw_to_utf8(raw_value, source_charset, decode_mode, out_error, out_replaced);
 	case SpecificCharacterSet::ISO_IR_192:
 	{
+		if (stop_at_first_value && element.vr().allows_multiple_text_values()) {
+			raw_value = raw_prefix_before_delimiter(raw_value);
+		}
 		if (decode_mode == DecodeReplacementMode::strict && !validate_utf8(raw_value)) {
 			set_error(out_error,
 			    fmt::format(
@@ -176,6 +225,9 @@ std::optional<std::string> decode_raw_text_to_utf8(
 	case SpecificCharacterSet::ISO_IR_203:
 	case SpecificCharacterSet::ISO_IR_13:
 	case SpecificCharacterSet::ISO_IR_166: {
+		if (stop_at_first_value && element.vr().allows_multiple_text_values()) {
+			raw_value = raw_prefix_before_delimiter(raw_value);
+		}
 		auto converted =
 		    decode_sbcs_raw_to_utf8(raw_value, source_charset, decode_mode, out_error, out_replaced);
 		if (!converted && out_error && !out_error->empty()) {
@@ -185,8 +237,8 @@ std::optional<std::string> decode_raw_text_to_utf8(
 		return converted;
 	}
 	case SpecificCharacterSet::GB18030: {
-		auto converted =
-		    gb18030_to_utf8_string(raw_value, true, "GB18030", decode_mode, out_error, out_replaced);
+		auto converted = gb18030_to_utf8_string(
+		    raw_value, true, "GB18030", decode_mode, out_error, out_replaced, stop_at_first_value);
 		if (!converted && out_error && !out_error->empty()) {
 			*out_error =
 			    fmt::format("CHARSET_UNSUPPORTED tag={} {}", element.tag().to_string(), *out_error);
@@ -194,8 +246,8 @@ std::optional<std::string> decode_raw_text_to_utf8(
 		return converted;
 	}
 	case SpecificCharacterSet::GBK: {
-		auto converted =
-		    gb18030_to_utf8_string(raw_value, false, "GBK", decode_mode, out_error, out_replaced);
+		auto converted = gb18030_to_utf8_string(
+		    raw_value, false, "GBK", decode_mode, out_error, out_replaced, stop_at_first_value);
 		if (!converted && out_error && !out_error->empty()) {
 			*out_error =
 			    fmt::format("CHARSET_UNSUPPORTED tag={} {}", element.tag().to_string(), *out_error);
@@ -215,11 +267,24 @@ std::optional<std::string> decode_raw_text_to_utf8(
 
 }  // namespace
 
+std::optional<std::string> decode_text_value(
+    const DataElement& element, const ParsedSpecificCharacterSet& source_charset_plan,
+    DecodeReplacementMode decode_mode, std::string* out_error, bool* out_replaced) {
+	auto converted = decode_raw_text_to_utf8(
+	    raw_text_bytes(element), element, source_charset_plan, decode_mode, out_error,
+	    out_replaced, true);
+	if (!converted) {
+		return std::nullopt;
+	}
+	return normalize_decoded_first_value(element.vr(), *converted);
+}
+
 std::optional<std::vector<std::string>> decode_text_values(
     const DataElement& element, const ParsedSpecificCharacterSet& source_charset_plan,
     DecodeReplacementMode decode_mode, std::string* out_error, bool* out_replaced) {
-	auto converted =
-	    decode_raw_text_to_utf8(element, source_charset_plan, decode_mode, out_error, out_replaced);
+	auto converted = decode_raw_text_to_utf8(
+	    raw_text_bytes(element), element, source_charset_plan, decode_mode, out_error,
+	    out_replaced);
 	if (!converted) {
 		return std::nullopt;
 	}
@@ -240,6 +305,22 @@ std::optional<std::vector<std::string>> decode_text_values(
 		return std::nullopt;
 	}
 	return decode_text_values(element, *source_charset_plan, decode_mode, out_error, out_replaced);
+}
+
+std::optional<std::string> decode_text_value(
+    const DataElement& element, DecodeReplacementMode decode_mode, std::string* out_error,
+    bool* out_replaced) {
+	const DataSet* dataset = nullptr;
+	if (auto* parent = element.parent()) {
+		dataset = parent;
+	}
+	auto source_charset_plan =
+	    dataset ? parse_dataset_charset(*dataset, out_error)
+	            : std::optional<ParsedSpecificCharacterSet>{default_specific_character_set_plan()};
+	if (!source_charset_plan) {
+		return std::nullopt;
+	}
+	return decode_text_value(element, *source_charset_plan, decode_mode, out_error, out_replaced);
 }
 
 bool should_reuse_raw_values(const ParsedSpecificCharacterSet& source_charset,
@@ -395,6 +476,26 @@ DataSet& ensure_dataset_loaded_for_edit(DataSet& dataset) {
 }  // namespace dicom::charset::detail
 
 namespace dicom::charset {
+
+std::optional<std::string> raw_element_as_owned_utf8_value(
+    const DataElement& element, std::string* out_error) {
+	return detail::decode_text_value(
+	    element, detail::DecodeReplacementMode::strict, out_error, nullptr);
+}
+
+std::optional<std::string> raw_element_as_owned_utf8_value(
+    const DataElement& element, CharsetDecodeErrorPolicy errors, std::string* out_error) {
+	return detail::decode_text_value(element, detail::decode_mode(errors), out_error, nullptr);
+}
+
+std::optional<std::string> raw_element_as_owned_utf8_value(
+    const DataElement& element, CharsetDecodeErrorPolicy errors, std::string* out_error,
+    bool* out_replaced) {
+	if (out_replaced) {
+		*out_replaced = false;
+	}
+	return detail::decode_text_value(element, detail::decode_mode(errors), out_error, out_replaced);
+}
 
 std::optional<std::vector<std::string>> raw_element_as_owned_utf8_values(
     const DataElement& element, std::string* out_error) {

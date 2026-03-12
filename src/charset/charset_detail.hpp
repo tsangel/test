@@ -119,7 +119,8 @@ void append_decode_replacement(
 [[nodiscard]] std::optional<std::string> gb18030_to_utf8_string(
     std::string_view value, bool allow_four_byte, std::string_view charset_name,
     DecodeReplacementMode mode = DecodeReplacementMode::strict,
-    std::string* out_error = nullptr, bool* out_replaced = nullptr);
+    std::string* out_error = nullptr, bool* out_replaced = nullptr,
+    bool stop_at_first_value = false);
 [[nodiscard]] std::optional<std::string> utf8_to_gbk_string(
     std::string_view value, std::string* out_error);
 [[nodiscard]] std::optional<std::string> utf8_to_gb18030_string(
@@ -136,7 +137,8 @@ void append_decode_replacement(
 [[nodiscard]] std::optional<std::string> decode_iso_2022_charset_plan_to_utf8(
     std::string_view value, const ParsedSpecificCharacterSet& declared_charset, VR vr,
     DecodeReplacementMode mode = DecodeReplacementMode::strict,
-    std::string* out_error = nullptr, bool* out_replaced = nullptr);
+    std::string* out_error = nullptr, bool* out_replaced = nullptr,
+    bool stop_at_first_value = false);
 
 [[nodiscard]] std::optional<std::vector<std::uint8_t>> encode_utf8_stored_values(
     VR vr, std::span<const std::string> values, SpecificCharacterSet target_charset,

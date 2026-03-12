@@ -1670,27 +1670,26 @@ public:
 	}
 
 	/// Add or replace a data element with no stream binding (offset/length = 0).
-	/// Do not use this to edit `(0008,0005) Specific Character Set`; use
-	/// `set_declared_specific_charset()` or `set_specific_charset()` instead so
-	/// effective charset state stays synchronized.
+	/// Direct edits to `(0008,0005) Specific Character Set` keep the effective charset
+	/// cache synchronized, but the charset-specific setter APIs remain preferred because
+	/// they make intent clearer and validate multi-term combinations explicitly.
 	/// @return Reference to the inserted/replaced element.
 	/// @throws Exception on validation errors (for example: VR::None with unknown tag)
 	///         or allocation failures.
 	DataElement& add_dataelement(Tag tag, VR vr = VR::None);
 
 	/// Add or replace a data element with explicit stream binding metadata.
-	/// Do not use this to edit `(0008,0005) Specific Character Set`; use
-	/// `set_declared_specific_charset()` or `set_specific_charset()` instead so
-	/// effective charset state stays synchronized.
+	/// Direct edits to `(0008,0005) Specific Character Set` keep the effective charset
+	/// cache synchronized, but the charset-specific setter APIs remain preferred because
+	/// they make intent clearer and validate multi-term combinations explicitly.
 	/// @return Reference to the inserted/replaced element.
 	/// @throws Exception on validation errors (for example: VR::None with unknown tag)
 	///         or allocation failures.
 	DataElement& add_dataelement(Tag tag, VR vr, std::size_t offset, std::size_t length);
 
 	/// Remove a data element by tag (no-op if missing).
-	/// Do not remove `(0008,0005) Specific Character Set` through this API; use
-	/// `set_declared_specific_charset()` instead so effective charset state stays
-	/// synchronized.
+	/// Removing `(0008,0005)` through this API also refreshes the effective charset cache,
+	/// though `set_declared_specific_charset()` is still preferred for clarity.
 	void remove_dataelement(Tag tag);
 
 	/// Low-level lookup by tag (reference form). For most user-facing code, prefer operator[].
@@ -1775,6 +1774,9 @@ private:
 	friend class Sequence;
 	friend std::optional<charset::detail::ParsedSpecificCharacterSet>
 	charset::detail::parse_dataset_charset(const DataSet& dataset, std::string* out_error);
+	DataElement& add_dataelement_nocheck(Tag tag, VR vr);
+	DataElement& add_dataelement_nocheck(Tag tag, VR vr, std::size_t offset, std::size_t length);
+	void remove_dataelement_nocheck(Tag tag);
 	void attach_to_stream(std::string identifier, std::unique_ptr<InStream> stream);
 	void set_root_file(DicomFile* root_file) noexcept { root_file_ = root_file; }
 	void on_specific_character_set_changed() noexcept;
