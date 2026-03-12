@@ -143,6 +143,89 @@ int main() {
 	}
 
 	{
+		const std::string pn_utf8(
+		    "Yamada^Tarou=\xE5\xB1\xB1\xE7\x94\xB0^\xE5\xA4\xAA\xE9\x83\x8E="
+		    "\xE3\x82\x84\xE3\x81\xBE\xE3\x81\xA0^\xE3\x81\x9F\xE3\x82\x8D\xE3\x81\x86");
+		dicom::DicomFile pn_file;
+		pn_file.set_declared_specific_charset(dicom::SpecificCharacterSet::ISO_IR_192);
+		auto& patient_name = pn_file.add_dataelement("PatientName"_tag, dicom::VR::PN);
+		if (!patient_name.from_utf8_view(pn_utf8)) {
+			fail("PN UTF-8 assignment should succeed for PersonName API test");
+		}
+
+		const auto parsed = patient_name.to_person_name();
+		if (!parsed || !parsed->alphabetic || !parsed->ideographic || !parsed->phonetic) {
+			fail("to_person_name should parse alphabetic/ideographic/phonetic groups");
+		}
+		if (parsed->alphabetic->family_name() != "Yamada" ||
+		    parsed->alphabetic->given_name() != "Tarou") {
+			fail("alphabetic PN group should expose family/given components");
+		}
+		if (parsed->ideographic->family_name() != "\xE5\xB1\xB1\xE7\x94\xB0" ||
+		    parsed->ideographic->given_name() != "\xE5\xA4\xAA\xE9\x83\x8E") {
+			fail("ideographic PN group should expose UTF-8 family/given components");
+		}
+		if (parsed->phonetic->family_name() != "\xE3\x82\x84\xE3\x81\xBE\xE3\x81\xA0" ||
+		    parsed->phonetic->given_name() != "\xE3\x81\x9F\xE3\x82\x8D\xE3\x81\x86") {
+			fail("phonetic PN group should expose UTF-8 family/given components");
+		}
+
+		dicom::PersonName rebuilt;
+		rebuilt.alphabetic = dicom::PersonNameGroup{{"Yamada", "Tarou", "", "", ""}};
+		rebuilt.ideographic = dicom::PersonNameGroup{{
+		    "\xE5\xB1\xB1\xE7\x94\xB0", "\xE5\xA4\xAA\xE9\x83\x8E", "", "", ""}};
+		rebuilt.phonetic = dicom::PersonNameGroup{{
+		    "\xE3\x82\x84\xE3\x81\xBE\xE3\x81\xA0",
+		    "\xE3\x81\x9F\xE3\x82\x8D\xE3\x81\x86", "", "", ""}};
+
+		dicom::DataSet rebuilt_dataset;
+		rebuilt_dataset.set_declared_specific_charset(dicom::SpecificCharacterSet::ISO_IR_192);
+		auto& rebuilt_name = rebuilt_dataset.add_dataelement("PatientName"_tag, dicom::VR::PN);
+		if (!rebuilt_name.from_person_name(rebuilt)) {
+			fail("from_person_name should serialize structured PN data");
+		}
+		const auto rebuilt_utf8 = rebuilt_name.to_utf8_string();
+		if (!rebuilt_utf8 || *rebuilt_utf8 != pn_utf8) {
+			fail("from_person_name should roundtrip through to_utf8_string");
+		}
+
+		dicom::PersonName ideographic_only;
+		ideographic_only.ideographic = dicom::PersonNameGroup{{
+		    "\xE5\xB1\xB1\xE7\x94\xB0", "\xE5\xA4\xAA\xE9\x83\x8E", "", "", ""}};
+		ideographic_only.phonetic = dicom::PersonNameGroup{{
+		    "\xE3\x82\x84\xE3\x81\xBE\xE3\x81\xA0",
+		    "\xE3\x81\x9F\xE3\x82\x8D\xE3\x81\x86", "", "", ""}};
+		const std::string expected_leading_empty(
+		    "=\xE5\xB1\xB1\xE7\x94\xB0^\xE5\xA4\xAA\xE9\x83\x8E="
+		    "\xE3\x82\x84\xE3\x81\xBE\xE3\x81\xA0^\xE3\x81\x9F\xE3\x82\x8D\xE3\x81\x86");
+		if (ideographic_only.to_dicom_string() != expected_leading_empty) {
+			fail("PersonName::to_dicom_string should preserve leading empty alphabetic group");
+		}
+
+		const auto trailing_empty = dicom::PersonName::parse(
+		    "Wang^XiaoDong=\xE7\x8E\x8B^\xE5\xB0\x8F\xE6\x9D\xB1=");
+		if (!trailing_empty ||
+		    trailing_empty->to_dicom_string() !=
+		        "Wang^XiaoDong=\xE7\x8E\x8B^\xE5\xB0\x8F\xE6\x9D\xB1=") {
+			fail("PersonName::parse should preserve trailing empty component groups");
+		}
+
+		dicom::DataSet trailing_dataset;
+		trailing_dataset.set_declared_specific_charset(dicom::SpecificCharacterSet::ISO_IR_192);
+		auto& trailing_name = trailing_dataset.add_dataelement("PatientName"_tag, dicom::VR::PN);
+		if (!trailing_name.from_utf8_view(
+		        "Wang^XiaoDong=\xE7\x8E\x8B^\xE5\xB0\x8F\xE6\x9D\xB1=")) {
+			fail("setup for trailing empty PN test should succeed");
+		}
+		const auto parsed_trailing = trailing_name.to_person_name();
+		if (!parsed_trailing ||
+		    parsed_trailing->to_dicom_string() !=
+		        "Wang^XiaoDong=\xE7\x8E\x8B^\xE5\xB0\x8F\xE6\x9D\xB1=") {
+			fail("DataElement::to_person_name should preserve trailing empty component groups");
+		}
+	}
+
+	{
 		const std::string utf8_latin1_name("Gr\xC3\xB6\xC3\x9F" "e", 7);
 		const std::string latin1_name("Gr\xF6\xDF" "e", 5);
 		const std::array<std::uint8_t, 6> expected_name{

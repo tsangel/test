@@ -127,6 +127,7 @@ add_library(dicomsdl STATIC
     src/dicomfile.cpp
     src/dicomfile_pixel_encode.cpp
     src/dicom_write.cpp
+    src/person_name.cpp
     src/uid_utils.cpp
     src/sequence.cpp
     src/dataelement.cpp

@@ -233,3 +233,62 @@ def test_set_specific_charset_errors_replacement_modes():
 	assert unicode_elem.from_utf8_view(korean_name)
 	unicode_df.set_specific_charset("ISO_IR 100", errors="replace_unicode_escape")
 	assert unicode_df.get_dataelement("PatientName").to_string_view() == "(U+D64D)(U+AE38)(U+B3D9)"
+
+
+def test_person_name_group_short_components_are_padded():
+	group = dicom.PersonNameGroup(("\u5c71\u7530", "\u592a\u90ce"))
+	assert group.components == ["\u5c71\u7530", "\u592a\u90ce", "", "", ""]
+	assert group.family_name == "\u5c71\u7530"
+	assert group.given_name == "\u592a\u90ce"
+	assert group.to_dicom_string() == "\u5c71\u7530^\u592a\u90ce"
+
+
+def test_person_name_api_roundtrip():
+	name = "Yamada^Tarou=\u5c71\u7530^\u592a\u90ce=\u3084\u307e\u3060^\u305f\u308d\u3046"
+	df = dicom.DicomFile()
+	df.set_declared_specific_charset("ISO_IR 192")
+	pn_elem = df.dataset.add_dataelement(dicom.Tag("PatientName"), dicom.VR.PN)
+	assert pn_elem.from_utf8_view(name)
+
+	parsed = pn_elem.to_person_name()
+	assert parsed is not None
+	assert parsed.alphabetic is not None
+	assert parsed.ideographic is not None
+	assert parsed.phonetic is not None
+	assert parsed.alphabetic.family_name == "Yamada"
+	assert parsed.alphabetic.given_name == "Tarou"
+	assert parsed.ideographic.family_name == "\u5c71\u7530"
+	assert parsed.ideographic.given_name == "\u592a\u90ce"
+	assert parsed.phonetic.family_name == "\u3084\u307e\u3060"
+	assert parsed.phonetic.given_name == "\u305f\u308d\u3046"
+
+	rebuilt = dicom.PersonName(
+	    alphabetic=("Yamada", "Tarou"),
+	    ideographic=("\u5c71\u7530", "\u592a\u90ce"),
+	    phonetic=("\u3084\u307e\u3060", "\u305f\u308d\u3046"),
+	)
+	other = df.dataset.add_dataelement(dicom.Tag(0x0010, 0x1001), dicom.VR.PN)
+	assert other.from_person_name(rebuilt)
+	assert other.to_utf8_string() == name
+
+	ideographic_only = dicom.PersonName(
+	    ideographic=("\u5c71\u7530", "\u592a\u90ce"),
+	    phonetic=("\u3084\u307e\u3060", "\u305f\u308d\u3046"),
+	)
+	assert ideographic_only.to_dicom_string() == "=\u5c71\u7530^\u592a\u90ce=\u3084\u307e\u3060^\u305f\u308d\u3046"
+
+
+def test_person_name_parse_preserves_trailing_empty_group():
+	name = "Wang^XiaoDong=\u738b^\u5c0f\u6771="
+	df = dicom.DicomFile()
+	df.set_declared_specific_charset("ISO_IR 192")
+	pn_elem = df.dataset.add_dataelement(dicom.Tag("PatientName"), dicom.VR.PN)
+	assert pn_elem.from_utf8_view(name)
+
+	parsed = pn_elem.to_person_name()
+	assert parsed is not None
+	assert parsed.to_dicom_string() == name
+
+	other = df.dataset.add_dataelement(dicom.Tag(0x0010, 0x1002), dicom.VR.PN)
+	assert other.from_person_name(parsed)
+	assert other.to_utf8_string() == name

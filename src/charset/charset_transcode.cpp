@@ -298,9 +298,9 @@ std::optional<std::vector<std::string>> decode_text_values(
 	if (auto* parent = element.parent()) {
 		dataset = parent;
 	}
-	auto source_charset_plan =
+	const auto* source_charset_plan =
 	    dataset ? parse_dataset_charset(*dataset, out_error)
-	            : std::optional<ParsedSpecificCharacterSet>{default_specific_character_set_plan()};
+	            : default_charset_spec();
 	if (!source_charset_plan) {
 		return std::nullopt;
 	}
@@ -314,9 +314,9 @@ std::optional<std::string> decode_text_value(
 	if (auto* parent = element.parent()) {
 		dataset = parent;
 	}
-	auto source_charset_plan =
+	const auto* source_charset_plan =
 	    dataset ? parse_dataset_charset(*dataset, out_error)
-	            : std::optional<ParsedSpecificCharacterSet>{default_specific_character_set_plan()};
+	            : default_charset_spec();
 	if (!source_charset_plan) {
 		return std::nullopt;
 	}
@@ -385,7 +385,7 @@ std::optional<std::vector<std::uint8_t>> transcode_element_text(
 bool validate_charset_values(DataSet& dataset,
     const ParsedSpecificCharacterSet& target_charset, std::string* out_error,
     bool* out_replaced) {
-	auto source_charset = parse_dataset_charset(dataset, out_error);
+	const auto* source_charset = parse_dataset_charset(dataset, out_error);
 	if (!source_charset || !validate_declared_charset(*source_charset, out_error)) {
 		return false;
 	}
@@ -419,7 +419,7 @@ bool validate_charset_values(DataSet& dataset,
 bool rewrite_charset_values(DataSet& dataset,
     const ParsedSpecificCharacterSet& target_charset, CharsetEncodeErrorPolicy errors,
     std::string* out_error, bool* out_replaced) {
-	auto source_charset = parse_dataset_charset(dataset, out_error);
+	const auto* source_charset = parse_dataset_charset(dataset, out_error);
 	if (!source_charset || !validate_declared_charset(*source_charset, out_error)) {
 		return false;
 	}

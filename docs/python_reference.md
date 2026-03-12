@@ -38,6 +38,10 @@ Warning: when `copy=False`, the source buffer must remain alive for as long as t
 
 ### DataElement
 - Provides `tag`, `vr`, `length`, `offset`, and helpers to coerce values (`to_long`, `to_double`, `to_string_view`, `to_utf8_string`, `to_utf8_strings`, etc.).
+- Structured PN helpers:
+  - `to_person_name()` decodes a single-valued `PN` into a `PersonName`.
+  - `to_person_names()` decodes all `PN` values into `list[PersonName]`.
+  - `from_person_name()` / `from_person_names()` serialize structured `PN` data back into DICOM text.
 - `from_utf8_view()` / `from_utf8_views()` encode immediately using the current dataset charset declaration.
   Supports `errors='strict'`, `errors='replace_qmark'`, and
   `errors='replace_unicode_escape'`.
@@ -54,6 +58,51 @@ Warning: when `copy=False`, the source buffer must remain alive for as long as t
 - Truthiness: `bool(elem)` is `False` for missing lookups (`VR.None`), otherwise `True`.
 - Presence helpers: `elem.is_present()` / `elem.is_missing()` use the same rule as `bool(elem)`.
 - Sequence helpers: `sequence`, `as_sequence`, `pixel_sequence`, `as_pixel_sequence`.
+
+### PersonNameGroup
+- Represents one `PN` component group with up to 5 components.
+- Constructor accepts 0 to 5 strings. Missing components are padded with `''`.
+- `component(index)` is the neutral API. Component order is the standard DICOM order.
+- The named aliases (`family_name`, `given_name`, `middle_name`, `name_prefix`, `name_suffix`) follow the human-use meaning from PS3.5 6.2. Veterinary `PN` uses different semantics for the first two components.
+- Properties:
+  - `components`
+  - `family_name`
+  - `given_name`
+  - `middle_name`
+  - `name_prefix`
+  - `name_suffix`
+- Methods:
+  - `component(index)`
+  - `empty()`
+  - `to_dicom_string()`
+
+Example:
+```python
+group = dicom.PersonNameGroup(("Yamada", "Tarou"))
+assert group.components == ("Yamada", "Tarou", "", "", "")
+assert group.to_dicom_string() == "Yamada^Tarou"
+```
+
+### PersonName
+- Represents a parsed `PN` value with 3 optional component groups:
+  - `alphabetic`
+  - `ideographic`
+  - `phonetic`
+- Each group can be `None`, a `PersonNameGroup`, or a short sequence of strings passed to the constructor.
+- Methods:
+  - `empty()`
+  - `to_dicom_string()`
+
+Example:
+```python
+pn = dicom.PersonName(
+    alphabetic=("Yamada", "Tarou"),
+    ideographic=("??", "??"),
+    phonetic=("???", "???"),
+)
+
+assert pn.to_dicom_string() == "Yamada^Tarou=??^??=???^???"
+```
 
 ### Tag
 - Construct from `(group, element)`, packed int, or keyword.

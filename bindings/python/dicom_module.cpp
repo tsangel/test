@@ -6,6 +6,7 @@
 #include <iomanip>
 #include <limits>
 #include <memory>
+#include <new>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -1407,6 +1408,35 @@ dicom::CharsetDecodeErrorPolicy parse_charset_decode_error_policy(
 	        .c_str());
 }
 
+dicom::PersonNameGroup make_person_name_group(
+    const std::vector<std::string>& components, std::string_view arg_name) {
+	if (components.size() > 5) {
+		throw nb::value_error(
+		    (std::string(arg_name) + " must have at most 5 PN components").c_str());
+	}
+	dicom::PersonNameGroup group;
+	for (std::size_t i = 0; i < components.size(); ++i) {
+		group.components[i] = components[i];
+	}
+	return group;
+}
+
+std::optional<dicom::PersonNameGroup> parse_person_name_group_argument(
+    nb::handle value, std::string_view arg_name) {
+	if (!value || value.is_none()) {
+		return std::nullopt;
+	}
+	if (nb::isinstance<dicom::PersonNameGroup>(value)) {
+		return nb::cast<dicom::PersonNameGroup>(value);
+	}
+	return make_person_name_group(nb::cast<std::vector<std::string>>(value), arg_name);
+}
+
+std::vector<std::string> person_name_group_components(
+    const dicom::PersonNameGroup& group) {
+	return std::vector<std::string>(group.components.begin(), group.components.end());
+}
+
 dicom::WriteOptions make_write_options(
     bool include_preamble, bool write_file_meta, bool keep_existing_meta) {
 	dicom::WriteOptions options;
@@ -1556,6 +1586,126 @@ NB_MODULE(_dicomsdl, m) {
 	m.def("set_log_level", &diag::set_log_level, nb::arg("level"),
 	    "Set process-wide log level; messages below this are dropped");
 
+	nb::class_<dicom::PersonNameGroup>(m, "PersonNameGroup",
+	    "One PN component group with up to 5 components in DICOM order. "
+	    "Use component(index) for a neutral view; family_name/given_name/... are "
+	    "human-use convenience aliases.")
+		.def(nb::init<>())
+		.def("__init__",
+		    [](dicom::PersonNameGroup* self, const std::vector<std::string>& components) {
+			    new (self) dicom::PersonNameGroup(make_person_name_group(components, "components"));
+		    },
+		    nb::arg("components"))
+		.def_prop_rw("components",
+		    [](const dicom::PersonNameGroup& group) {
+			    return person_name_group_components(group);
+		    },
+		    [](dicom::PersonNameGroup& group, const std::vector<std::string>& components) {
+			    group = make_person_name_group(components, "components");
+		    })
+		.def("component",
+		    [](const dicom::PersonNameGroup& group, std::size_t index) -> std::string {
+			    if (index >= group.components.size()) {
+				    throw nb::index_error("PN component index must be in [0, 4]");
+			    }
+			    return group.components[index];
+		    },
+		    nb::arg("index"))
+		.def("empty", &dicom::PersonNameGroup::empty)
+		.def("to_dicom_string", &dicom::PersonNameGroup::to_dicom_string)
+		.def_prop_rw("family_name",
+		    [](const dicom::PersonNameGroup& group) {
+			    return std::string(group.family_name());
+		    },
+		    [](dicom::PersonNameGroup& group, const std::string& value) {
+			    group.components[0] = value;
+		    })
+		.def_prop_rw("given_name",
+		    [](const dicom::PersonNameGroup& group) {
+			    return std::string(group.given_name());
+		    },
+		    [](dicom::PersonNameGroup& group, const std::string& value) {
+			    group.components[1] = value;
+		    })
+		.def_prop_rw("middle_name",
+		    [](const dicom::PersonNameGroup& group) {
+			    return std::string(group.middle_name());
+		    },
+		    [](dicom::PersonNameGroup& group, const std::string& value) {
+			    group.components[2] = value;
+		    })
+		.def_prop_rw("name_prefix",
+		    [](const dicom::PersonNameGroup& group) {
+			    return std::string(group.name_prefix());
+		    },
+		    [](dicom::PersonNameGroup& group, const std::string& value) {
+			    group.components[3] = value;
+		    })
+		.def_prop_rw("name_suffix",
+		    [](const dicom::PersonNameGroup& group) {
+			    return std::string(group.name_suffix());
+		    },
+		    [](dicom::PersonNameGroup& group, const std::string& value) {
+			    group.components[4] = value;
+		    })
+		.def("__repr__",
+		    [](const dicom::PersonNameGroup& group) {
+			    return "PersonNameGroup(" + group.to_dicom_string() + ")";
+		    });
+
+	nb::class_<dicom::PersonName>(m, "PersonName",
+	    "Structured PN value with alphabetic, ideographic, and phonetic component groups.")
+		.def(nb::init<>())
+		.def("__init__",
+		    [](dicom::PersonName* self, nb::handle alphabetic, nb::handle ideographic,
+		        nb::handle phonetic) {
+			    dicom::PersonName value;
+			    value.alphabetic = parse_person_name_group_argument(alphabetic, "alphabetic");
+			    value.ideographic = parse_person_name_group_argument(ideographic, "ideographic");
+			    value.phonetic = parse_person_name_group_argument(phonetic, "phonetic");
+			    new (self) dicom::PersonName(std::move(value));
+		    },
+		    nb::kw_only(),
+		    nb::arg("alphabetic") = nb::none(),
+		    nb::arg("ideographic") = nb::none(),
+		    nb::arg("phonetic") = nb::none())
+		.def_prop_rw("alphabetic",
+		    [](const dicom::PersonName& value) -> nb::object {
+			    if (!value.alphabetic) {
+				    return nb::none();
+			    }
+			    return nb::cast(*value.alphabetic);
+		    },
+		    [](dicom::PersonName& value, nb::handle group) {
+			    value.alphabetic = parse_person_name_group_argument(group, "alphabetic");
+		    })
+		.def_prop_rw("ideographic",
+		    [](const dicom::PersonName& value) -> nb::object {
+			    if (!value.ideographic) {
+				    return nb::none();
+			    }
+			    return nb::cast(*value.ideographic);
+		    },
+		    [](dicom::PersonName& value, nb::handle group) {
+			    value.ideographic = parse_person_name_group_argument(group, "ideographic");
+		    })
+		.def_prop_rw("phonetic",
+		    [](const dicom::PersonName& value) -> nb::object {
+			    if (!value.phonetic) {
+				    return nb::none();
+			    }
+			    return nb::cast(*value.phonetic);
+		    },
+		    [](dicom::PersonName& value, nb::handle group) {
+			    value.phonetic = parse_person_name_group_argument(group, "phonetic");
+		    })
+		.def("empty", &dicom::PersonName::empty)
+		.def("to_dicom_string", &dicom::PersonName::to_dicom_string)
+		.def("__repr__",
+		    [](const dicom::PersonName& value) {
+			    return "PersonName(" + value.to_dicom_string() + ")";
+		    });
+
 	nb::class_<DataElement>(m, "DataElement",
 	    "Single DICOM element. Provides tag/VR/length/offset and typed value helpers.\n"
 	    "For sequences and pixel data, holds nested Sequence or PixelSequence objects.")
@@ -1661,6 +1811,44 @@ NB_MODULE(_dicomsdl, m) {
 		    "Encode and store multiple UTF-8 textual values according to this element VR.\n"
 		    "errors: 'strict', 'replace_qmark', or 'replace_unicode_escape'.\n"
 		    "When return_replaced=True, returns (ok, replaced).")
+		.def("from_person_name",
+		    [](DataElement& element, const dicom::PersonName& value, nb::handle errors,
+		        bool return_replaced) -> nb::object {
+			    bool replaced = false;
+			    const auto ok = element.from_person_name(
+			        value, parse_charset_encode_error_policy(errors, "errors"),
+			        return_replaced ? &replaced : nullptr);
+			    if (return_replaced) {
+				    return nb::make_tuple(ok, replaced);
+			    }
+			    return nb::cast(ok);
+		    },
+		    nb::arg("value"),
+		    nb::kw_only(),
+		    nb::arg("errors") = nb::str("strict"),
+		    nb::arg("return_replaced") = false,
+		    "Serialize structured PN data and encode it into this PN element.\n"
+		    "errors: 'strict', 'replace_qmark', or 'replace_unicode_escape'.\n"
+		    "When return_replaced=True, returns (ok, replaced).")
+		.def("from_person_names",
+		    [](DataElement& element, const std::vector<dicom::PersonName>& values, nb::handle errors,
+		        bool return_replaced) -> nb::object {
+			    bool replaced = false;
+			    const auto ok = element.from_person_names(
+			        values, parse_charset_encode_error_policy(errors, "errors"),
+			        return_replaced ? &replaced : nullptr);
+			    if (return_replaced) {
+				    return nb::make_tuple(ok, replaced);
+			    }
+			    return nb::cast(ok);
+		    },
+		    nb::arg("values"),
+		    nb::kw_only(),
+		    nb::arg("errors") = nb::str("strict"),
+		    nb::arg("return_replaced") = false,
+		    "Serialize multiple structured PN values and encode them into this PN element.\n"
+		    "errors: 'strict', 'replace_qmark', or 'replace_unicode_escape'.\n"
+		    "When return_replaced=True, returns (ok, replaced).")
 		.def("to_uid_string",
 		    [](const DataElement& element) -> nb::object {
 		        auto v = element.to_uid_string();
@@ -1736,6 +1924,52 @@ NB_MODULE(_dicomsdl, m) {
 	    nb::arg("errors") = nb::str("strict"),
 	    nb::arg("return_replaced") = false,
 	    "Return a list of charset-decoded owned UTF-8 strings when available, else None.\n"
+	    "errors: 'strict', 'replace_fffd', or 'replace_hex_escape'.\n"
+	    "When return_replaced=True, returns (values_or_none, replaced).")
+		.def("to_person_name",
+	    [](const DataElement& element, nb::handle errors, bool return_replaced) -> nb::object {
+	        bool replaced = false;
+	        auto value = element.to_person_name(
+	            parse_charset_decode_error_policy(errors, "errors"),
+	            return_replaced ? &replaced : nullptr);
+	        if (return_replaced) {
+	            if (value) {
+	                return nb::make_tuple(nb::cast(*value), replaced);
+	            }
+	            return nb::make_tuple(nb::none(), replaced);
+	        }
+	        if (value) {
+	            return nb::cast(*value);
+	        }
+	        return nb::none();
+	    },
+	    nb::kw_only(),
+	    nb::arg("errors") = nb::str("strict"),
+	    nb::arg("return_replaced") = false,
+	    "Return the first PN value parsed into alphabetic/ideographic/phonetic groups, else None.\n"
+	    "errors: 'strict', 'replace_fffd', or 'replace_hex_escape'.\n"
+	    "When return_replaced=True, returns (value_or_none, replaced).")
+		.def("to_person_names",
+	    [](const DataElement& element, nb::handle errors, bool return_replaced) -> nb::object {
+	        bool replaced = false;
+	        auto values = element.to_person_names(
+	            parse_charset_decode_error_policy(errors, "errors"),
+	            return_replaced ? &replaced : nullptr);
+	        if (return_replaced) {
+	            if (!values) {
+	                return nb::make_tuple(nb::none(), replaced);
+	            }
+	            return nb::make_tuple(nb::cast(*values), replaced);
+	        }
+	        if (!values) {
+	            return nb::none();
+	        }
+	        return nb::cast(*values);
+	    },
+	    nb::kw_only(),
+	    nb::arg("errors") = nb::str("strict"),
+	    nb::arg("return_replaced") = false,
+	    "Return all PN values parsed into alphabetic/ideographic/phonetic groups, else None.\n"
 	    "errors: 'strict', 'replace_fffd', or 'replace_hex_escape'.\n"
 	    "When return_replaced=True, returns (values_or_none, replaced).")
 	.def("to_transfer_syntax_uid",
@@ -3068,6 +3302,8 @@ m.def("generate_study_instance_uid",
 	    "create_encoder_context",
 	    "DicomFile",
 	    "DataSet",
+	    "PersonName",
+	    "PersonNameGroup",
 	    "Tag",
 	    "VR",
 	    "Uid",

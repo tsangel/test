@@ -362,7 +362,7 @@ std::optional<std::string> decode_iso_2022_charset_plan_to_utf8(
 		    }
 		    return parsed.primary;
 	    }();
-	const std::optional<SpecificCharacterSet> initial_g1 = first_iso2022_g1_term(parsed);
+	const std::optional<SpecificCharacterSet> initial_g1 = initial_iso2022_g1_term(parsed);
 	std::optional<SpecificCharacterSet> active_g0 = initial_g0;
 	std::optional<SpecificCharacterSet> active_g1 = initial_g1;
 

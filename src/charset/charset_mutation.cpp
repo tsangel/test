@@ -28,7 +28,7 @@ std::optional<std::vector<std::uint8_t>> encode_utf8_value_range(VR vr,
 	}
 	joined.reserve(total_length);
 	bool previous_value_ended_designated = false;
-	const auto reset_escape = iso2022_reset_escape();
+	const auto reset_escape = iso2022_initial_reset_escape(target_charset);
 	const auto* target_info = charset_info_or_null(target_charset);
 	const bool reset_to_initial_each_value = target_info && target_info->uses_iso_2022;
 
@@ -89,8 +89,8 @@ std::optional<std::vector<std::uint8_t>> encode_utf8_value_range(VR vr,
 	}
 	joined.reserve(total_length * 2u);
 
-	const auto reset_escape = iso2022_reset_escape();
-	const bool value_start_restores_initial_g1 = first_iso2022_g1_term(target_charset).has_value();
+	const auto reset_escape = iso2022_initial_reset_escape(target_charset.primary);
+	const bool value_start_restores_initial_g1 = initial_iso2022_g1_term(target_charset).has_value();
 	bool previous_value_ended_designated = false;
 	for (std::size_t i = 0; i < values.size(); ++i) {
 		auto encoded = encode_utf8_value_for_iso2022_charset_plan(
@@ -387,10 +387,9 @@ bool encode_utf8_for_element(DataElement& element,
 	if (auto* parent = element.parent()) {
 		dataset = parent;
 	}
-	auto target_charset =
+	const auto* target_charset =
 	    dataset ? detail::parse_dataset_charset(*dataset, out_error)
-	            : std::optional<detail::ParsedSpecificCharacterSet>{
-	                  detail::default_specific_character_set_plan()};
+	            : detail::default_charset_spec();
 	if (!target_charset || !detail::validate_declared_charset(*target_charset, out_error)) {
 		return false;
 	}
