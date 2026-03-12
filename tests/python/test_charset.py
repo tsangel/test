@@ -1,3 +1,5 @@
+import array
+
 import dicomsdl as dicom
 
 
@@ -278,6 +280,28 @@ def test_person_name_api_roundtrip():
 	assert ideographic_only.to_dicom_string() == "=\u5c71\u7530^\u592a\u90ce=\u3084\u307e\u3060^\u305f\u308d\u3046"
 
 
+def test_binary_vr_assignment_accepts_matching_typed_arrays():
+	ds = dicom.DataSet()
+
+	cases = [
+	    (dicom.VR.OB, array.array("B", [1, 2, 3])),
+	    (dicom.VR.OD, array.array("d", [1.25, 2.5])),
+	    (dicom.VR.OF, array.array("f", [1.25, 2.5])),
+	    (dicom.VR.OL, array.array("I", [1, 2, 3])),
+	    (dicom.VR.OW, array.array("H", [1, 2, 3])),
+	    (dicom.VR.OV, array.array("Q", [1, 2, 3])),
+	]
+
+	for index, (vr, values) in enumerate(cases, start=1):
+		tag = dicom.Tag(0x0011, 0x1000 + index)
+		elem = ds.add_dataelement(tag, vr)
+		ds[tag] = values
+		expected = values.tobytes()
+		if len(expected) % 2 != 0:
+			expected += b"\x00"
+		assert bytes(elem.value_span()) == expected
+
+
 def test_person_name_parse_preserves_trailing_empty_group():
 	name = "Wang^XiaoDong=\u738b^\u5c0f\u6771="
 	df = dicom.DicomFile()
@@ -306,3 +330,90 @@ def test_person_name_api_preserves_explicit_empty_components():
 	assert parsed.alphabetic.components == ["", "", "", "", ""]
 	assert parsed.alphabetic.to_dicom_string() == "^^^^"
 	assert parsed.to_dicom_string() == "^^^^"
+
+
+def test_get_value_returns_person_name_for_pn():
+	name = "Yamada^Tarou=\u5c71\u7530^\u592a\u90ce=\u3084\u307e\u3060^\u305f\u308d\u3046"
+	df = dicom.DicomFile()
+	df.set_declared_specific_charset("ISO_IR 192")
+	pn_elem = df.dataset.add_dataelement(dicom.Tag("PatientName"), dicom.VR.PN)
+	assert pn_elem.from_utf8_view(name)
+
+	value = pn_elem.get_value()
+	assert isinstance(value, dicom.PersonName)
+	assert value.alphabetic is not None
+	assert value.ideographic is not None
+	assert value.phonetic is not None
+	assert value.alphabetic.family_name == "Yamada"
+	assert df.PatientName.alphabetic.given_name == "Tarou"
+
+
+def test_get_value_returns_utf8_for_charset_aware_text():
+	df = dicom.DicomFile()
+	df.set_declared_specific_charset("GBK")
+	lo_elem = df.dataset.add_dataelement(dicom.Tag(0x0008, 0x1030), dicom.VR.LO)
+	assert lo_elem.from_utf8_view("\u4e2d\u6587")
+
+	value = lo_elem.get_value()
+	assert value == "\u4e2d\u6587"
+	assert df.StudyDescription == "\u4e2d\u6587"
+
+
+def test_get_value_returns_bytes_when_pn_parse_or_decode_fails():
+	df = dicom.DicomFile()
+	df.set_declared_specific_charset("ISO 2022 IR 100")
+	pn_elem = df.dataset.add_dataelement(dicom.Tag("PatientName"), dicom.VR.PN)
+	assert pn_elem.from_string_view("\x1b%GA")
+
+	value = pn_elem.get_value()
+	assert isinstance(value, bytes)
+	assert value == b"\x1b%GA"
+
+
+def test_get_value_returns_bytes_when_charset_text_decode_fails():
+	df = dicom.DicomFile()
+	df.set_declared_specific_charset("ISO 2022 IR 100")
+	lo_elem = df.dataset.add_dataelement(dicom.Tag(0x0008, 0x1030), dicom.VR.LO)
+	assert lo_elem.from_string_view("\x1b%GA")
+
+	value = lo_elem.get_value()
+	assert isinstance(value, bytes)
+	assert value == b"\x1b%GA"
+
+
+def test_dataset_assignment_sugar_sets_numeric_values():
+	ds = dicom.DataSet()
+	ds.Rows = 512
+	ds["Columns"] = 256
+
+	assert ds.Rows == 512
+	assert ds["Rows"] == 512
+	assert ds.Columns == 256
+	assert ds["Columns"] == 256
+
+
+def test_dataset_assignment_sugar_sets_text_and_person_name_values():
+	df = dicom.DicomFile()
+	df.set_declared_specific_charset("ISO_IR 192")
+
+	df.StudyDescription = "테스트 설명"
+	assert df.StudyDescription == "테스트 설명"
+
+	pn = dicom.PersonName(
+	    alphabetic=dicom.PersonNameGroup(("Hong", "Gildong")),
+	    ideographic=dicom.PersonNameGroup(("洪", "吉洞")),
+	    phonetic=dicom.PersonNameGroup(("홍", "길동")),
+	)
+	df.PatientName = pn
+	value = df.PatientName
+	assert isinstance(value, dicom.PersonName)
+	assert value.alphabetic.family_name == "Hong"
+	assert value.ideographic.family_name == "洪"
+
+
+def test_dataset_assignment_none_removes_element():
+	ds = dicom.DataSet()
+	ds.Rows = 512
+	assert ds.Rows == 512
+	ds.Rows = None
+	assert ds["Rows"] is None

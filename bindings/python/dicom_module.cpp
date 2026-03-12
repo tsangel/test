@@ -1189,40 +1189,21 @@ private:
 };
 
 nb::object dataelement_get_value_py(DataElement& element, nb::handle parent = nb::handle()) {
-	if (!element) {
-		return nb::none();
-	}
-	if (element.vr().is_sequence()) {
-		auto* seq = element.as_sequence();
-		if (!seq) return nb::none();
-		nb::handle keep = parent.is_none() ? nb::cast(element.parent(), nb::rv_policy::reference) : parent;
-		return nb::cast(seq, nb::rv_policy::reference_internal, keep);
-	}
-	if (element.vr().is_pixel_sequence()) {
-		auto* pix = element.as_pixel_sequence();
-		if (!pix) return nb::none();
-		nb::handle keep = parent.is_none() ? nb::cast(element.parent(), nb::rv_policy::reference) : parent;
-		return nb::cast(pix, nb::rv_policy::reference_internal, keep);
-	}
-
-	const int vm = element.vm();
-	if (vm <= 1) {
-		if (auto v = element.to_longlong()) {
-			return nb::cast(*v);
-		}
-		if (auto v = element.to_double()) {
-			return nb::cast(*v);
-		}
+	const auto raw_bytes = [&element]() -> nb::object {
+		auto span = element.value_span();
+		return nb::bytes(reinterpret_cast<const char*>(span.data()), span.size());
+	};
+	const auto raw_memoryview = [&element]() -> nb::object {
+		auto span = element.value_span();
+		return readonly_memoryview_from_span(span.data(), span.size());
+	};
+	const auto raw_string_scalar = [&element, &raw_bytes]() -> nb::object {
 		if (auto v = element.to_string_view()) {
 			return nb::str(v->data(), v->size());
 		}
-	} else {
-		if (auto v = element.to_longlong_vector()) {
-			return nb::cast(*v);
-		}
-		if (auto v = element.to_double_vector()) {
-			return nb::cast(*v);
-		}
+		return raw_bytes();
+	};
+	const auto raw_string_multi = [&element, &raw_bytes]() -> nb::object {
 		if (auto v = element.to_string_views()) {
 			nb::list out;
 			for (const auto& sv : *v) {
@@ -1230,11 +1211,618 @@ nb::object dataelement_get_value_py(DataElement& element, nb::handle parent = nb
 			}
 			return out;
 		}
+		return raw_bytes();
+	};
+	const int vm = element.vm();
+	switch (element.vr().value) {
+	case dicom::VR::None_val:
+		return nb::none();
+	case dicom::VR::SQ_val: {
+		auto* seq = element.as_sequence();
+		if (!seq) {
+			return nb::none();
+		}
+		nb::handle keep =
+		    parent.is_none() ? nb::cast(element.parent(), nb::rv_policy::reference) : parent;
+		return nb::cast(seq, nb::rv_policy::reference_internal, keep);
+	}
+	case dicom::VR::PX_val: {
+		auto* pix = element.as_pixel_sequence();
+		if (!pix) {
+			return nb::none();
+		}
+		nb::handle keep =
+		    parent.is_none() ? nb::cast(element.parent(), nb::rv_policy::reference) : parent;
+		return nb::cast(pix, nb::rv_policy::reference_internal, keep);
+	}
+	case dicom::VR::PN_val:
+		if (vm <= 1) {
+			if (auto v = element.to_person_name()) {
+				return nb::cast(*v);
+			}
+			if (auto v = element.to_utf8_string()) {
+				return nb::cast(*v);
+			}
+			return raw_bytes();
+		}
+		if (auto v = element.to_person_names()) {
+			return nb::cast(*v);
+		}
+		if (auto v = element.to_utf8_strings()) {
+			return nb::cast(*v);
+		}
+		return raw_bytes();
+	case dicom::VR::LO_val:
+	case dicom::VR::LT_val:
+	case dicom::VR::SH_val:
+	case dicom::VR::ST_val:
+	case dicom::VR::UC_val:
+	case dicom::VR::UT_val:
+		if (vm <= 1) {
+			if (auto v = element.to_utf8_string()) {
+				return nb::cast(*v);
+			}
+			return raw_bytes();
+		}
+		if (auto v = element.to_utf8_strings()) {
+			return nb::cast(*v);
+		}
+		return raw_bytes();
+	case dicom::VR::AE_val:
+	case dicom::VR::AS_val:
+	case dicom::VR::CS_val:
+	case dicom::VR::DA_val:
+	case dicom::VR::DT_val:
+	case dicom::VR::TM_val:
+	case dicom::VR::UI_val:
+	case dicom::VR::UR_val:
+		return vm <= 1 ? raw_string_scalar() : raw_string_multi();
+	case dicom::VR::IS_val:
+		if (vm <= 1) {
+			if (auto v = element.to_longlong()) {
+				return nb::cast(*v);
+			}
+			return raw_string_scalar();
+		}
+		if (auto v = element.to_longlong_vector()) {
+			return nb::cast(*v);
+		}
+		return raw_string_multi();
+	case dicom::VR::DS_val:
+		if (vm <= 1) {
+			if (auto v = element.to_double()) {
+				return nb::cast(*v);
+			}
+			return raw_string_scalar();
+		}
+		if (auto v = element.to_double_vector()) {
+			return nb::cast(*v);
+		}
+		return raw_string_multi();
+	case dicom::VR::AT_val:
+		if (vm <= 1) {
+			if (auto v = element.to_tag()) {
+				return nb::cast(*v);
+			}
+			return raw_memoryview();
+		}
+		if (auto v = element.to_tag_vector()) {
+			return nb::cast(*v);
+		}
+		return raw_memoryview();
+	case dicom::VR::FD_val:
+	case dicom::VR::FL_val:
+		if (vm <= 1) {
+			if (auto v = element.to_double()) {
+				return nb::cast(*v);
+			}
+			return raw_memoryview();
+		}
+		if (auto v = element.to_double_vector()) {
+			return nb::cast(*v);
+		}
+		return raw_memoryview();
+	case dicom::VR::SL_val:
+	case dicom::VR::SS_val:
+	case dicom::VR::SV_val:
+	case dicom::VR::UL_val:
+	case dicom::VR::US_val:
+	case dicom::VR::UV_val:
+		if (vm <= 1) {
+			if (auto v = element.to_longlong()) {
+				return nb::cast(*v);
+			}
+			return raw_memoryview();
+		}
+		if (auto v = element.to_longlong_vector()) {
+			return nb::cast(*v);
+		}
+		return raw_memoryview();
+	case dicom::VR::OB_val:
+	case dicom::VR::OD_val:
+	case dicom::VR::OF_val:
+	case dicom::VR::OL_val:
+	case dicom::VR::OW_val:
+	case dicom::VR::OV_val:
+	case dicom::VR::UN_val:
+		return raw_memoryview();
+	default:
+		if (element.vr().is_string()) {
+			return vm <= 1 ? raw_string_scalar() : raw_string_multi();
+		}
+		return raw_memoryview();
+	}
+}
+
+std::vector<std::uint8_t> pybuffer_to_bytes(nb::handle value) {
+	Py_buffer view{};
+	if (PyObject_GetBuffer(value.ptr(), &view, PyBUF_CONTIG_RO) != 0) {
+		throw nb::python_error();
+	}
+	std::vector<std::uint8_t> bytes;
+	bytes.resize(static_cast<std::size_t>(view.len));
+	if (view.len > 0) {
+		std::memcpy(bytes.data(), view.buf, static_cast<std::size_t>(view.len));
+	}
+	PyBuffer_Release(&view);
+	return bytes;
+}
+
+bool try_adopt_typed_binary_buffer(DataElement& element, nb::handle value) {
+	if (value.is_none() || PyUnicode_Check(value.ptr()) || !PyObject_CheckBuffer(value.ptr())) {
+		return false;
 	}
 
-	auto span = element.value_span();
-	return readonly_memoryview_from_span(span.data(), span.size());
+	Py_buffer view{};
+	if (PyObject_GetBuffer(value.ptr(), &view, PyBUF_C_CONTIGUOUS | PyBUF_FORMAT) != 0) {
+		PyErr_Clear();
+		return false;
+	}
+
+	const auto release = [&]() { PyBuffer_Release(&view); };
+	if (view.len < 0 || view.itemsize <= 0 || (view.len > 0 && view.buf == nullptr) ||
+	    view.format == nullptr || view.format[0] == '\0') {
+		release();
+		return false;
+	}
+
+	const auto format = strip_pep3118_endianness_prefix(std::string_view(view.format));
+	const auto matches = [&](std::size_t itemsize, std::initializer_list<char> codes) {
+		if (static_cast<std::size_t>(view.itemsize) != itemsize || format.size() != 1) {
+			return false;
+		}
+		for (char code : codes) {
+			if (format.front() == code) {
+				return true;
+			}
+		}
+		return false;
+	};
+
+	bool ok = false;
+	switch (element.vr().value) {
+	case VR::OB_val:
+		ok = matches(1, {'B', 'b'});
+		break;
+	case VR::OF_val:
+		ok = matches(4, {'f'});
+		break;
+	case VR::OD_val:
+		ok = matches(8, {'d'});
+		break;
+	case VR::OW_val:
+		ok = matches(2, {'H', 'h'});
+		break;
+	case VR::OL_val:
+		ok = matches(4, {'I', 'i', 'L', 'l'});
+		break;
+	case VR::OV_val:
+		ok = matches(8, {'Q', 'q', 'L', 'l'});
+		break;
+	default:
+		break;
+	}
+
+	if (!ok) {
+		release();
+		return false;
+	}
+
+	std::vector<std::uint8_t> bytes(static_cast<std::size_t>(view.len));
+	if (view.len > 0) {
+		std::memcpy(bytes.data(), view.buf, static_cast<std::size_t>(view.len));
+	}
+	release();
+	element.adopt_value_bytes(std::move(bytes));
+	return true;
 }
+
+bool dataelement_set_value_py(DataElement& element, nb::handle value) {
+	if (element.is_missing()) {
+		throw nb::value_error("Cannot assign to a missing DataElement");
+	}
+	if (element.vr().is_sequence() || element.vr().is_pixel_sequence()) {
+		throw nb::type_error("Sequence and pixel-sequence elements do not support direct scalar assignment");
+	}
+
+	PyObject* obj = value.ptr();
+	PyTypeObject* tp = Py_TYPE(obj);
+
+	const auto is_bytes_like = [&]() -> bool {
+		return !value.is_none() && !PyUnicode_Check(obj) && PyObject_CheckBuffer(obj);
+	};
+	const auto adopt_bytes = [&]() -> bool {
+		auto bytes = pybuffer_to_bytes(value);
+		element.adopt_value_bytes(std::move(bytes));
+		return true;
+	};
+	const auto is_sequence_like = [&]() -> bool {
+		return PyList_Check(obj) || PyTuple_Check(obj);
+	};
+	const auto get_sequence = [&]() -> std::pair<nb::sequence, std::size_t> {
+		nb::sequence seq = nb::borrow<nb::sequence>(value);
+		const Py_ssize_t size_ssize = PySequence_Size(obj);
+		if (size_ssize < 0) {
+			throw nb::python_error();
+		}
+		return {seq, static_cast<std::size_t>(size_ssize)};
+	};
+	const auto from_string_list = [&](nb::sequence seq, std::size_t size) -> bool {
+		std::vector<std::string> storage;
+		std::vector<std::string_view> views;
+		storage.reserve(size);
+		views.reserve(size);
+		for (std::size_t i = 0; i < size; ++i) {
+			storage.push_back(nb::cast<std::string>(seq[i]));
+			views.push_back(storage.back());
+		}
+		return element.vr().uses_specific_character_set() ? element.from_utf8_views(views)
+		                                                  : element.from_string_views(views);
+	};
+	const auto from_person_name_list = [&](nb::sequence seq, std::size_t size) -> bool {
+		std::vector<dicom::PersonName> values;
+		values.reserve(size);
+		for (std::size_t i = 0; i < size; ++i) {
+			values.push_back(nb::cast<dicom::PersonName>(seq[i]));
+		}
+		return element.from_person_names(values);
+	};
+	const auto from_tag_list = [&](nb::sequence seq, std::size_t size) -> bool {
+		std::vector<Tag> values;
+		values.reserve(size);
+		for (std::size_t i = 0; i < size; ++i) {
+			values.push_back(nb::cast<Tag>(seq[i]));
+		}
+		return element.from_tag_vector(values);
+	};
+	const auto from_packed_tag_list = [&](nb::sequence seq, std::size_t size) -> bool {
+		std::vector<Tag> values;
+		values.reserve(size);
+		for (std::size_t i = 0; i < size; ++i) {
+			values.emplace_back(nb::cast<std::uint32_t>(seq[i]));
+		}
+		return element.from_tag_vector(values);
+	};
+	const auto from_double_list = [&](nb::sequence seq, std::size_t size) -> bool {
+		std::vector<double> values;
+		values.reserve(size);
+		for (std::size_t i = 0; i < size; ++i) {
+			values.push_back(nb::cast<double>(seq[i]));
+		}
+		return element.from_double_vector(values);
+	};
+	const auto from_long_list = [&](nb::sequence seq, std::size_t size) -> bool {
+		std::vector<long long> values;
+		values.reserve(size);
+		for (std::size_t i = 0; i < size; ++i) {
+			values.push_back(nb::cast<long long>(seq[i]));
+		}
+		return element.from_longlong_vector(values);
+	};
+
+	switch (element.vr().value) {
+	case VR::PN_val:
+		if (value.type().is(nb::type<dicom::PersonName>())) {
+			return element.from_person_name(nb::cast<dicom::PersonName>(value));
+		}
+		if (PyUnicode_Check(obj)) {
+			return element.from_utf8_view(nb::cast<std::string>(value));
+		}
+		if (is_sequence_like()) {
+			auto [seq, size] = get_sequence();
+			if (size == 0) {
+				std::vector<std::string_view> empty;
+				return element.from_utf8_views(empty);
+			}
+			nb::handle first = seq[0];
+			if (first.type().is(nb::type<dicom::PersonName>())) {
+				return from_person_name_list(seq, size);
+			}
+			if (PyUnicode_Check(first.ptr())) {
+				return from_string_list(seq, size);
+			}
+			throw nb::type_error("PN assignment expects PersonName, str, or a sequence of those");
+		}
+		if (is_bytes_like()) {
+			return adopt_bytes();
+		}
+		throw nb::type_error("PN assignment expects PersonName, str, or bytes-like");
+
+	case VR::LO_val:
+	case VR::LT_val:
+	case VR::SH_val:
+	case VR::ST_val:
+	case VR::UC_val:
+	case VR::UT_val:
+	case VR::AE_val:
+	case VR::AS_val:
+	case VR::CS_val:
+	case VR::DA_val:
+	case VR::DT_val:
+	case VR::TM_val:
+	case VR::UI_val:
+	case VR::UR_val:
+		if (PyUnicode_Check(obj)) {
+			return element.vr().uses_specific_character_set() ? element.from_utf8_view(nb::cast<std::string>(value))
+			                                                  : element.from_string_view(nb::cast<std::string>(value));
+		}
+		if (is_sequence_like()) {
+			auto [seq, size] = get_sequence();
+			if (size == 0) {
+				std::vector<std::string_view> empty;
+				return element.vr().uses_specific_character_set() ? element.from_utf8_views(empty)
+				                                                  : element.from_string_views(empty);
+			}
+			if (!PyUnicode_Check(seq[0].ptr())) {
+				throw nb::type_error("String VR assignment expects str or a sequence of str");
+			}
+			return from_string_list(seq, size);
+		}
+		if (is_bytes_like()) {
+			return adopt_bytes();
+		}
+		throw nb::type_error("String VR assignment expects str or bytes-like");
+
+	case VR::FD_val:
+	case VR::FL_val:
+		if (tp == &PyFloat_Type || tp == &PyLong_Type || PyFloat_Check(obj) || PyLong_Check(obj)) {
+			return element.from_double(nb::cast<double>(value));
+		}
+		if (PyUnicode_Check(obj)) {
+			return element.from_string_view(nb::cast<std::string>(value));
+		}
+		if (is_sequence_like()) {
+			auto [seq, size] = get_sequence();
+			if (size == 0) {
+				return element.from_double_vector({});
+			}
+			if (PyUnicode_Check(seq[0].ptr())) {
+				return from_string_list(seq, size);
+			}
+			return from_double_list(seq, size);
+		}
+		if (is_bytes_like()) {
+			return adopt_bytes();
+		}
+		throw nb::type_error("Floating-point VR assignment expects float, str, or bytes-like");
+
+	case VR::DS_val:
+		if (tp == &PyFloat_Type || tp == &PyLong_Type || PyFloat_Check(obj) || PyLong_Check(obj)) {
+			return element.from_double(nb::cast<double>(value));
+		}
+		if (PyUnicode_Check(obj)) {
+			return element.from_string_view(nb::cast<std::string>(value));
+		}
+		if (is_sequence_like()) {
+			auto [seq, size] = get_sequence();
+			if (size == 0) {
+				return element.from_double_vector({});
+			}
+			if (PyUnicode_Check(seq[0].ptr())) {
+				return from_string_list(seq, size);
+			}
+			return from_double_list(seq, size);
+		}
+		if (is_bytes_like()) {
+			return adopt_bytes();
+		}
+		throw nb::type_error("DS assignment expects float, str, or bytes-like");
+
+	case VR::IS_val:
+	case VR::SL_val:
+	case VR::SS_val:
+	case VR::SV_val:
+	case VR::UL_val:
+	case VR::US_val:
+	case VR::UV_val:
+		if (tp == &PyLong_Type || PyLong_Check(obj)) {
+			return element.from_longlong(nb::cast<long long>(value));
+		}
+		if (element.vr() == VR::IS && PyUnicode_Check(obj)) {
+			return element.from_string_view(nb::cast<std::string>(value));
+		}
+		if (is_sequence_like()) {
+			auto [seq, size] = get_sequence();
+			if (size == 0) {
+				return element.from_longlong_vector({});
+			}
+			if (element.vr() == VR::IS && PyUnicode_Check(seq[0].ptr())) {
+				return from_string_list(seq, size);
+			}
+			return from_long_list(seq, size);
+		}
+		if (is_bytes_like()) {
+			return adopt_bytes();
+		}
+		throw nb::type_error("Integer VR assignment expects int, str for IS, or bytes-like");
+
+	case VR::AT_val:
+		if (value.type().is(nb::type<Tag>())) {
+			return element.from_tag(nb::cast<Tag>(value));
+		}
+		if (tp == &PyLong_Type || PyLong_Check(obj)) {
+			return element.from_tag(Tag(nb::cast<std::uint32_t>(value)));
+		}
+		if (is_sequence_like()) {
+			auto [seq, size] = get_sequence();
+			if (size == 0) {
+				return element.from_tag_vector({});
+			}
+			nb::handle first = seq[0];
+			if (first.type().is(nb::type<Tag>())) {
+				return from_tag_list(seq, size);
+			}
+			if (PyLong_Check(first.ptr())) {
+				return from_packed_tag_list(seq, size);
+			}
+			throw nb::type_error("AT assignment expects Tag, packed int, or a sequence of those");
+		}
+		if (is_bytes_like()) {
+			return adopt_bytes();
+		}
+		throw nb::type_error("AT assignment expects Tag, packed int, or bytes-like");
+
+	case VR::OB_val:
+	case VR::OD_val:
+	case VR::OF_val:
+	case VR::OL_val:
+	case VR::OW_val:
+	case VR::OV_val:
+		if (try_adopt_typed_binary_buffer(element, value)) {
+			return true;
+		}
+		if (is_bytes_like()) {
+			return adopt_bytes();
+		}
+		throw nb::type_error(
+		    "Binary VR assignment expects a bytes-like object or a matching typed array");
+	case VR::UN_val:
+		if (is_bytes_like()) {
+			return adopt_bytes();
+		}
+		throw nb::type_error("Binary VR assignment expects a bytes-like object");
+
+	case VR::SQ_val:
+	case VR::PX_val:
+	case VR::None_val:
+	default:
+		if (is_bytes_like()) {
+			return adopt_bytes();
+		}
+		throw nb::type_error("Unsupported Python value type for DICOM DataElement assignment");
+	}
+}
+
+Tag dataset_assignment_key_to_tag(nb::handle key) {
+	if (nb::isinstance<Tag>(key)) {
+		return nb::cast<Tag>(key);
+	}
+	if (nb::isinstance<nb::int_>(key)) {
+		return Tag(nb::cast<std::uint32_t>(key));
+	}
+	if (nb::isinstance<nb::str>(key)) {
+		const std::string text = nb::cast<std::string>(key);
+		if (text.find('.') != std::string::npos) {
+			throw nb::type_error("Assignment does not support nested tag-path strings");
+		}
+		return Tag(text);
+	}
+	throw nb::type_error("DataSet assignment keys must be Tag, int (0xGGGEEEE), or str");
+}
+
+void dataset_set_value_py(DataSet& self, nb::handle key, nb::handle value) {
+	const Tag tag = dataset_assignment_key_to_tag(key);
+	if (value.is_none()) {
+		self.remove_dataelement(tag);
+		return;
+	}
+
+	DataElement& existing = self.get_dataelement(tag);
+	const bool existed = existing.is_present();
+	DataElement* target = existed ? &existing : nullptr;
+	if (!target) {
+		target = &self.add_dataelement(tag, VR::None);
+	}
+
+	try {
+		const bool ok = dataelement_set_value_py(*target, value);
+		if (!ok) {
+			if (!existed) {
+				self.remove_dataelement(tag);
+			}
+			throw nb::value_error(
+			    ("Failed to assign value to " + tag.to_string() + " (" + std::string(target->vr().str()) + ")")
+			        .c_str());
+		}
+	} catch (...) {
+		if (!existed) {
+			self.remove_dataelement(tag);
+		}
+		throw;
+	}
+}
+
+int dataset_setattro(PyObject* obj, PyObject* name, PyObject* value) {
+	if (!name || !PyUnicode_Check(name)) {
+		return PyObject_GenericSetAttr(obj, name, value);
+	}
+	try {
+		std::string attr_name = nb::cast<std::string>(nb::handle(name));
+		if (!attr_name.empty() && attr_name[0] != '_') {
+			DataSet* self = nb::inst_ptr<DataSet>(nb::handle(obj));
+			if (value == nullptr) {
+				return PyObject_GenericSetAttr(obj, name, value);
+			}
+			try {
+				dataset_set_value_py(*self, nb::handle(name), nb::handle(value));
+				return 0;
+			} catch (const nb::python_error&) {
+				throw;
+			} catch (const std::exception&) {
+				// fall through to generic attribute handling
+			}
+		}
+		return PyObject_GenericSetAttr(obj, name, value);
+	} catch (const nb::python_error&) {
+		return -1;
+	}
+}
+
+int dicomfile_setattro(PyObject* obj, PyObject* name, PyObject* value) {
+	if (!name || !PyUnicode_Check(name)) {
+		return PyObject_GenericSetAttr(obj, name, value);
+	}
+	try {
+		std::string attr_name = nb::cast<std::string>(nb::handle(name));
+		if (!attr_name.empty() && attr_name[0] != '_') {
+			DicomFile* self = nb::inst_ptr<DicomFile>(nb::handle(obj));
+			if (value == nullptr) {
+				return PyObject_GenericSetAttr(obj, name, value);
+			}
+			try {
+				dataset_set_value_py(self->dataset(), nb::handle(name), nb::handle(value));
+				return 0;
+			} catch (const nb::python_error&) {
+				throw;
+			} catch (const std::exception&) {
+				// fall through to generic attribute handling
+			}
+		}
+		return PyObject_GenericSetAttr(obj, name, value);
+	} catch (const nb::python_error&) {
+		return -1;
+	}
+}
+
+PyType_Slot dataset_type_slots[] = {
+	{Py_tp_setattro, reinterpret_cast<void*>(dataset_setattro)},
+	{0, nullptr},
+};
+
+PyType_Slot dicomfile_type_slots[] = {
+	{Py_tp_setattro, reinterpret_cast<void*>(dicomfile_setattro)},
+	{0, nullptr},
+};
 
 std::string tag_repr(const Tag& tag) {
 	std::ostringstream oss;
@@ -2079,8 +2667,10 @@ NB_MODULE(_dicomsdl, m) {
 		    [](DataElement& element) -> nb::object {
 			    return dataelement_get_value_py(element);
 		    },
-		    "Best-effort typed access: returns int/float/str or list based on VR/VM; "
-		    "falls back to raw bytes (memoryview) for binary VRs; "
+		    "Best-effort typed access: returns int/float, UTF-8 strings for charset-aware text, "
+		    "PersonName / list[PersonName] for PN when possible, raw strings for other text, "
+		    "and falls back to raw bytes when charset decode/parsing fails or to raw bytes "
+		    "(memoryview) for binary VRs; "
 		    "returns None for missing elements or sequences/pixel sequences.")
 		.def("value_span",
 		    [](const DataElement& element) {
@@ -2145,7 +2735,8 @@ NB_MODULE(_dicomsdl, m) {
 	    "- Iterable over DataElements in tag order\n"
 	    "- Indexing by Tag, packed int, or tag-path string\n"
 	    "- Attribute access by keyword (e.g., ds.PatientName)\n"
-	    "- Missing lookups return a falsey DataElement (VR::None)")
+	    "- Missing lookups return a falsey DataElement (VR::None)",
+	    nb::type_slots(dataset_type_slots))
 		.def(nb::init<>())
 	.def_prop_ro("path", &DataSet::path, "Identifier of the attached stream (file path, provided name, or '<memory>')")
 		.def("size", &DataSet::size,
@@ -2224,6 +2815,14 @@ NB_MODULE(_dicomsdl, m) {
 		    },
 		    nb::arg("key"),
 		    "Index syntax: ds[tag|packed_int|tag_str] -> element.get_value(); returns None if missing")
+		.def("__setitem__",
+		    [](DataSet& self, nb::object key, nb::handle value) {
+			    dataset_set_value_py(self, key, value);
+		    },
+		    nb::arg("key"), nb::arg("value"),
+		    "Assignment syntax: ds[tag|packed_int|keyword] = value.\n"
+		    "Supports Python scalars, str/list[str], PersonName/list[PersonName], Tag/list[Tag],\n"
+		    "and bytes-like objects for raw value bytes. Setting None removes the element.")
 		.def("__getattr__",
 		    [](DataSet& self, const std::string& name) -> nb::object {
 			    // Allow keyword-style attribute access: ds.PatientName -> get_value("PatientName")
@@ -2326,7 +2925,8 @@ NB_MODULE(_dicomsdl, m) {
 		    "Configured transfer syntax UID, or None when not configured.");
 
 	nb::class_<DicomFile>(m, "DicomFile",
-	    "DICOM file/session object that owns the root DataSet.")
+	    "DICOM file/session object that owns the root DataSet.",
+	    nb::type_slots(dicomfile_type_slots))
 		.def(nb::init<>())
 		.def_prop_ro("path", &DicomFile::path,
 		    "Identifier of the attached root stream (file path or provided memory name)")
@@ -2648,6 +3248,12 @@ NB_MODULE(_dicomsdl, m) {
 		    },
 		    nb::arg("key"),
 		    "Index syntax delegated to root DataSet")
+		.def("__setitem__",
+		    [](DicomFile& self, nb::object key, nb::handle value) {
+			    dataset_set_value_py(self.dataset(), key, value);
+		    },
+		    nb::arg("key"), nb::arg("value"),
+		    "Assignment syntax delegated to the root DataSet.")
 		.def("__getattr__",
 		    [](DicomFile& self, const std::string& name) -> nb::object {
 			    nb::object owner = nb::cast(&self, nb::rv_policy::reference);

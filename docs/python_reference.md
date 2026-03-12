@@ -18,6 +18,12 @@ Warning: when `copy=False`, the source buffer must remain alive for as long as t
 - Iterable container of `DataElement` objects in tag order.
 - Indexing: `ds[tag|packed_int|tag_str]` returns the element's value or `None` if missing.
 - Attribute sugar: `ds.PatientName` resolves keyword → tag and returns the value, raising `AttributeError` if missing.
+- Assignment sugar: `ds.Rows = 512`, `ds["StudyDescription"] = "text"`, `df.PatientName = pn`.
+- Binary VRs (`OB`, `OD`, `OF`, `OL`, `OW`, `OV`) also accept matching typed arrays
+  via the Python buffer protocol, for example `array.array('H', ...)` for `OW`
+  and `array.array('d', ...)` for `OD`.
+- Setting a keyword/tag to `None` removes that element.
+  For `PN`, this returns `PersonName` when parsing succeeds. For charset-aware text VRs, returned strings are UTF-8 decoded.
 - Methods: `add_dataelement`, `remove_dataelement`, `get_dataelement` (returns a falsey `DataElement` with `VR.None` on miss), `dump_elements`, `path`.
 - Charset updates: prefer `set_declared_specific_charset()` / `set_specific_charset()` instead of directly editing `(0008,0005)` as a raw element. Effective charset caches are synchronized by the charset setter APIs.
 - Pixel decode safety: if pixel-affecting metadata changes (transfer syntax,
@@ -37,6 +43,12 @@ Warning: when `copy=False`, the source buffer must remain alive for as long as t
 - `write_bytes()` and `write_file()` write the dataset's current raw byte values as-is.
 
 ### DataElement
+- `get_value()` is best-effort typed access.
+  - numbers -> `int` / `float`
+  - `PN` -> `PersonName` / `list[PersonName]` when parsing succeeds
+  - charset-aware text -> UTF-8 `str` / `list[str]`
+  - charset decode or PN parse failure -> raw `bytes`
+  - binary VRs -> read-only `memoryview`
 - Provides `tag`, `vr`, `length`, `offset`, and helpers to coerce values (`to_long`, `to_double`, `to_string_view`, `to_utf8_string`, `to_utf8_strings`, etc.).
 - Structured PN helpers:
   - `to_person_name()` decodes a single-valued `PN` into a `PersonName`.

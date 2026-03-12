@@ -90,4 +90,4 @@ def pytest_configure(config: pytest.Config) -> None:
 
     _configure_windows_dll_dirs(native_module)
     _configure_sys_path(native_module)
-    os.environ.setdefault("DICOMSDL_NATIVE_MODULE_PATH", str(native_module))
+    os.environ["DICOMSDL_NATIVE_MODULE_PATH"] = str(native_module)
