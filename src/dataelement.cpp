@@ -1884,6 +1884,63 @@ std::optional<std::vector<std::string>> DataElement::to_utf8_strings(
 	return charset::raw_element_as_owned_utf8_values(*this, errors, nullptr, out_replaced);
 }
 
+std::optional<PersonName> DataElement::to_person_name(
+    CharsetDecodeErrorPolicy errors, bool* out_replaced) const {
+	if (vr_ != dicom::VR::PN) {
+		if (out_replaced) {
+			*out_replaced = false;
+		}
+		return std::nullopt;
+	}
+	auto utf8_value = to_utf8_string(errors, out_replaced);
+	if (!utf8_value) {
+		return std::nullopt;
+	}
+	return PersonName::parse(*utf8_value);
+}
+
+std::optional<std::vector<PersonName>> DataElement::to_person_names(
+    CharsetDecodeErrorPolicy errors, bool* out_replaced) const {
+	if (vr_ != dicom::VR::PN) {
+		if (out_replaced) {
+			*out_replaced = false;
+		}
+		return std::nullopt;
+	}
+	auto utf8_values = to_utf8_strings(errors, out_replaced);
+	if (!utf8_values) {
+		return std::nullopt;
+	}
+	return PersonName::parse_many(*utf8_values);
+}
+
+bool DataElement::from_person_name(
+    const PersonName& value, CharsetEncodeErrorPolicy errors, bool* out_replaced) {
+	if (vr_ != dicom::VR::PN) {
+		return report_from_assignment_failure(
+		    "DataElement::from_person_name", *this, "PN VR required for from_person_name");
+	}
+	return from_utf8_view(value.to_dicom_string(), errors, out_replaced);
+}
+
+bool DataElement::from_person_names(
+    std::span<const PersonName> values, CharsetEncodeErrorPolicy errors,
+    bool* out_replaced) {
+	if (vr_ != dicom::VR::PN) {
+		return report_from_assignment_failure(
+		    "DataElement::from_person_names", *this, "PN VR required for from_person_names");
+	}
+	std::vector<std::string> encoded_values;
+	std::vector<std::string_view> encoded_views;
+	encoded_values.reserve(values.size());
+	encoded_views.reserve(values.size());
+	for (const auto& value : values) {
+		encoded_values.push_back(value.to_dicom_string());
+		encoded_views.push_back(encoded_values.back());
+	}
+	return from_utf8_views(encoded_views, errors, out_replaced);
+}
+
 
 std::optional<uid::WellKnown> DataElement::to_transfer_syntax_uid() const {
 	auto uid = well_known_uid_from_element_value(*this);

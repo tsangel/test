@@ -10,6 +10,8 @@ namespace dicom::charset::detail {
 
 namespace {
 
+constexpr std::string_view kIso2022JisRomanEscape{"\x1b\x28\x4a"};
+
 std::optional<std::string> ksx1001_to_utf8_string(
     std::string_view value, std::string_view charset_name, std::string* out_error) {
 	std::string utf8;
@@ -124,6 +126,10 @@ std::optional<std::string> decode_iso_2022_single_byte_to_utf8(
 				offset += reset_escape.size();
 				continue;
 			}
+			if (remaining.starts_with(kIso2022JisRomanEscape)) {
+				offset += kIso2022JisRomanEscape.size();
+				continue;
+			}
 			set_error(out_error, "reason=unsupported ISO 2022 escape sequence");
 			return std::nullopt;
 		}
@@ -167,6 +173,10 @@ std::optional<std::string> decode_iso_2022_multibyte_to_utf8(
 				offset += reset_escape.size();
 				continue;
 			}
+			if (remaining.starts_with(kIso2022JisRomanEscape)) {
+				offset += kIso2022JisRomanEscape.size();
+				continue;
+			}
 			set_error(out_error, "reason=unsupported ISO 2022 escape sequence");
 			return std::nullopt;
 		}
@@ -190,6 +200,10 @@ std::optional<std::string> decode_iso_2022_multibyte_to_utf8(
 			}
 			if (!reset_escape.empty() && remaining.starts_with(reset_escape)) {
 				offset += reset_escape.size();
+				continue;
+			}
+			if (remaining.starts_with(kIso2022JisRomanEscape)) {
+				offset += kIso2022JisRomanEscape.size();
 				continue;
 			}
 			set_error(out_error, "reason=unsupported ISO 2022 escape sequence");
@@ -218,6 +232,11 @@ std::optional<std::string> decode_iso_2022_multibyte_to_utf8(
 			if (!reset_escape.empty() && remaining.starts_with(reset_escape)) {
 				mode = Mode::ascii;
 				offset += reset_escape.size();
+				continue;
+			}
+			if (remaining.starts_with(kIso2022JisRomanEscape)) {
+				mode = Mode::ascii;
+				offset += kIso2022JisRomanEscape.size();
 				continue;
 			}
 			set_error(out_error, "reason=unsupported ISO 2022 escape sequence");
@@ -343,7 +362,7 @@ std::optional<std::string> decode_iso_2022_charset_plan_to_utf8(
 		    }
 		    return parsed.primary;
 	    }();
-	const std::optional<SpecificCharacterSet> initial_g1 = first_iso2022_g1_term(parsed);
+	const std::optional<SpecificCharacterSet> initial_g1 = initial_iso2022_g1_term(parsed);
 	std::optional<SpecificCharacterSet> active_g0 = initial_g0;
 	std::optional<SpecificCharacterSet> active_g1 = initial_g1;
 
@@ -358,6 +377,11 @@ std::optional<std::string> decode_iso_2022_charset_plan_to_utf8(
 			if (!reset_escape.empty() && remaining.starts_with(reset_escape)) {
 				active_g0.reset();
 				offset += reset_escape.size();
+				continue;
+			}
+			if (remaining.starts_with(kIso2022JisRomanEscape)) {
+				active_g0.reset();
+				offset += kIso2022JisRomanEscape.size();
 				continue;
 			}
 			std::size_t matched_length = 0;

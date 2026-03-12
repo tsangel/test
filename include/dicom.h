@@ -43,7 +43,7 @@ bool encode_utf8_for_element(DataElement& element, std::span<const std::string_v
 namespace charset::detail {
 struct ParsedSpecificCharacterSet;
 using CharsetSpec = ParsedSpecificCharacterSet;
-[[nodiscard]] std::optional<ParsedSpecificCharacterSet> parse_dataset_charset(
+[[nodiscard]] const CharsetSpec* parse_dataset_charset(
     const DataSet& dataset, std::string* out_error);
 [[nodiscard]] bool apply_declared_charset(
     DataSet& dataset, const ParsedSpecificCharacterSet& parsed, std::string* out_error);
@@ -1032,6 +1032,51 @@ enum class CharsetDecodeErrorPolicy : std::uint8_t {
 	replace_hex_escape,
 };
 
+/// One component group of a PN value.
+/// Components are stored in canonical DICOM order:
+/// component 0..4 = family-name-complex, given-name-complex, middle-name,
+/// name-prefix, name-suffix for human use.
+/// Veterinary use assigns different semantics to the first two components,
+/// so component(index) is the neutral API. The aliases below are human-use
+/// convenience accessors from PS3.5 6.2 / 6.2.1.2.
+struct PersonNameGroup {
+	std::array<std::string, 5> components{};
+	// 0 means "infer from last non-empty component". Parsed values can use this
+	// to preserve explicit trailing empty PN components such as "^^^^".
+	std::uint8_t explicit_component_count_{0};
+
+	[[nodiscard]] std::string_view component(std::size_t index) const noexcept {
+		return index < components.size() ? std::string_view(components[index]) : std::string_view{};
+	}
+	[[nodiscard]] std::string to_dicom_string() const;
+	[[nodiscard]] bool empty() const noexcept;
+
+	[[nodiscard]] std::string_view family_name() const noexcept { return components[0]; }
+	[[nodiscard]] std::string_view given_name() const noexcept { return components[1]; }
+	[[nodiscard]] std::string_view middle_name() const noexcept { return components[2]; }
+	[[nodiscard]] std::string_view name_prefix() const noexcept { return components[3]; }
+	[[nodiscard]] std::string_view name_suffix() const noexcept { return components[4]; }
+};
+
+/// Parsed Person Name (PN) value with up to three component groups:
+/// alphabetic, ideographic, phonetic.
+struct PersonName {
+	std::optional<PersonNameGroup> alphabetic{};
+	std::optional<PersonNameGroup> ideographic{};
+	std::optional<PersonNameGroup> phonetic{};
+
+	[[nodiscard]] bool empty() const noexcept;
+	[[nodiscard]] std::string to_dicom_string() const;
+	[[nodiscard]] static std::optional<PersonName> parse(std::string_view utf8_value);
+	[[nodiscard]] static std::optional<std::vector<PersonName>> parse_many(
+	    std::span<const std::string> utf8_values);
+	[[nodiscard]] static std::optional<std::vector<PersonName>> parse_many(
+	    std::span<const std::string_view> utf8_values);
+
+private:
+	std::uint8_t explicit_group_count_{0};
+};
+
 namespace pixel {
 
 enum class Planar : std::uint8_t {
@@ -1427,6 +1472,24 @@ public:
 	[[nodiscard]] std::optional<std::vector<std::string>> to_utf8_strings(
 	    CharsetDecodeErrorPolicy errors = CharsetDecodeErrorPolicy::strict,
 	    bool* out_replaced = nullptr) const;
+	/// Parse the first PN value into structured groups/components.
+	/// Returns nullopt when VR is not PN, UTF-8 decode fails, or PN syntax is invalid.
+	[[nodiscard]] std::optional<PersonName> to_person_name(
+	    CharsetDecodeErrorPolicy errors = CharsetDecodeErrorPolicy::strict,
+	    bool* out_replaced = nullptr) const;
+	/// Parse all PN values into structured groups/components.
+	/// Returns nullopt when VR is not PN, UTF-8 decode fails, or any PN syntax is invalid.
+	[[nodiscard]] std::optional<std::vector<PersonName>> to_person_names(
+	    CharsetDecodeErrorPolicy errors = CharsetDecodeErrorPolicy::strict,
+	    bool* out_replaced = nullptr) const;
+	/// Serialize structured PN data and encode it into the current dataset charset declaration.
+	bool from_person_name(const PersonName& value,
+	    CharsetEncodeErrorPolicy errors = CharsetEncodeErrorPolicy::strict,
+	    bool* out_replaced = nullptr);
+	/// Serialize multiple structured PN values and encode them into the current dataset charset declaration.
+	bool from_person_names(std::span<const PersonName> values,
+	    CharsetEncodeErrorPolicy errors = CharsetEncodeErrorPolicy::strict,
+	    bool* out_replaced = nullptr);
 
 	/*
 	VR trimming/charset rules (for string helpers like to_string_view):
@@ -1797,7 +1860,7 @@ private:
 	friend class DicomFile;
 	friend class DataElement;
 	friend class Sequence;
-	friend std::optional<charset::detail::ParsedSpecificCharacterSet>
+	friend const charset::detail::CharsetSpec*
 	charset::detail::parse_dataset_charset(const DataSet& dataset, std::string* out_error);
 	friend bool charset::detail::apply_declared_charset(
 	    DataSet& dataset, const charset::detail::ParsedSpecificCharacterSet& parsed,

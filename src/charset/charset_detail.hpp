@@ -56,7 +56,7 @@ void set_error(std::string* out_error, std::string message);
     std::span<const std::string_view> values, std::string_view origin, std::string* out_error);
 [[nodiscard]] std::optional<ParsedSpecificCharacterSet> parse_charset_element(
     const DataElement& element, std::string* out_error);
-[[nodiscard]] std::optional<ParsedSpecificCharacterSet> parse_dataset_charset(
+[[nodiscard]] const CharsetSpec* parse_dataset_charset(
     const DataSet& dataset, std::string* out_error);
 [[nodiscard]] bool same_charset_terms(
     const ParsedSpecificCharacterSet& lhs, const ParsedSpecificCharacterSet& rhs) noexcept;
@@ -64,11 +64,15 @@ void set_error(std::string* out_error, std::string message);
     const ParsedSpecificCharacterSet& parsed) noexcept;
 [[nodiscard]] std::optional<SpecificCharacterSet> first_iso2022_g1_term(
     const ParsedSpecificCharacterSet& parsed) noexcept;
+[[nodiscard]] std::optional<SpecificCharacterSet> initial_iso2022_g1_term(
+    const ParsedSpecificCharacterSet& parsed) noexcept;
 [[nodiscard]] bool are_equivalent_passthrough_charsets(
     SpecificCharacterSet lhs, SpecificCharacterSet rhs) noexcept;
 [[nodiscard]] bool is_iso2022_charset(SpecificCharacterSet charset) noexcept;
 [[nodiscard]] bool is_iso2022_g0_charset(SpecificCharacterSet charset) noexcept;
 [[nodiscard]] std::string_view iso2022_reset_escape() noexcept;
+[[nodiscard]] std::string_view iso2022_initial_reset_escape(
+    SpecificCharacterSet charset) noexcept;
 [[nodiscard]] inline bool is_iso2022_state_reset_char(VR vr, std::uint32_t codepoint) noexcept {
 	switch (codepoint) {
 	case '\n':

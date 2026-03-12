@@ -143,6 +143,105 @@ int main() {
 	}
 
 	{
+		const std::string pn_utf8(
+		    "Yamada^Tarou=\xE5\xB1\xB1\xE7\x94\xB0^\xE5\xA4\xAA\xE9\x83\x8E="
+		    "\xE3\x82\x84\xE3\x81\xBE\xE3\x81\xA0^\xE3\x81\x9F\xE3\x82\x8D\xE3\x81\x86");
+		dicom::DicomFile pn_file;
+		pn_file.set_declared_specific_charset(dicom::SpecificCharacterSet::ISO_IR_192);
+		auto& patient_name = pn_file.add_dataelement("PatientName"_tag, dicom::VR::PN);
+		if (!patient_name.from_utf8_view(pn_utf8)) {
+			fail("PN UTF-8 assignment should succeed for PersonName API test");
+		}
+
+		const auto parsed = patient_name.to_person_name();
+		if (!parsed || !parsed->alphabetic || !parsed->ideographic || !parsed->phonetic) {
+			fail("to_person_name should parse alphabetic/ideographic/phonetic groups");
+		}
+		if (parsed->alphabetic->family_name() != "Yamada" ||
+		    parsed->alphabetic->given_name() != "Tarou") {
+			fail("alphabetic PN group should expose family/given components");
+		}
+		if (parsed->ideographic->family_name() != "\xE5\xB1\xB1\xE7\x94\xB0" ||
+		    parsed->ideographic->given_name() != "\xE5\xA4\xAA\xE9\x83\x8E") {
+			fail("ideographic PN group should expose UTF-8 family/given components");
+		}
+		if (parsed->phonetic->family_name() != "\xE3\x82\x84\xE3\x81\xBE\xE3\x81\xA0" ||
+		    parsed->phonetic->given_name() != "\xE3\x81\x9F\xE3\x82\x8D\xE3\x81\x86") {
+			fail("phonetic PN group should expose UTF-8 family/given components");
+		}
+
+		dicom::PersonName rebuilt;
+		rebuilt.alphabetic = dicom::PersonNameGroup{{"Yamada", "Tarou", "", "", ""}};
+		rebuilt.ideographic = dicom::PersonNameGroup{{
+		    "\xE5\xB1\xB1\xE7\x94\xB0", "\xE5\xA4\xAA\xE9\x83\x8E", "", "", ""}};
+		rebuilt.phonetic = dicom::PersonNameGroup{{
+		    "\xE3\x82\x84\xE3\x81\xBE\xE3\x81\xA0",
+		    "\xE3\x81\x9F\xE3\x82\x8D\xE3\x81\x86", "", "", ""}};
+
+		dicom::DataSet rebuilt_dataset;
+		rebuilt_dataset.set_declared_specific_charset(dicom::SpecificCharacterSet::ISO_IR_192);
+		auto& rebuilt_name = rebuilt_dataset.add_dataelement("PatientName"_tag, dicom::VR::PN);
+		if (!rebuilt_name.from_person_name(rebuilt)) {
+			fail("from_person_name should serialize structured PN data");
+		}
+		const auto rebuilt_utf8 = rebuilt_name.to_utf8_string();
+		if (!rebuilt_utf8 || *rebuilt_utf8 != pn_utf8) {
+			fail("from_person_name should roundtrip through to_utf8_string");
+		}
+
+		dicom::PersonName ideographic_only;
+		ideographic_only.ideographic = dicom::PersonNameGroup{{
+		    "\xE5\xB1\xB1\xE7\x94\xB0", "\xE5\xA4\xAA\xE9\x83\x8E", "", "", ""}};
+		ideographic_only.phonetic = dicom::PersonNameGroup{{
+		    "\xE3\x82\x84\xE3\x81\xBE\xE3\x81\xA0",
+		    "\xE3\x81\x9F\xE3\x82\x8D\xE3\x81\x86", "", "", ""}};
+		const std::string expected_leading_empty(
+		    "=\xE5\xB1\xB1\xE7\x94\xB0^\xE5\xA4\xAA\xE9\x83\x8E="
+		    "\xE3\x82\x84\xE3\x81\xBE\xE3\x81\xA0^\xE3\x81\x9F\xE3\x82\x8D\xE3\x81\x86");
+		if (ideographic_only.to_dicom_string() != expected_leading_empty) {
+			fail("PersonName::to_dicom_string should preserve leading empty alphabetic group");
+		}
+
+		const auto trailing_empty = dicom::PersonName::parse(
+		    "Wang^XiaoDong=\xE7\x8E\x8B^\xE5\xB0\x8F\xE6\x9D\xB1=");
+		if (!trailing_empty ||
+		    trailing_empty->to_dicom_string() !=
+		        "Wang^XiaoDong=\xE7\x8E\x8B^\xE5\xB0\x8F\xE6\x9D\xB1=") {
+			fail("PersonName::parse should preserve trailing empty component groups");
+		}
+		const auto empty_components = dicom::PersonName::parse("^^^^");
+		if (!empty_components || !empty_components->alphabetic ||
+		    empty_components->alphabetic->to_dicom_string() != "^^^^" ||
+		    empty_components->to_dicom_string() != "^^^^") {
+			fail("PersonName::parse should preserve explicit empty PN components");
+		}
+
+		dicom::DataSet trailing_dataset;
+		trailing_dataset.set_declared_specific_charset(dicom::SpecificCharacterSet::ISO_IR_192);
+		auto& trailing_name = trailing_dataset.add_dataelement("PatientName"_tag, dicom::VR::PN);
+		if (!trailing_name.from_utf8_view(
+		        "Wang^XiaoDong=\xE7\x8E\x8B^\xE5\xB0\x8F\xE6\x9D\xB1=")) {
+			fail("setup for trailing empty PN test should succeed");
+		}
+		const auto parsed_trailing = trailing_name.to_person_name();
+		if (!parsed_trailing ||
+		    parsed_trailing->to_dicom_string() !=
+		        "Wang^XiaoDong=\xE7\x8E\x8B^\xE5\xB0\x8F\xE6\x9D\xB1=") {
+			fail("DataElement::to_person_name should preserve trailing empty component groups");
+		}
+		auto& empty_component_name =
+		    trailing_dataset.add_dataelement("ReferringPhysicianName"_tag, dicom::VR::PN);
+		if (!empty_component_name.from_string_view("^^^^")) {
+			fail("setup for explicit empty PN component test should succeed");
+		}
+		const auto parsed_empty_component = empty_component_name.to_person_name();
+		if (!parsed_empty_component ||
+		    parsed_empty_component->to_dicom_string() != "^^^^") {
+			fail("DataElement::to_person_name should preserve explicit empty PN components");
+		}
+	}
+
+	{
 		const std::string utf8_latin1_name("Gr\xC3\xB6\xC3\x9F" "e", 7);
 		const std::string latin1_name("Gr\xF6\xDF" "e", 5);
 		const std::array<std::uint8_t, 6> expected_name{
@@ -889,6 +988,50 @@ int main() {
 		}
 		expect_bytes(target_roundtrip->get_dataelement("PatientName"_tag).value_span(), expected_bytes,
 		    "write_bytes should encode bytes for declared multi-term SpecificCharacterSet");
+	}
+
+	{
+		const std::array<std::string_view, 2> expected_charsets{
+		    "", "ISO 2022 IR 87"};
+		const std::string_view expected_name =
+		    "Yamada^Tarou=\xE5\xB1\xB1\xE7\x94\xB0^\xE5\xA4\xAA\xE9\x83\x8E=\xE3\x82\x84\xE3\x81\xBE\xE3\x81\xA0^\xE3\x81\x9F\xE3\x82\x8D\xE3\x81\x86";
+		const std::array<std::uint8_t, 60> expected_bytes{
+		    0x59u, 0x61u, 0x6Du, 0x61u, 0x64u, 0x61u, 0x5Eu, 0x54u, 0x61u, 0x72u,
+		    0x6Fu, 0x75u, 0x3Du, 0x1Bu, 0x24u, 0x42u, 0x3Bu, 0x33u, 0x45u, 0x44u,
+		    0x1Bu, 0x28u, 0x42u, 0x5Eu, 0x1Bu, 0x24u, 0x42u, 0x42u, 0x40u, 0x4Fu,
+		    0x3Au, 0x1Bu, 0x28u, 0x42u, 0x3Du, 0x1Bu, 0x24u, 0x42u, 0x24u, 0x64u,
+		    0x24u, 0x5Eu, 0x24u, 0x40u, 0x1Bu, 0x28u, 0x42u, 0x5Eu, 0x1Bu, 0x24u,
+		    0x42u, 0x24u, 0x3Fu, 0x24u, 0x6Du, 0x24u, 0x26u, 0x1Bu, 0x28u, 0x42u};
+
+		dicom::DicomFile leading_empty_file;
+		leading_empty_file.set_declared_specific_charset({
+		    dicom::SpecificCharacterSet::NONE,
+		    dicom::SpecificCharacterSet::ISO_2022_IR_87});
+		auto& patient_name = leading_empty_file.add_dataelement("PatientName"_tag, dicom::VR::PN);
+		if (!patient_name.from_utf8_view(expected_name)) {
+			fail("leading-empty SpecificCharacterSet should encode ISO 2022 PN bytes");
+		}
+		expect_bytes(patient_name.value_span(), expected_bytes,
+		    "leading-empty SpecificCharacterSet should encode expected ISO 2022 PN bytes");
+		const auto encoded_now = patient_name.to_utf8_string();
+		if (!encoded_now || *encoded_now != expected_name) {
+			fail("leading-empty SpecificCharacterSet should decode PN immediately after encode");
+		}
+		const auto encoded_bytes = leading_empty_file.write_bytes();
+		auto roundtrip = read_bytes(
+		    "leading-empty-specific-charset-roundtrip", encoded_bytes.data(), encoded_bytes.size());
+		if (!roundtrip) fail("leading-empty SpecificCharacterSet roundtrip returned null");
+		const auto charset =
+		    roundtrip->get_dataelement("SpecificCharacterSet"_tag).to_string_views();
+		if (!charset || charset->size() != expected_charsets.size() ||
+		    !std::equal(charset->begin(), charset->end(), expected_charsets.begin())) {
+			fail("write_bytes should preserve a leading empty SpecificCharacterSet term");
+		}
+		const auto roundtrip_name =
+		    roundtrip->get_dataelement("PatientName"_tag).to_utf8_string();
+		if (!roundtrip_name || *roundtrip_name != expected_name) {
+			fail("write_bytes should roundtrip PN encoded with a leading empty SpecificCharacterSet term");
+		}
 	}
 
 	{

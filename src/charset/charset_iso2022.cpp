@@ -106,6 +106,19 @@ std::optional<SpecificCharacterSet> first_iso2022_g1_term(
 	return std::nullopt;
 }
 
+std::optional<SpecificCharacterSet> initial_iso2022_g1_term(
+    const ParsedSpecificCharacterSet& parsed) noexcept {
+	const auto term = parsed.primary;
+	const auto* info = charset_info_or_null(term);
+	if (!info || !info->uses_iso_2022) {
+		return std::nullopt;
+	}
+	if (info->code_element == SpecificCharacterSetCodeElement::G1) {
+		return term;
+	}
+	return std::nullopt;
+}
+
 bool is_iso2022_charset(SpecificCharacterSet charset) noexcept {
 	const auto* info = charset_info_or_null(charset);
 	return info && info->uses_iso_2022;
@@ -120,6 +133,16 @@ bool is_iso2022_g0_charset(SpecificCharacterSet charset) noexcept {
 std::string_view iso2022_reset_escape() noexcept {
 	const auto* info = charset_info_or_null(SpecificCharacterSet::ISO_2022_IR_6);
 	return info ? info->escape_sequence_bytes : std::string_view{};
+}
+
+std::string_view iso2022_initial_reset_escape(SpecificCharacterSet charset) noexcept {
+	switch (charset) {
+	case SpecificCharacterSet::ISO_2022_IR_13:
+	case SpecificCharacterSet::ISO_IR_13:
+		return "\x1b\x28\x4a";
+	default:
+		return iso2022_reset_escape();
+	}
 }
 
 namespace {
@@ -238,7 +261,7 @@ std::optional<EncodedTextValue> encode_utf8_value_for_iso2022_charset(
 	EncodedTextValue encoded{};
 	encoded.bytes.reserve(value.size() * 4u);
 	const auto designate_escape = info->escape_sequence_bytes;
-	const auto reset_escape = iso2022_reset_escape();
+	const auto reset_escape = iso2022_initial_reset_escape(target_charset);
 	const bool g0_designation = info->code_element == SpecificCharacterSetCodeElement::G0;
 	encoded.ended_designated = reset_to_initial_each_value;
 	bool use_initial_designation = reset_to_initial_each_value;
@@ -301,9 +324,9 @@ std::optional<EncodedTextValue> encode_utf8_value_for_iso2022_charset_plan(
 
 	EncodedTextValue encoded{};
 	encoded.bytes.reserve(value.size() * 4u);
-	const auto reset_escape = iso2022_reset_escape();
+	const auto reset_escape = iso2022_initial_reset_escape(parsed.primary);
 	std::optional<SpecificCharacterSet> active_g0{};
-	const auto initial_g1 = first_iso2022_g1_term(parsed);
+	const auto initial_g1 = initial_iso2022_g1_term(parsed);
 	std::optional<SpecificCharacterSet> active_g1 =
 	    start_with_initial_g1_designation ? initial_g1 : std::optional<SpecificCharacterSet>{};
 

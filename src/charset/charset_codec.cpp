@@ -177,13 +177,8 @@ std::optional<ParsedSpecificCharacterSet> parse_charset_element(
 	return parse_charset_values(*values, element.tag().to_string(), out_error);
 }
 
-std::optional<ParsedSpecificCharacterSet> parse_dataset_charset(
-    const DataSet& dataset, std::string* out_error) {
-	const auto* effective = dataset.effective_charset_spec(out_error);
-	if (!effective) {
-		return std::nullopt;
-	}
-	return *effective;
+const CharsetSpec* parse_dataset_charset(const DataSet& dataset, std::string* out_error) {
+	return dataset.effective_charset_spec(out_error);
 }
 
 bool same_charset_terms(

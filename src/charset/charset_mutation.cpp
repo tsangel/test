@@ -28,7 +28,7 @@ std::optional<std::vector<std::uint8_t>> encode_utf8_value_range(VR vr,
 	}
 	joined.reserve(total_length);
 	bool previous_value_ended_designated = false;
-	const auto reset_escape = iso2022_reset_escape();
+	const auto reset_escape = iso2022_initial_reset_escape(target_charset);
 	const auto* target_info = charset_info_or_null(target_charset);
 	const bool reset_to_initial_each_value = target_info && target_info->uses_iso_2022;
 
@@ -59,6 +59,10 @@ std::optional<std::vector<std::uint8_t>> encode_utf8_value_range(VR vr,
 		joined.append(encoded_bytes->data(), encoded_bytes->size());
 		previous_value_ended_designated = ended_designated;
 	}
+	if (previous_value_ended_designated && (joined.size() & 1u) != 0u &&
+	    is_iso2022_g0_charset(target_charset)) {
+		joined.append(reset_escape.data(), reset_escape.size());
+	}
 	return std::vector<std::uint8_t>(joined.begin(), joined.end());
 }
 
@@ -85,8 +89,8 @@ std::optional<std::vector<std::uint8_t>> encode_utf8_value_range(VR vr,
 	}
 	joined.reserve(total_length * 2u);
 
-	const auto reset_escape = iso2022_reset_escape();
-	const bool value_start_restores_initial_g1 = first_iso2022_g1_term(target_charset).has_value();
+	const auto reset_escape = iso2022_initial_reset_escape(target_charset.primary);
+	const bool value_start_restores_initial_g1 = initial_iso2022_g1_term(target_charset).has_value();
 	bool previous_value_ended_designated = false;
 	for (std::size_t i = 0; i < values.size(); ++i) {
 		auto encoded = encode_utf8_value_for_iso2022_charset_plan(
@@ -102,6 +106,9 @@ std::optional<std::vector<std::uint8_t>> encode_utf8_value_range(VR vr,
 		}
 		joined.append(encoded->bytes.data(), encoded->bytes.size());
 		previous_value_ended_designated = encoded->ended_designated;
+	}
+	if (previous_value_ended_designated && (joined.size() & 1u) != 0u) {
+		joined.append(reset_escape.data(), reset_escape.size());
 	}
 	return std::vector<std::uint8_t>(joined.begin(), joined.end());
 }
@@ -133,13 +140,20 @@ std::optional<std::vector<std::uint8_t>> encode_charset_tag(
 	}
 
 	std::string joined;
-	for (const auto charset : charsets) {
-		if (!joined.empty()) {
+	if (charsets.front() == SpecificCharacterSet::NONE) {
+		joined.push_back('\\');
+	}
+	for (std::size_t index = 0; index < charsets.size(); ++index) {
+		const auto charset = charsets[index];
+		if (!joined.empty() && joined.back() != '\\') {
 			joined.push_back('\\');
 		}
 		if (charset == SpecificCharacterSet::NONE) {
+			if (index == 0u) {
+				continue;
+			}
 			set_error(out_error,
-			    "CHARSET_UNSUPPORTED reason=multi-term Specific Character Set must not contain NONE");
+			    "CHARSET_UNSUPPORTED reason=multi-term Specific Character Set may contain NONE only as the first term");
 			return std::nullopt;
 		}
 		const auto* info = specific_character_set_info(charset);
@@ -177,10 +191,14 @@ bool validate_declared_charset(
 	if (!parsed.is_multi_term()) {
 		return true;
 	}
-	for (const auto term : parsed.terms) {
+	for (std::size_t index = 0; index < parsed.terms.size(); ++index) {
+		const auto term = parsed.terms[index];
 		if (term == SpecificCharacterSet::NONE) {
+			if (index == 0u) {
+				continue;
+			}
 			set_error(out_error,
-			    "CHARSET_UNSUPPORTED reason=multi-term Specific Character Set must not contain NONE");
+			    "CHARSET_UNSUPPORTED reason=multi-term Specific Character Set may contain NONE only as the first term");
 			return false;
 		}
 	}
@@ -369,10 +387,9 @@ bool encode_utf8_for_element(DataElement& element,
 	if (auto* parent = element.parent()) {
 		dataset = parent;
 	}
-	auto target_charset =
+	const auto* target_charset =
 	    dataset ? detail::parse_dataset_charset(*dataset, out_error)
-	            : std::optional<detail::ParsedSpecificCharacterSet>{
-	                  detail::default_specific_character_set_plan()};
+	            : detail::default_charset_spec();
 	if (!target_charset || !detail::validate_declared_charset(*target_charset, out_error)) {
 		return false;
 	}
