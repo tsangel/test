@@ -149,10 +149,10 @@ std::optional<std::string> decode_raw_text_to_utf8(
 	}
 
 	const auto source_charset = source_charset_plan.primary;
-	if (is_iso2022_charset(source_charset)) {
-		ParsedSpecificCharacterSet single_term_plan{{source_charset}, source_charset};
+	if (charset_plan_uses_only_iso2022_terms(source_charset_plan) &&
+	    (source_charset_plan.is_multi_term() || is_iso2022_charset(source_charset))) {
 		auto converted = decode_iso_2022_charset_plan_to_utf8(
-		    raw_value, single_term_plan, element.vr(), decode_mode, out_error, out_replaced,
+		    raw_value, source_charset_plan, element.vr(), decode_mode, out_error, out_replaced,
 		    stop_at_first_value);
 		if (!converted) {
 			if (out_error && !out_error->empty()) {

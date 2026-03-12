@@ -133,13 +133,17 @@ std::optional<std::vector<std::uint8_t>> encode_charset_tag(
 	}
 
 	std::string joined;
-	for (const auto charset : charsets) {
+	for (std::size_t index = 0; index < charsets.size(); ++index) {
+		const auto charset = charsets[index];
 		if (!joined.empty()) {
 			joined.push_back('\\');
 		}
 		if (charset == SpecificCharacterSet::NONE) {
+			if (index == 0u) {
+				continue;
+			}
 			set_error(out_error,
-			    "CHARSET_UNSUPPORTED reason=multi-term Specific Character Set must not contain NONE");
+			    "CHARSET_UNSUPPORTED reason=multi-term Specific Character Set may contain NONE only as the first term");
 			return std::nullopt;
 		}
 		const auto* info = specific_character_set_info(charset);
@@ -177,10 +181,14 @@ bool validate_declared_charset(
 	if (!parsed.is_multi_term()) {
 		return true;
 	}
-	for (const auto term : parsed.terms) {
+	for (std::size_t index = 0; index < parsed.terms.size(); ++index) {
+		const auto term = parsed.terms[index];
 		if (term == SpecificCharacterSet::NONE) {
+			if (index == 0u) {
+				continue;
+			}
 			set_error(out_error,
-			    "CHARSET_UNSUPPORTED reason=multi-term Specific Character Set must not contain NONE");
+			    "CHARSET_UNSUPPORTED reason=multi-term Specific Character Set may contain NONE only as the first term");
 			return false;
 		}
 	}
