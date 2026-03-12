@@ -106,6 +106,23 @@ def test_write_bytes_preserves_declared_multi_term_iso2022_charset():
 	assert roundtrip.get_dataelement("PatientName").to_utf8_string() == japanese_name
 
 
+def test_leading_empty_iso2022_ir87_encodes_and_roundtrips_pn():
+	name = "Yamada^Tarou=\u5c71\u7530^\u592a\u90ce=\u3084\u307e\u3060^\u305f\u308d\u3046"
+	df = dicom.DicomFile()
+	df.set_declared_specific_charset(["", "ISO 2022 IR 87"])
+	pn_elem = df.dataset.add_dataelement(dicom.Tag("PatientName"), dicom.VR.PN)
+	assert pn_elem.from_utf8_view(name)
+	assert pn_elem.to_utf8_string() == name
+
+	out_bytes = df.write_bytes()
+	roundtrip = dicom.read_bytes(out_bytes, name="leading-empty-iso2022-ir87-pn-roundtrip")
+	assert roundtrip.get_dataelement("SpecificCharacterSet").to_string_views() == [
+	    "",
+	    "ISO 2022 IR 87",
+	]
+	assert roundtrip.get_dataelement("PatientName").to_utf8_string() == name
+
+
 def test_write_bytes_omits_initial_iso2022_g0_designation():
 	jis_name = "\u4e9c"
 	df = dicom.DicomFile()

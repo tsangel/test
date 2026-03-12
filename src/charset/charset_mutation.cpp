@@ -59,6 +59,10 @@ std::optional<std::vector<std::uint8_t>> encode_utf8_value_range(VR vr,
 		joined.append(encoded_bytes->data(), encoded_bytes->size());
 		previous_value_ended_designated = ended_designated;
 	}
+	if (previous_value_ended_designated && (joined.size() & 1u) != 0u &&
+	    is_iso2022_g0_charset(target_charset)) {
+		joined.append(reset_escape.data(), reset_escape.size());
+	}
 	return std::vector<std::uint8_t>(joined.begin(), joined.end());
 }
 
@@ -103,6 +107,9 @@ std::optional<std::vector<std::uint8_t>> encode_utf8_value_range(VR vr,
 		joined.append(encoded->bytes.data(), encoded->bytes.size());
 		previous_value_ended_designated = encoded->ended_designated;
 	}
+	if (previous_value_ended_designated && (joined.size() & 1u) != 0u) {
+		joined.append(reset_escape.data(), reset_escape.size());
+	}
 	return std::vector<std::uint8_t>(joined.begin(), joined.end());
 }
 
@@ -133,9 +140,12 @@ std::optional<std::vector<std::uint8_t>> encode_charset_tag(
 	}
 
 	std::string joined;
+	if (charsets.front() == SpecificCharacterSet::NONE) {
+		joined.push_back('\\');
+	}
 	for (std::size_t index = 0; index < charsets.size(); ++index) {
 		const auto charset = charsets[index];
-		if (!joined.empty()) {
+		if (!joined.empty() && joined.back() != '\\') {
 			joined.push_back('\\');
 		}
 		if (charset == SpecificCharacterSet::NONE) {

@@ -892,6 +892,50 @@ int main() {
 	}
 
 	{
+		const std::array<std::string_view, 2> expected_charsets{
+		    "", "ISO 2022 IR 87"};
+		const std::string_view expected_name =
+		    "Yamada^Tarou=\xE5\xB1\xB1\xE7\x94\xB0^\xE5\xA4\xAA\xE9\x83\x8E=\xE3\x82\x84\xE3\x81\xBE\xE3\x81\xA0^\xE3\x81\x9F\xE3\x82\x8D\xE3\x81\x86";
+		const std::array<std::uint8_t, 60> expected_bytes{
+		    0x59u, 0x61u, 0x6Du, 0x61u, 0x64u, 0x61u, 0x5Eu, 0x54u, 0x61u, 0x72u,
+		    0x6Fu, 0x75u, 0x3Du, 0x1Bu, 0x24u, 0x42u, 0x3Bu, 0x33u, 0x45u, 0x44u,
+		    0x1Bu, 0x28u, 0x42u, 0x5Eu, 0x1Bu, 0x24u, 0x42u, 0x42u, 0x40u, 0x4Fu,
+		    0x3Au, 0x1Bu, 0x28u, 0x42u, 0x3Du, 0x1Bu, 0x24u, 0x42u, 0x24u, 0x64u,
+		    0x24u, 0x5Eu, 0x24u, 0x40u, 0x1Bu, 0x28u, 0x42u, 0x5Eu, 0x1Bu, 0x24u,
+		    0x42u, 0x24u, 0x3Fu, 0x24u, 0x6Du, 0x24u, 0x26u, 0x1Bu, 0x28u, 0x42u};
+
+		dicom::DicomFile leading_empty_file;
+		leading_empty_file.set_declared_specific_charset({
+		    dicom::SpecificCharacterSet::NONE,
+		    dicom::SpecificCharacterSet::ISO_2022_IR_87});
+		auto& patient_name = leading_empty_file.add_dataelement("PatientName"_tag, dicom::VR::PN);
+		if (!patient_name.from_utf8_view(expected_name)) {
+			fail("leading-empty SpecificCharacterSet should encode ISO 2022 PN bytes");
+		}
+		expect_bytes(patient_name.value_span(), expected_bytes,
+		    "leading-empty SpecificCharacterSet should encode expected ISO 2022 PN bytes");
+		const auto encoded_now = patient_name.to_utf8_string();
+		if (!encoded_now || *encoded_now != expected_name) {
+			fail("leading-empty SpecificCharacterSet should decode PN immediately after encode");
+		}
+		const auto encoded_bytes = leading_empty_file.write_bytes();
+		auto roundtrip = read_bytes(
+		    "leading-empty-specific-charset-roundtrip", encoded_bytes.data(), encoded_bytes.size());
+		if (!roundtrip) fail("leading-empty SpecificCharacterSet roundtrip returned null");
+		const auto charset =
+		    roundtrip->get_dataelement("SpecificCharacterSet"_tag).to_string_views();
+		if (!charset || charset->size() != expected_charsets.size() ||
+		    !std::equal(charset->begin(), charset->end(), expected_charsets.begin())) {
+			fail("write_bytes should preserve a leading empty SpecificCharacterSet term");
+		}
+		const auto roundtrip_name =
+		    roundtrip->get_dataelement("PatientName"_tag).to_utf8_string();
+		if (!roundtrip_name || *roundtrip_name != expected_name) {
+			fail("write_bytes should roundtrip PN encoded with a leading empty SpecificCharacterSet term");
+		}
+	}
+
+	{
 		const std::array<std::string_view, 2> japanese_charsets{
 		    "ISO 2022 IR 13", "ISO 2022 IR 87"};
 		const std::array<std::string_view, 2> japanese_values{

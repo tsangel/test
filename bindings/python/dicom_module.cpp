@@ -1323,10 +1323,16 @@ std::vector<dicom::SpecificCharacterSet> parse_specific_character_sets_option(
 	}
 	std::vector<dicom::SpecificCharacterSet> parsed_terms;
 	parsed_terms.reserve(terms.size());
-	for (const auto& term : terms) {
+	for (std::size_t index = 0; index < terms.size(); ++index) {
+		const auto& term = terms[index];
 		if (term.empty()) {
-			throw nb::value_error(
-			    (std::string(argument_name) + " must not contain empty terms").c_str());
+			if (index == 0u) {
+				parsed_terms.push_back(dicom::SpecificCharacterSet::NONE);
+				continue;
+			}
+			throw nb::value_error((std::string(argument_name) +
+			                       " may contain an empty term only in the first position")
+			                          .c_str());
 		}
 		const auto charset = dicom::specific_character_set_from_term(term);
 		if (charset == dicom::SpecificCharacterSet::Unknown) {
