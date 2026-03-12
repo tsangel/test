@@ -1041,6 +1041,9 @@ enum class CharsetDecodeErrorPolicy : std::uint8_t {
 /// convenience accessors from PS3.5 6.2 / 6.2.1.2.
 struct PersonNameGroup {
 	std::array<std::string, 5> components{};
+	// 0 means "infer from last non-empty component". Parsed values can use this
+	// to preserve explicit trailing empty PN components such as "^^^^".
+	std::uint8_t explicit_component_count_{0};
 
 	[[nodiscard]] std::string_view component(std::size_t index) const noexcept {
 		return index < components.size() ? std::string_view(components[index]) : std::string_view{};

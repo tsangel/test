@@ -209,6 +209,12 @@ int main() {
 		        "Wang^XiaoDong=\xE7\x8E\x8B^\xE5\xB0\x8F\xE6\x9D\xB1=") {
 			fail("PersonName::parse should preserve trailing empty component groups");
 		}
+		const auto empty_components = dicom::PersonName::parse("^^^^");
+		if (!empty_components || !empty_components->alphabetic ||
+		    empty_components->alphabetic->to_dicom_string() != "^^^^" ||
+		    empty_components->to_dicom_string() != "^^^^") {
+			fail("PersonName::parse should preserve explicit empty PN components");
+		}
 
 		dicom::DataSet trailing_dataset;
 		trailing_dataset.set_declared_specific_charset(dicom::SpecificCharacterSet::ISO_IR_192);
@@ -222,6 +228,16 @@ int main() {
 		    parsed_trailing->to_dicom_string() !=
 		        "Wang^XiaoDong=\xE7\x8E\x8B^\xE5\xB0\x8F\xE6\x9D\xB1=") {
 			fail("DataElement::to_person_name should preserve trailing empty component groups");
+		}
+		auto& empty_component_name =
+		    trailing_dataset.add_dataelement("ReferringPhysicianName"_tag, dicom::VR::PN);
+		if (!empty_component_name.from_string_view("^^^^")) {
+			fail("setup for explicit empty PN component test should succeed");
+		}
+		const auto parsed_empty_component = empty_component_name.to_person_name();
+		if (!parsed_empty_component ||
+		    parsed_empty_component->to_dicom_string() != "^^^^") {
+			fail("DataElement::to_person_name should preserve explicit empty PN components");
 		}
 	}
 

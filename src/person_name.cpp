@@ -33,15 +33,15 @@ std::optional<PersonNameGroup> parse_person_name_group(std::string_view raw_grou
 		return std::nullopt;
 	}
 	PersonNameGroup group;
+	std::size_t component_count = 0;
 	if (!split_preserve_empty(raw_group, '^', group.components.size(),
 	        [&](std::size_t index, std::string_view part) {
 		        group.components[index].assign(part.data(), part.size());
+		        component_count = index + 1;
 	        })) {
 		return std::nullopt;
 	}
-	if (group.empty()) {
-		return std::nullopt;
-	}
+	group.explicit_component_count_ = static_cast<std::uint8_t>(component_count);
 	return group;
 }
 
@@ -66,11 +66,22 @@ bool PersonNameGroup::empty() const noexcept {
 }
 
 std::string PersonNameGroup::to_dicom_string() const {
-	if (empty()) {
+	std::size_t last_non_empty = components.size();
+	while (last_non_empty > 0 && components[last_non_empty - 1].empty()) {
+		--last_non_empty;
+	}
+	const auto component_count =
+	    std::max<std::size_t>(last_non_empty, explicit_component_count_);
+	if (component_count == 0) {
 		return {};
 	}
 	std::string out;
-	append_person_name_group_to_string(*this, out);
+	for (std::size_t i = 0; i < component_count; ++i) {
+		if (i != 0) {
+			out.push_back('^');
+		}
+		out += components[i];
+	}
 	return out;
 }
 
@@ -98,8 +109,8 @@ std::string PersonName::to_dicom_string() const {
 		if (i != 0) {
 			out.push_back('=');
 		}
-		if (*groups[i] && !(*groups[i])->empty()) {
-			append_person_name_group_to_string(**groups[i], out);
+		if (*groups[i]) {
+			out += (*groups[i])->to_dicom_string();
 		}
 	}
 	return out;

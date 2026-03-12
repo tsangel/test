@@ -292,3 +292,17 @@ def test_person_name_parse_preserves_trailing_empty_group():
 	other = df.dataset.add_dataelement(dicom.Tag(0x0010, 0x1002), dicom.VR.PN)
 	assert other.from_person_name(parsed)
 	assert other.to_utf8_string() == name
+
+
+def test_person_name_api_preserves_explicit_empty_components():
+	df = dicom.DicomFile()
+	df.set_declared_specific_charset("ISO_IR 192")
+	pn_elem = df.dataset.add_dataelement(dicom.Tag("ReferringPhysicianName"), dicom.VR.PN)
+	assert pn_elem.from_string_view("^^^^")
+
+	parsed = pn_elem.to_person_name()
+	assert parsed is not None
+	assert parsed.alphabetic is not None
+	assert parsed.alphabetic.components == ["", "", "", "", ""]
+	assert parsed.alphabetic.to_dicom_string() == "^^^^"
+	assert parsed.to_dicom_string() == "^^^^"

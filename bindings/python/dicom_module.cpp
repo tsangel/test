@@ -1415,6 +1415,7 @@ dicom::PersonNameGroup make_person_name_group(
 		    (std::string(arg_name) + " must have at most 5 PN components").c_str());
 	}
 	dicom::PersonNameGroup group;
+	group.explicit_component_count_ = static_cast<std::uint8_t>(components.size());
 	for (std::size_t i = 0; i < components.size(); ++i) {
 		group.components[i] = components[i];
 	}
