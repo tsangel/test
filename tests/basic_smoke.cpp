@@ -69,7 +69,7 @@ int main() {
 		fail("implementation_class_uid should be a strict-valid UID");
 	}
 	if (dicom::uid::implementation_version_name() !=
-	    std::string_view("DICOMSDL 2026FEB")) {
+	    std::string_view(DICOMSDL_IMPLEMENTATION_VERSION_NAME)) {
 		fail("implementation_version_name mismatch");
 	}
 
