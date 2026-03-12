@@ -44,6 +44,7 @@ Warning: when `copy=False`, the source buffer must remain alive for as long as t
 
 ### DataElement
 - `get_value()` is best-effort typed access.
+  - `SQ` / `PX` -> `Sequence` / `PixelSequence`
   - numbers -> `int` / `float`
   - `PN` -> `PersonName` / `list[PersonName]` when parsing succeeds
   - charset-aware text -> UTF-8 `str` / `list[str]`

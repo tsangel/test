@@ -2667,11 +2667,11 @@ NB_MODULE(_dicomsdl, m) {
 		    [](DataElement& element) -> nb::object {
 			    return dataelement_get_value_py(element);
 		    },
-		    "Best-effort typed access: returns int/float, UTF-8 strings for charset-aware text, "
+		    "Best-effort typed access: returns Sequence / PixelSequence for SQ/PX, "
+		    "int/float for numeric VRs, UTF-8 strings for charset-aware text, "
 		    "PersonName / list[PersonName] for PN when possible, raw strings for other text, "
 		    "and falls back to raw bytes when charset decode/parsing fails or to raw bytes "
-		    "(memoryview) for binary VRs; "
-		    "returns None for missing elements or sequences/pixel sequences.")
+		    "(memoryview) for binary VRs; returns None for missing elements.")
 		.def("value_span",
 		    [](const DataElement& element) {
 			    auto span = element.value_span();
