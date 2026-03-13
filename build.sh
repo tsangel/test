@@ -17,10 +17,12 @@ DICOMSDL_PIXEL_DEFAULT_MODE="${DICOMSDL_PIXEL_DEFAULT_MODE:-builtin}"
 # Keep JPEG XL opt-in by default because enabling JPEG XL modes requires libjxl.
 DICOMSDL_PIXEL_JPEGXL_MODE="${DICOMSDL_PIXEL_JPEGXL_MODE:-none}"
 BUILD_WHEEL="${BUILD_WHEEL:-1}"
+WHEEL_ONLY="${WHEEL_ONLY:-0}"
 CTEST_LABEL="${CTEST_LABEL:-dicomsdl}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 WHEEL_DIR="${WHEEL_DIR:-${ROOT_DIR}/dist}"
 PRESERVE_WHEEL_HISTORY="${PRESERVE_WHEEL_HISTORY:-1}"
+PIP_WHEEL_VERBOSE="${PIP_WHEEL_VERBOSE:-0}"
 
 ensure_python_wheel_build_requirements() {
 	local py_bin="$1"
@@ -40,6 +42,15 @@ PY
 		echo "Run: ${py_bin} -m pip install --upgrade pip setuptools wheel" >&2
 		exit 1
 	fi
+}
+
+clean_python_wheel_build_dirs() {
+	for path in "${ROOT_DIR}"/build/temp.* "${ROOT_DIR}"/build/lib.* "${ROOT_DIR}"/build/bdist.*; do
+		if [[ -d "${path}" ]]; then
+			echo "Removing wheel intermediate directory: ${path}"
+			rm -rf "${path}"
+		fi
+	done
 }
 
 pixel_v2_args=(
@@ -155,100 +166,114 @@ else
 	GENERATOR_EXPLICIT=0
 fi
 
-CMAKE_CACHE_FILE="${BUILD_DIR}/CMakeCache.txt"
-if [[ -f "$CMAKE_CACHE_FILE" ]]; then
-	EXISTING_GENERATOR="$(sed -n 's/^CMAKE_GENERATOR:INTERNAL=//p' "$CMAKE_CACHE_FILE" | head -n 1)"
-	if [[ -n "$EXISTING_GENERATOR" && "$EXISTING_GENERATOR" != "$REQUESTED_GENERATOR" ]]; then
-		if (( GENERATOR_EXPLICIT )); then
-			if [[ "${RESET_CMAKE_CACHE:-0}" == "1" ]]; then
-				echo "Resetting CMake cache in ${BUILD_DIR} to switch generator (${EXISTING_GENERATOR} -> ${REQUESTED_GENERATOR})"
-				rm -rf "${BUILD_DIR}/CMakeCache.txt" "${BUILD_DIR}/CMakeFiles"
-			else
-				echo "Error: ${BUILD_DIR} was configured with generator '${EXISTING_GENERATOR}', but requested '${REQUESTED_GENERATOR}'." >&2
-				echo "       Set RESET_CMAKE_CACHE=1 to remove CMakeCache.txt/CMakeFiles automatically." >&2
-				exit 1
-			fi
-		else
-			echo "Using existing CMake generator '${EXISTING_GENERATOR}' from ${BUILD_DIR}"
-			REQUESTED_GENERATOR="$EXISTING_GENERATOR"
-		fi
-	fi
-fi
-
-cmake_args=(-S "$ROOT_DIR" -B "$BUILD_DIR" \
-	-DBUILD_TESTING="${BUILD_TESTING}" \
-	-DDICOM_BUILD_EXAMPLES="${DICOM_BUILD_EXAMPLES}" \
-	-DDICOMSDL_MSVC_ENABLE_LTCG="${DICOMSDL_MSVC_ENABLE_LTCG}" \
-	-DDICOMSDL_MSVC_PGO="${DICOMSDL_MSVC_PGO}" \
-	-DDICOMSDL_MSVC_PGO_DIR="${DICOMSDL_MSVC_PGO_DIR}" \
-	-DCMAKE_BUILD_TYPE="${BUILD_TYPE}")
-
-if ((${#codec_pixel_args[@]})); then
-	cmake_args+=("${codec_pixel_args[@]}")
-fi
-if ((jpegxl_mode_requested)); then
-	cmake_args+=("-DDICOMSDL_ENABLE_JPEGXL=ON")
-fi
-if ((${#pixel_v2_args[@]})); then
-	cmake_args+=("${pixel_v2_args[@]}")
-fi
-
-if [[ -n "${CMAKE_EXTRA_ARGS:-}" ]]; then
-	# shellcheck disable=SC2206
-	extra_cmake_args=(${CMAKE_EXTRA_ARGS})
-	cmake_args+=("${extra_cmake_args[@]}")
-fi
-
-if [[ -n "$REQUESTED_GENERATOR" ]]; then
-	cmake_args+=(-G "$REQUESTED_GENERATOR")
-fi
-
-echo "Configuring dicomsdl (${BUILD_TYPE}) in $BUILD_DIR"
 echo "Codec modes: ${codec_mode_log_parts[*]}"
 echo "Pixel runtime mode: v2 (default)"
-cmake "${cmake_args[@]}"
 
-if [[ -z "${BUILD_PARALLELISM:-}" ]]; then
-	if command -v sysctl >/dev/null 2>&1 && BUILD_PARALLELISM="$(sysctl -n hw.ncpu 2>/dev/null)"; then
-		:
-	elif command -v getconf >/dev/null 2>&1 && BUILD_PARALLELISM="$(getconf _NPROCESSORS_ONLN 2>/dev/null)"; then
-		:
-	else
-		BUILD_PARALLELISM=1
+if [[ "${WHEEL_ONLY}" != "0" ]]; then
+	echo "Wheel-only mode: skipping top-level CMake configure/build and relying on pip wheel."
+	if [[ "${DICOMSDL_CLEAN_BUILD:-0}" != "0" ]]; then
+		clean_python_wheel_build_dirs
 	fi
-fi
+	if [[ "${RUN_TESTS:-1}" != "0" ]]; then
+		echo "Warning: RUN_TESTS is ignored in WHEEL_ONLY mode."
+	fi
+	if [ "$#" -gt 0 ]; then
+		echo "Warning: explicit CMake targets are ignored in WHEEL_ONLY mode."
+	fi
+else
+	CMAKE_CACHE_FILE="${BUILD_DIR}/CMakeCache.txt"
+	if [[ -f "$CMAKE_CACHE_FILE" ]]; then
+		EXISTING_GENERATOR="$(sed -n 's/^CMAKE_GENERATOR:INTERNAL=//p' "$CMAKE_CACHE_FILE" | head -n 1)"
+		if [[ -n "$EXISTING_GENERATOR" && "$EXISTING_GENERATOR" != "$REQUESTED_GENERATOR" ]]; then
+			if (( GENERATOR_EXPLICIT )); then
+				if [[ "${RESET_CMAKE_CACHE:-0}" == "1" ]]; then
+					echo "Resetting CMake cache in ${BUILD_DIR} to switch generator (${EXISTING_GENERATOR} -> ${REQUESTED_GENERATOR})"
+					rm -rf "${BUILD_DIR}/CMakeCache.txt" "${BUILD_DIR}/CMakeFiles"
+				else
+					echo "Error: ${BUILD_DIR} was configured with generator '${EXISTING_GENERATOR}', but requested '${REQUESTED_GENERATOR}'." >&2
+					echo "       Set RESET_CMAKE_CACHE=1 to remove CMakeCache.txt/CMakeFiles automatically." >&2
+					exit 1
+				fi
+			else
+				echo "Using existing CMake generator '${EXISTING_GENERATOR}' from ${BUILD_DIR}"
+				REQUESTED_GENERATOR="$EXISTING_GENERATOR"
+			fi
+		fi
+	fi
 
-case "$BUILD_PARALLELISM" in
-	''|*[!0-9]*)
-		BUILD_PARALLELISM=1
-		;;
-	*)
-		if [ "$BUILD_PARALLELISM" -lt 1 ]; then
+	cmake_args=(-S "$ROOT_DIR" -B "$BUILD_DIR" \
+		-DBUILD_TESTING="${BUILD_TESTING}" \
+		-DDICOM_BUILD_EXAMPLES="${DICOM_BUILD_EXAMPLES}" \
+		-DDICOMSDL_MSVC_ENABLE_LTCG="${DICOMSDL_MSVC_ENABLE_LTCG}" \
+		-DDICOMSDL_MSVC_PGO="${DICOMSDL_MSVC_PGO}" \
+		-DDICOMSDL_MSVC_PGO_DIR="${DICOMSDL_MSVC_PGO_DIR}" \
+		-DCMAKE_BUILD_TYPE="${BUILD_TYPE}")
+
+	if ((${#codec_pixel_args[@]})); then
+		cmake_args+=("${codec_pixel_args[@]}")
+	fi
+	if ((jpegxl_mode_requested)); then
+		cmake_args+=("-DDICOMSDL_ENABLE_JPEGXL=ON")
+	fi
+	if ((${#pixel_v2_args[@]})); then
+		cmake_args+=("${pixel_v2_args[@]}")
+	fi
+
+	if [[ -n "${CMAKE_EXTRA_ARGS:-}" ]]; then
+		# shellcheck disable=SC2206
+		extra_cmake_args=(${CMAKE_EXTRA_ARGS})
+		cmake_args+=("${extra_cmake_args[@]}")
+	fi
+
+	if [[ -n "$REQUESTED_GENERATOR" ]]; then
+		cmake_args+=(-G "$REQUESTED_GENERATOR")
+	fi
+
+	echo "Configuring dicomsdl (${BUILD_TYPE}) in $BUILD_DIR"
+	cmake "${cmake_args[@]}"
+
+	if [[ -z "${BUILD_PARALLELISM:-}" ]]; then
+		if command -v sysctl >/dev/null 2>&1 && BUILD_PARALLELISM="$(sysctl -n hw.ncpu 2>/dev/null)"; then
+			:
+		elif command -v getconf >/dev/null 2>&1 && BUILD_PARALLELISM="$(getconf _NPROCESSORS_ONLN 2>/dev/null)"; then
+			:
+		else
 			BUILD_PARALLELISM=1
 		fi
-		;;
-esac
-
-build_cmd=(cmake --build "$BUILD_DIR" --config "$BUILD_TYPE" --parallel "$BUILD_PARALLELISM")
-if [ "$#" -gt 0 ]; then
-	build_cmd+=(--target)
-	for target in "$@"; do
-		build_cmd+=("$target")
-	done
-fi
-
-echo "Building dicomsdl (${BUILD_TYPE})"
-"${build_cmd[@]}"
-
-if [[ "${RUN_TESTS:-1}" != "0" ]]; then
-	echo "Running CTest suite (${BUILD_TYPE})"
-	pushd "$BUILD_DIR" >/dev/null
-	if [[ -n "${CTEST_LABEL}" ]]; then
-		ctest --output-on-failure --build-config "$BUILD_TYPE" -L "$CTEST_LABEL"
-	else
-		ctest --output-on-failure --build-config "$BUILD_TYPE"
 	fi
-	popd >/dev/null
+
+	case "$BUILD_PARALLELISM" in
+		''|*[!0-9]*)
+			BUILD_PARALLELISM=1
+			;;
+		*)
+			if [ "$BUILD_PARALLELISM" -lt 1 ]; then
+				BUILD_PARALLELISM=1
+			fi
+			;;
+	esac
+
+	build_cmd=(cmake --build "$BUILD_DIR" --config "$BUILD_TYPE" --parallel "$BUILD_PARALLELISM")
+	if [ "$#" -gt 0 ]; then
+		build_cmd+=(--target)
+		for target in "$@"; do
+			build_cmd+=("$target")
+		done
+	fi
+
+	echo "Building dicomsdl (${BUILD_TYPE})"
+	"${build_cmd[@]}"
+
+	if [[ "${RUN_TESTS:-1}" != "0" ]]; then
+		echo "Running CTest suite (${BUILD_TYPE})"
+		pushd "$BUILD_DIR" >/dev/null
+		if [[ -n "${CTEST_LABEL}" ]]; then
+			ctest --output-on-failure --build-config "$BUILD_TYPE" -L "$CTEST_LABEL"
+		else
+			ctest --output-on-failure --build-config "$BUILD_TYPE"
+		fi
+		popd >/dev/null
+	fi
 fi
 
 if [[ "${BUILD_WHEEL}" != "0" ]]; then
@@ -260,7 +285,11 @@ if [[ "${BUILD_WHEEL}" != "0" ]]; then
 	echo "Building Python wheel into ${WHEEL_DIR}"
 	mkdir -p "$WHEEL_DIR"
 	tmp_wheel_dir="$(mktemp -d "${WHEEL_DIR}/.wheel-build.XXXXXX")"
-	"$PYTHON_BIN" -m pip wheel "$ROOT_DIR" --no-build-isolation --no-deps -w "$tmp_wheel_dir"
+	wheel_cmd=("$PYTHON_BIN" -m pip wheel "$ROOT_DIR" --no-build-isolation --no-deps -w "$tmp_wheel_dir")
+	if [[ "${PIP_WHEEL_VERBOSE}" != "0" ]]; then
+		wheel_cmd=("$PYTHON_BIN" -m pip wheel -v "$ROOT_DIR" --no-build-isolation --no-deps -w "$tmp_wheel_dir")
+	fi
+	"${wheel_cmd[@]}"
 	wheel_timestamp="$(date '+%Y%m%d-%H%M%S')"
 	shopt -s nullglob
 	built_wheels=("$tmp_wheel_dir"/*.whl)
