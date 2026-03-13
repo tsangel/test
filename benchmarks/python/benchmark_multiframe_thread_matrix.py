@@ -664,18 +664,18 @@ def _format_tables(
 
     sections: list[str] = []
     if outer_only_rows:
-        sections.append("### Worker-Thread-Only")
+        sections.append("### Worker Thread")
         sections.append("")
         sections.append(_format_outer_only_table(outer_only_rows, worker_order))
     if codec_thread_rows:
         if sections:
             sections.append("")
-        sections.append("### Codec-Thread-Sensitive")
+        sections.append("### Worker Thread / Codec Thread")
         sections.append("")
         sections.append(_format_codec_thread_table(codec_thread_rows, worker_order, codec_order))
     if codec_sweep_rows:
         sections.append("")
-        sections.append("### Codec-Thread Sweep")
+        sections.append("### Codec Thread (Worker Thread = 1, 2)")
         sections.append("")
         sections.append(
             _format_codec_thread_table(
