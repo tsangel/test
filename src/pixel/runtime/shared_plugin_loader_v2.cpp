@@ -13,6 +13,8 @@ namespace {
 
 using get_decoder_api_fn = int (*)(pixel_decoder_plugin_api_v2* out_api);
 using get_encoder_api_fn = int (*)(pixel_encoder_plugin_api_v2* out_api);
+constexpr std::size_t kEncoderApiV2RequiredPrefixSize =
+    offsetof(pixel_encoder_plugin_api_v2, encode_frame_to_context_buffer);
 
 void* open_shared_library(const char* library_path) noexcept {
 #if defined(_WIN32)
@@ -63,7 +65,7 @@ bool validate_decoder_api_contract(const pixel_decoder_plugin_api_v2& api) noexc
 }
 
 bool validate_encoder_api_contract(const pixel_encoder_plugin_api_v2& api) noexcept {
-  if (api.struct_size < sizeof(pixel_encoder_plugin_api_v2) ||
+  if (api.struct_size < kEncoderApiV2RequiredPrefixSize ||
       api.abi_version != PIXEL_ENCODER_PLUGIN_ABI_V2) {
     return false;
   }

@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 #include "pixel_decoder_plugin_abi_v2.h"
 #include "pixel_encoder_plugin_abi_v2.h"
@@ -26,6 +27,7 @@ struct EncoderCtx {
   uint32_t codec_profile_code{PIXEL_CODEC_PROFILE_UNKNOWN_V2};
   int near_lossless_error{0};
   bool configured{false};
+  std::vector<std::uint8_t> encoded_buffer{};
   char last_error_detail[kLastErrorDetailCapacity]{};
 };
 
@@ -95,8 +97,12 @@ void* encoder_create();
 void encoder_destroy(void* ctx);
 pixel_error_code_v2 encoder_configure(void* ctx, uint32_t codec_profile_code,
     const pixel_option_list_v2* options);
+pixel_error_code_v2 encoder_encode_frame_to_context_buffer(
+    void* ctx, const pixel_encoder_request_v2* request);
 pixel_error_code_v2 encoder_encode_frame(
     void* ctx, const pixel_encoder_request_v2* request);
+pixel_error_code_v2 encoder_get_encoded_buffer(
+    const void* ctx, pixel_const_buffer_v2* out_encoded_buffer);
 uint32_t encoder_copy_last_error_detail(
     const void* ctx, char* out_detail, uint32_t out_detail_capacity);
 

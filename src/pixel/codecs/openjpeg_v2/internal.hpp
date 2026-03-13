@@ -83,6 +83,7 @@ struct EncoderCtx {
   int threads{-1};
   double target_bpp{0.0};
   double target_psnr{0.0};
+  std::vector<std::uint8_t> encoded_buffer{};
   char last_error_detail[kLastErrorDetailCapacity]{};
 };
 
@@ -175,8 +176,12 @@ void* encoder_create();
 void encoder_destroy(void* ctx);
 pixel_error_code_v2 encoder_configure(void* ctx, uint32_t codec_profile_code,
     const pixel_option_list_v2* options);
+pixel_error_code_v2 encoder_encode_frame_to_context_buffer(
+    void* ctx, const pixel_encoder_request_v2* request);
 pixel_error_code_v2 encoder_encode_frame(
     void* ctx, const pixel_encoder_request_v2* request);
+pixel_error_code_v2 encoder_get_encoded_buffer(
+    const void* ctx, pixel_const_buffer_v2* out_encoded_buffer);
 uint32_t encoder_copy_last_error_detail(
     const void* ctx, char* out_detail, uint32_t out_detail_capacity);
 

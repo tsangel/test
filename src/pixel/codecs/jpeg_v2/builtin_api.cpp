@@ -37,6 +37,9 @@ const pixel_encoder_plugin_api_v2& encoder_builtin_api() noexcept {
     out.configure = &pixel::jpeg_codec_v2::encoder_configure;
     out.encode_frame = &pixel::jpeg_codec_v2::encoder_encode_frame;
     out.copy_last_error_detail = &pixel::jpeg_codec_v2::encoder_copy_last_error_detail;
+    out.encode_frame_to_context_buffer =
+        &pixel::jpeg_codec_v2::encoder_encode_frame_to_context_buffer;
+    out.get_encoded_buffer = &pixel::jpeg_codec_v2::encoder_get_encoded_buffer;
     return out;
   }();
   return api;

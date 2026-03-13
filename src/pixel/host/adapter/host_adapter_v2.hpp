@@ -66,6 +66,12 @@ pixel_error_code_v2 encode_frame_with_host_context_v2(HostEncoderContextV2* ctx,
     const dicom::pixel::PixelSource* source, std::span<const uint8_t> source_frame,
     bool use_multicomponent_transform, pixel_output_buffer_v2 encoded_buffer,
     uint64_t* inout_encoded_size);
+bool host_encoder_context_supports_context_buffer_v2(
+    const HostEncoderContextV2* ctx) noexcept;
+pixel_error_code_v2 encode_frame_to_context_buffer_with_host_context_v2(
+    HostEncoderContextV2* ctx, const dicom::pixel::PixelSource* source,
+    std::span<const uint8_t> source_frame, bool use_multicomponent_transform,
+    pixel_const_buffer_v2* out_encoded_buffer);
 
 uint32_t copy_host_decoder_last_error_detail_v2(
     const HostDecoderContextV2* ctx, char* out_detail, uint32_t out_detail_capacity);

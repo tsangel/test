@@ -18,10 +18,11 @@ void store_le32(uint8_t* dst, uint32_t value) {
   dst[3] = static_cast<uint8_t>((value >> 24u) & 0xFFu);
 }
 
-std::vector<uint8_t> encode_packbits_segment(const uint8_t* source, std::size_t size) {
-  std::vector<uint8_t> encoded;
-  encoded.reserve(size + size / 128u + 16u);
-
+void encode_packbits_segment_append(
+    const uint8_t* source, std::size_t size, std::vector<uint8_t>* out_encoded) {
+  if (out_encoded == nullptr) {
+    return;
+  }
   std::size_t i = 0;
   while (i < size) {
     std::size_t repeat_count = 1;
@@ -33,8 +34,8 @@ std::vector<uint8_t> encode_packbits_segment(const uint8_t* source, std::size_t 
     if (repeat_count >= 2) {
       const int8_t control =
           static_cast<int8_t>(1 - static_cast<int>(repeat_count));
-      encoded.push_back(static_cast<uint8_t>(control));
-      encoded.push_back(source[i]);
+      out_encoded->push_back(static_cast<uint8_t>(control));
+      out_encoded->push_back(source[i]);
       i += repeat_count;
       continue;
     }
@@ -55,12 +56,10 @@ std::vector<uint8_t> encode_packbits_segment(const uint8_t* source, std::size_t 
       ++literal_count;
     }
 
-    encoded.push_back(static_cast<uint8_t>(literal_count - 1u));
-    encoded.insert(encoded.end(), source + literal_begin,
+    out_encoded->push_back(static_cast<uint8_t>(literal_count - 1u));
+    out_encoded->insert(out_encoded->end(), source + literal_begin,
         source + literal_begin + literal_count);
   }
-
-  return encoded;
 }
 
 pixel_error_code_v2 build_rle_codestream(EncoderCtx* ctx,
@@ -102,7 +101,23 @@ pixel_error_code_v2 build_rle_codestream(EncoderCtx* ctx,
   }
 
   std::vector<uint8_t> byte_plane(pixels, uint8_t{0});
-  std::vector<std::vector<uint8_t>> segments(segment_count);
+  std::vector<uint8_t> encoded(64u, uint8_t{0});
+  store_le32(encoded.data(), static_cast<uint32_t>(segment_count));
+
+  const uint64_t segment_slack_u64 = pixels_u64 / 128u + 16u;
+  uint64_t segment_upper_bound_u64 = 0;
+  if (pixels_u64 > (std::numeric_limits<uint64_t>::max)() - segment_slack_u64) {
+    return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "encode_frame",
+        "RLE codestream reserve bound overflow");
+  }
+  segment_upper_bound_u64 = pixels_u64 + segment_slack_u64;
+  uint64_t total_reserve_u64 = 0;
+  std::size_t total_reserve = 0;
+  if (mul_u64(segment_count_u64, segment_upper_bound_u64, &total_reserve_u64) &&
+      total_reserve_u64 <= (std::numeric_limits<uint64_t>::max)() - 64u &&
+      u64_to_size(total_reserve_u64 + 64u, &total_reserve)) {
+    encoded.reserve(total_reserve);
+  }
 
   std::size_t interleaved_pixel_stride = 0;
   if (!source_planar) {
@@ -115,6 +130,7 @@ pixel_error_code_v2 build_rle_codestream(EncoderCtx* ctx,
     }
   }
 
+  const std::size_t max_u32 = static_cast<std::size_t>(std::numeric_limits<uint32_t>::max());
   for (std::size_t sample = 0; sample < samples_per_pixel; ++sample) {
     for (std::size_t byte_plane_index = 0; byte_plane_index < bytes_per_sample;
          ++byte_plane_index) {
@@ -136,31 +152,18 @@ pixel_error_code_v2 build_rle_codestream(EncoderCtx* ctx,
       }
 
       const std::size_t segment_index = sample * bytes_per_sample + byte_plane_index;
-      segments[segment_index] = encode_packbits_segment(byte_plane.data(), byte_plane.size());
+      if (encoded.size() > max_u32) {
+        return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "encode_frame",
+            "RLE codestream exceeds 32-bit offset range");
+      }
+      store_le32(encoded.data() + 4u + segment_index * sizeof(uint32_t),
+          static_cast<uint32_t>(encoded.size()));
+      encode_packbits_segment_append(byte_plane.data(), byte_plane.size(), &encoded);
+      if (encoded.size() > max_u32) {
+        return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "encode_frame",
+            "RLE codestream exceeds 32-bit offset range");
+      }
     }
-  }
-
-  std::size_t total_size = 64u;
-  const std::size_t max_u32 = static_cast<std::size_t>(std::numeric_limits<uint32_t>::max());
-  for (const auto& segment : segments) {
-    if (total_size > max_u32 || segment.size() > max_u32 - total_size) {
-      return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "encode_frame",
-          "RLE codestream exceeds 32-bit offset range");
-    }
-    total_size += segment.size();
-  }
-
-  std::vector<uint8_t> encoded(64u, uint8_t{0});
-  encoded.reserve(total_size);
-  store_le32(encoded.data(), static_cast<uint32_t>(segment_count));
-
-  uint32_t next_offset = 64u;
-  for (std::size_t i = 0; i < segment_count; ++i) {
-    store_le32(encoded.data() + 4u + i * sizeof(uint32_t), next_offset);
-    next_offset = static_cast<uint32_t>(next_offset + segments[i].size());
-  }
-  for (const auto& segment : segments) {
-    encoded.insert(encoded.end(), segment.begin(), segment.end());
   }
 
   *out_encoded = std::move(encoded);
@@ -302,7 +305,7 @@ pixel_error_code_v2 validate_encoder_request(EncoderCtx* ctx,
 
 }  // namespace
 
-pixel_error_code_v2 encoder_encode_frame(
+pixel_error_code_v2 encoder_encode_frame_to_context_buffer(
     void* ctx, const pixel_encoder_request_v2* request) {
   auto* c = static_cast<EncoderCtx*>(ctx);
   if (c == nullptr) {
@@ -345,24 +348,54 @@ pixel_error_code_v2 encoder_encode_frame(
         "size conversion overflow");
   }
 
-  std::vector<uint8_t> encoded{};
+  c->encoded_buffer.clear();
   const pixel_error_code_v2 encode_ec = build_rle_codestream(c,
       request->source.source_buffer.data, rows, cols, samples, sample_bytes,
-      source_planar, source_row_stride, source_plane_stride, &encoded);
+      source_planar, source_row_stride, source_plane_stride, &c->encoded_buffer);
   if (encode_ec != PIXEL_CODEC_ERR_OK) {
     return encode_ec;
   }
 
   auto* mutable_request = const_cast<pixel_encoder_request_v2*>(request);
-  mutable_request->output.encoded_size = static_cast<uint64_t>(encoded.size());
+  mutable_request->output.encoded_size = static_cast<uint64_t>(c->encoded_buffer.size());
+  clear_detail(c);
+  return PIXEL_CODEC_ERR_OK;
+}
+
+pixel_error_code_v2 encoder_encode_frame(
+    void* ctx, const pixel_encoder_request_v2* request) {
+  auto* c = static_cast<EncoderCtx*>(ctx);
+  const pixel_error_code_v2 encode_ec =
+      encoder_encode_frame_to_context_buffer(ctx, request);
+  if (encode_ec != PIXEL_CODEC_ERR_OK) {
+    return encode_ec;
+  }
+  if (c == nullptr || request == nullptr) {
+    return PIXEL_CODEC_ERR_INVALID_ARGUMENT;
+  }
   if (request->output.encoded_buffer.data == nullptr ||
-      request->output.encoded_buffer.size < mutable_request->output.encoded_size) {
+      request->output.encoded_buffer.size < c->encoded_buffer.size()) {
     return fail_detail(c, PIXEL_CODEC_ERR_OUTPUT_TOO_SMALL, "encode_frame",
         "output buffer too small");
   }
-
-  std::memcpy(request->output.encoded_buffer.data, encoded.data(), encoded.size());
+  std::memcpy(request->output.encoded_buffer.data,
+      c->encoded_buffer.data(), c->encoded_buffer.size());
   clear_detail(c);
+  return PIXEL_CODEC_ERR_OK;
+}
+
+pixel_error_code_v2 encoder_get_encoded_buffer(
+    const void* ctx, pixel_const_buffer_v2* out_encoded_buffer) {
+  auto* c = static_cast<const EncoderCtx*>(ctx);
+  if (c == nullptr || out_encoded_buffer == nullptr) {
+    return PIXEL_CODEC_ERR_INVALID_ARGUMENT;
+  }
+  if (!c->configured || c->encoded_buffer.empty()) {
+    return fail_detail(const_cast<EncoderCtx*>(c), PIXEL_CODEC_ERR_FAILED,
+        "encode_frame", "encoded buffer is not available");
+  }
+  out_encoded_buffer->data = c->encoded_buffer.data();
+  out_encoded_buffer->size = static_cast<uint64_t>(c->encoded_buffer.size());
   return PIXEL_CODEC_ERR_OK;
 }
 

@@ -4,6 +4,7 @@
 #include "diagnostics.h"
 #include "pixel/host/decode/decode_plan_compute.hpp"
 #include "pixel/host/decode/decode_modality_value_transform.hpp"
+#include "pixel/host/encode/encode_set_pixel_data_runner.hpp"
 
 #include <exception>
 #include <cstddef>
@@ -302,6 +303,64 @@ struct DecodedNativePixelBuffer {
 	return source;
 }
 
+[[nodiscard]] pixel::PixelSource build_set_pixel_source_from_decoded_native_frames(
+    DicomFile& file, uid::WellKnown target_ts, const pixel::PixelDataInfo& info,
+    const pixel::DecodePlan& decode_plan) {
+	if (!info.has_pixel_data || info.rows <= 0 || info.cols <= 0 ||
+	    info.frames <= 0 || info.samples_per_pixel <= 0) {
+		diag::error_and_throw(
+		    "DicomFile::apply_transfer_syntax file={} target_ts={} reason=invalid decoded pixel metadata rows={} cols={} frames={} samples_per_pixel={}",
+		    file.path(), target_ts.value(), info.rows, info.cols,
+		    info.frames, info.samples_per_pixel);
+	}
+	if (decode_plan.strides.row == 0 || decode_plan.strides.frame == 0) {
+		diag::error_and_throw(
+		    "DicomFile::apply_transfer_syntax file={} target_ts={} reason=decoded frame layout is empty",
+		    file.path(), target_ts.value());
+	}
+
+	const auto photometric_text = file.dataset()["PhotometricInterpretation"_tag].to_string_view();
+	if (!photometric_text) {
+		diag::error_and_throw(
+		    "DicomFile::apply_transfer_syntax file={} target_ts={} reason=missing or invalid PhotometricInterpretation",
+		    file.path(), target_ts.value());
+	}
+	const auto photometric = parse_photometric_from_text(*photometric_text);
+	if (!photometric) {
+		diag::error_and_throw(
+		    "DicomFile::apply_transfer_syntax file={} target_ts={} reason=unsupported PhotometricInterpretation='{}' for streaming transcode path",
+		    file.path(), target_ts.value(), *photometric_text);
+	}
+
+	const auto parse_optional_int_tag = [&](Tag tag, std::string_view name) -> std::optional<int> {
+		const auto value = file.dataset()[tag].to_long();
+		if (!value) {
+			return std::nullopt;
+		}
+		if (*value < static_cast<long>(std::numeric_limits<int>::min()) ||
+		    *value > static_cast<long>(std::numeric_limits<int>::max())) {
+			diag::error_and_throw(
+			    "DicomFile::apply_transfer_syntax file={} target_ts={} reason={} value({}) is outside int range",
+			    file.path(), target_ts.value(), name, *value);
+		}
+		return static_cast<int>(*value);
+	};
+
+	pixel::PixelSource source{};
+	source.data_type = info.sv_dtype;
+	source.rows = info.rows;
+	source.cols = info.cols;
+	source.frames = info.frames;
+	source.samples_per_pixel = info.samples_per_pixel;
+	source.planar = info.planar_configuration;
+	source.row_stride = decode_plan.strides.row;
+	source.frame_stride = decode_plan.strides.frame;
+	source.photometric = *photometric;
+	source.bits_stored =
+	    parse_optional_int_tag("BitsStored"_tag, "BitsStored").value_or(info.bits_stored);
+	return source;
+}
+
 void convert_encapsulated_pixel_data_to_native(DicomFile& file) {
 	DataSet& dataset = file.dataset();
 	const auto& pixel_data = dataset["PixelData"_tag];
@@ -335,18 +394,47 @@ void transcode_encapsulated_pixel_data_to_encapsulated(DicomFile& file,
     ApplyTransferSyntaxEncodeMode encode_mode,
     std::span<const pixel::CodecOptionTextKv> codec_opt_override,
     const pixel::EncoderContext* encoder_ctx) {
-	convert_encapsulated_pixel_data_to_native(file);
-	auto source =
-	    build_set_pixel_source_from_native_pixel_data(file, target_transfer_syntax);
+	const auto info = file.pixeldata_info();
+	pixel::DecodeOptions decode_options{};
+	decode_options.planar_out = info.planar_configuration;
+	decode_options.alignment = 1;
+	decode_options.to_modality_value = false;
+	decode_options.decode_mct = false;
+	const auto decode_plan = file.create_decode_plan(decode_options);
+	if (decode_plan.strides.frame == 0) {
+		diag::error_and_throw(
+		    "DicomFile::apply_transfer_syntax file={} target_ts={} reason=calculated native frame size is zero for streaming transcode",
+		    file.path(), target_transfer_syntax.value());
+	}
+
+	auto source_descriptor = build_set_pixel_source_from_decoded_native_frames(
+	    file, target_transfer_syntax, info, decode_plan);
+	std::vector<std::uint8_t> decoded_frame(decode_plan.strides.frame);
+
+	pixel::EncoderContext staged_encoder_ctx{};
+	const pixel::EncoderContext* active_encoder_ctx = encoder_ctx;
 	if (encode_mode == ApplyTransferSyntaxEncodeMode::use_plugin_defaults) {
-		file.set_pixel_data(target_transfer_syntax, source);
-		return;
+		staged_encoder_ctx.configure(target_transfer_syntax);
+		active_encoder_ctx = &staged_encoder_ctx;
+	} else if (encode_mode == ApplyTransferSyntaxEncodeMode::use_explicit_options) {
+		staged_encoder_ctx.configure(target_transfer_syntax, codec_opt_override);
+		active_encoder_ctx = &staged_encoder_ctx;
 	}
-	if (encode_mode == ApplyTransferSyntaxEncodeMode::use_encoder_context) {
-		file.set_pixel_data(target_transfer_syntax, source, *encoder_ctx);
-		return;
+	if (active_encoder_ctx == nullptr) {
+		diag::error_and_throw(
+		    "DicomFile::apply_transfer_syntax file={} target_ts={} reason=encoder context is missing for streaming transcode",
+		    file.path(), target_transfer_syntax.value());
 	}
-	file.set_pixel_data(target_transfer_syntax, source, codec_opt_override);
+
+	pixel::detail::run_set_pixel_data_from_frame_provider_with_computed_codec_options(
+	    file, target_transfer_syntax, source_descriptor,
+	    active_encoder_ctx->codec_options(),
+	    [&](std::size_t frame_index) -> std::span<const std::uint8_t> {
+		    auto frame_span = std::span<std::uint8_t>(
+		        decoded_frame.data(), decoded_frame.size());
+		    file.decode_into(frame_index, frame_span, decode_plan);
+		    return std::span<const std::uint8_t>(frame_span.data(), frame_span.size());
+	    });
 }
 
 [[nodiscard]] bool apply_transfer_syntax_impl(DicomFile& file,
@@ -391,7 +479,7 @@ void transcode_encapsulated_pixel_data_to_encapsulated(DicomFile& file,
 				transcode_encapsulated_pixel_data_to_encapsulated(
 				    file, transfer_syntax, encode_mode, codec_opt_override,
 				    encoder_ctx);
-				return false;
+				return true;
 			}
 		} else if (has_encapsulated_pixel_data && !target_uses_encapsulated_pixel_data) {
 		convert_encapsulated_pixel_data_to_native(file);

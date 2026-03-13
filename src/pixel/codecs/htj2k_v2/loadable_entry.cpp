@@ -58,6 +58,9 @@ PIXEL_PLUGIN_EXPORT int pixel_get_encoder_plugin_api_v2(
   api.configure = &pixel::htj2k_codec_v2::encoder_configure;
   api.encode_frame = &pixel::htj2k_codec_v2::encoder_encode_frame;
   api.copy_last_error_detail = &pixel::htj2k_codec_v2::encoder_copy_last_error_detail;
+  api.encode_frame_to_context_buffer =
+      &pixel::htj2k_codec_v2::encoder_encode_frame_to_context_buffer;
+  api.get_encoded_buffer = &pixel::htj2k_codec_v2::encoder_get_encoded_buffer;
   *out_api = api;
   return 1;
 }

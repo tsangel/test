@@ -36,6 +36,8 @@ const pixel_encoder_plugin_api_v2& encoder_builtin_api() noexcept {
     value.configure = &encoder_configure;
     value.encode_frame = &encoder_encode_frame;
     value.copy_last_error_detail = &encoder_copy_last_error_detail;
+    value.encode_frame_to_context_buffer = &encoder_encode_frame_to_context_buffer;
+    value.get_encoded_buffer = &encoder_get_encoded_buffer;
     return value;
   }();
   return api;

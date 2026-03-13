@@ -1,5 +1,6 @@
 #include <bit>
 #include <cstdint>
+#include <cstddef>
 
 #include "direct_api_v2.hpp"
 #include "plugin_registry_v2.hpp"
@@ -28,6 +29,8 @@ namespace pixel::runtime_v2 {
 namespace {
 
 constexpr uint64_t kLower32Mask = UINT64_C(0x00000000FFFFFFFF);
+constexpr std::size_t kEncoderApiV2RequiredPrefixSize =
+    offsetof(pixel_encoder_plugin_api_v2, encode_frame_to_context_buffer);
 
 bool has_non_empty_string(const char* text) {
   return text != nullptr && text[0] != '\0';
@@ -63,7 +66,7 @@ bool validate_encoder_api(const pixel_encoder_plugin_api_v2* api) {
   if (api == nullptr) {
     return false;
   }
-  if (api->struct_size < sizeof(pixel_encoder_plugin_api_v2) ||
+  if (api->struct_size < kEncoderApiV2RequiredPrefixSize ||
       api->abi_version != PIXEL_ENCODER_PLUGIN_ABI_V2) {
     return false;
   }

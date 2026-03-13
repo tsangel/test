@@ -308,8 +308,11 @@ std::span<const std::uint8_t> native_decode_frame_bytes_or_throw(
 	return source_view.source_bytes.subspan(frame_offset, source_view.frame_bytes);
 }
 
-ComputedEncodeSourceLayout compute_encode_source_layout_or_throw(
-    const pixel::PixelSource& source, std::string_view file_path) {
+namespace {
+
+[[nodiscard]] ComputedEncodeSourceLayout compute_encode_source_layout_impl(
+    const pixel::PixelSource& source, std::string_view file_path,
+    bool validate_source_bytes) {
 	const auto native_layout = native_source_layout_of(source.data_type);
 	if (!native_layout) {
 		diag::error_and_throw(
@@ -427,7 +430,7 @@ ComputedEncodeSourceLayout compute_encode_source_layout_or_throw(
 		    file_path);
 	}
 	const std::size_t source_required_bytes = source_last_frame_begin + source_last_frame_used;
-	if (source.bytes.size() < source_required_bytes) {
+	if (validate_source_bytes && source.bytes.size() < source_required_bytes) {
 		diag::error_and_throw(
 		    "DicomFile::set_pixel_data file={} reason=source bytes({}) are shorter than required({})",
 		    file_path, source.bytes.size(), source_required_bytes);
@@ -461,6 +464,18 @@ ComputedEncodeSourceLayout compute_encode_source_layout_or_throw(
 	    .pixel_representation = pixel_representation,
 	    .high_bit = bits_stored - 1,
 	};
+}
+
+} // namespace
+
+ComputedEncodeSourceLayout compute_encode_source_layout_or_throw(
+    const pixel::PixelSource& source, std::string_view file_path) {
+	return compute_encode_source_layout_impl(source, file_path, true);
+}
+
+ComputedEncodeSourceLayout compute_encode_source_layout_without_source_bytes_or_throw(
+    const pixel::PixelSource& source, std::string_view file_path) {
+	return compute_encode_source_layout_impl(source, file_path, false);
 }
 
 bool source_aliases_native_pixel_data(

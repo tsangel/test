@@ -230,6 +230,26 @@ int main() {
 		    with_context_file.pixel_data(1) != expected_frame1) {
 			fail("set_pixel_data with reusable encoder context mismatch");
 		}
+
+		if (dicom::test::kJpeg2kBuiltin) {
+			dicom::DicomFile transcode_chain_file;
+			transcode_chain_file.set_pixel_data("RLELossless"_uid, source);
+			transcode_chain_file.set_transfer_syntax("JPEG2000Lossless"_uid);
+			const auto& transcoded_pixel_data =
+			    transcode_chain_file.get_dataelement("PixelData"_tag);
+			if (transcoded_pixel_data.is_missing() ||
+			    !transcoded_pixel_data.vr().is_pixel_sequence()) {
+				fail("multi-frame RLE->JPEG2000 transcode should keep encapsulated PixelData");
+			}
+			const auto* transcoded_sequence = transcoded_pixel_data.as_pixel_sequence();
+			if (!transcoded_sequence || transcoded_sequence->number_of_frames() != 2) {
+				fail("multi-frame RLE->JPEG2000 transcode should preserve frame count");
+			}
+			if (transcode_chain_file.pixel_data(0) != expected_frame0 ||
+			    transcode_chain_file.pixel_data(1) != expected_frame1) {
+				fail("multi-frame RLE->JPEG2000 transcode frame roundtrip mismatch");
+			}
+		}
 	}
 
 	{

@@ -398,7 +398,7 @@ pixel_error_code_v2 build_normalized_interleaved(
 
 }  // namespace
 
-pixel_error_code_v2 encoder_encode_frame(
+pixel_error_code_v2 encoder_encode_frame_to_context_buffer(
     void* ctx, const pixel_encoder_request_v2* request) {
   auto* c = static_cast<EncoderCtx*>(ctx);
   if (c == nullptr || request == nullptr) {
@@ -571,26 +571,26 @@ pixel_error_code_v2 encoder_encode_frame(
 
     JxlEncoderCloseInput(encoder.get());
 
-    std::vector<uint8_t> encoded(64 * 1024);
+    c->encoded_buffer.assign(64 * 1024, uint8_t{0});
     std::size_t produced_bytes = 0;
     while (true) {
-      if (encoded.size() - produced_bytes < 32) {
+      if (c->encoded_buffer.size() - produced_bytes < 32) {
         const auto next_size =
-            std::max<std::size_t>(encoded.size() * 2, produced_bytes + 64);
-        encoded.resize(next_size);
+            std::max<std::size_t>(c->encoded_buffer.size() * 2, produced_bytes + 64);
+        c->encoded_buffer.resize(next_size);
       }
 
-      auto* next_out = encoded.data() + produced_bytes;
-      std::size_t avail_out = encoded.size() - produced_bytes;
+      auto* next_out = c->encoded_buffer.data() + produced_bytes;
+      std::size_t avail_out = c->encoded_buffer.size() - produced_bytes;
       const auto status = JxlEncoderProcessOutput(encoder.get(), &next_out, &avail_out);
-      produced_bytes = static_cast<std::size_t>(next_out - encoded.data());
+      produced_bytes = static_cast<std::size_t>(next_out - c->encoded_buffer.data());
 
       if (status == JXL_ENC_SUCCESS) {
         break;
       }
       if (status == JXL_ENC_NEED_MORE_OUTPUT) {
-        if (produced_bytes == encoded.size()) {
-          encoded.resize(encoded.size() * 2);
+        if (produced_bytes == c->encoded_buffer.size()) {
+          c->encoded_buffer.resize(c->encoded_buffer.size() * 2);
         }
         continue;
       }
@@ -603,22 +603,14 @@ pixel_error_code_v2 encoder_encode_frame(
       return fail_detail(c, PIXEL_CODEC_ERR_FAILED, "encode_frame", reason);
     }
 
-    encoded.resize(produced_bytes);
-    if (encoded.empty()) {
+    c->encoded_buffer.resize(produced_bytes);
+    if (c->encoded_buffer.empty()) {
       return fail_detail(c, PIXEL_CODEC_ERR_FAILED, "encode_frame",
           "JPEG-XL encoder produced empty codestream");
     }
 
     auto* mutable_request = const_cast<pixel_encoder_request_v2*>(request);
-    mutable_request->output.encoded_size = encoded.size();
-
-    if (request->output.encoded_buffer.data == nullptr ||
-        request->output.encoded_buffer.size < encoded.size()) {
-      return fail_detail(c, PIXEL_CODEC_ERR_OUTPUT_TOO_SMALL, "encode_frame",
-          "output buffer too small");
-    }
-
-    std::memcpy(request->output.encoded_buffer.data, encoded.data(), encoded.size());
+    mutable_request->output.encoded_size = c->encoded_buffer.size();
     clear_detail(c);
     return PIXEL_CODEC_ERR_OK;
   } catch (const std::bad_alloc&) {
@@ -630,6 +622,43 @@ pixel_error_code_v2 encoder_encode_frame(
     return fail_detail(c, PIXEL_CODEC_ERR_FAILED, "encode_frame",
         "non-standard exception");
   }
+}
+
+pixel_error_code_v2 encoder_encode_frame(
+    void* ctx, const pixel_encoder_request_v2* request) {
+  auto* c = static_cast<EncoderCtx*>(ctx);
+  const pixel_error_code_v2 encode_ec =
+      encoder_encode_frame_to_context_buffer(ctx, request);
+  if (encode_ec != PIXEL_CODEC_ERR_OK) {
+    return encode_ec;
+  }
+  if (c == nullptr || request == nullptr) {
+    return PIXEL_CODEC_ERR_INVALID_ARGUMENT;
+  }
+  if (request->output.encoded_buffer.data == nullptr ||
+      request->output.encoded_buffer.size < c->encoded_buffer.size()) {
+    return fail_detail(c, PIXEL_CODEC_ERR_OUTPUT_TOO_SMALL, "encode_frame",
+        "output buffer too small");
+  }
+  std::memcpy(request->output.encoded_buffer.data,
+      c->encoded_buffer.data(), c->encoded_buffer.size());
+  clear_detail(c);
+  return PIXEL_CODEC_ERR_OK;
+}
+
+pixel_error_code_v2 encoder_get_encoded_buffer(
+    const void* ctx, pixel_const_buffer_v2* out_encoded_buffer) {
+  auto* c = static_cast<const EncoderCtx*>(ctx);
+  if (c == nullptr || out_encoded_buffer == nullptr) {
+    return PIXEL_CODEC_ERR_INVALID_ARGUMENT;
+  }
+  if (!c->configured || c->encoded_buffer.empty()) {
+    return fail_detail(const_cast<EncoderCtx*>(c), PIXEL_CODEC_ERR_FAILED,
+        "encode_frame", "encoded buffer is not available");
+  }
+  out_encoded_buffer->data = c->encoded_buffer.data();
+  out_encoded_buffer->size = static_cast<uint64_t>(c->encoded_buffer.size());
+  return PIXEL_CODEC_ERR_OK;
 }
 
 }  // namespace pixel::jpegxl_codec_v2

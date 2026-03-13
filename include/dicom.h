@@ -1184,6 +1184,9 @@ public:
 	[[nodiscard]] uid::WellKnown transfer_syntax_uid() const noexcept {
 		return transfer_syntax_uid_;
 	}
+	[[nodiscard]] std::span<const CodecOptionKv> codec_options() const noexcept {
+		return codec_options_;
+	}
 
 private:
 	friend void set_pixel_data(

@@ -346,7 +346,7 @@ pixel_error_code_v2 fill_openjph_line_from_source(EncoderCtx* ctx, ojph::line_bu
 
 }  // namespace
 
-pixel_error_code_v2 encoder_encode_frame(
+pixel_error_code_v2 encoder_encode_frame_to_context_buffer(
     void* ctx, const pixel_encoder_request_v2* request) {
   auto* c = static_cast<EncoderCtx*>(ctx);
   if (c == nullptr || request == nullptr) {
@@ -453,20 +453,12 @@ pixel_error_code_v2 encoder_encode_frame(
           "OpenJPH produced empty codestream");
     }
 
-    std::vector<uint8_t> encoded(used_size);
-    std::memcpy(encoded.data(), outfile.get_data(), used_size);
+    c->encoded_buffer.resize(used_size);
+    std::memcpy(c->encoded_buffer.data(), outfile.get_data(), used_size);
     outfile.close();
 
     auto* mutable_request = const_cast<pixel_encoder_request_v2*>(request);
-    mutable_request->output.encoded_size = encoded.size();
-
-    if (request->output.encoded_buffer.data == nullptr ||
-        request->output.encoded_buffer.size < encoded.size()) {
-      return fail_detail(c, PIXEL_CODEC_ERR_OUTPUT_TOO_SMALL, "encode_frame",
-          "output buffer too small");
-    }
-
-    std::memcpy(request->output.encoded_buffer.data, encoded.data(), encoded.size());
+    mutable_request->output.encoded_size = c->encoded_buffer.size();
     clear_detail(c);
     return PIXEL_CODEC_ERR_OK;
   } catch (const std::bad_alloc&) {
@@ -478,6 +470,43 @@ pixel_error_code_v2 encoder_encode_frame(
     return fail_detail(c, PIXEL_CODEC_ERR_FAILED, "encode_frame",
         "non-standard exception");
   }
+}
+
+pixel_error_code_v2 encoder_encode_frame(
+    void* ctx, const pixel_encoder_request_v2* request) {
+  auto* c = static_cast<EncoderCtx*>(ctx);
+  const pixel_error_code_v2 encode_ec =
+      encoder_encode_frame_to_context_buffer(ctx, request);
+  if (encode_ec != PIXEL_CODEC_ERR_OK) {
+    return encode_ec;
+  }
+  if (c == nullptr || request == nullptr) {
+    return PIXEL_CODEC_ERR_INVALID_ARGUMENT;
+  }
+  if (request->output.encoded_buffer.data == nullptr ||
+      request->output.encoded_buffer.size < c->encoded_buffer.size()) {
+    return fail_detail(c, PIXEL_CODEC_ERR_OUTPUT_TOO_SMALL, "encode_frame",
+        "output buffer too small");
+  }
+  std::memcpy(request->output.encoded_buffer.data,
+      c->encoded_buffer.data(), c->encoded_buffer.size());
+  clear_detail(c);
+  return PIXEL_CODEC_ERR_OK;
+}
+
+pixel_error_code_v2 encoder_get_encoded_buffer(
+    const void* ctx, pixel_const_buffer_v2* out_encoded_buffer) {
+  auto* c = static_cast<const EncoderCtx*>(ctx);
+  if (c == nullptr || out_encoded_buffer == nullptr) {
+    return PIXEL_CODEC_ERR_INVALID_ARGUMENT;
+  }
+  if (!c->configured || c->encoded_buffer.empty()) {
+    return fail_detail(const_cast<EncoderCtx*>(c), PIXEL_CODEC_ERR_FAILED,
+        "encode_frame", "encoded buffer is not available");
+  }
+  out_encoded_buffer->data = c->encoded_buffer.data();
+  out_encoded_buffer->size = static_cast<uint64_t>(c->encoded_buffer.size());
+  return PIXEL_CODEC_ERR_OK;
 }
 
 }  // namespace pixel::htj2k_codec_v2

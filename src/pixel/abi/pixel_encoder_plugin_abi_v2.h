@@ -69,6 +69,10 @@ typedef pixel_error_code_v2 (*pixel_encoder_configure_fn_v2)(
     void* ctx, uint32_t codec_profile_code, const pixel_option_list_v2* options);
 typedef pixel_error_code_v2 (*pixel_encoder_encode_frame_fn_v2)(
     void* ctx, const pixel_encoder_request_v2* request);
+typedef pixel_error_code_v2 (*pixel_encoder_encode_frame_to_context_buffer_fn_v2)(
+    void* ctx, const pixel_encoder_request_v2* request);
+typedef pixel_error_code_v2 (*pixel_encoder_get_encoded_buffer_fn_v2)(
+    const void* ctx, pixel_const_buffer_v2* out_encoded_buffer);
 
 typedef struct pixel_encoder_plugin_api_v2 {
   uint32_t struct_size;
@@ -80,6 +84,8 @@ typedef struct pixel_encoder_plugin_api_v2 {
   pixel_encoder_configure_fn_v2 configure;
   pixel_encoder_encode_frame_fn_v2 encode_frame;
   pixel_copy_last_error_detail_fn_v2 copy_last_error_detail;
+  pixel_encoder_encode_frame_to_context_buffer_fn_v2 encode_frame_to_context_buffer;
+  pixel_encoder_get_encoded_buffer_fn_v2 get_encoded_buffer;
 } pixel_encoder_plugin_api_v2;
 
 #ifndef PIXEL_ENCODER_PLUGIN_API_NO_ENTRYPOINT_DECL
