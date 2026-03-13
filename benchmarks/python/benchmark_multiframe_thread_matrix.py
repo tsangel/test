@@ -182,6 +182,18 @@ class BenchmarkResult:
     mean_ms: float
 
 
+def _transfer_syntax_uses_codec_threads(
+    transfer_syntax: str, htj2k_backend: str
+) -> bool:
+    if transfer_syntax.startswith("JPEG2000"):
+        return True
+    if transfer_syntax.startswith("JPEGXL"):
+        return True
+    if transfer_syntax.startswith("HTJ2K"):
+        return htj2k_backend == "openjpeg"
+    return False
+
+
 def _resolve_input_paths(items: list[str]) -> list[Path]:
     paths: list[Path] = []
     for item in items:
@@ -389,6 +401,7 @@ def _benchmark_one(
     transfer_syntax: str,
     worker_cases: list[tuple[str, int]],
     codec_thread_cases: list[int],
+    htj2k_backend: str,
     warmup: int,
     repeat: int,
     target_sample_ms: float,
@@ -402,8 +415,13 @@ def _benchmark_one(
     df.decode_into(reference, frame=-1, plan=reference_plan)
     frames = int(reference_plan.frames)
     results: list[BenchmarkResult] = []
+    active_codec_thread_cases = (
+        codec_thread_cases
+        if _transfer_syntax_uses_codec_threads(transfer_syntax, htj2k_backend)
+        else codec_thread_cases[:1]
+    )
 
-    for codec_threads in codec_thread_cases:
+    for codec_threads in active_codec_thread_cases:
         for worker_label, worker_requested in worker_cases:
             options = dicom.DecodeOptions(
                 worker_threads=worker_requested,
@@ -459,18 +477,49 @@ def _benchmark_one(
     return results
 
 
-def _format_table(rows: list[BenchmarkResult]) -> str:
+def _format_outer_only_table(
+    rows: list[BenchmarkResult],
+    worker_order: list[str],
+) -> str:
+    by_ts: dict[str, dict[str, BenchmarkResult]] = {}
+    for row in rows:
+        by_ts.setdefault(row.transfer_syntax, {})[row.worker_threads_requested] = row
+
+    lines = [
+        "| TS | " + " | ".join(worker_order) + " |",
+        "| --- | " + " | ".join("---:" for _ in worker_order) + " |",
+    ]
+    for transfer_syntax in DEFAULT_BENCHMARK_KEYWORDS:
+        ts_rows = by_ts.get(transfer_syntax)
+        if not ts_rows:
+            continue
+        values = [
+            f"{ts_rows[worker].median_ms:.2f}" if worker in ts_rows else "-"
+            for worker in worker_order
+        ]
+        lines.append(f"| `{transfer_syntax}` | " + " | ".join(values) + " |")
+    return "\n".join(lines)
+
+
+def _format_codec_thread_table(
+    rows: list[BenchmarkResult],
+    worker_order: list[str],
+    codec_order: list[int],
+) -> str:
     by_ts: dict[str, dict[tuple[str, int], BenchmarkResult]] = {}
-    worker_order = ["1", "2", "4", "8", "all"]
-    codec_order = [1, 2]
     for row in rows:
         by_ts.setdefault(row.transfer_syntax, {})[
             (row.worker_threads_requested, row.codec_threads)
         ] = row
 
+    value_headers = [
+        f"{worker}/{codec_threads}"
+        for codec_threads in codec_order
+        for worker in worker_order
+    ]
     lines = [
-        "| TS | 1/1 | 2/1 | 4/1 | 8/1 | all/1 | 1/2 | 2/2 | 4/2 | 8/2 | all/2 |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| TS | " + " | ".join(value_headers) + " |",
+        "| --- | " + " | ".join("---:" for _ in value_headers) + " |",
     ]
     for transfer_syntax in DEFAULT_BENCHMARK_KEYWORDS:
         ts_rows = by_ts.get(transfer_syntax)
@@ -485,6 +534,40 @@ def _format_table(rows: list[BenchmarkResult]) -> str:
     return "\n".join(lines)
 
 
+def _format_tables(
+    rows: list[BenchmarkResult],
+    worker_cases: list[tuple[str, int]],
+    codec_thread_cases: list[int],
+    htj2k_backend: str,
+) -> list[str]:
+    worker_order = [label for label, _ in worker_cases]
+    codec_order = codec_thread_cases
+
+    outer_only_rows = [
+        row
+        for row in rows
+        if not _transfer_syntax_uses_codec_threads(row.transfer_syntax, htj2k_backend)
+    ]
+    codec_thread_rows = [
+        row
+        for row in rows
+        if _transfer_syntax_uses_codec_threads(row.transfer_syntax, htj2k_backend)
+    ]
+
+    sections: list[str] = []
+    if outer_only_rows:
+        sections.append("### Outer-Only")
+        sections.append("")
+        sections.append(_format_outer_only_table(outer_only_rows, worker_order))
+    if codec_thread_rows:
+        if sections:
+            sections.append("")
+        sections.append("### Codec-Thread-Sensitive")
+        sections.append("")
+        sections.append(_format_codec_thread_table(codec_thread_rows, worker_order, codec_order))
+    return sections
+
+
 def _write_report(
     output_dir: Path,
     inputs: list[Path],
@@ -493,12 +576,14 @@ def _write_report(
     worker_cases: list[tuple[str, int]],
     codec_thread_cases: list[int],
     hardware_threads: int,
+    htj2k_backend: str,
 ) -> Path:
     payload = {
         "inputs": [str(path) for path in inputs],
         "hardware_threads": hardware_threads,
         "worker_cases": [label for label, _ in worker_cases],
         "codec_thread_cases": codec_thread_cases,
+        "htj2k_backend": htj2k_backend,
         "converted_cases": [asdict(case) for case in converted_cases],
         "benchmark_results": [asdict(result) for result in benchmark_results],
     }
@@ -537,6 +622,7 @@ def _write_report(
         "- value: median latency (ms)",
         f"- worker cases: {', '.join(label for label, _ in worker_cases)}",
         f"- codec thread cases: {', '.join(str(v) for v in codec_thread_cases)}",
+        f"- HTJ2K backend: {htj2k_backend}",
         "",
     ]
     for input_path in inputs:
@@ -549,7 +635,14 @@ def _write_report(
             lines.append("_no verified benchmark rows_")
             lines.append("")
             continue
-        lines.append(_format_table(verified))
+        lines.extend(
+            _format_tables(
+                verified,
+                worker_cases,
+                codec_thread_cases,
+                htj2k_backend,
+            )
+        )
         skipped = [
             case
             for case in converted_cases
@@ -717,6 +810,7 @@ def main(argv: list[str] | None = None) -> int:
                     case.transfer_syntax,
                     worker_cases,
                     codec_thread_cases,
+                    args.htj2k_backend,
                     warmup=args.warmup,
                     repeat=args.repeat,
                     target_sample_ms=args.target_sample_ms,
@@ -735,6 +829,7 @@ def main(argv: list[str] | None = None) -> int:
             worker_cases,
             codec_thread_cases,
             hardware_threads,
+            args.htj2k_backend,
         )
         print(f"[report] {report_path}")
         print(report_path.read_text(encoding="utf-8"))
