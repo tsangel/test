@@ -17,6 +17,8 @@ std::string_view codec_status_code_name(CodecStatusCode code) noexcept {
 		return "unsupported";
 	case CodecStatusCode::backend_error:
 		return "backend_error";
+	case CodecStatusCode::cancelled:
+		return "cancelled";
 	case CodecStatusCode::internal_error:
 		return "internal_error";
 	}

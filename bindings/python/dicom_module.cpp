@@ -29,7 +29,9 @@
 #include <dicom.h>
 #include <dicom_endian.h>
 #include <diagnostics.h>
+#include "pixel/host/adapter/host_adapter_v2.hpp"
 #include "pixel/host/support/dicom_pixel_support.hpp"
+#include "pixel/runtime/runtime_registry_v2.hpp"
 
 namespace nb = nanobind;
 
@@ -47,6 +49,30 @@ namespace diag = dicom::diag;
 namespace {
 
 std::string_view vr_to_string_view(const VR& vr);
+
+bool transfer_syntax_has_runtime_encode_support(Uid uid) noexcept {
+	if (!uid.valid() || uid.uid_type() != dicom::UidType::TransferSyntax) {
+		return false;
+	}
+
+	uint32_t codec_profile_code = PIXEL_CODEC_PROFILE_UNKNOWN_V2;
+	if (!::pixel::runtime_v2::codec_profile_code_from_transfer_syntax(
+	        uid, &codec_profile_code)) {
+		return false;
+	}
+
+#if defined(DICOMSDL_PIXEL_RUNTIME_ENABLED)
+	const auto* registry = ::pixel::runtime_v2::current_registry();
+	if (registry == nullptr) {
+		return false;
+	}
+	const auto* binding = registry->find_encoder_binding(codec_profile_code);
+	return binding != nullptr &&
+	       binding->binding_kind != ::pixel::runtime_v2::EncoderBindingKind::kNone;
+#else
+	return codec_profile_code == PIXEL_CODEC_PROFILE_NATIVE_UNCOMPRESSED_V2;
+#endif
+}
 
 nb::object readonly_memoryview_from_span(const void* data, std::size_t size) {
 	char* ptr = size == 0
@@ -115,6 +141,56 @@ DecodedArraySpec decoded_array_spec(
 	}
 
 	throw nb::value_error("to_array requires a known pixel sample dtype");
+}
+
+DecodedArraySpec decoded_array_spec(const dicom::pixel::DecodePlan& plan) {
+	return decoded_array_spec(plan.info, plan.options.to_modality_value);
+}
+
+nb::object numpy_dtype_object(const dicom::pixel::DecodePlan& plan) {
+	const auto numpy = nb::module_::import_("numpy");
+	if (plan.options.to_modality_value) {
+		return numpy.attr("dtype")("float32");
+	}
+
+	switch (plan.info.sv_dtype) {
+	case dicom::pixel::DataType::u8:
+		return numpy.attr("dtype")("uint8");
+	case dicom::pixel::DataType::s8:
+		return numpy.attr("dtype")("int8");
+	case dicom::pixel::DataType::u16:
+		return numpy.attr("dtype")("uint16");
+	case dicom::pixel::DataType::s16:
+		return numpy.attr("dtype")("int16");
+	case dicom::pixel::DataType::u32:
+		return numpy.attr("dtype")("uint32");
+	case dicom::pixel::DataType::s32:
+		return numpy.attr("dtype")("int32");
+	case dicom::pixel::DataType::f32:
+		return numpy.attr("dtype")("float32");
+	case dicom::pixel::DataType::f64:
+		return numpy.attr("dtype")("float64");
+	default:
+		break;
+	}
+
+	throw nb::value_error("decode plan does not describe a supported NumPy dtype");
+}
+
+nb::object uid_to_object(Uid uid) {
+	if (!uid.valid()) {
+		return nb::none();
+	}
+	return nb::cast(uid);
+}
+
+nb::tuple shape_tuple_from_layout(const DecodedArrayLayout& layout) {
+	nb::tuple shape = nb::steal<nb::tuple>(PyTuple_New(static_cast<Py_ssize_t>(layout.ndim)));
+	for (std::size_t i = 0; i < layout.ndim; ++i) {
+		PyTuple_SET_ITEM(shape.ptr(), static_cast<Py_ssize_t>(i),
+		    PyLong_FromSize_t(layout.shape[i]));
+	}
+	return shape;
 }
 
 DecodedArrayOutput make_writable_numpy_array(
@@ -819,23 +895,14 @@ void configure_encoder_context_with_options(EncoderContext& context,
 	context.configure(transfer_syntax, text_options.span());
 }
 
-DecodedArrayLayout build_decode_layout(
-    const DicomFile& self, long frame, bool to_modality_value, int decoder_threads = -1,
-    bool decode_mct = true) {
+DecodedArrayLayout build_decode_layout_from_plan(
+    const dicom::pixel::DecodePlan& plan, long frame) {
 	if (frame < -1) {
 		throw nb::value_error("frame must be >= -1");
 	}
-	if (decoder_threads < -1) {
-		throw nb::value_error("threads must be -1, 0, or positive");
-	}
 
 	DecodedArrayLayout layout{};
-	layout.opt.planar_out = dicom::pixel::Planar::interleaved;
-	layout.opt.alignment = 1;
-	layout.opt.to_modality_value = to_modality_value;
-	layout.opt.decode_mct = decode_mct;
-	layout.opt.decoder_threads = decoder_threads;
-	layout.plan = self.create_decode_plan(layout.opt);
+	layout.plan = plan;
 	layout.opt = layout.plan.options;
 	layout.dst_strides = layout.plan.strides;
 
@@ -928,6 +995,35 @@ DecodedArrayLayout build_decode_layout(
 	return layout;
 }
 
+DecodedArrayLayout build_decode_layout(
+    const DicomFile& self, long frame, bool to_modality_value, int worker_threads = -1,
+    int codec_threads = -1, bool decode_mct = true) {
+	if (worker_threads < -1) {
+		throw nb::value_error("worker_threads must be -1, 0, or positive");
+	}
+	if (codec_threads < -1) {
+		throw nb::value_error("codec_threads must be -1, 0, or positive");
+	}
+
+	dicom::pixel::DecodeOptions opt{};
+	opt.planar_out = dicom::pixel::Planar::interleaved;
+	opt.alignment = 1;
+	opt.to_modality_value = to_modality_value;
+	opt.decode_mct = decode_mct;
+	opt.worker_threads = worker_threads;
+	opt.codec_threads = codec_threads;
+	return build_decode_layout_from_plan(self.create_decode_plan(opt), frame);
+}
+
+void validate_decode_thread_options_or_throw(int worker_threads, int codec_threads) {
+	if (worker_threads < -1) {
+		throw nb::value_error("worker_threads must be -1, 0, or positive");
+	}
+	if (codec_threads < -1) {
+		throw nb::value_error("codec_threads must be -1, 0, or positive");
+	}
+}
+
 [[nodiscard]] bool resolve_to_modality_value_option(
     bool to_modality_value, nb::handle scaled_alias) {
 	if (!scaled_alias.is_none()) {
@@ -941,15 +1037,29 @@ void decode_layout_into(const DicomFile& self, const DecodedArrayLayout& layout,
 	if (out.size() < layout.required_bytes) {
 		throw nb::value_error("decode_into output buffer is smaller than required size");
 	}
-	if (!layout.decode_all_frames) {
-		self.decode_into(layout.frame_index, out, layout.plan);
+	if (layout.decode_all_frames) {
+		self.decode_all_frames_into(out, layout.plan);
 		return;
 	}
+	self.decode_into(layout.frame_index, out, layout.plan);
+}
 
-	for (std::size_t frame_index = 0; frame_index < layout.frames; ++frame_index) {
-		auto frame_span = out.subspan(frame_index * layout.frame_stride, layout.frame_stride);
-		self.decode_into(frame_index, frame_span, layout.plan);
+void decode_layout_into_unchecked(const DicomFile& self, const DecodedArrayLayout& layout,
+    std::span<std::uint8_t> out) {
+	if (layout.decode_all_frames) {
+		self.decode_all_frames_into(out, layout.plan);
+		return;
 	}
+	self.decode_into(layout.frame_index, out, layout.plan);
+}
+
+void copy_direct_raw_array_access_unchecked(const DirectRawArrayAccess& access,
+    std::span<std::uint8_t> dst) {
+	if (access.layout.required_bytes == 0) {
+		return;
+	}
+	std::memcpy(dst.data(), access.source_bytes.data() + access.byte_offset,
+	    access.layout.required_bytes);
 }
 
 DirectRawArrayAccess build_direct_raw_array_access_or_throw(
@@ -1063,11 +1173,7 @@ void copy_direct_raw_array_access(const DirectRawArrayAccess& access,
 	if (dst.size() != access.layout.required_bytes) {
 		throw nb::value_error("direct raw copy size does not match expected decoded size");
 	}
-	if (access.layout.required_bytes == 0) {
-		return;
-	}
-	std::memcpy(dst.data(), access.source_bytes.data() + access.byte_offset,
-	    access.layout.required_bytes);
+	copy_direct_raw_array_access_unchecked(access, dst);
 }
 
 nb::object dicomfile_to_array_view(const DicomFile& self, long frame) {
@@ -1084,22 +1190,42 @@ nb::object dicomfile_to_array_view(const DicomFile& self, long frame) {
 
 nb::object dicomfile_to_array(
     const DicomFile& self, long frame, bool to_modality_value, bool decode_mct,
-    nb::handle scaled) {
+    nb::handle scaled, int worker_threads, int codec_threads, nb::handle plan_obj) {
+	if (!plan_obj.is_none()) {
+		const auto plan = nb::cast<dicom::pixel::DecodePlan>(plan_obj);
+		const auto layout = build_decode_layout_from_plan(plan, frame);
+		auto out = make_writable_numpy_array(
+		    layout.ndim, layout.shape, layout.strides, layout.spec.dtype, layout.required_bytes);
+		{
+			nb::gil_scoped_release release;
+			decode_layout_into_unchecked(self, layout, out.bytes);
+		}
+		return nb::cast(std::move(out.array));
+	}
+
 	const auto effective_to_modality_value =
 	    resolve_to_modality_value_option(to_modality_value, scaled);
+	validate_decode_thread_options_or_throw(worker_threads, codec_threads);
 	if (auto direct = try_build_direct_raw_array_access(
 	        self, frame, effective_to_modality_value)) {
 		auto out = make_writable_numpy_array(direct->layout.ndim, direct->layout.shape,
 		    direct->layout.strides, direct->layout.spec.dtype,
 		    direct->layout.required_bytes);
-		copy_direct_raw_array_access(*direct, out.bytes);
+		{
+			nb::gil_scoped_release release;
+			copy_direct_raw_array_access_unchecked(*direct, out.bytes);
+		}
 		return nb::cast(std::move(out.array));
 	}
 	const auto layout = build_decode_layout(
-	    self, frame, effective_to_modality_value, -1, decode_mct);
+	    self, frame, effective_to_modality_value, worker_threads, codec_threads,
+	    decode_mct);
 	auto out = make_writable_numpy_array(
 	    layout.ndim, layout.shape, layout.strides, layout.spec.dtype, layout.required_bytes);
-	decode_layout_into(self, layout, out.bytes);
+	{
+		nb::gil_scoped_release release;
+		decode_layout_into_unchecked(self, layout, out.bytes);
+	}
 	return nb::cast(std::move(out.array));
 }
 
@@ -1125,18 +1251,23 @@ private:
 };
 
 nb::object dicomfile_decode_into_array(const DicomFile& self, nb::handle out,
-    long frame, bool to_modality_value, int threads, bool decode_mct, nb::handle scaled) {
-	const auto effective_to_modality_value =
-	    resolve_to_modality_value_option(to_modality_value, scaled);
-	if (threads < -1) {
-		throw nb::value_error("threads must be -1, 0, or positive");
+    long frame, bool to_modality_value, bool decode_mct, nb::handle scaled,
+    int worker_threads, int codec_threads, nb::handle plan_obj) {
+	std::optional<DirectRawArrayAccess> direct{};
+	DecodedArrayLayout layout{};
+	if (!plan_obj.is_none()) {
+		layout = build_decode_layout_from_plan(
+		    nb::cast<dicom::pixel::DecodePlan>(plan_obj), frame);
+	} else {
+		const auto effective_to_modality_value =
+		    resolve_to_modality_value_option(to_modality_value, scaled);
+		validate_decode_thread_options_or_throw(worker_threads, codec_threads);
+		direct = try_build_direct_raw_array_access(self, frame, effective_to_modality_value);
+		layout = direct ? direct->layout
+		                : build_decode_layout(
+		                      self, frame, effective_to_modality_value, worker_threads,
+		                      codec_threads, decode_mct);
 	}
-	const auto direct =
-	    try_build_direct_raw_array_access(self, frame, effective_to_modality_value);
-	const auto layout =
-	    direct ? direct->layout
-	           : build_decode_layout(
-	                 self, frame, effective_to_modality_value, threads, decode_mct);
 
 	PyWritableBufferView writable(out);
 	const auto& view = writable.view();
@@ -1162,9 +1293,11 @@ nb::object dicomfile_decode_into_array(const DicomFile& self, nb::handle out,
 	auto out_span = std::span<std::uint8_t>(
 	    static_cast<std::uint8_t*>(view.buf), actual_bytes);
 	if (direct) {
-		copy_direct_raw_array_access(*direct, out_span);
+		nb::gil_scoped_release release;
+		copy_direct_raw_array_access_unchecked(*direct, out_span);
 	} else {
-		decode_layout_into(self, layout, out_span);
+		nb::gil_scoped_release release;
+		decode_layout_into_unchecked(self, layout, out_span);
 	}
 	return nb::borrow<nb::object>(out);
 }
@@ -2879,6 +3012,117 @@ NB_MODULE(_dicomsdl, m) {
 		    },
 		    nb::keep_alive<0, 1>(), "Iterate over DataElements in tag order");
 
+	nb::enum_<dicom::pixel::Planar>(m, "Planar",
+	    "Pixel sample layout for multi-sample decode output.")
+		.value("interleaved", dicom::pixel::Planar::interleaved)
+		.value("planar", dicom::pixel::Planar::planar);
+
+	nb::class_<dicom::pixel::DecodeOptions>(m, "DecodeOptions",
+	    "Decode option set used to build a reusable DecodePlan.")
+		.def("__init__",
+		    [](dicom::pixel::DecodeOptions* self, dicom::pixel::Planar planar_out,
+		        std::uint16_t alignment, bool to_modality_value, bool decode_mct,
+		        int worker_threads, int codec_threads) {
+			    new (self) dicom::pixel::DecodeOptions{};
+			    self->planar_out = planar_out;
+			    self->alignment = alignment;
+			    self->to_modality_value = to_modality_value;
+			    self->decode_mct = decode_mct;
+			    self->worker_threads = worker_threads;
+			    self->codec_threads = codec_threads;
+		    },
+		    nb::kw_only(),
+		    nb::arg("planar_out") = dicom::pixel::Planar::interleaved,
+		    nb::arg("alignment") = static_cast<std::uint16_t>(1),
+		    nb::arg("to_modality_value") = false,
+		    nb::arg("decode_mct") = true,
+		    nb::arg("worker_threads") = -1,
+		    nb::arg("codec_threads") = -1)
+		.def_rw("planar_out", &dicom::pixel::DecodeOptions::planar_out,
+		    "Requested output sample layout.")
+		.def_rw("alignment", &dicom::pixel::DecodeOptions::alignment,
+		    "Requested output row/frame alignment in bytes.")
+		.def_rw("to_modality_value", &dicom::pixel::DecodeOptions::to_modality_value,
+		    "Convert stored values to modality values when applicable.")
+		.def_rw("decode_mct", &dicom::pixel::DecodeOptions::decode_mct,
+		    "Apply codestream-level inverse MCT/color transform when supported.")
+		.def_rw("worker_threads", &dicom::pixel::DecodeOptions::worker_threads,
+		    "DICOMSDL-managed outer worker count used by batch decode paths.")
+		.def_rw("codec_threads", &dicom::pixel::DecodeOptions::codec_threads,
+		    "Codec/backend internal thread-count hint.")
+		.def("__repr__",
+		    [](const dicom::pixel::DecodeOptions& self) {
+			    std::ostringstream oss;
+			    oss << "DecodeOptions(planar_out="
+			        << (self.planar_out == dicom::pixel::Planar::planar ? "Planar.planar"
+			                                                            : "Planar.interleaved")
+			        << ", alignment=" << self.alignment
+			        << ", to_modality_value=" << (self.to_modality_value ? "True" : "False")
+			        << ", decode_mct=" << (self.decode_mct ? "True" : "False")
+			        << ", worker_threads=" << self.worker_threads
+			        << ", codec_threads=" << self.codec_threads << ")";
+			    return oss.str();
+		    });
+
+	nb::class_<dicom::pixel::DecodePlan>(m, "DecodePlan",
+	    "Reusable decode-plan snapshot for repeated frame decode.")
+		.def_prop_ro("options",
+		    [](const dicom::pixel::DecodePlan& self) { return self.options; },
+		    "Decode options captured in this plan.")
+		.def_prop_ro("transfer_syntax_uid",
+		    [](const dicom::pixel::DecodePlan& self) {
+			    return uid_to_object(self.info.ts);
+		    },
+		    "Transfer syntax captured in this plan, or None if unavailable.")
+		.def_prop_ro("has_pixel_data",
+		    [](const dicom::pixel::DecodePlan& self) { return self.info.has_pixel_data; })
+		.def_prop_ro("rows",
+		    [](const dicom::pixel::DecodePlan& self) { return self.info.rows; })
+		.def_prop_ro("cols",
+		    [](const dicom::pixel::DecodePlan& self) { return self.info.cols; })
+		.def_prop_ro("frames",
+		    [](const dicom::pixel::DecodePlan& self) { return self.info.frames; })
+		.def_prop_ro("samples_per_pixel",
+		    [](const dicom::pixel::DecodePlan& self) { return self.info.samples_per_pixel; })
+		.def_prop_ro("bits_stored",
+		    [](const dicom::pixel::DecodePlan& self) { return self.info.bits_stored; })
+		.def_prop_ro("row_stride",
+		    [](const dicom::pixel::DecodePlan& self) { return self.strides.row; },
+		    "Decoded output row stride in bytes.")
+		.def_prop_ro("frame_stride",
+		    [](const dicom::pixel::DecodePlan& self) { return self.strides.frame; },
+		    "Decoded output frame stride in bytes.")
+		.def_prop_ro("dtype",
+		    [](const dicom::pixel::DecodePlan& self) { return numpy_dtype_object(self); },
+		    "NumPy dtype implied by this plan.")
+		.def_prop_ro("bytes_per_sample",
+		    [](const dicom::pixel::DecodePlan& self) {
+			    return decoded_array_spec(self).bytes_per_sample;
+		    },
+		    "Decoded output bytes per sample.")
+		.def("shape",
+		    [](const dicom::pixel::DecodePlan& self, long frame) {
+			    return shape_tuple_from_layout(build_decode_layout_from_plan(self, frame));
+		    },
+		    nb::arg("frame") = -1,
+		    "Return the NumPy shape implied by this plan for the selected frame.")
+		.def("required_bytes",
+		    [](const dicom::pixel::DecodePlan& self, long frame) {
+			    return build_decode_layout_from_plan(self, frame).required_bytes;
+		    },
+		    nb::arg("frame") = -1,
+		    "Return the required output buffer size in bytes for the selected frame.")
+		.def("__repr__",
+		    [](const dicom::pixel::DecodePlan& self) {
+			    std::ostringstream oss;
+			    oss << "DecodePlan(rows=" << self.info.rows
+			        << ", cols=" << self.info.cols
+			        << ", frames=" << self.info.frames
+			        << ", samples_per_pixel=" << self.info.samples_per_pixel
+			        << ", frame_stride=" << self.strides.frame << ")";
+			    return oss.str();
+		    });
+
 	nb::class_<EncoderContext>(m, "EncoderContext",
 	    "Reusable encoder option context bound to one transfer syntax.")
 		.def(nb::init<>())
@@ -2953,6 +3197,15 @@ NB_MODULE(_dicomsdl, m) {
 		    [](DicomFile& self) -> DataSet& { return self.dataset(); },
 		    nb::rv_policy::reference_internal,
 		    "Root DataSet owned by this DicomFile")
+		.def("create_decode_plan",
+		    [](const DicomFile& self) { return self.create_decode_plan(); },
+		    "Compute a reusable DecodePlan using default DecodeOptions.")
+		.def("create_decode_plan",
+		    [](const DicomFile& self, const dicom::pixel::DecodeOptions& options) {
+			    return self.create_decode_plan(options);
+		    },
+		    nb::arg("options"),
+		    "Compute a reusable DecodePlan from explicit DecodeOptions.")
 		.def("__len__",
 		    [](DicomFile& self) { return self.dataset().size(); },
 		    "Number of active DataElements currently available in the root DataSet")
@@ -3146,6 +3399,10 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::arg("to_modality_value") = false,
 		    nb::arg("decode_mct") = true,
 		    nb::arg("scaled") = nb::none(),
+		    nb::kw_only(),
+		    nb::arg("worker_threads") = -1,
+		    nb::arg("codec_threads") = -1,
+		    nb::arg("plan") = nb::none(),
 		    "Decode pixel samples and return a NumPy array.\n"
 		    "\n"
 		    "Parameters\n"
@@ -3162,6 +3419,18 @@ NB_MODULE(_dicomsdl, m) {
 		    "    Whether to apply codestream-level MCT/color inverse transform when supported.\n"
 		    "    True by default. Currently honored by OpenJPEG-based decode paths.\n"
 		    "    OpenJPH backend ignores this flag.\n"
+		    "worker_threads : int, optional\n"
+		    "    DICOMSDL-managed outer worker count for batch/multi-frame decode.\n"
+		    "    -1 uses the current API-specific auto scheduling policy,\n"
+		    "    0/1 disables outer parallelism,\n"
+		    "    and >1 requests an explicit worker count.\n"
+		    "codec_threads : int, optional\n"
+		    "    Codec/backend internal thread-count hint.\n"
+		    "    -1 uses the current API-specific/backend-aware auto policy,\n"
+		    "    0 uses library default/sequential,\n"
+		    "    and >0 requests an explicit internal thread count.\n"
+		    "plan : DecodePlan, optional\n"
+		    "    Reuse a previously computed DecodePlan. When provided, plan options win.\n"
 		    "\n"
 		    "Returns\n"
 		    "-------\n"
@@ -3181,9 +3450,12 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::arg("out"),
 		    nb::arg("frame") = 0,
 		    nb::arg("to_modality_value") = false,
-		    nb::arg("threads") = -1,
 		    nb::arg("decode_mct") = true,
 		    nb::arg("scaled") = nb::none(),
+		    nb::kw_only(),
+		    nb::arg("worker_threads") = -1,
+		    nb::arg("codec_threads") = -1,
+		    nb::arg("plan") = nb::none(),
 		    "Decode pixel samples into an existing writable C-contiguous buffer.\n"
 		    "\n"
 		    "Parameters\n"
@@ -3197,16 +3469,22 @@ NB_MODULE(_dicomsdl, m) {
 		    "    If True, convert stored values to modality values via Modality LUT/Rescale when available.\n"
 		    "scaled : bool, optional\n"
 		    "    Deprecated alias of to_modality_value.\n"
-		    "threads : int, optional\n"
-		    "    Decoder thread count hint.\n"
-		    "    Default is -1 (use all CPUs).\n"
-		    "    0 uses library default, -1 uses all CPUs, >0 sets explicit thread count.\n"
-		    "    Currently applied to JPEG 2000; unsupported decoders may ignore it.\n"
-		    "    The OpenJPH HTJ2K backend currently accepts this hint and ignores it.\n"
 		    "decode_mct : bool, optional\n"
 		    "    Whether to apply codestream-level MCT/color inverse transform when supported.\n"
 		    "    True by default. Currently honored by OpenJPEG-based decode paths.\n"
 		    "    OpenJPH backend ignores this flag.\n"
+		    "worker_threads : int, optional\n"
+		    "    DICOMSDL-managed outer worker count for batch/multi-frame decode.\n"
+		    "    -1 uses the current API-specific auto scheduling policy,\n"
+		    "    0/1 disables outer parallelism,\n"
+		    "    and >1 requests an explicit worker count.\n"
+		    "codec_threads : int, optional\n"
+		    "    Codec/backend internal thread-count hint.\n"
+		    "    -1 uses the current API-specific/backend-aware auto policy,\n"
+		    "    0 uses library default/sequential,\n"
+		    "    and >0 requests an explicit internal thread count.\n"
+		    "plan : DecodePlan, optional\n"
+		    "    Reuse a previously computed DecodePlan. When provided, plan options win.\n"
 		    "\n"
 		    "Raises\n"
 		    "------\n"
@@ -3224,6 +3502,10 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::arg("to_modality_value") = false,
 		    nb::arg("decode_mct") = true,
 		    nb::arg("scaled") = nb::none(),
+		    nb::kw_only(),
+		    nb::arg("worker_threads") = -1,
+		    nb::arg("codec_threads") = -1,
+		    nb::arg("plan") = nb::none(),
 		    "Alias of to_array(frame=-1, to_modality_value=False, decode_mct=True).")
 		.def("__getitem__",
 		    [](DicomFile& self, nb::object key) -> nb::object {
@@ -3787,14 +4069,15 @@ m.def("transfer_syntax_uids_encode_supported",
 			    continue;
 		    }
 		    if (auto uid = dicom::uid::from_value(entry.value)) {
-			    if (uid->supports_pixel_encode()) {
+			    if (uid->supports_pixel_encode() &&
+			        transfer_syntax_has_runtime_encode_support(*uid)) {
 				    result.append(nb::cast(*uid));
 			    }
 		    }
 	    }
 	    return result;
     },
-    "Return Transfer Syntax UIDs supported for target encoding in set_transfer_syntax.");
+    "Return Transfer Syntax UIDs currently available for target encoding in set_transfer_syntax.");
 
 m.def("uid_prefix",
     []() {
@@ -3905,6 +4188,9 @@ m.def("generate_study_instance_uid",
 	    "set_default_reporter",
 	    "set_thread_reporter",
 	    "set_log_level",
+	    "Planar",
+	    "DecodeOptions",
+	    "DecodePlan",
 	    "EncoderContext",
 	    "create_encoder_context",
 	    "DicomFile",

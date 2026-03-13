@@ -10,6 +10,13 @@ def _test_file(name: str = "test_le.dcm") -> str:
     return str(Path(__file__).resolve().parent.parent / name)
 
 
+def _supports_encode(keyword: str) -> bool:
+    for uid in dicom.transfer_syntax_uids_encode_supported():
+        if (uid.keyword or uid.value) == keyword:
+            return True
+    return False
+
+
 def test_decode_into_method_exists():
     assert hasattr(dicom.DicomFile, "decode_into")
 
@@ -44,11 +51,11 @@ def test_decode_into_scaled_alias_matches_to_array():
     assert np.array_equal(out, expected)
 
 
-def test_decode_into_threads_option_accepted():
+def test_decode_into_worker_threads_option_accepted():
     dicom_file = dicom.read_file(_test_file())
 
     out = np.empty((4, 4), dtype=np.int16)
-    dicom_file.decode_into(out, frame=0, to_modality_value=False, threads=1)
+    dicom_file.decode_into(out, frame=0, to_modality_value=False, worker_threads=1)
 
     expected = dicom_file.to_array(frame=0, to_modality_value=False)
     assert np.array_equal(out, expected)
@@ -65,7 +72,26 @@ def test_decode_into_invalid_frame():
         dicom_file.decode_into(out, frame=-2)
 
     with pytest.raises(ValueError):
-        dicom_file.decode_into(out, frame=0, threads=-2)
+        dicom_file.decode_into(out, frame=0, worker_threads=-2)
+
+    with pytest.raises(ValueError):
+        dicom_file.decode_into(out, frame=0, codec_threads=-2)
+
+
+def test_to_array_and_pixel_array_reject_invalid_thread_options_on_direct_path():
+    dicom_file = dicom.read_file(_test_file())
+
+    with pytest.raises(ValueError):
+        dicom_file.to_array(frame=0, worker_threads=-2)
+
+    with pytest.raises(ValueError):
+        dicom_file.to_array(frame=0, codec_threads=-2)
+
+    with pytest.raises(ValueError):
+        dicom_file.pixel_array(frame=0, worker_threads=-2)
+
+    with pytest.raises(ValueError):
+        dicom_file.pixel_array(frame=0, codec_threads=-2)
 
 
 def test_decode_into_size_mismatch_raises():
@@ -95,3 +121,53 @@ def test_decode_into_frame_minus_one_single_frame_matches_frame_zero():
     returned = dicom_file.decode_into(out, frame=-1, to_modality_value=False)
     assert returned is out
     assert np.array_equal(out, dicom_file.to_array(frame=0, to_modality_value=False))
+
+
+def test_decode_into_frame_minus_one_multi_frame_threads_roundtrip():
+    dicom_file = dicom.read_file(_test_file())
+    frame0 = np.arange(16, dtype=np.int16).reshape(4, 4)
+    frame1 = (np.arange(16, dtype=np.int16) + 100).reshape(4, 4)
+    frame2 = (np.arange(16, dtype=np.int16) + 200).reshape(4, 4)
+    source = np.stack([frame0, frame1, frame2], axis=0)
+
+    dicom_file.set_pixel_data("ExplicitVRLittleEndian", source)
+
+    out = np.empty_like(source)
+    returned = dicom_file.decode_into(
+        out, frame=-1, to_modality_value=False, worker_threads=2
+    )
+
+    assert returned is out
+    assert np.array_equal(out, source)
+
+
+def test_decode_into_single_frame_default_auto_roundtrip_jpeg2000_lossless():
+    if not _supports_encode("JPEG2000Lossless"):
+        pytest.skip("JPEG2000Lossless encoder is not available in this build")
+
+    dicom_file = dicom.read_file(_test_file())
+    source = np.arange(16, dtype=np.int16).reshape(4, 4)
+    dicom_file.set_pixel_data("JPEG2000Lossless", source)
+
+    out = np.empty_like(source)
+    returned = dicom_file.decode_into(out, frame=0, to_modality_value=False)
+
+    assert returned is out
+    assert np.array_equal(out, source)
+
+
+def test_decode_into_frame_minus_one_default_auto_roundtrip_jpeg2000_lossless():
+    if not _supports_encode("JPEG2000Lossless"):
+        pytest.skip("JPEG2000Lossless encoder is not available in this build")
+
+    dicom_file = dicom.read_file(_test_file())
+    frame0 = np.arange(16, dtype=np.int16).reshape(4, 4)
+    frame1 = (np.arange(16, dtype=np.int16) + 100).reshape(4, 4)
+    source = np.stack([frame0, frame1], axis=0)
+    dicom_file.set_pixel_data("JPEG2000Lossless", source)
+
+    out = np.empty_like(source)
+    returned = dicom_file.decode_into(out, frame=-1, to_modality_value=False)
+
+    assert returned is out
+    assert np.array_equal(out, source)

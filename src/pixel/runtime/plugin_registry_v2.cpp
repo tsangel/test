@@ -104,9 +104,14 @@ void register_htj2k_and_openjpeg_plugins(
     register_htj2k();
     return;
   }
+  if (htj2k_decoder_preference == Htj2kDecoderBackendPreference::kOpenJpeg) {
+    register_htj2k();
+    register_openjpeg();
+    return;
+  }
 
-  register_htj2k();
   register_openjpeg();
+  register_htj2k();
   return;
 #elif defined(DICOMSDL_PIXEL_RUNTIME_WITH_HTJ2K_STATIC)
   static_cast<void>(htj2k_decoder_preference);

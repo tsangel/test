@@ -1,16 +1,64 @@
 #include <cstdlib>
 #include <iostream>
 #include <string>
+#include <string_view>
 
 #include <dicom.h>
 
 #include "codec_builtin_flags.hpp"
+#include "pixel/runtime/plugin_registry_v2.hpp"
+
+namespace {
+
+void expect_auto_backend_binding() {
+	pixel::runtime_v2::BindingRegistryV2 registry{};
+	pixel::runtime_v2::init_builtin_registry_v2(&registry);
+	const auto* binding =
+	    registry.find_decoder_binding(PIXEL_CODEC_PROFILE_HTJ2K_LOSSLESS_V2);
+
+	if (dicom::test::kHtj2kBuiltin && dicom::test::kJpeg2kBuiltin &&
+	    dicom::test::kHasOpenJphBackend) {
+		if (binding == nullptr || binding->display_name == nullptr ||
+		    std::string_view(binding->display_name).find("HTJ2K") == std::string_view::npos) {
+			std::cerr << "auto HTJ2K backend should prefer OpenJPH when both backends are built\n";
+			std::exit(1);
+		}
+		return;
+	}
+
+	if (dicom::test::kHtj2kBuiltin) {
+		if (binding == nullptr || binding->display_name == nullptr ||
+		    std::string_view(binding->display_name).find("HTJ2K") == std::string_view::npos) {
+			std::cerr << "auto HTJ2K backend should resolve to builtin HTJ2K decoder\n";
+			std::exit(1);
+		}
+		return;
+	}
+
+	if (dicom::test::kJpeg2kBuiltin) {
+		if (binding == nullptr || binding->display_name == nullptr ||
+		    std::string_view(binding->display_name).find("OpenJPEG") == std::string_view::npos) {
+			std::cerr << "auto HTJ2K backend should fall back to OpenJPEG decoder\n";
+			std::exit(1);
+		}
+		return;
+	}
+
+	if (binding != nullptr) {
+		std::cerr << "auto HTJ2K backend should be absent when no backend is built\n";
+		std::exit(1);
+	}
+}
+
+}  // namespace
 
 int main() {
 	auto fail = [](const std::string& message) {
 		std::cerr << message << '\n';
 		std::exit(1);
 	};
+
+	expect_auto_backend_binding();
 
 	std::string error{};
 	if (dicom::test::kHasOpenJphBackend && dicom::test::kHtj2kBuiltin) {

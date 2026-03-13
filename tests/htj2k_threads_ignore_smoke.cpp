@@ -43,17 +43,17 @@ void fill_htj2k_test_file(dicom::DicomFile& df) {
 }
 
 void expect_decode_with_threads_hint(
-    const dicom::DicomFile& df, int decoder_threads,
+    const dicom::DicomFile& df, int codec_threads,
     const std::vector<std::uint8_t>& expected) {
 	dicom::pixel::DecodeOptions opt{};
-	opt.decoder_threads = decoder_threads;
+	opt.codec_threads = codec_threads;
 	const auto plan = df.create_decode_plan(opt);
 	std::vector<std::uint8_t> dst(plan.strides.frame, std::uint8_t{0});
 	dicom::pixel::decode_frame_into(
 	    df, 0, std::span<std::uint8_t>(dst.data(), dst.size()), plan);
 	if (dst != expected) {
-		fail("HTJ2K decode mismatch when using decoder_threads=" +
-		    std::to_string(decoder_threads));
+		fail("HTJ2K decode mismatch when using codec_threads=" +
+		    std::to_string(codec_threads));
 	}
 }
 

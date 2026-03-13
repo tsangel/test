@@ -59,7 +59,7 @@ python benchmarks/python/benchmark_wg04_pixel_decode.py \
   --repeat 10
 ```
 
-기본 설정에서 `decode_into` thread hint는 `threads=-1`(all CPUs)입니다.
+기본 설정에서 `decode_into`는 `worker_threads=-1`, `codec_threads=-1`을 사용합니다.
 
 ## Measurement method
 
@@ -69,10 +69,11 @@ python benchmarks/python/benchmark_wg04_pixel_decode.py \
     backend immediately after importing `dicomsdl`, before any decode work starts
   - default decode call: `df.to_array(frame=-1, scaled=False)`
   - for `J2KR`/`J2KI` in the base table, the driver forces
-    `df.decode_into(out, frame=-1, scaled=False, threads=-1)` to apply multi-CPU decoding
-  - with `--reuse-output`: `df.decode_into(out, frame=-1, scaled=False, threads=-1)`
-  - in this benchmark driver, `decode_into` uses `threads=-1` by default
-    (JPEG 2000: auto/all CPUs).
+    `df.decode_into(out, frame=-1, scaled=False, worker_threads=-1, codec_threads=-1)`
+  - with `--reuse-output`:
+    `df.decode_into(out, frame=-1, scaled=False, worker_threads=-1, codec_threads=-1)`
+  - in this benchmark driver, `decode_into` uses `worker_threads=-1`,
+    `codec_threads=-1` by default.
 - `pydicom` path:
   - decode call: `ds.pixel_array`
   - before each timed decode, `_pixel_id` is reset to force re-decode and avoid
