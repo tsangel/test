@@ -1015,6 +1015,15 @@ DecodedArrayLayout build_decode_layout(
 	return build_decode_layout_from_plan(self.create_decode_plan(opt), frame);
 }
 
+void validate_decode_thread_options_or_throw(int worker_threads, int codec_threads) {
+	if (worker_threads < -1) {
+		throw nb::value_error("worker_threads must be -1, 0, or positive");
+	}
+	if (codec_threads < -1) {
+		throw nb::value_error("codec_threads must be -1, 0, or positive");
+	}
+}
+
 [[nodiscard]] bool resolve_to_modality_value_option(
     bool to_modality_value, nb::handle scaled_alias) {
 	if (!scaled_alias.is_none()) {
@@ -1196,6 +1205,7 @@ nb::object dicomfile_to_array(
 
 	const auto effective_to_modality_value =
 	    resolve_to_modality_value_option(to_modality_value, scaled);
+	validate_decode_thread_options_or_throw(worker_threads, codec_threads);
 	if (auto direct = try_build_direct_raw_array_access(
 	        self, frame, effective_to_modality_value)) {
 		auto out = make_writable_numpy_array(direct->layout.ndim, direct->layout.shape,
@@ -1251,12 +1261,7 @@ nb::object dicomfile_decode_into_array(const DicomFile& self, nb::handle out,
 	} else {
 		const auto effective_to_modality_value =
 		    resolve_to_modality_value_option(to_modality_value, scaled);
-		if (worker_threads < -1) {
-			throw nb::value_error("worker_threads must be -1, 0, or positive");
-		}
-		if (codec_threads < -1) {
-			throw nb::value_error("codec_threads must be -1, 0, or positive");
-		}
+		validate_decode_thread_options_or_throw(worker_threads, codec_threads);
 		direct = try_build_direct_raw_array_access(self, frame, effective_to_modality_value);
 		layout = direct ? direct->layout
 		                : build_decode_layout(

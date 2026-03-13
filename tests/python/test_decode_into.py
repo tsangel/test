@@ -78,6 +78,22 @@ def test_decode_into_invalid_frame():
         dicom_file.decode_into(out, frame=0, codec_threads=-2)
 
 
+def test_to_array_and_pixel_array_reject_invalid_thread_options_on_direct_path():
+    dicom_file = dicom.read_file(_test_file())
+
+    with pytest.raises(ValueError):
+        dicom_file.to_array(frame=0, worker_threads=-2)
+
+    with pytest.raises(ValueError):
+        dicom_file.to_array(frame=0, codec_threads=-2)
+
+    with pytest.raises(ValueError):
+        dicom_file.pixel_array(frame=0, worker_threads=-2)
+
+    with pytest.raises(ValueError):
+        dicom_file.pixel_array(frame=0, codec_threads=-2)
+
+
 def test_decode_into_size_mismatch_raises():
     dicom_file = dicom.read_file(_test_file())
     out = np.empty((4, 3), dtype=np.int16)
