@@ -694,7 +694,7 @@ def _format_tables(
         sections.append(_format_codec_thread_table(codec_thread_rows, worker_order, codec_order))
     if codec_sweep_rows:
         sections.append("")
-        sections.append("### Codec Thread (Worker Thread = 1, 2)")
+        sections.append("### Worker Thread = 1, 2 / Codec Thread")
         sections.append("")
         sections.append(
             _format_codec_thread_table(
