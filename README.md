@@ -4,32 +4,16 @@ Minimal DICOM file wrapper with optional Python bindings.
 
 ## Repository Setup
 
-### Full setup (default)
+Dependencies are resolved by CMake `FetchContent` during configure.
+No `git submodule update` step is required for a normal checkout.
+
+If you need to override a fetched dependency revision, pass the corresponding
+cache variable at configure time (for example
+`-DDICOMSDL_CHARLS_GIT_TAG=<tag>` or `-DDICOMSDL_NANOBIND_GIT_TAG=<tag>`).
 
 ```bash
-git submodule update --init --recursive
+cmake -S . -B build
 ```
-
-### JPEG-XL minimal setup (optional)
-
-If you want to work on JPEG-XL integration without downloading all nested `extern/libjxl`
-submodules, use:
-
-```bash
-# macOS / Linux
-./scripts/setup_libjxl_minimal.sh
-```
-
-```bat
-:: Windows (cmd.exe)
-scripts\setup_libjxl_minimal.bat
-```
-
-The minimal script initializes only:
-
-- `extern/libjxl/third_party/highway`
-- `extern/libjxl/third_party/brotli`
-- `extern/libjxl/third_party/skcms`
 
 To enable JPEG-XL dependency build in this project:
 
@@ -37,23 +21,9 @@ To enable JPEG-XL dependency build in this project:
 cmake -S . -B build -DDICOMSDL_ENABLE_JPEGXL=ON
 ```
 
-## JPEG-LS (CharLS) Pin
-
-`extern/charls` is intentionally pinned to `2.2.1` for now.
-Newer CharLS tags (`2.3.0+`) show a regression for WG04 `MR1_JLSL`
-codestream decoding in this project. See:
-`misc/repro/charls_mr1_jpegls_regression/`.
-
-By default, CMake enforces the pinned CharLS submodule revision.
-If you explicitly need to test another CharLS revision, configure with:
-
-```bash
-cmake -S . -B build -DDICOMSDL_ALLOW_UNPINNED_CHARLS=ON
-```
-
 ## JPEG (libjpeg-turbo)
 
-`extern/libjpeg-turbo` is built as a static dependency and linked into `dicomsdl`.
+`libjpeg-turbo` is built as a static dependency and linked into `dicomsdl`.
 
 - JPEG Lossless SV1 (`1.2.840.10008.1.2.4.70`) is supported in the current decoder path.
 - JPEG Extended 12-bit (Process 2/4, `1.2.840.10008.1.2.4.51`) WG04 codestreams are
