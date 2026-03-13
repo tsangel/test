@@ -11,7 +11,7 @@ import statistics
 import sys
 import tempfile
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -69,6 +69,8 @@ LOSSLESS_DEFAULT_OPTIONS: dict[str, dict[str, object]] = {
     "JPEGXLLossless": {"type": "jpegxl", "distance": 0.0},
     "RLELossless": {"type": "rle"},
 }
+CODEC_SWEEP_WORKER_LABELS: tuple[str, ...] = ("1", "2")
+CODEC_SWEEP_CODEC_LABELS: tuple[str, ...] = ("1", "2", "4", "8", "all")
 
 
 def _find_native_module() -> Path:
@@ -170,13 +172,15 @@ class ConvertedCase:
 
 @dataclass
 class BenchmarkResult:
+    matrix: str
     source_path: str
     transfer_syntax: str
     output_path: str
     frames: int
     worker_threads_requested: str
     worker_threads_actual: int
-    codec_threads: int
+    codec_threads_requested: str
+    codec_threads_actual: int
     inner_loops: int
     median_ms: float
     mean_ms: float
@@ -385,13 +389,41 @@ def _parse_worker_threads(text: str, hardware_threads: int) -> list[tuple[str, i
     return out
 
 
-def _parse_codec_threads(text: str) -> list[int]:
-    out = [int(part.strip()) for part in text.split(",") if part.strip()]
+def _parse_codec_threads(text: str, hardware_threads: int) -> list[tuple[str, int]]:
+    out: list[tuple[str, int]] = []
+    for token in (part.strip() for part in text.split(",")):
+        if not token:
+            continue
+        if token.lower() == "all":
+            out.append(("all", hardware_threads))
+            continue
+        value = int(token)
+        out.append((str(value), value))
     if not out:
         raise ValueError("at least one codec thread request is required")
-    for value in out:
+    for _, value in out:
         if value < -1:
             raise ValueError("codec thread requests must be -1, 0, or positive")
+    return out
+
+
+def _build_codec_sweep_worker_cases(
+    hardware_threads: int,
+) -> list[tuple[str, int]]:
+    out: list[tuple[str, int]] = []
+    for label in CODEC_SWEEP_WORKER_LABELS:
+        requested = hardware_threads if label == "all" else int(label)
+        out.append((label, requested))
+    return out
+
+
+def _build_codec_sweep_codec_cases(
+    hardware_threads: int,
+) -> list[tuple[str, int]]:
+    out: list[tuple[str, int]] = []
+    for label in CODEC_SWEEP_CODEC_LABELS:
+        requested = hardware_threads if label == "all" else int(label)
+        out.append((label, requested))
     return out
 
 
@@ -400,7 +432,9 @@ def _benchmark_one(
     converted_path: Path,
     transfer_syntax: str,
     worker_cases: list[tuple[str, int]],
-    codec_thread_cases: list[int],
+    codec_thread_cases: list[tuple[str, int]],
+    codec_sweep_worker_cases: list[tuple[str, int]],
+    codec_sweep_codec_cases: list[tuple[str, int]],
     htj2k_backend: str,
     warmup: int,
     repeat: int,
@@ -415,65 +449,93 @@ def _benchmark_one(
     df.decode_into(reference, frame=-1, plan=reference_plan)
     frames = int(reference_plan.frames)
     results: list[BenchmarkResult] = []
-    active_codec_thread_cases = (
-        codec_thread_cases
-        if _transfer_syntax_uses_codec_threads(transfer_syntax, htj2k_backend)
-        else codec_thread_cases[:1]
+    uses_codec_threads = _transfer_syntax_uses_codec_threads(
+        transfer_syntax, htj2k_backend
     )
 
-    for codec_threads in active_codec_thread_cases:
+    requests: list[tuple[str, str, int, str, int]] = []
+    active_primary_codec_cases = (
+        codec_thread_cases if uses_codec_threads else codec_thread_cases[:1]
+    )
+    for codec_label, codec_requested in active_primary_codec_cases:
         for worker_label, worker_requested in worker_cases:
-            options = dicom.DecodeOptions(
-                worker_threads=worker_requested,
-                codec_threads=codec_threads,
+            requests.append(
+                ("primary", worker_label, worker_requested, codec_label, codec_requested)
             )
-            plan = df.create_decode_plan(options)
-            out = np.empty(plan.shape(frame=-1), dtype=plan.dtype)
+    if uses_codec_threads:
+        for codec_label, codec_requested in codec_sweep_codec_cases:
+            for worker_label, worker_requested in codec_sweep_worker_cases:
+                requests.append(
+                    (
+                        "codec_sweep",
+                        worker_label,
+                        worker_requested,
+                        codec_label,
+                        codec_requested,
+                    )
+                )
 
-            def run_once() -> None:
-                df.decode_into(out, frame=-1, plan=plan)
+    measured: dict[tuple[str, int, str, int], BenchmarkResult] = {}
+    for matrix, worker_label, worker_requested, codec_label, codec_requested in requests:
+        cache_key = (worker_label, worker_requested, codec_label, codec_requested)
+        cached = measured.get(cache_key)
+        if cached is not None:
+            results.append(replace(cached, matrix=matrix))
+            continue
 
-            for _ in range(warmup):
+        options = dicom.DecodeOptions(
+            worker_threads=worker_requested,
+            codec_threads=codec_requested,
+        )
+        plan = df.create_decode_plan(options)
+        out = np.empty(plan.shape(frame=-1), dtype=plan.dtype)
+
+        def run_once() -> None:
+            df.decode_into(out, frame=-1, plan=plan)
+
+        for _ in range(warmup):
+            run_once()
+        run_once()
+        if not np.array_equal(out, reference):
+            raise RuntimeError(
+                "benchmark decode output mismatch for "
+                f"{source_path.name} {transfer_syntax} "
+                f"worker={worker_label} codec={codec_label}"
+            )
+
+        probe_start = time.perf_counter()
+        run_once()
+        probe_sec = max(time.perf_counter() - probe_start, 1e-9)
+        inner_loops = max(
+            1,
+            min(max_inner_loops, int((target_sample_ms / 1000.0) / probe_sec)),
+        )
+
+        samples_ms: list[float] = []
+        for _ in range(repeat):
+            start = time.perf_counter()
+            for _ in range(inner_loops):
                 run_once()
-            run_once()
-            if not np.array_equal(out, reference):
-                raise RuntimeError(
-                    "benchmark decode output mismatch for "
-                    f"{source_path.name} {transfer_syntax} "
-                    f"worker={worker_label} codec={codec_threads}"
-                )
+            elapsed = time.perf_counter() - start
+            samples_ms.append((elapsed / inner_loops) * 1000.0)
 
-            probe_start = time.perf_counter()
-            run_once()
-            probe_sec = max(time.perf_counter() - probe_start, 1e-9)
-            inner_loops = max(
-                1,
-                min(max_inner_loops, int((target_sample_ms / 1000.0) / probe_sec)),
-            )
-
-            samples_ms: list[float] = []
-            for _ in range(repeat):
-                start = time.perf_counter()
-                for _ in range(inner_loops):
-                    run_once()
-                elapsed = time.perf_counter() - start
-                samples_ms.append((elapsed / inner_loops) * 1000.0)
-
-            actual_worker_count = min(worker_requested, frames)
-            results.append(
-                BenchmarkResult(
-                    source_path=str(source_path),
-                    transfer_syntax=transfer_syntax,
-                    output_path=str(converted_path),
-                    frames=frames,
-                    worker_threads_requested=worker_label,
-                    worker_threads_actual=actual_worker_count,
-                    codec_threads=codec_threads,
-                    inner_loops=inner_loops,
-                    median_ms=statistics.median(samples_ms),
-                    mean_ms=statistics.fmean(samples_ms),
-                )
-            )
+        actual_worker_count = min(worker_requested, frames)
+        result = BenchmarkResult(
+            matrix=matrix,
+            source_path=str(source_path),
+            transfer_syntax=transfer_syntax,
+            output_path=str(converted_path),
+            frames=frames,
+            worker_threads_requested=worker_label,
+            worker_threads_actual=actual_worker_count,
+            codec_threads_requested=codec_label,
+            codec_threads_actual=codec_requested,
+            inner_loops=inner_loops,
+            median_ms=statistics.median(samples_ms),
+            mean_ms=statistics.fmean(samples_ms),
+        )
+        measured[cache_key] = result
+        results.append(result)
     return results
 
 
@@ -481,35 +543,72 @@ def _format_outer_only_table(
     rows: list[BenchmarkResult],
     worker_order: list[str],
 ) -> str:
-    by_ts: dict[str, dict[str, BenchmarkResult]] = {}
-    for row in rows:
-        by_ts.setdefault(row.transfer_syntax, {})[row.worker_threads_requested] = row
-
-    lines = [
-        "| TS | " + " | ".join(worker_order) + " |",
-        "| --- | " + " | ".join("---:" for _ in worker_order) + " |",
-    ]
+    by_ts = _group_outer_only_rows(rows)
+    data_rows: list[list[str]] = []
     for transfer_syntax in DEFAULT_BENCHMARK_KEYWORDS:
         ts_rows = by_ts.get(transfer_syntax)
         if not ts_rows:
             continue
-        values = [
-            f"{ts_rows[worker].median_ms:.2f}" if worker in ts_rows else "-"
-            for worker in worker_order
-        ]
-        lines.append(f"| `{transfer_syntax}` | " + " | ".join(values) + " |")
+        data_rows.append(
+            [
+                f"`{transfer_syntax}`",
+                *[
+                    f"{ts_rows[worker].median_ms:.2f}" if worker in ts_rows else "-"
+                    for worker in worker_order
+                ],
+            ]
+        )
+    return _render_markdown_table(["TS", *worker_order], data_rows)
+
+
+def _group_outer_only_rows(
+    rows: list[BenchmarkResult],
+) -> dict[str, dict[str, BenchmarkResult]]:
+    by_ts: dict[str, dict[str, BenchmarkResult]] = {}
+    for row in rows:
+        by_ts.setdefault(row.transfer_syntax, {})[row.worker_threads_requested] = row
+    return by_ts
+
+
+def _render_markdown_table(headers: list[str], data_rows: list[list[str]]) -> str:
+    widths = [len(header) for header in headers]
+    for row in data_rows:
+        for index, cell in enumerate(row):
+            widths[index] = max(widths[index], len(cell), 3)
+
+    def format_row(values: list[str]) -> str:
+        cells: list[str] = []
+        for index, value in enumerate(values):
+            if index == 0:
+                cells.append(value.ljust(widths[index]))
+            else:
+                cells.append(value.rjust(widths[index]))
+        return "| " + " | ".join(cells) + " |"
+
+    separator_cells = []
+    for index, width in enumerate(widths):
+        if index == 0:
+            separator_cells.append("-" * width)
+        else:
+            separator_cells.append("-" * (width - 1) + ":")
+
+    lines = [
+        format_row(headers),
+        "| " + " | ".join(separator_cells) + " |",
+    ]
+    lines.extend(format_row(row) for row in data_rows)
     return "\n".join(lines)
 
 
 def _format_codec_thread_table(
     rows: list[BenchmarkResult],
     worker_order: list[str],
-    codec_order: list[int],
+    codec_order: list[str],
 ) -> str:
     by_ts: dict[str, dict[tuple[str, int], BenchmarkResult]] = {}
     for row in rows:
         by_ts.setdefault(row.transfer_syntax, {})[
-            (row.worker_threads_requested, row.codec_threads)
+            (row.worker_threads_requested, row.codec_threads_requested)
         ] = row
 
     value_headers = [
@@ -517,10 +616,7 @@ def _format_codec_thread_table(
         for codec_threads in codec_order
         for worker in worker_order
     ]
-    lines = [
-        "| TS | " + " | ".join(value_headers) + " |",
-        "| --- | " + " | ".join("---:" for _ in value_headers) + " |",
-    ]
+    data_rows: list[list[str]] = []
     for transfer_syntax in DEFAULT_BENCHMARK_KEYWORDS:
         ts_rows = by_ts.get(transfer_syntax)
         if not ts_rows:
@@ -530,33 +626,45 @@ def _format_codec_thread_table(
             for worker in worker_order:
                 result = ts_rows.get((worker, codec_threads))
                 values.append(f"{result.median_ms:.2f}" if result is not None else "-")
-        lines.append(f"| `{transfer_syntax}` | " + " | ".join(values) + " |")
-    return "\n".join(lines)
+        data_rows.append([f"`{transfer_syntax}`", *values])
+    return _render_markdown_table(["TS", *value_headers], data_rows)
 
 
 def _format_tables(
     rows: list[BenchmarkResult],
     worker_cases: list[tuple[str, int]],
-    codec_thread_cases: list[int],
+    codec_thread_cases: list[tuple[str, int]],
+    codec_sweep_worker_cases: list[tuple[str, int]],
+    codec_sweep_codec_cases: list[tuple[str, int]],
     htj2k_backend: str,
 ) -> list[str]:
     worker_order = [label for label, _ in worker_cases]
-    codec_order = codec_thread_cases
+    codec_order = [label for label, _ in codec_thread_cases]
+    codec_sweep_worker_order = [label for label, _ in codec_sweep_worker_cases]
+    codec_sweep_codec_order = [label for label, _ in codec_sweep_codec_cases]
 
     outer_only_rows = [
         row
         for row in rows
-        if not _transfer_syntax_uses_codec_threads(row.transfer_syntax, htj2k_backend)
+        if row.matrix == "primary"
+        and not _transfer_syntax_uses_codec_threads(row.transfer_syntax, htj2k_backend)
     ]
     codec_thread_rows = [
         row
         for row in rows
-        if _transfer_syntax_uses_codec_threads(row.transfer_syntax, htj2k_backend)
+        if row.matrix == "primary"
+        and _transfer_syntax_uses_codec_threads(row.transfer_syntax, htj2k_backend)
+    ]
+    codec_sweep_rows = [
+        row
+        for row in rows
+        if row.matrix == "codec_sweep"
+        and _transfer_syntax_uses_codec_threads(row.transfer_syntax, htj2k_backend)
     ]
 
     sections: list[str] = []
     if outer_only_rows:
-        sections.append("### Outer-Only")
+        sections.append("### Worker-Thread-Only")
         sections.append("")
         sections.append(_format_outer_only_table(outer_only_rows, worker_order))
     if codec_thread_rows:
@@ -565,6 +673,17 @@ def _format_tables(
         sections.append("### Codec-Thread-Sensitive")
         sections.append("")
         sections.append(_format_codec_thread_table(codec_thread_rows, worker_order, codec_order))
+    if codec_sweep_rows:
+        sections.append("")
+        sections.append("### Codec-Thread Sweep")
+        sections.append("")
+        sections.append(
+            _format_codec_thread_table(
+                codec_sweep_rows,
+                codec_sweep_worker_order,
+                codec_sweep_codec_order,
+            )
+        )
     return sections
 
 
@@ -574,7 +693,9 @@ def _write_report(
     converted_cases: list[ConvertedCase],
     benchmark_results: list[BenchmarkResult],
     worker_cases: list[tuple[str, int]],
-    codec_thread_cases: list[int],
+    codec_thread_cases: list[tuple[str, int]],
+    codec_sweep_worker_cases: list[tuple[str, int]],
+    codec_sweep_codec_cases: list[tuple[str, int]],
     hardware_threads: int,
     htj2k_backend: str,
 ) -> Path:
@@ -582,7 +703,9 @@ def _write_report(
         "inputs": [str(path) for path in inputs],
         "hardware_threads": hardware_threads,
         "worker_cases": [label for label, _ in worker_cases],
-        "codec_thread_cases": codec_thread_cases,
+        "codec_thread_cases": [label for label, _ in codec_thread_cases],
+        "codec_sweep_worker_cases": [label for label, _ in codec_sweep_worker_cases],
+        "codec_sweep_codec_cases": [label for label, _ in codec_sweep_codec_cases],
         "htj2k_backend": htj2k_backend,
         "converted_cases": [asdict(case) for case in converted_cases],
         "benchmark_results": [asdict(result) for result in benchmark_results],
@@ -599,9 +722,11 @@ def _write_report(
                 "transfer_syntax",
                 "output_path",
                 "frames",
+                "matrix",
                 "worker_threads_requested",
                 "worker_threads_actual",
-                "codec_threads",
+                "codec_threads_requested",
+                "codec_threads_actual",
                 "inner_loops",
                 "median_ms",
                 "mean_ms",
@@ -621,7 +746,9 @@ def _write_report(
         f"- hardware threads: {hardware_threads}",
         "- value: median latency (ms)",
         f"- worker cases: {', '.join(label for label, _ in worker_cases)}",
-        f"- codec thread cases: {', '.join(str(v) for v in codec_thread_cases)}",
+        f"- codec thread cases: {', '.join(label for label, _ in codec_thread_cases)}",
+        f"- codec sweep workers: {', '.join(label for label, _ in codec_sweep_worker_cases)}",
+        f"- codec sweep threads: {', '.join(label for label, _ in codec_sweep_codec_cases)}",
         f"- HTJ2K backend: {htj2k_backend}",
         "",
     ]
@@ -640,6 +767,8 @@ def _write_report(
                 verified,
                 worker_cases,
                 codec_thread_cases,
+                codec_sweep_worker_cases,
+                codec_sweep_codec_cases,
                 htj2k_backend,
             )
         )
@@ -758,7 +887,9 @@ def main(argv: list[str] | None = None) -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
     hardware_threads = os.cpu_count() or 1
     worker_cases = _parse_worker_threads(args.worker_threads, hardware_threads)
-    codec_thread_cases = _parse_codec_threads(args.codec_threads)
+    codec_thread_cases = _parse_codec_threads(args.codec_threads, hardware_threads)
+    codec_sweep_worker_cases = _build_codec_sweep_worker_cases(hardware_threads)
+    codec_sweep_codec_cases = _build_codec_sweep_codec_cases(hardware_threads)
     transfer_syntax_uids = _selected_transfer_syntax_uids(args.transfer_syntaxes)
 
     temp_ctx: tempfile.TemporaryDirectory[str] | None = None
@@ -810,6 +941,8 @@ def main(argv: list[str] | None = None) -> int:
                     case.transfer_syntax,
                     worker_cases,
                     codec_thread_cases,
+                    codec_sweep_worker_cases,
+                    codec_sweep_codec_cases,
                     args.htj2k_backend,
                     warmup=args.warmup,
                     repeat=args.repeat,
@@ -828,6 +961,8 @@ def main(argv: list[str] | None = None) -> int:
             benchmark_results,
             worker_cases,
             codec_thread_cases,
+            codec_sweep_worker_cases,
+            codec_sweep_codec_cases,
             hardware_threads,
             args.htj2k_backend,
         )
