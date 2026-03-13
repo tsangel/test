@@ -604,6 +604,8 @@ def _format_codec_thread_table(
     rows: list[BenchmarkResult],
     worker_order: list[str],
     codec_order: list[str],
+    *,
+    worker_major: bool = False,
 ) -> str:
     by_ts: dict[str, dict[tuple[str, int], BenchmarkResult]] = {}
     for row in rows:
@@ -611,21 +613,38 @@ def _format_codec_thread_table(
             (row.worker_threads_requested, row.codec_threads_requested)
         ] = row
 
-    value_headers = [
-        f"{worker}/{codec_threads}"
-        for codec_threads in codec_order
-        for worker in worker_order
-    ]
+    if worker_major:
+        value_headers = [
+            f"{worker}/{codec_threads}"
+            for worker in worker_order
+            for codec_threads in codec_order
+        ]
+    else:
+        value_headers = [
+            f"{worker}/{codec_threads}"
+            for codec_threads in codec_order
+            for worker in worker_order
+        ]
     data_rows: list[list[str]] = []
     for transfer_syntax in DEFAULT_BENCHMARK_KEYWORDS:
         ts_rows = by_ts.get(transfer_syntax)
         if not ts_rows:
             continue
         values: list[str] = []
-        for codec_threads in codec_order:
+        if worker_major:
             for worker in worker_order:
-                result = ts_rows.get((worker, codec_threads))
-                values.append(f"{result.median_ms:.2f}" if result is not None else "-")
+                for codec_threads in codec_order:
+                    result = ts_rows.get((worker, codec_threads))
+                    values.append(
+                        f"{result.median_ms:.2f}" if result is not None else "-"
+                    )
+        else:
+            for codec_threads in codec_order:
+                for worker in worker_order:
+                    result = ts_rows.get((worker, codec_threads))
+                    values.append(
+                        f"{result.median_ms:.2f}" if result is not None else "-"
+                    )
         data_rows.append([f"`{transfer_syntax}`", *values])
     return _render_markdown_table(["TS", *value_headers], data_rows)
 
@@ -682,6 +701,7 @@ def _format_tables(
                 codec_sweep_rows,
                 codec_sweep_worker_order,
                 codec_sweep_codec_order,
+                worker_major=True,
             )
         )
     return sections
