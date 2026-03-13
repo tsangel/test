@@ -1213,11 +1213,16 @@ struct DecodeOptions {
 	// false: keep codestream component domain (for example, YBR_* domain for JPEG2000 MCT streams).
 	// Note: currently honored by OpenJPEG-based decode paths; other backends may ignore it.
 	bool decode_mct{true};
-	// Decoder thread count hint:
-	//  -1: auto(all CPUs) [default], 0: library default, >0: explicit thread count.
+	// DICOMSDL-managed outer worker count used by batch/multi-work-item decode paths.
+	//  -1: API-specific auto scheduling policy [default], 0/1: disable outer parallelism,
+	//      >1: explicit worker count.
+	// Single-frame decode paths do not currently use this field.
+	int worker_threads{-1};
+	// Codec/backend internal thread count hint forwarded to runtime decoders when supported.
+	//  -1: API-specific/backend-aware auto [default],
+	//      0: library/default sequential, >0: explicit thread count.
 	// Backends may ignore this option when unsupported.
-	// The current OpenJPH HTJ2K decoder accepts the hint but ignores it.
-	int decoder_threads{-1};
+	int codec_threads{-1};
 };
 
 struct DecodeStrides {
@@ -1251,6 +1256,23 @@ struct DecodePlan {
 	ModalityValueTransform modality_value_transform{};
 };
 
+using ExecutionProgressCallback =
+    void (*)(std::size_t completed, std::size_t total, void* user_data) noexcept;
+using ExecutionCancelCallback = bool (*)(void* user_data) noexcept;
+
+struct ExecutionObserver {
+	// Called after successful work units complete.
+	// For decode_all_frames_into(), completed/total are frame counts.
+	// Callbacks may run on worker threads and must be thread-safe and noexcept.
+	ExecutionProgressCallback on_progress{nullptr};
+	// Polled cooperatively before scheduling more work.
+	// Returning true cancels the operation and causes the batch API to throw.
+	ExecutionCancelCallback should_cancel{nullptr};
+	void* user_data{nullptr};
+	// 0/1: notify every completed unit, >1: notify at this interval and on completion.
+	std::size_t notify_every{8};
+};
+
 /// Compute a decode plan for the current pixel metadata snapshot.
 [[nodiscard]] DecodePlan create_decode_plan(const DicomFile& df, const DecodeOptions& opt = {});
 
@@ -1270,6 +1292,21 @@ struct DecodePlan {
 /// mismatched destination layout/size, unsupported decoder binding, or backend decode failure.
 void decode_frame_into(const DicomFile& df, std::size_t frame_index,
     std::span<std::uint8_t> dst, const DecodePlan& plan);
+/// Decode every frame into one caller-provided contiguous output buffer.
+/// `dst.size()` must be at least `plan.strides.frame * plan.info.frames`.
+/// Frames are written in index order, each occupying one `plan.strides.frame` span.
+/// @throws diag::DicomException on invalid decode plan, invalid frame metadata,
+/// mismatched destination layout/size, unsupported decoder binding, or backend decode failure.
+void decode_all_frames_into(
+    const DicomFile& df, std::span<std::uint8_t> dst, const DecodePlan& plan);
+/// Decode every frame into one caller-provided contiguous output buffer.
+/// When `observer` is provided, progress is reported in frames and cancellation
+/// is polled cooperatively while scheduling work.
+/// @throws diag::DicomException on invalid decode plan, invalid frame metadata,
+/// mismatched destination layout/size, unsupported decoder binding, backend decode failure,
+/// or observer-requested cancellation.
+void decode_all_frames_into(const DicomFile& df, std::span<std::uint8_t> dst,
+    const DecodePlan& plan, const ExecutionObserver* observer);
 
 enum class Htj2kDecoderBackend : std::uint8_t {
 	auto_select = 0,
@@ -2015,6 +2052,16 @@ public:
 	/// @throws diag::DicomException under the same conditions as pixel::decode_frame_into().
 	void decode_into(std::span<std::uint8_t> dst, const pixel::DecodePlan& plan) const {
 		pixel::decode_frame_into(*this, 0, dst, plan);
+	}
+	/// @throws diag::DicomException under the same conditions as pixel::decode_all_frames_into().
+	void decode_all_frames_into(std::span<std::uint8_t> dst,
+	    const pixel::DecodePlan& plan) const {
+		pixel::decode_all_frames_into(*this, dst, plan);
+	}
+	/// @throws diag::DicomException under the same conditions as pixel::decode_all_frames_into().
+	void decode_all_frames_into(std::span<std::uint8_t> dst,
+	    const pixel::DecodePlan& plan, const pixel::ExecutionObserver* observer) const {
+		pixel::decode_all_frames_into(*this, dst, plan, observer);
 	}
 	[[nodiscard]] std::vector<std::uint8_t> pixel_data(
 	    std::size_t frame_index, const pixel::DecodePlan& plan) const {

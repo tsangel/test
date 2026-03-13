@@ -73,6 +73,10 @@ if(BUILD_TESTING)
     add_executable(dicomsdl_htj2k_backend_config_smoke
         tests/htj2k_backend_config_smoke.cpp
     )
+    target_include_directories(dicomsdl_htj2k_backend_config_smoke
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
     target_link_libraries(dicomsdl_htj2k_backend_config_smoke PRIVATE dicomsdl)
     add_test(NAME htj2k_backend_config_smoke COMMAND dicomsdl_htj2k_backend_config_smoke)
     set_tests_properties(htj2k_backend_config_smoke PROPERTIES LABELS "dicomsdl")
@@ -128,6 +132,13 @@ if(BUILD_TESTING)
     target_link_libraries(dicomsdl_codec_error_boundary PRIVATE dicomsdl)
     add_test(NAME codec_error_boundary COMMAND dicomsdl_codec_error_boundary)
     set_tests_properties(codec_error_boundary PROPERTIES LABELS "dicomsdl")
+
+    add_executable(dicomsdl_decode_execution_observer_smoke
+        tests/decode_execution_observer_smoke.cpp
+    )
+    target_link_libraries(dicomsdl_decode_execution_observer_smoke PRIVATE dicomsdl)
+    add_test(NAME decode_execution_observer_smoke COMMAND dicomsdl_decode_execution_observer_smoke)
+    set_tests_properties(decode_execution_observer_smoke PROPERTIES LABELS "dicomsdl")
 
     add_executable(dicomsdl_codec_cycle_realdata
         tests/codec_cycle_realdata.cpp
@@ -257,6 +268,7 @@ if(BUILD_TESTING)
         dicomsdl_dataset_ordering_regression
         dicomsdl_codec_cycle_roundtrip
         dicomsdl_codec_error_boundary
+        dicomsdl_decode_execution_observer_smoke
         dicomsdl_codec_cycle_realdata
         dicomsdl_pixel_core_uncompressed_smoke
         dicomsdl_pixel_rle_static_plugin_smoke
@@ -286,6 +298,7 @@ if(BUILD_TESTING)
             dicomsdl_dataset_ordering_regression
             dicomsdl_codec_cycle_roundtrip
             dicomsdl_codec_error_boundary
+            dicomsdl_decode_execution_observer_smoke
             dicomsdl_pixel_core_uncompressed_smoke
             dicomsdl_pixel_rle_static_plugin_smoke
             dicomsdl_pixel_jpeg_plugin_smoke

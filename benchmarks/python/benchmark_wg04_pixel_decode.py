@@ -56,6 +56,7 @@ _RAW_BEST_CODEC = "REF"
 _RAW_BEST_DICOMSDL_MODE = "to_array_view_copyto"
 _RAW_BEST_PYDICOM_MODE = "reuse_output"
 _J2K_CODECS: tuple[str, ...] = ("J2KR", "J2KI")
+_LEGACY_INTERNAL_THREAD_CODECS: tuple[str, ...] = ("J2KR", "J2KI", "htj2kll", "htj2kly")
 
 
 def _is_htj2k_codec(codec: str) -> bool:
@@ -294,6 +295,20 @@ def _prepare_dicomsdl_view_copyto_context(
     return DicomsdlViewCopytoContext(outputs=outputs, use_view=use_view, copyto=np.copyto)
 
 
+def _legacy_decode_into_thread_kwargs(codec: str, decoder_threads: int) -> dict[str, int]:
+    # Preserve the historical WG04 benchmark thread hint semantics after the
+    # public API split into worker_threads + codec_threads.
+    if codec in _LEGACY_INTERNAL_THREAD_CODECS:
+        return {
+            "worker_threads": 1,
+            "codec_threads": decoder_threads,
+        }
+    return {
+        "worker_threads": decoder_threads,
+        "codec_threads": 0,
+    }
+
+
 def _benchmark_codec(
     backend: str,
     codec: str,
@@ -316,6 +331,7 @@ def _benchmark_codec(
             backend,
             scaled=scaled,
         )
+    decode_into_thread_kwargs = _legacy_decode_into_thread_kwargs(codec, decoder_threads)
     if backend == "dicomsdl" and dicomsdl_mode == "to_array_view_copyto":
         dicomsdl_view_copyto = _prepare_dicomsdl_view_copyto_context(inputs, scaled=scaled)
         fallback_count = sum(1 for enabled in dicomsdl_view_copyto.use_view if not enabled)
@@ -341,7 +357,7 @@ def _benchmark_codec(
                         reusable_outputs[index],
                         frame=-1,
                         scaled=scaled,
-                        threads=decoder_threads,
+                        **decode_into_thread_kwargs,
                     )
                 elif dicomsdl_mode == "to_array_view_copyto" and dicomsdl_view_copyto is not None:
                     if dicomsdl_view_copyto.use_view[index]:
@@ -353,7 +369,7 @@ def _benchmark_codec(
                             dicomsdl_view_copyto.outputs[index],
                             frame=-1,
                             scaled=scaled,
-                            threads=decoder_threads,
+                            **decode_into_thread_kwargs,
                         )
                 elif dicomsdl_mode == "to_array_view":
                     _ = ds.to_array_view(frame=-1)
@@ -384,7 +400,7 @@ def _benchmark_codec(
                         reusable_outputs[index],
                         frame=-1,
                         scaled=scaled,
-                        threads=decoder_threads,
+                        **decode_into_thread_kwargs,
                     )
                 elif dicomsdl_mode == "to_array_view_copyto" and dicomsdl_view_copyto is not None:
                     if dicomsdl_view_copyto.use_view[index]:
@@ -396,7 +412,7 @@ def _benchmark_codec(
                             dicomsdl_view_copyto.outputs[index],
                             frame=-1,
                             scaled=scaled,
-                            threads=decoder_threads,
+                            **decode_into_thread_kwargs,
                         )
                     arr = dicomsdl_view_copyto.outputs[index]
                 elif dicomsdl_mode == "to_array_view":
@@ -472,14 +488,14 @@ def _print_backend_report(
         mode_display = "mixed(" + ", ".join(mode_set) + ")"
     print(f"decode mode: {mode_display}")
     if backend == "dicomsdl" and mode in ("decode_into", "to_array_view_copyto"):
-        print("decode_into threads hint: -1 (all CPUs)")
+        print("decode_into legacy thread hint: -1")
     if backend == "dicomsdl" and mode == "to_array":
         j2k_forced = sorted(
             row.codec for row in stats if row.codec in _J2K_CODECS and row.mode == "decode_into"
         )
         if j2k_forced:
             print(
-                "note: base table forces J2K codecs to decode_into(..., threads=-1): "
+                "note: base table forces J2K codecs to decode_into with legacy thread hint -1: "
                 + ", ".join(j2k_forced)
             )
     print(
@@ -726,7 +742,7 @@ def _print_j2k_multicpu_report(
         return
 
     print("\n== dicomsdl J2K Multi-CPU ==")
-    print(f"mode: decode_into, threads={threads}")
+    print(f"mode: decode_into, legacy thread hint={threads}")
     print(
         f"{'Codec':<8} {'Files':>5} {'Decodes':>8} {'Time(s)':>9} "
         f"{'ms/decode':>10} {'MPix/s':>10} {'MiB/s':>10} Label"
@@ -801,7 +817,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help=(
             "Backward-compatible alias for --dicomsdl-mode=decode_into. "
-            "Uses decode_into(..., threads=-1) by default. "
+            "Uses the legacy decode thread hint -1 by default. "
             "Ignored for non-dicomsdl backends."
         ),
     )
@@ -837,7 +853,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         "--include-j2k-multicpu",
         action="store_true",
         help=(
-            "Add extra dicomsdl J2K rows using decode_into(..., threads=-1), "
+            "Add extra dicomsdl J2K rows using decode_into with the legacy thread hint, "
             "reported separately from the base table."
         ),
     )
@@ -845,7 +861,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         "--j2k-multicpu-threads",
         type=int,
         default=-1,
-        help="Thread count hint for --include-j2k-multicpu (-1: all CPUs).",
+        help="Legacy decode thread hint for --include-j2k-multicpu (-1: all CPUs).",
     )
     parser.add_argument("--json", dest="json_path", type=Path, help="Write benchmark report to JSON.")
     parser.add_argument("--verbose", "-v", action="store_true", help="Print per-file decode details.")
@@ -1103,7 +1119,7 @@ def main(argv: list[str]) -> int:
             mt_row.codec = f"{codec}_MT"
             mt_row.label = (
                 f"{_CODEC_LABEL.get(codec, codec)} "
-                f"(decode_into, threads={args.j2k_multicpu_threads})"
+                f"(decode_into, legacy thread hint={args.j2k_multicpu_threads})"
             )
             j2k_multicpu_stats.append(mt_row)
 

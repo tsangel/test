@@ -28,6 +28,9 @@ __all__ = [
     "set_default_reporter",
     "set_thread_reporter",
     "set_log_level",
+    "Planar",
+    "DecodeOptions",
+    "DecodePlan",
     "EncoderContext",
     "create_encoder_context",
     "DicomFile",
@@ -76,6 +79,11 @@ class LogLevel(enum.Enum):
     Error = ...
 
 
+class Planar(enum.Enum):
+    interleaved = ...
+    planar = ...
+
+
 class Reporter: ...
 
 
@@ -99,6 +107,78 @@ def set_log_level(level: LogLevel, /) -> None: ...
 def log_info(message: str, /) -> None: ...
 def log_warn(message: str, /) -> None: ...
 def log_error(message: str, /) -> None: ...
+
+
+class DecodeOptions:
+    def __init__(
+        self,
+        *,
+        planar_out: Planar = ...,
+        alignment: int = ...,
+        to_modality_value: bool = ...,
+        decode_mct: bool = ...,
+        worker_threads: int = ...,
+        codec_threads: int = ...,
+    ) -> None: ...
+
+    @property
+    def planar_out(self) -> Planar: ...
+    @planar_out.setter
+    def planar_out(self, value: Planar) -> None: ...
+
+    @property
+    def alignment(self) -> int: ...
+    @alignment.setter
+    def alignment(self, value: int) -> None: ...
+
+    @property
+    def to_modality_value(self) -> bool: ...
+    @to_modality_value.setter
+    def to_modality_value(self, value: bool) -> None: ...
+
+    @property
+    def decode_mct(self) -> bool: ...
+    @decode_mct.setter
+    def decode_mct(self, value: bool) -> None: ...
+
+    @property
+    def worker_threads(self) -> int: ...
+    @worker_threads.setter
+    def worker_threads(self, value: int) -> None: ...
+
+    @property
+    def codec_threads(self) -> int: ...
+    @codec_threads.setter
+    def codec_threads(self, value: int) -> None: ...
+
+
+class DecodePlan:
+    @property
+    def options(self) -> DecodeOptions: ...
+    @property
+    def transfer_syntax_uid(self) -> Optional[Uid]: ...
+    @property
+    def has_pixel_data(self) -> bool: ...
+    @property
+    def rows(self) -> int: ...
+    @property
+    def cols(self) -> int: ...
+    @property
+    def frames(self) -> int: ...
+    @property
+    def samples_per_pixel(self) -> int: ...
+    @property
+    def bits_stored(self) -> int: ...
+    @property
+    def row_stride(self) -> int: ...
+    @property
+    def frame_stride(self) -> int: ...
+    @property
+    def dtype(self) -> Any: ...
+    @property
+    def bytes_per_sample(self) -> int: ...
+    def shape(self, frame: int = ...) -> tuple[int, ...]: ...
+    def required_bytes(self, frame: int = ...) -> int: ...
 
 
 class EncoderContext:
@@ -144,6 +224,11 @@ class DicomFile:
 
     @property
     def error_message(self) -> Optional[str]: ...
+
+    @overload
+    def create_decode_plan(self) -> DecodePlan: ...
+    @overload
+    def create_decode_plan(self, options: DecodeOptions, /) -> DecodePlan: ...
 
     def __len__(self) -> int: ...
     def __iter__(self) -> DataElementIterator: ...
@@ -225,6 +310,10 @@ class DicomFile:
         to_modality_value: bool = ...,
         decode_mct: bool = ...,
         scaled: bool | None = ...,
+        *,
+        worker_threads: int = ...,
+        codec_threads: int = ...,
+        plan: DecodePlan | None = ...,
     ) -> Any: ...
     def to_array_view(self, frame: int = ...) -> Any: ...
     def decode_into(
@@ -232,9 +321,12 @@ class DicomFile:
         out: Any,
         frame: int = ...,
         to_modality_value: bool = ...,
-        threads: int = ...,
         decode_mct: bool = ...,
         scaled: bool | None = ...,
+        *,
+        worker_threads: int = ...,
+        codec_threads: int = ...,
+        plan: DecodePlan | None = ...,
     ) -> Any: ...
     def pixel_array(
         self,
@@ -242,6 +334,10 @@ class DicomFile:
         to_modality_value: bool = ...,
         decode_mct: bool = ...,
         scaled: bool | None = ...,
+        *,
+        worker_threads: int = ...,
+        codec_threads: int = ...,
+        plan: DecodePlan | None = ...,
     ) -> Any: ...
     def to_pil_image(
         self,

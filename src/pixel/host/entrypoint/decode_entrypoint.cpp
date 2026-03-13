@@ -27,6 +27,16 @@ void decode_frame_into(const DicomFile& df, std::size_t frame_index,
 	detail::dispatch_decode_frame(df, frame_index, dst, plan);
 }
 
+void decode_all_frames_into(
+    const DicomFile& df, std::span<std::uint8_t> dst, const DecodePlan& plan) {
+	detail::dispatch_decode_all_frames(df, dst, plan);
+}
+
+void decode_all_frames_into(const DicomFile& df, std::span<std::uint8_t> dst,
+    const DecodePlan& plan, const ExecutionObserver* observer) {
+	detail::dispatch_decode_all_frames(df, dst, plan, observer);
+}
+
 } // namespace pixel
 
 } // namespace dicom

@@ -27,4 +27,8 @@ if(DICOM_BUILD_PYTHON)
         ${CMAKE_CURRENT_SOURCE_DIR}/src
     )
     target_link_libraries(_dicomsdl PRIVATE dicomsdl fmt::fmt-header-only)
+    dicomsdl_apply_pixel_static_plugin_defines(_dicomsdl)
+    if(DICOMSDL_PIXEL_RUNTIME)
+        target_compile_definitions(_dicomsdl PRIVATE DICOMSDL_PIXEL_RUNTIME_ENABLED=1)
+    endif()
 endif()

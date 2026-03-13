@@ -14,6 +14,7 @@ enum class CodecStatusCode : std::uint8_t {
 	invalid_argument,
 	unsupported,
 	backend_error,
+	cancelled,
 	internal_error,
 };
 

@@ -15,16 +15,55 @@
 #include <cstring>
 #include <cstdint>
 #include <cstdio>
+#include <atomic>
 #include <exception>
 #include <limits>
+#include <mutex>
 #include <new>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace dicom::pixel::detail {
 
 namespace {
+
+#if defined(DICOMSDL_PIXEL_RUNTIME_ENABLED)
+[[nodiscard]] const ::pixel::runtime_v2::BindingRegistryV2* get_runtime_registry();
+#endif
+
+struct EffectiveExecutionThreadSettings {
+	std::size_t worker_count{1};
+	int codec_threads{1};
+};
+
+[[nodiscard]] std::size_t resolve_hardware_thread_count() noexcept {
+	const unsigned int hw_threads = std::thread::hardware_concurrency();
+	return hw_threads == 0u ? std::size_t{1}
+	                        : static_cast<std::size_t>(hw_threads);
+}
+
+void validate_decode_thread_options_or_throw(
+    const DicomFile& df, std::size_t frame_index, const DecodePlan& plan,
+    std::string_view api_name) {
+	if (plan.options.worker_threads < -1) {
+		throw_codec_error_with_context(api_name, df.path(), plan.info.ts, frame_index,
+		    CodecError{
+		        .code = CodecStatusCode::invalid_argument,
+		        .stage = "validate_plan",
+		        .detail = "worker_threads must be -1, 0, or positive",
+		    });
+	}
+	if (plan.options.codec_threads < -1) {
+		throw_codec_error_with_context(api_name, df.path(), plan.info.ts, frame_index,
+		    CodecError{
+		        .code = CodecStatusCode::invalid_argument,
+		        .stage = "validate_plan",
+		        .detail = "codec_threads must be -1, 0, or positive",
+		    });
+	}
+}
 
 void validate_decode_plan_or_throw(
     const DicomFile& df, std::size_t frame_index, const DecodePlan& plan) {
@@ -39,6 +78,175 @@ void validate_decode_plan_or_throw(
 		        .detail = "decode plan is not initialized; call create_decode_plan()",
 		    });
 	}
+	validate_decode_thread_options_or_throw(
+	    df, frame_index, plan, "pixel::decode_frame_into");
+}
+
+void validate_decode_all_frames_request_or_throw(
+    const DicomFile& df, std::span<std::uint8_t> dst, const DecodePlan& plan) {
+	if (!plan.info.ts.valid() || plan.strides.frame == 0) {
+		const auto transfer_syntax =
+		    plan.info.ts.valid() ? plan.info.ts : df.transfer_syntax_uid();
+		throw_codec_error_with_context("pixel::decode_all_frames_into", df.path(),
+		    transfer_syntax, 0,
+		    CodecError{
+		        .code = CodecStatusCode::invalid_argument,
+		        .stage = "validate_plan",
+		        .detail = "decode plan is not initialized; call create_decode_plan()",
+		    });
+	}
+	validate_decode_thread_options_or_throw(
+	    df, 0, plan, "pixel::decode_all_frames_into");
+	if (plan.info.frames <= 0) {
+		throw_codec_error_with_context("pixel::decode_all_frames_into", df.path(),
+		    plan.info.ts, 0,
+		    CodecError{
+		        .code = CodecStatusCode::invalid_argument,
+		        .stage = "validate_plan",
+		        .detail = "decode plan does not describe any frames",
+		    });
+	}
+
+	const auto frames = static_cast<std::size_t>(plan.info.frames);
+	if (plan.strides.frame > (std::numeric_limits<std::size_t>::max() / frames)) {
+		throw_codec_error_with_context("pixel::decode_all_frames_into", df.path(),
+		    plan.info.ts, 0,
+		    CodecError{
+		        .code = CodecStatusCode::invalid_argument,
+		        .stage = "validate_dst",
+		        .detail = "decoded output size overflow for all frames",
+		    });
+	}
+
+	const auto required_bytes = plan.strides.frame * frames;
+	if (dst.size() < required_bytes) {
+		throw_codec_error_with_context("pixel::decode_all_frames_into", df.path(),
+		    plan.info.ts, 0,
+		    CodecError{
+		        .code = CodecStatusCode::invalid_argument,
+		        .stage = "validate_dst",
+		        .detail = "destination buffer is smaller than required decoded size",
+		    });
+	}
+}
+
+[[nodiscard]] bool should_cancel_execution(
+    const ExecutionObserver* observer) noexcept {
+	return observer != nullptr && observer->should_cancel != nullptr &&
+	       observer->should_cancel(observer->user_data);
+}
+
+[[nodiscard]] std::size_t resolve_execution_notify_every(
+    const ExecutionObserver* observer) noexcept {
+	if (observer == nullptr) {
+		return std::size_t{0};
+	}
+	return observer->notify_every <= std::size_t{1} ? std::size_t{1}
+	                                                : observer->notify_every;
+}
+
+[[noreturn]] void throw_decode_all_frames_cancelled(const DicomFile& df,
+    const DecodePlan& plan, std::size_t completed, std::size_t total) {
+	throw_codec_error_with_context("pixel::decode_all_frames_into", df.path(),
+	    plan.info.ts, std::nullopt,
+	    CodecError{
+	        .code = CodecStatusCode::cancelled,
+	        .stage = "cancel",
+	        .detail = "decode cancelled by observer after " +
+	            std::to_string(completed) + " of " + std::to_string(total) +
+	            " frames",
+	    });
+}
+
+[[nodiscard]] int resolve_auto_codec_thread_cap(
+    uid::WellKnown transfer_syntax) noexcept {
+	if (transfer_syntax.is_jpeg2000()) {
+		return 8;
+	}
+	if (transfer_syntax.is_jpegxl()) {
+		return 4;
+	}
+	if (!transfer_syntax.is_htj2k()) {
+		return 1;
+	}
+
+#if defined(DICOMSDL_PIXEL_RUNTIME_ENABLED)
+	const auto* registry = get_runtime_registry();
+	if (registry != nullptr) {
+		uint32_t codec_profile_code = PIXEL_CODEC_PROFILE_UNKNOWN_V2;
+		if (::pixel::runtime_v2::codec_profile_code_from_transfer_syntax(
+		        transfer_syntax, &codec_profile_code)) {
+			const auto* binding = registry->find_decoder_binding(codec_profile_code);
+			if (binding != nullptr && binding->display_name != nullptr) {
+				const std::string_view display_name{binding->display_name};
+				if (display_name.find("OpenJPEG") != std::string_view::npos) {
+					return 8;
+				}
+				if (display_name.find("HTJ2K") != std::string_view::npos) {
+					return 1;
+				}
+			}
+		}
+	}
+#endif
+
+	return get_htj2k_decoder_backend() == Htj2kDecoderBackend::openjpeg ? 8 : 1;
+}
+
+[[nodiscard]] EffectiveExecutionThreadSettings resolve_decode_frame_thread_settings(
+    const DecodePlan& plan) noexcept {
+	const int codec_cap = resolve_auto_codec_thread_cap(plan.info.ts);
+	const int codec_threads =
+	    plan.options.codec_threads == -1 ? codec_cap : plan.options.codec_threads;
+	return EffectiveExecutionThreadSettings{
+	    .worker_count = std::size_t{1},
+	    .codec_threads = codec_threads,
+	};
+}
+
+[[nodiscard]] EffectiveExecutionThreadSettings resolve_decode_all_frames_thread_settings(
+    const DecodePlan& plan) noexcept {
+	const auto frames =
+	    plan.info.frames > 0 ? static_cast<std::size_t>(plan.info.frames) : std::size_t{1};
+	const auto hardware_threads = resolve_hardware_thread_count();
+
+	std::size_t worker_count = std::size_t{1};
+	if (frames > std::size_t{1}) {
+		if (plan.options.worker_threads == -1) {
+			worker_count = (frames < hardware_threads) ? frames : hardware_threads;
+		} else if (plan.options.worker_threads > 1) {
+			worker_count = static_cast<std::size_t>(plan.options.worker_threads);
+			if (worker_count > frames) {
+				worker_count = frames;
+			}
+		}
+	}
+
+	const int codec_cap = resolve_auto_codec_thread_cap(plan.info.ts);
+	int codec_threads = plan.options.codec_threads;
+	if (codec_threads == -1) {
+		if (worker_count >= std::size_t{4}) {
+			codec_threads = 1;
+		} else {
+			std::size_t budget = hardware_threads;
+			if (worker_count > std::size_t{1}) {
+				budget /= worker_count;
+			}
+			if (budget == std::size_t{0}) {
+				budget = std::size_t{1};
+			}
+			const auto capped_budget = static_cast<std::size_t>(codec_cap);
+			if (budget > capped_budget) {
+				budget = capped_budget;
+			}
+			codec_threads = static_cast<int>(budget);
+		}
+	}
+
+	return EffectiveExecutionThreadSettings{
+	    .worker_count = worker_count,
+	    .codec_threads = codec_threads,
+	};
 }
 
 } // namespace
@@ -55,7 +263,7 @@ struct DecoderContextCache {
 	const ::pixel::runtime_v2::BindingRegistryV2* registry{nullptr};
 	std::uint64_t registry_generation{0};
 	std::uint32_t transfer_syntax_index{0};
-	int thread_option{kNoThreadOption};
+	int codec_thread_option{kNoThreadOption};
 	bool configured{false};
 
 	DecoderContextCache() = default;
@@ -376,7 +584,8 @@ void parse_runtime_detail_or_default(
 
 // Try the runtime-backed decode path and return false only when no runtime registry is present.
 [[nodiscard]] bool try_decode_frame_with_runtime(const DicomFile& df,
-    std::size_t frame_index, std::span<std::uint8_t> dst, const DecodePlan& plan) {
+    std::size_t frame_index, std::span<std::uint8_t> dst, const DecodePlan& plan,
+    int codec_threads_override) {
 	const auto& info = plan.info;
 	const auto* registry = get_runtime_registry();
 	const auto registry_generation = get_runtime_registry_generation();
@@ -393,11 +602,11 @@ void parse_runtime_detail_or_default(
 	pixel_option_kv_v2 option_item{};
 	pixel_option_list_v2 option_list{};
 	char threads_text[32]{};
-	int thread_option = kNoThreadOption;
-	if (info.ts.is_jpeg2000() || info.ts.is_jpegxl()) {
-		thread_option = plan.options.decoder_threads;
-		std::snprintf(threads_text, sizeof(threads_text), "%d",
-		    plan.options.decoder_threads);
+	int codec_thread_option = kNoThreadOption;
+	if (info.ts.is_jpeg2000() || info.ts.is_htj2k() || info.ts.is_jpegxl()) {
+		codec_thread_option = codec_threads_override;
+		std::snprintf(
+		    threads_text, sizeof(threads_text), "%d", codec_threads_override);
 		option_item.key = "threads";
 		option_item.value = threads_text;
 		option_list.items = &option_item;
@@ -411,7 +620,7 @@ void parse_runtime_detail_or_default(
 	if (cache.configured && cache.registry == registry &&
 	    cache.registry_generation == registry_generation &&
 	    cache.transfer_syntax_index == transfer_syntax_index &&
-	    cache.thread_option == thread_option) {
+	    cache.codec_thread_option == codec_thread_option) {
 		needs_configure = false;
 	}
 
@@ -444,7 +653,7 @@ void parse_runtime_detail_or_default(
 		cache.registry = registry;
 		cache.registry_generation = registry_generation;
 		cache.transfer_syntax_index = transfer_syntax_index;
-		cache.thread_option = thread_option;
+		cache.codec_thread_option = codec_thread_option;
 	}
 
 	// Load the frame source and convert the plan transform to the host ABI form.
@@ -631,9 +840,9 @@ void parse_runtime_detail_or_default(
 }  // namespace
 #endif
 
-// Dispatch one frame decode through the runtime path or fail with a stable unsupported error.
-void dispatch_decode_frame(const DicomFile& df, std::size_t frame_index,
-    std::span<std::uint8_t> dst, const DecodePlan& plan) {
+void dispatch_decode_frame_with_codec_threads(const DicomFile& df,
+    std::size_t frame_index, std::span<std::uint8_t> dst, const DecodePlan& plan,
+    int codec_threads) {
 	validate_decode_plan_or_throw(df, frame_index, plan);
 #if defined(DICOMSDL_PIXEL_RUNTIME_ENABLED)
 	// Try the narrow builtin hot paths first before paying the full runtime
@@ -643,7 +852,8 @@ void dispatch_decode_frame(const DicomFile& df, std::size_t frame_index,
 		return;
 	}
 	// Prefer the runtime-backed path when that subsystem is compiled in and initialized.
-	if (try_decode_frame_with_runtime(df, frame_index, dst, plan)) {
+	if (try_decode_frame_with_runtime(
+	        df, frame_index, dst, plan, codec_threads)) {
 		return;
 	}
 #endif
@@ -655,6 +865,108 @@ void dispatch_decode_frame(const DicomFile& df, std::size_t frame_index,
 	decode_error.detail = "runtime registry is not available";
 	throw_codec_error_with_context("pixel::decode_frame_into", df.path(),
 	    plan.info.ts, frame_index, decode_error);
+}
+
+// Dispatch one frame decode through the runtime path or fail with a stable unsupported error.
+void dispatch_decode_frame(const DicomFile& df, std::size_t frame_index,
+    std::span<std::uint8_t> dst, const DecodePlan& plan) {
+	const auto settings = resolve_decode_frame_thread_settings(plan);
+	dispatch_decode_frame_with_codec_threads(
+	    df, frame_index, dst, plan, settings.codec_threads);
+}
+
+void dispatch_decode_all_frames(
+    const DicomFile& df, std::span<std::uint8_t> dst, const DecodePlan& plan) {
+	dispatch_decode_all_frames(df, dst, plan, nullptr);
+}
+
+void dispatch_decode_all_frames(const DicomFile& df,
+    std::span<std::uint8_t> dst, const DecodePlan& plan,
+    const ExecutionObserver* observer) {
+	validate_decode_all_frames_request_or_throw(df, dst, plan);
+	const auto frames = static_cast<std::size_t>(plan.info.frames);
+	const auto settings = resolve_decode_all_frames_thread_settings(plan);
+	const auto worker_count = settings.worker_count;
+	const auto notify_every = resolve_execution_notify_every(observer);
+	if (should_cancel_execution(observer)) {
+		throw_decode_all_frames_cancelled(df, plan, 0, frames);
+	}
+
+	std::atomic<std::size_t> next_frame{0};
+	std::atomic<std::size_t> completed_frames{0};
+	std::atomic<bool> stop{false};
+	std::atomic<bool> cancelled{false};
+	std::mutex error_mutex{};
+	std::mutex progress_mutex{};
+	std::exception_ptr first_error{};
+
+	const auto notify_progress = [&](std::size_t completed) {
+		if (observer == nullptr || observer->on_progress == nullptr ||
+		    notify_every == std::size_t{0}) {
+			return;
+		}
+		if (completed != frames &&
+		    (completed % notify_every) != std::size_t{0}) {
+			return;
+		}
+		std::lock_guard<std::mutex> lock(progress_mutex);
+		observer->on_progress(completed, frames, observer->user_data);
+	};
+
+	const auto worker = [&]() {
+		while (!stop.load(std::memory_order_acquire)) {
+			if (should_cancel_execution(observer)) {
+				cancelled.store(true, std::memory_order_release);
+				stop.store(true, std::memory_order_release);
+				return;
+			}
+			const auto frame_index = next_frame.fetch_add(1, std::memory_order_relaxed);
+			if (frame_index >= frames) {
+				return;
+			}
+			auto frame_dst = dst.subspan(frame_index * plan.strides.frame, plan.strides.frame);
+			try {
+				dispatch_decode_frame_with_codec_threads(
+				    df, frame_index, frame_dst, plan, settings.codec_threads);
+			} catch (...) {
+				{
+					std::lock_guard<std::mutex> lock(error_mutex);
+					if (!first_error) {
+						first_error = std::current_exception();
+					}
+				}
+				stop.store(true, std::memory_order_release);
+				return;
+			}
+			const auto completed =
+			    completed_frames.fetch_add(1, std::memory_order_acq_rel) + 1;
+			notify_progress(completed);
+		}
+	};
+
+	if (worker_count <= std::size_t{1}) {
+		worker();
+	} else {
+		std::vector<std::thread> workers{};
+		workers.reserve(worker_count - 1);
+		for (std::size_t i = 1; i < worker_count; ++i) {
+			workers.emplace_back(worker);
+		}
+		worker();
+		for (auto& thread : workers) {
+			thread.join();
+		}
+	}
+	if (first_error) {
+		std::rethrow_exception(first_error);
+	}
+	const auto completed = completed_frames.load(std::memory_order_acquire);
+	if (completed == frames) {
+		return;
+	}
+	if (cancelled.load(std::memory_order_acquire)) {
+		throw_decode_all_frames_cancelled(df, plan, completed, frames);
+	}
 }
 
 } // namespace dicom::pixel::detail

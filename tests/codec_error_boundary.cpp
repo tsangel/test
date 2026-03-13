@@ -284,7 +284,7 @@ int main() {
 		df.set_encoded_pixel_frame(0, std::vector<std::uint8_t>{0x00, 0x01, 0x02, 0x03});
 
 		auto decode_opt = dicom::pixel::DecodeOptions{};
-		decode_opt.decoder_threads = -2;
+		decode_opt.codec_threads = -2;
 		const auto plan = df.create_decode_plan(decode_opt);
 		std::vector<std::uint8_t> dst(plan.strides.frame, std::uint8_t{0});
 		try {
