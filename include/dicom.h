@@ -1331,6 +1331,8 @@ enum class Htj2kDecoderBackend : std::uint8_t {
 
 /// Register external codec plugin(s) from a shared library.
 /// The library may export decoder and/or encoder plugin API symbols.
+/// External loadable plugins are supported only when shipped with the same
+/// dicomsdl runtime release; mixed-version host/plugin deployment is not supported.
 [[nodiscard]] bool register_external_codec_plugin_from_library(
     std::string_view library_path, std::string* out_error = nullptr);
 
@@ -1960,6 +1962,9 @@ public:
 	/// written with an empty Basic Offset Table and without ExtendedOffsetTable attributes.
 	/// For lossy encapsulated targets on non-seekable output streams, the writer still performs
 	/// a prepass encode to compute LossyImageCompressionRatio, so those writes remain two-pass.
+	/// For large pixel payloads where the goal is an output file/stream, prefer this API over
+	/// `set_transfer_syntax(...)` so the target encapsulated PixelData does not need to remain
+	/// materialized inside the in-memory DicomFile object.
 	void write_with_transfer_syntax(std::ostream& os, uid::WellKnown transfer_syntax,
 	    const WriteOptions& options = {});
 	void write_with_transfer_syntax(std::ostream& os, uid::WellKnown transfer_syntax,
@@ -2014,6 +2019,9 @@ public:
 	/// This updates both runtime parse/write state and file meta information.
 	/// For encapsulated PixelData, encapsulated->encapsulated conversion is handled as
 	/// decode-to-native + re-encode when the target transfer syntax supports pixel encode.
+	/// This API mutates the in-memory DicomFile and keeps the resulting target PixelData on the
+	/// object. For large files whose end goal is serialization, prefer
+	/// `write_with_transfer_syntax(...)`.
 	void set_transfer_syntax(uid::WellKnown transfer_syntax);
 	void set_transfer_syntax(uid::WellKnown transfer_syntax,
 	    const pixel::EncoderContext& encoder_ctx);

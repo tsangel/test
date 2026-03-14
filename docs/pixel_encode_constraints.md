@@ -217,6 +217,10 @@ Current behavior:
 - native -> encapsulated: supported only when target transfer syntax is encode-capable
 - encapsulated -> native: supported (decode to native)
 - encapsulated -> encapsulated: supported when target transfer syntax is encode-capable
+- `set_transfer_syntax(...)` mutates the in-memory `DicomFile` and retains the target
+  PixelData on the object
+- for large pixel payloads whose end goal is writing a file/stream, prefer
+  `write_with_transfer_syntax(...)` over `set_transfer_syntax(...) + write_file(...)`
 
 `encapsulated -> encapsulated` is implemented as decode-to-native + re-encode in a single
 `set_transfer_syntax(...)` call (not codestream pass-through).

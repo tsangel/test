@@ -80,3 +80,9 @@
 1. uncompressed 경로는 copy/pack 중심 경량 처리이므로 plugin ABI request 조립/검증/간접호출 오버헤드를 피하기 위해 core 직통을 기본으로 한다.
 2. `RLE_LOSSLESS`는 static 링크로 유지하여 동적 로딩(dlopen/LoadLibrary) 오버헤드는 없애고, API 테이블 기반 디스패치 비용만 허용한다.
 3. 압축 코덱(shared plugin)의 호출 오버헤드는 codec 처리 비용 대비 미미하므로 분리/확장성을 우선한다.
+
+## 11. Loadable Plugin Deployment Policy
+
+1. external loadable plugin은 host runtime과 같은 dicomsdl release set으로만 배포/지원한다.
+2. mixed-version host/plugin 조합은 지원 대상이 아니다.
+3. 같은 ABI major를 유지하더라도 독립 업그레이드 호환성을 보장하지 않는다.
