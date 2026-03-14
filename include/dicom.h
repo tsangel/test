@@ -1958,6 +1958,8 @@ public:
 	/// ExtendedOffsetTable / ExtendedOffsetTableLengths for the streamed frames.
 	/// When `os` is not seekable, the streamed encapsulated output remains valid DICOM but is
 	/// written with an empty Basic Offset Table and without ExtendedOffsetTable attributes.
+	/// For lossy encapsulated targets on non-seekable output streams, the writer still performs
+	/// a prepass encode to compute LossyImageCompressionRatio, so those writes remain two-pass.
 	void write_with_transfer_syntax(std::ostream& os, uid::WellKnown transfer_syntax,
 	    const WriteOptions& options = {});
 	void write_with_transfer_syntax(std::ostream& os, uid::WellKnown transfer_syntax,

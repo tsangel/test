@@ -18,4 +18,10 @@ if(DICOM_BUILD_BENCHMARKS)
     )
     target_link_libraries(dicomsdl_read_all_dcm PRIVATE dicomsdl)
     target_compile_features(dicomsdl_read_all_dcm PRIVATE cxx_std_20)
+
+    add_executable(dicomsdl_streaming_write_stress
+        benchmarks/streaming_write_stress.cpp
+    )
+    target_link_libraries(dicomsdl_streaming_write_stress PRIVATE dicomsdl)
+    target_compile_features(dicomsdl_streaming_write_stress PRIVATE cxx_std_20)
 endif()

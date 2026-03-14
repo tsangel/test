@@ -220,3 +220,27 @@ Current behavior:
 
 `encapsulated -> encapsulated` is implemented as decode-to-native + re-encode in a single
 `set_transfer_syntax(...)` call (not codestream pass-through).
+
+## `write_with_transfer_syntax` Streaming Write Caveats
+
+Current behavior:
+
+- seekable output (`std::ofstream`, `std::stringstream`, file-path overload):
+  - encapsulated streaming write can backpatch `ExtendedOffsetTable` /
+    `ExtendedOffsetTableLengths`
+  - lossy encapsulated targets can backpatch `LossyImageCompressionRatio`
+  - seekable lossy encapsulated writes are therefore one-pass at the encode stage
+- non-seekable output (`stdout`, pipes, sockets, forwarding streambufs):
+  - encapsulated streaming write stays valid DICOM
+  - output uses an empty Basic Offset Table and omits `ExtendedOffsetTable` attributes
+  - lossy encapsulated targets still require a prepass encode to compute
+    `LossyImageCompressionRatio`, so those writes remain two-pass
+
+Benchmark/stress coverage:
+
+- `benchmarks/streaming_write_stress.cpp`
+  - build with `-DDICOM_BUILD_BENCHMARKS=ON`
+  - generates a synthetic large multi-frame encapsulated-uncompressed source
+  - repeatedly calls `write_with_transfer_syntax(...)`
+  - reports elapsed time, observed RSS, and whether source frame caches were
+    materialized during the write path
