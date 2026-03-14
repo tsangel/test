@@ -2,9 +2,11 @@
 
 #include "dicom_endian.h"
 #include "diagnostics.h"
+#include "pixel/host/decode/decode_frame_dispatch.hpp"
 #include "pixel/host/decode/decode_plan_compute.hpp"
 #include "pixel/host/decode/decode_modality_value_transform.hpp"
 #include "pixel/host/encode/encode_set_pixel_data_runner.hpp"
+#include "pixel/host/support/dicom_pixel_support.hpp"
 
 #include <exception>
 #include <cstddef>
@@ -406,6 +408,20 @@ void transcode_encapsulated_pixel_data_to_encapsulated(DicomFile& file,
 		    "DicomFile::apply_transfer_syntax file={} target_ts={} reason=calculated native frame size is zero for streaming transcode",
 		    file.path(), target_transfer_syntax.value());
 	}
+	auto& source_pixel_data = file.dataset().get_dataelement("PixelData"_tag);
+	if (source_pixel_data.is_missing() || !source_pixel_data.vr().is_pixel_sequence()) {
+		diag::error_and_throw(
+		    "DicomFile::apply_transfer_syntax file={} target_ts={} reason=streaming transcode requires encapsulated PixelData source",
+		    file.path(), target_transfer_syntax.value());
+	}
+	auto* source_pixel_sequence = source_pixel_data.as_pixel_sequence();
+	if (source_pixel_sequence == nullptr) {
+		diag::error_and_throw(
+		    "DicomFile::apply_transfer_syntax file={} target_ts={} reason=encapsulated PixelData sequence is missing during streaming transcode",
+		    file.path(), target_transfer_syntax.value());
+	}
+	auto source_pixel_sequence_snapshot =
+	    std::make_unique<PixelSequence>(std::move(*source_pixel_sequence));
 
 	auto source_descriptor = build_set_pixel_source_from_decoded_native_frames(
 	    file, target_transfer_syntax, info, decode_plan);
@@ -426,13 +442,19 @@ void transcode_encapsulated_pixel_data_to_encapsulated(DicomFile& file,
 		    file.path(), target_transfer_syntax.value());
 	}
 
-	pixel::detail::run_set_pixel_data_from_frame_provider_with_computed_codec_options(
+	pixel::detail::run_set_pixel_data_from_frame_provider_streaming_with_computed_codec_options(
 	    file, target_transfer_syntax, source_descriptor,
 	    active_encoder_ctx->codec_options(),
 	    [&](std::size_t frame_index) -> std::span<const std::uint8_t> {
 		    auto frame_span = std::span<std::uint8_t>(
 		        decoded_frame.data(), decoded_frame.size());
-		    file.decode_into(frame_index, frame_span, decode_plan);
+		    auto prepared_source =
+		        pixel::support_detail::prepare_decode_frame_source_or_throw(
+		            *source_pixel_sequence_snapshot, frame_index);
+		    pixel::detail::dispatch_decode_prepared_frame(
+		        file.path(), frame_index, prepared_source.bytes, frame_span,
+		        decode_plan);
+		    source_pixel_sequence_snapshot->clear_frame_encoded_data(frame_index);
 		    return std::span<const std::uint8_t>(frame_span.data(), frame_span.size());
 	    });
 }
@@ -446,6 +468,9 @@ void transcode_encapsulated_pixel_data_to_encapsulated(DicomFile& file,
 	DataSet& dataset = file.dataset();
 	dataset.ensure_loaded(Tag(0xFFFFu, 0xFFFFu));
 	const auto& pixel_data = dataset.get_dataelement("PixelData"_tag);
+	const bool has_float_pixel_data =
+	    dataset["FloatPixelData"_tag].is_present() ||
+	    dataset["DoubleFloatPixelData"_tag].is_present();
 	const bool has_pixel_data_element = !pixel_data.is_missing();
 	const bool has_encapsulated_pixel_data = pixel_data.vr().is_pixel_sequence();
 	const bool target_uses_encapsulated_pixel_data = transfer_syntax.is_encapsulated();
@@ -483,6 +508,11 @@ void transcode_encapsulated_pixel_data_to_encapsulated(DicomFile& file,
 			}
 		} else if (has_encapsulated_pixel_data && !target_uses_encapsulated_pixel_data) {
 		convert_encapsulated_pixel_data_to_native(file);
+	}
+	if (target_uses_encapsulated_pixel_data && has_float_pixel_data) {
+		diag::error_and_throw(
+		    "DicomFile::set_transfer_syntax file={} target_ts={} reason=FloatPixelData/DoubleFloatPixelData cannot be written with encapsulated transfer syntaxes",
+		    file.path(), transfer_syntax.value());
 	}
 
 	return true;

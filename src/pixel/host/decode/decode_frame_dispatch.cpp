@@ -583,7 +583,8 @@ void parse_runtime_detail_or_default(
 }
 
 // Try the runtime-backed decode path and return false only when no runtime registry is present.
-[[nodiscard]] bool try_decode_frame_with_runtime(const DicomFile& df,
+[[nodiscard]] bool try_decode_frame_with_runtime_source(
+    std::string_view file_path, std::span<const std::uint8_t> prepared_source,
     std::size_t frame_index, std::span<std::uint8_t> dst, const DecodePlan& plan,
     int codec_threads_override) {
 	const auto& info = plan.info;
@@ -635,7 +636,7 @@ void parse_runtime_detail_or_default(
 	// Translate configure-time binding failures into the public host error model.
 	if (configure_ec == PIXEL_CODEC_ERR_UNSUPPORTED) {
 		cache.configured = false;
-		throw_codec_error_with_context("pixel::decode_frame_into", df.path(), info.ts,
+		throw_codec_error_with_context("pixel::decode_frame_into", file_path, info.ts,
 		    frame_index,
 		    CodecError{
 		        .code = CodecStatusCode::unsupported,
@@ -646,7 +647,7 @@ void parse_runtime_detail_or_default(
 	if (configure_ec != PIXEL_CODEC_ERR_OK) {
 		cache.configured = false;
 		throw_runtime_decode_error(
-		    df.path(), info.ts, frame_index, configure_ec, configure_detail);
+		    file_path, info.ts, frame_index, configure_ec, configure_detail);
 	}
 	if (needs_configure) {
 		cache.configured = true;
@@ -656,9 +657,7 @@ void parse_runtime_detail_or_default(
 		cache.codec_thread_option = codec_thread_option;
 	}
 
-	// Load the frame source and convert the plan transform to the host ABI form.
-	const auto computed_source =
-	    prepare_runtime_frame_source_or_throw(df, info, info.ts, frame_index);
+	// Convert the plan transform to the host ABI form and decode from caller-owned bytes.
 	const auto host_transform =
 	    prepare_host_value_transform(plan.modality_value_transform);
 	const ::pixel::runtime_v2::HostModalityValueTransformV2* transform_ptr =
@@ -669,12 +668,12 @@ void parse_runtime_detail_or_default(
 	// Decode using the plan's metadata, output layout, and effective options.
 	const pixel_error_code_v2 decode_ec =
 	    ::pixel::runtime_v2::decode_frame_with_host_context_v2(
-	        ctx, &info, computed_source.bytes, dst, &plan.strides, &plan.options,
+	        ctx, &info, prepared_source, dst, &plan.strides, &plan.options,
 	        transform_ptr);
 
 	// Normalize runtime decode failures before they cross the public API boundary.
 	if (decode_ec == PIXEL_CODEC_ERR_UNSUPPORTED) {
-		throw_codec_error_with_context("pixel::decode_frame_into", df.path(), info.ts,
+		throw_codec_error_with_context("pixel::decode_frame_into", file_path, info.ts,
 		    frame_index,
 		    CodecError{
 		        .code = CodecStatusCode::unsupported,
@@ -683,10 +682,20 @@ void parse_runtime_detail_or_default(
 		    });
 	}
 	if (decode_ec != PIXEL_CODEC_ERR_OK) {
-		throw_runtime_decode_error(df.path(), info.ts, frame_index, decode_ec,
+		throw_runtime_decode_error(file_path, info.ts, frame_index, decode_ec,
 		    copy_decoder_error_detail(*ctx));
 	}
 	return true;
+}
+
+[[nodiscard]] bool try_decode_frame_with_runtime(const DicomFile& df,
+    std::size_t frame_index, std::span<std::uint8_t> dst, const DecodePlan& plan,
+    int codec_threads_override) {
+	const auto computed_source =
+	    prepare_runtime_frame_source_or_throw(df, plan.info, plan.info.ts, frame_index);
+	return try_decode_frame_with_runtime_source(
+	    df.path(), computed_source.bytes, frame_index, dst, plan,
+	    codec_threads_override);
 }
 
 [[nodiscard]] bool try_copy_frame_with_builtin_native_fast_path(
@@ -772,7 +781,8 @@ void parse_runtime_detail_or_default(
 	return true;
 }
 
-[[nodiscard]] bool try_decode_frame_with_builtin_uncompressed_core_path(const DicomFile& df,
+[[nodiscard]] bool try_decode_frame_with_builtin_uncompressed_core_source(
+    std::string_view file_path, std::span<const std::uint8_t> prepared_source,
     std::size_t frame_index, std::span<std::uint8_t> dst, const DecodePlan& plan) {
 	const auto& info = plan.info;
 	// Fall back to the uncompressed core decoder when raw-copy is not enough,
@@ -797,11 +807,9 @@ void parse_runtime_detail_or_default(
 		return false;
 	}
 
-	const auto computed_source =
-	    prepare_runtime_frame_source_or_throw(df, info, info.ts, frame_index);
 	pixel_decoder_request_v2 request{};
 	populate_direct_decode_request(
-	    request, codec_profile_code, info, computed_source.bytes, dst, plan);
+	    request, codec_profile_code, info, prepared_source, dst, plan);
 	if (request.frame.source_dtype == PIXEL_DTYPE_UNKNOWN_V2) {
 		return false;
 	}
@@ -810,10 +818,18 @@ void parse_runtime_detail_or_default(
 	const pixel_error_code_v2 decode_ec =
 	    ::pixel::core_v2::decode_uncompressed_frame(&error_state, &request);
 	if (decode_ec != PIXEL_CODEC_ERR_OK) {
-		throw_runtime_decode_error(df.path(), info.ts, frame_index, decode_ec,
+		throw_runtime_decode_error(file_path, info.ts, frame_index, decode_ec,
 		    copy_core_error_detail(error_state));
 	}
 	return true;
+}
+
+[[nodiscard]] bool try_decode_frame_with_builtin_uncompressed_core_path(const DicomFile& df,
+    std::size_t frame_index, std::span<std::uint8_t> dst, const DecodePlan& plan) {
+	const auto computed_source =
+	    prepare_runtime_frame_source_or_throw(df, plan.info, plan.info.ts, frame_index);
+	return try_decode_frame_with_builtin_uncompressed_core_source(
+	    df.path(), computed_source.bytes, frame_index, dst, plan);
 }
 
 [[nodiscard]] bool try_decode_frame_with_builtin_uncompressed_fast_paths(const DicomFile& df,
@@ -873,6 +889,59 @@ void dispatch_decode_frame(const DicomFile& df, std::size_t frame_index,
 	const auto settings = resolve_decode_frame_thread_settings(plan);
 	dispatch_decode_frame_with_codec_threads(
 	    df, frame_index, dst, plan, settings.codec_threads);
+}
+
+void dispatch_decode_prepared_frame(std::string_view file_path,
+    std::size_t frame_index, std::span<const std::uint8_t> prepared_source,
+    std::span<std::uint8_t> dst, const DecodePlan& plan) {
+	if (!plan.info.ts.valid() || plan.strides.frame == 0) {
+		throw_codec_error_with_context("pixel::decode_frame_into", file_path,
+		    plan.info.ts, frame_index,
+		    CodecError{
+		        .code = CodecStatusCode::invalid_argument,
+		        .stage = "validate_plan",
+		        .detail = "decode plan is not initialized; call create_decode_plan()",
+		    });
+	}
+	if (plan.options.worker_threads < -1) {
+		throw_codec_error_with_context("pixel::decode_frame_into", file_path,
+		    plan.info.ts, frame_index,
+		    CodecError{
+		        .code = CodecStatusCode::invalid_argument,
+		        .stage = "validate_plan",
+		        .detail = "worker_threads must be -1, 0, or positive",
+		    });
+	}
+	if (plan.options.codec_threads < -1) {
+		throw_codec_error_with_context("pixel::decode_frame_into", file_path,
+		    plan.info.ts, frame_index,
+		    CodecError{
+		        .code = CodecStatusCode::invalid_argument,
+		        .stage = "validate_plan",
+		        .detail = "codec_threads must be -1, 0, or positive",
+		    });
+	}
+
+#if defined(DICOMSDL_PIXEL_RUNTIME_ENABLED)
+	if (plan.info.ts.is_uncompressed() &&
+	    try_decode_frame_with_builtin_uncompressed_core_source(
+	        file_path, prepared_source, frame_index, dst, plan)) {
+		return;
+	}
+	const auto settings = resolve_decode_frame_thread_settings(plan);
+	if (try_decode_frame_with_runtime_source(
+	        file_path, prepared_source, frame_index, dst, plan,
+	        settings.codec_threads)) {
+		return;
+	}
+#endif
+
+	CodecError decode_error{};
+	decode_error.code = CodecStatusCode::unsupported;
+	decode_error.stage = "plugin_lookup";
+	decode_error.detail = "runtime registry is not available";
+	throw_codec_error_with_context("pixel::decode_frame_into", file_path,
+	    plan.info.ts, frame_index, decode_error);
 }
 
 void dispatch_decode_all_frames(

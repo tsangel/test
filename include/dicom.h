@@ -1953,6 +1953,30 @@ public:
 	void write_to_stream(std::ostream& os, const WriteOptions& options = {});
 	[[nodiscard]] std::vector<std::uint8_t> write_bytes(const WriteOptions& options = {});
 	void write_file(const std::string& path, const WriteOptions& options = {});
+	/// Serialize this dataset using `transfer_syntax` without mutating the source DicomFile.
+	/// When the target PixelData is encapsulated and `os` is seekable, the writer backpatches
+	/// ExtendedOffsetTable / ExtendedOffsetTableLengths for the streamed frames.
+	/// When `os` is not seekable, the streamed encapsulated output remains valid DICOM but is
+	/// written with an empty Basic Offset Table and without ExtendedOffsetTable attributes.
+	void write_with_transfer_syntax(std::ostream& os, uid::WellKnown transfer_syntax,
+	    const WriteOptions& options = {});
+	void write_with_transfer_syntax(std::ostream& os, uid::WellKnown transfer_syntax,
+	    const pixel::EncoderContext& encoder_ctx, const WriteOptions& options = {});
+	void write_with_transfer_syntax(std::ostream& os, uid::WellKnown transfer_syntax,
+	    std::span<const pixel::CodecOptionTextKv> codec_opt,
+	    const WriteOptions& options = {});
+	/// Convenience overload that writes to a regular file path.
+	/// The output file stream is seekable, so streamed encapsulated output can include
+	/// backpatched ExtendedOffsetTable / ExtendedOffsetTableLengths when applicable.
+	void write_with_transfer_syntax(const std::string& path,
+	    uid::WellKnown transfer_syntax, const WriteOptions& options = {});
+	void write_with_transfer_syntax(const std::string& path,
+	    uid::WellKnown transfer_syntax, const pixel::EncoderContext& encoder_ctx,
+	    const WriteOptions& options = {});
+	void write_with_transfer_syntax(const std::string& path,
+	    uid::WellKnown transfer_syntax,
+	    std::span<const pixel::CodecOptionTextKv> codec_opt,
+	    const WriteOptions& options = {});
 	/// Forwarding helper to the root DataSet::add_dataelement.
 	/// @return Reference to the inserted/replaced element.
 	/// @throws Exception under the same conditions as DataSet::add_dataelement.

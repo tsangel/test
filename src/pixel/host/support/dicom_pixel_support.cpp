@@ -84,24 +84,14 @@ NativeSourceElement select_native_source_element(
 }
 
 EncapsulatedFrameSource load_encapsulated_frame_source_or_throw(
-    const DataSet& ds, std::size_t frame_index) {
-	const auto& pixel_data = ds["PixelData"_tag];
-	if (!pixel_data || !pixel_data.vr().is_pixel_sequence()) {
-		throw_decode_frame_source_error("encapsulated decode requires PixelData sequence");
-	}
-
-	const auto* pixel_sequence = pixel_data.as_pixel_sequence();
-	if (!pixel_sequence) {
-		throw_decode_frame_source_error("PixelData sequence is missing");
-	}
-
-	const auto frame_count = pixel_sequence->number_of_frames();
+    const PixelSequence& pixel_sequence, std::size_t frame_index) {
+	const auto frame_count = pixel_sequence.number_of_frames();
 	if (frame_index >= frame_count) {
 		throw_decode_frame_source_error(
 		    "frame index out of range (frames=" + std::to_string(frame_count) + ")");
 	}
 
-	const auto* frame = pixel_sequence->frame(frame_index);
+	const auto* frame = pixel_sequence.frame(frame_index);
 	if (!frame) {
 		throw_decode_frame_source_error("encoded frame is missing");
 	}
@@ -124,14 +114,14 @@ EncapsulatedFrameSource load_encapsulated_frame_source_or_throw(
 		}
 	}
 
-	auto* mutable_sequence = const_cast<PixelSequence*>(pixel_sequence);
+	auto* mutable_sequence = const_cast<PixelSequence*>(&pixel_sequence);
 	source.contiguous = mutable_sequence->frame_encoded_span(frame_index);
 	if (!source.contiguous.empty()) {
 		source.total_size = source.contiguous.size();
 		return source;
 	}
 
-	const auto* stream = pixel_sequence->stream();
+	const auto* stream = pixel_sequence.stream();
 	if (!stream) {
 		throw_decode_frame_source_error("pixel sequence stream is missing");
 	}
@@ -154,6 +144,21 @@ EncapsulatedFrameSource load_encapsulated_frame_source_or_throw(
 	}
 	source.total_size = total_size;
 	return source;
+}
+
+EncapsulatedFrameSource load_encapsulated_frame_source_or_throw(
+    const DataSet& ds, std::size_t frame_index) {
+	const auto& pixel_data = ds["PixelData"_tag];
+	if (!pixel_data || !pixel_data.vr().is_pixel_sequence()) {
+		throw_decode_frame_source_error("encapsulated decode requires PixelData sequence");
+	}
+
+	const auto* pixel_sequence = pixel_data.as_pixel_sequence();
+	if (!pixel_sequence) {
+		throw_decode_frame_source_error("PixelData sequence is missing");
+	}
+
+	return load_encapsulated_frame_source_or_throw(*pixel_sequence, frame_index);
 }
 
 NativeDecodeSourceView build_native_decode_source_view_or_throw(
@@ -279,6 +284,16 @@ PreparedDecodeFrameSource prepare_decode_frame_source_or_throw(
 	}
 
 	const auto source = load_encapsulated_frame_source_or_throw(ds, frame_index);
+	prepared_source.bytes = materialize_encapsulated_frame_source_or_throw(
+	    source, prepared_source.owned_bytes);
+	return prepared_source;
+}
+
+PreparedDecodeFrameSource prepare_decode_frame_source_or_throw(
+    const PixelSequence& pixel_sequence, std::size_t frame_index) {
+	PreparedDecodeFrameSource prepared_source{};
+	const auto source =
+	    load_encapsulated_frame_source_or_throw(pixel_sequence, frame_index);
 	prepared_source.bytes = materialize_encapsulated_frame_source_or_throw(
 	    source, prepared_source.owned_bytes);
 	return prepared_source;

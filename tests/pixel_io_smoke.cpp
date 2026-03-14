@@ -404,6 +404,210 @@ int main() {
 	}
 
 	{
+		auto [source_bytes, source] = make_u16_source();
+		const std::vector<std::uint8_t> expected_frame0{
+		    0x01u, 0x00u, 0x02u, 0x00u, 0x03u, 0x00u,
+		    0x04u, 0x00u, 0x05u, 0x00u, 0x06u, 0x00u};
+		const std::vector<std::uint8_t> expected_frame1{
+		    0x11u, 0x00u, 0x12u, 0x00u, 0x13u, 0x00u,
+		    0x14u, 0x00u, 0x15u, 0x00u, 0x16u, 0x00u};
+
+		dicom::DicomFile native_file;
+		native_file.set_pixel_data("ExplicitVRLittleEndian"_uid, source);
+
+		std::ostringstream os(std::ios::binary);
+		native_file.write_with_transfer_syntax(os, "RLELossless"_uid);
+		const auto encoded = os.str();
+		auto roundtrip = read_bytes(
+		    "write-with-ts-rle",
+		    reinterpret_cast<const std::uint8_t*>(encoded.data()), encoded.size());
+		if (!roundtrip) fail("write_with_transfer_syntax native->RLE returned null");
+		const auto& pixel_data = roundtrip->get_dataelement("PixelData"_tag);
+		if (pixel_data.is_missing() || !pixel_data.vr().is_pixel_sequence()) {
+			fail("write_with_transfer_syntax native->RLE should write encapsulated PixelData");
+		}
+		const auto* pixel_sequence = pixel_data.as_pixel_sequence();
+		if (!pixel_sequence || pixel_sequence->extended_offset_table_count() != 2) {
+			fail("write_with_transfer_syntax native->RLE should backpatch ExtendedOffsetTable");
+		}
+		if (roundtrip->pixel_data(0) != expected_frame0 ||
+		    roundtrip->pixel_data(1) != expected_frame1) {
+			fail("write_with_transfer_syntax native->RLE frame roundtrip mismatch");
+		}
+		const auto& original_pixel_data = native_file.get_dataelement("PixelData"_tag);
+		if (original_pixel_data.is_missing() || !original_pixel_data.vr().is_binary()) {
+			fail("write_with_transfer_syntax native->RLE should not mutate source DicomFile");
+		}
+		if (native_file.transfer_syntax_uid().value() !=
+		    "ExplicitVRLittleEndian"_uid.value()) {
+			fail("write_with_transfer_syntax native->RLE should preserve source transfer syntax state");
+		}
+	}
+
+	{
+		auto [source_bytes, source] = make_u16_source();
+		dicom::DicomFile native_file;
+		native_file.set_pixel_data("ExplicitVRLittleEndian"_uid, source);
+		static constexpr std::string_view kLowerPhotometric = "monochrome2";
+		native_file.add_dataelement("PhotometricInterpretation"_tag, dicom::VR::CS)
+		    .set_value_bytes(std::span<const std::uint8_t>(
+		        reinterpret_cast<const std::uint8_t*>(kLowerPhotometric.data()),
+		        kLowerPhotometric.size()));
+
+		std::ostringstream os(std::ios::binary);
+		native_file.write_with_transfer_syntax(os, "RLELossless"_uid);
+		const auto encoded = os.str();
+		auto roundtrip = read_bytes(
+		    "write-with-ts-rle-lowercase-pi",
+		    reinterpret_cast<const std::uint8_t*>(encoded.data()), encoded.size());
+		if (!roundtrip) fail("write_with_transfer_syntax lowercase PI returned null");
+		if (roundtrip->pixel_data(0).empty()) {
+			fail("write_with_transfer_syntax should accept lowercase PhotometricInterpretation");
+		}
+	}
+
+	{
+		auto [source_bytes, source] = make_u16_source();
+		const std::vector<std::uint8_t> expected_frame0{
+		    0x01u, 0x00u, 0x02u, 0x00u, 0x03u, 0x00u,
+		    0x04u, 0x00u, 0x05u, 0x00u, 0x06u, 0x00u};
+		const std::vector<std::uint8_t> expected_frame1{
+		    0x11u, 0x00u, 0x12u, 0x00u, 0x13u, 0x00u,
+		    0x14u, 0x00u, 0x15u, 0x00u, 0x16u, 0x00u};
+
+		dicom::DicomFile rle_file;
+		rle_file.set_pixel_data("RLELossless"_uid, source);
+
+		std::ostringstream os(std::ios::binary);
+		rle_file.write_with_transfer_syntax(os, "ExplicitVRLittleEndian"_uid);
+		const auto decoded = os.str();
+		auto roundtrip = read_bytes(
+		    "write-with-ts-native",
+		    reinterpret_cast<const std::uint8_t*>(decoded.data()), decoded.size());
+		if (!roundtrip) fail("write_with_transfer_syntax RLE->native returned null");
+		const auto& pixel_data = roundtrip->get_dataelement("PixelData"_tag);
+		if (pixel_data.is_missing() || pixel_data.vr().is_pixel_sequence()) {
+			fail("write_with_transfer_syntax RLE->native should write native PixelData");
+		}
+		if (roundtrip->pixel_data(0) != expected_frame0 ||
+		    roundtrip->pixel_data(1) != expected_frame1) {
+			fail("write_with_transfer_syntax RLE->native frame roundtrip mismatch");
+		}
+		const auto& original_pixel_data = rle_file.get_dataelement("PixelData"_tag);
+		if (original_pixel_data.is_missing() || !original_pixel_data.vr().is_pixel_sequence()) {
+			fail("write_with_transfer_syntax RLE->native should not mutate source DicomFile");
+		}
+		if (rle_file.transfer_syntax_uid().value() != "RLELossless"_uid.value()) {
+			fail("write_with_transfer_syntax RLE->native should preserve source transfer syntax state");
+		}
+	}
+
+	if (dicom::test::kJpegLsBuiltin) {
+		const std::vector<std::uint8_t> lossy_source_bytes{
+		    0x10u, 0x20u, 0x30u, 0x40u, 0x50u, 0x60u};
+		dicom::pixel::PixelSource lossy_source{};
+		lossy_source.bytes = std::span<const std::uint8_t>(
+		    lossy_source_bytes.data(), lossy_source_bytes.size());
+		lossy_source.data_type = dicom::pixel::DataType::u8;
+		lossy_source.rows = 2;
+		lossy_source.cols = 3;
+		lossy_source.frames = 1;
+		lossy_source.samples_per_pixel = 1;
+		lossy_source.photometric = dicom::pixel::Photometric::monochrome2;
+
+		dicom::DicomFile lossy_writer_file;
+		lossy_writer_file.set_pixel_data("ExplicitVRLittleEndian"_uid, lossy_source);
+		const std::array<dicom::pixel::CodecOptionTextKv, 1> near_lossless_options{{
+		    {"near_lossless_error", "2"},
+		}};
+		std::ostringstream os(std::ios::binary);
+		lossy_writer_file.write_with_transfer_syntax(
+		    os, "JPEGLSNearLossless"_uid,
+		    std::span<const dicom::pixel::CodecOptionTextKv>(near_lossless_options));
+		const auto encoded = os.str();
+		auto roundtrip = read_bytes(
+		    "write-with-ts-jpegls-lossy",
+		    reinterpret_cast<const std::uint8_t*>(encoded.data()), encoded.size());
+		if (!roundtrip) fail("write_with_transfer_syntax JPEG-LS lossy returned null");
+		if (roundtrip->get_dataelement("LossyImageCompression"_tag)
+		        .to_string_view().value_or("") != std::string_view("01")) {
+			fail("write_with_transfer_syntax JPEG-LS lossy should set LossyImageCompression to 01");
+		}
+		if (roundtrip->pixel_data(0) != lossy_source_bytes) {
+			fail("write_with_transfer_syntax JPEG-LS lossy roundtrip mismatch");
+		}
+	}
+
+	{
+		dicom::DicomFile float_file;
+		if (!float_file.add_dataelement("Rows"_tag, dicom::VR::US).from_long(1) ||
+		    !float_file.add_dataelement("Columns"_tag, dicom::VR::US).from_long(1) ||
+		    !float_file.add_dataelement("SamplesPerPixel"_tag, dicom::VR::US).from_long(1) ||
+		    !float_file.add_dataelement("PhotometricInterpretation"_tag, dicom::VR::CS)
+		             .from_string_view("MONOCHROME2")) {
+			fail("failed to build float pixel source dataset");
+		}
+		const std::array<float, 1> float_pixels{{1.0f}};
+		float_file.add_dataelement("FloatPixelData"_tag, dicom::VR::OF)
+		    .set_value_bytes(std::span<const std::uint8_t>(
+		        reinterpret_cast<const std::uint8_t*>(float_pixels.data()),
+		        sizeof(float_pixels)));
+
+		bool write_threw = false;
+		try {
+			std::ostringstream os(std::ios::binary);
+			float_file.write_with_transfer_syntax(os, "RLELossless"_uid);
+		} catch (const std::exception&) {
+			write_threw = true;
+		}
+		if (!write_threw) {
+			fail("write_with_transfer_syntax should reject FloatPixelData -> encapsulated transfer syntax");
+		}
+
+		bool set_ts_threw = false;
+		try {
+			float_file.set_transfer_syntax("RLELossless"_uid);
+		} catch (const std::exception&) {
+			set_ts_threw = true;
+		}
+		if (!set_ts_threw) {
+			fail("set_transfer_syntax should reject FloatPixelData -> encapsulated transfer syntax");
+		}
+	}
+
+	{
+		auto [source_bytes, source] = make_u16_source();
+		const std::vector<std::uint8_t> expected_frame0{
+		    0x01u, 0x00u, 0x02u, 0x00u, 0x03u, 0x00u,
+		    0x04u, 0x00u, 0x05u, 0x00u, 0x06u, 0x00u};
+		const std::vector<std::uint8_t> expected_frame1{
+		    0x11u, 0x00u, 0x12u, 0x00u, 0x13u, 0x00u,
+		    0x14u, 0x00u, 0x15u, 0x00u, 0x16u, 0x00u};
+
+		dicom::DicomFile native_file;
+		native_file.set_pixel_data("ExplicitVRLittleEndian"_uid, source);
+		dicom::WriteOptions rebuilt_meta_opts;
+		rebuilt_meta_opts.keep_existing_meta = false;
+
+		std::ostringstream os(std::ios::binary);
+		native_file.write_with_transfer_syntax(
+		    os, "DeflatedExplicitVRLittleEndian"_uid, rebuilt_meta_opts);
+		const auto deflated = os.str();
+		auto roundtrip = read_bytes(
+		    "write-with-ts-deflated",
+		    reinterpret_cast<const std::uint8_t*>(deflated.data()), deflated.size());
+		if (!roundtrip) fail("write_with_transfer_syntax deflated returned null");
+		if (roundtrip->pixel_data(0) != expected_frame0 ||
+		    roundtrip->pixel_data(1) != expected_frame1) {
+			fail("write_with_transfer_syntax deflated frame roundtrip mismatch");
+		}
+		if (native_file.transfer_syntax_uid().value() !=
+		    "ExplicitVRLittleEndian"_uid.value()) {
+			fail("write_with_transfer_syntax deflated should preserve source transfer syntax state");
+		}
+	}
+
+	{
 		dicom::DicomFile generated;
 		auto add_text_element = [&](dicom::Tag tag, dicom::VR vr, std::string_view value)
 		    -> dicom::DataElement& {

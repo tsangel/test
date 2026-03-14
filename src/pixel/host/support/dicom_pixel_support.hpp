@@ -30,6 +30,8 @@ struct NativeDecodeSourceView {
 
 [[nodiscard]] PreparedDecodeFrameSource prepare_decode_frame_source_or_throw(
     const DicomFile& df, const PixelDataInfo& info, std::size_t frame_index);
+[[nodiscard]] PreparedDecodeFrameSource prepare_decode_frame_source_or_throw(
+    const PixelSequence& pixel_sequence, std::size_t frame_index);
 
 [[nodiscard]] NativeDecodeSourceView compute_native_decode_source_view_or_throw(
     const DicomFile& df, const PixelDataInfo& info);

@@ -534,7 +534,7 @@ bool build_runtime_option_list_from_pairs(std::span<const CodecOptionKv> option_
 }
 
 template <typename FrameProvider, typename FrameSink>
-void encode_frames_with_runtime_or_throw(DicomFile& file,
+void encode_frames_with_runtime_or_throw_impl(DicomFile& file,
     uid::WellKnown transfer_syntax, const pixel::PixelSource& source,
     uint32_t codec_profile_code, std::span<const CodecOptionKv> codec_options,
     bool use_multicomponent_transform, std::size_t frame_count,
@@ -606,7 +606,7 @@ void encode_frames_with_runtime_or_throw(DicomFile& file,
 	}
 
 	file.reset_encapsulated_pixel_data(encode_input.frame_count);
-	encode_frames_with_runtime_or_throw(file, transfer_syntax, source,
+	encode_frames_with_runtime_or_throw_impl(file, transfer_syntax, source,
 	    codec_profile_code, codec_options, use_multicomponent_transform,
 	    encode_input.frame_count,
 	    [&](std::size_t frame_index) {
@@ -622,6 +622,18 @@ void encode_frames_with_runtime_or_throw(DicomFile& file,
 }
 
 }  // namespace
+
+void encode_frames_from_frame_provider_with_runtime_or_throw(
+    DicomFile& file, uid::WellKnown transfer_syntax,
+    const pixel::PixelSource& source_descriptor, uint32_t codec_profile_code,
+    std::span<const CodecOptionKv> codec_options,
+    bool use_multicomponent_transform, std::size_t frame_count,
+    const std::function<std::span<const std::uint8_t>(std::size_t)>& frame_provider,
+    const std::function<void(std::size_t, std::vector<std::uint8_t>&&)>& frame_sink) {
+	encode_frames_with_runtime_or_throw_impl(file, transfer_syntax, source_descriptor,
+	    codec_profile_code, codec_options, use_multicomponent_transform,
+	    frame_count, frame_provider, frame_sink);
+}
 #endif
 
 void run_set_pixel_data_with_computed_codec_options(DicomFile& file,
@@ -712,11 +724,12 @@ void run_set_pixel_data_with_computed_codec_options(DicomFile& file,
 	    encoded_payload_bytes);
 }
 
-void run_set_pixel_data_from_frame_provider_with_computed_codec_options(
+void run_set_pixel_data_from_frame_provider_with_computed_codec_options_impl(
     DicomFile& file, uid::WellKnown transfer_syntax,
     const pixel::PixelSource& source_descriptor,
     std::span<const CodecOptionKv> codec_options,
-    const std::function<std::span<const std::uint8_t>(std::size_t)>& frame_provider) {
+    const std::function<std::span<const std::uint8_t>(std::size_t)>& frame_provider,
+    bool stream_output_frames) {
 	const auto file_path = file.path();
 	const auto codec_profile_code =
 	    encode_codec_profile_code_from_transfer_syntax_or_throw(
@@ -754,20 +767,30 @@ void run_set_pixel_data_from_frame_provider_with_computed_codec_options(
 	}
 
 #if defined(DICOMSDL_PIXEL_RUNTIME_ENABLED)
-	std::vector<std::vector<std::uint8_t>> encoded_frames;
-	encoded_frames.reserve(source_layout.frames);
-	encode_frames_with_runtime_or_throw(file, transfer_syntax, source_descriptor,
-	    codec_profile_code, codec_options, use_multicomponent_transform,
-	    source_layout.frames, frame_provider,
-	    [&](std::size_t, std::vector<std::uint8_t>&& encoded_frame) {
-		    encoded_frames.push_back(std::move(encoded_frame));
-	    });
+	if (stream_output_frames) {
+		file.reset_encapsulated_pixel_data(source_layout.frames);
+		encode_frames_with_runtime_or_throw_impl(file, transfer_syntax, source_descriptor,
+		    codec_profile_code, codec_options, use_multicomponent_transform,
+		    source_layout.frames, frame_provider,
+		    [&](std::size_t frame_index, std::vector<std::uint8_t>&& encoded_frame) {
+			    file.set_encoded_pixel_frame(frame_index, std::move(encoded_frame));
+		    });
+	} else {
+		std::vector<std::vector<std::uint8_t>> encoded_frames;
+		encoded_frames.reserve(source_layout.frames);
+		encode_frames_with_runtime_or_throw_impl(file, transfer_syntax, source_descriptor,
+		    codec_profile_code, codec_options, use_multicomponent_transform,
+		    source_layout.frames, frame_provider,
+		    [&](std::size_t, std::vector<std::uint8_t>&& encoded_frame) {
+			    encoded_frames.push_back(std::move(encoded_frame));
+		    });
 
-	file.reset_encapsulated_pixel_data(source_layout.frames);
-	for (std::size_t frame_index = 0; frame_index < encoded_frames.size();
-	     ++frame_index) {
-		file.set_encoded_pixel_frame(
-		    frame_index, std::move(encoded_frames[frame_index]));
+		file.reset_encapsulated_pixel_data(source_layout.frames);
+		for (std::size_t frame_index = 0; frame_index < encoded_frames.size();
+		     ++frame_index) {
+			file.set_encoded_pixel_frame(
+			    frame_index, std::move(encoded_frames[frame_index]));
+		}
 	}
 #else
 	CodecError encode_error{};
@@ -785,6 +808,26 @@ void run_set_pixel_data_from_frame_provider_with_computed_codec_options(
 	update_lossy_compression_metadata_for_set_pixel_data(dataset, file_path,
 	    transfer_syntax, codec_profile_code, source_layout.destination_total_bytes,
 	    encoded_payload_bytes);
+}
+
+void run_set_pixel_data_from_frame_provider_with_computed_codec_options(
+    DicomFile& file, uid::WellKnown transfer_syntax,
+    const pixel::PixelSource& source_descriptor,
+    std::span<const CodecOptionKv> codec_options,
+    const std::function<std::span<const std::uint8_t>(std::size_t)>& frame_provider) {
+	run_set_pixel_data_from_frame_provider_with_computed_codec_options_impl(
+	    file, transfer_syntax, source_descriptor, codec_options, frame_provider,
+	    false);
+}
+
+void run_set_pixel_data_from_frame_provider_streaming_with_computed_codec_options(
+    DicomFile& file, uid::WellKnown transfer_syntax,
+    const pixel::PixelSource& source_descriptor,
+    std::span<const CodecOptionKv> codec_options,
+    const std::function<std::span<const std::uint8_t>(std::size_t)>& frame_provider) {
+	run_set_pixel_data_from_frame_provider_with_computed_codec_options_impl(
+	    file, transfer_syntax, source_descriptor, codec_options, frame_provider,
+	    true);
 }
 
 } // namespace dicom::pixel::detail
