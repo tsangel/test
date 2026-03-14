@@ -1,20 +1,22 @@
 #include "dicom.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <limits>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <streambuf>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #if defined(_WIN32)
@@ -25,6 +27,7 @@
 #include <psapi.h>
 #elif defined(__APPLE__)
 #include <mach/mach.h>
+#include <unistd.h>
 #elif defined(__linux__)
 #include <unistd.h>
 #endif
@@ -43,10 +46,16 @@ struct Options {
 	int rows = 512;
 	int cols = 512;
 	int frames = 32;
-	int fragments_per_frame = 1;
+	int fragments_per_frame = 4;
 	int repeat = 3;
 	SinkMode sink = SinkMode::file;
 	dicom::uid::WellKnown target_ts = "RLELossless"_uid;
+};
+
+enum class OffsetTableMode : std::uint8_t {
+	empty_basic = 0,
+	basic,
+	extended,
 };
 
 void print_usage(const char* prog) {
@@ -78,6 +87,28 @@ SinkMode parse_sink_mode(std::string_view text) {
 		return SinkMode::nonseekable_null;
 	}
 	throw std::invalid_argument("unsupported sink mode");
+}
+
+OffsetTableMode select_offset_table_mode(const Options& options) noexcept {
+	if (options.frames <= 1) {
+		return OffsetTableMode::empty_basic;
+	}
+	if (options.fragments_per_frame == 1) {
+		return OffsetTableMode::extended;
+	}
+	return OffsetTableMode::basic;
+}
+
+const char* offset_table_mode_name(OffsetTableMode mode) noexcept {
+	switch (mode) {
+	case OffsetTableMode::empty_basic:
+		return "empty_basic";
+	case OffsetTableMode::basic:
+		return "basic";
+	case OffsetTableMode::extended:
+		return "extended";
+	}
+	return "unknown";
 }
 
 dicom::uid::WellKnown parse_transfer_syntax_or_throw(std::string_view text) {
@@ -250,35 +281,42 @@ std::vector<std::uint8_t> build_multiframe_encapsulated_uncompressed_body(
 	append_explicit_vr_le_16(body, dicom::Tag(0x0028u, 0x0008u), 'I', 'S',
 	    std::vector<std::uint8_t>(frame_count_text.begin(), frame_count_text.end()));
 
-	const std::size_t frame_payload_bytes =
+	const std::size_t samples_per_frame =
 	    static_cast<std::size_t>(options.rows) *
-	    static_cast<std::size_t>(options.cols) * sizeof(std::uint16_t);
+	    static_cast<std::size_t>(options.cols);
+	const std::size_t frame_payload_bytes =
+	    samples_per_frame * sizeof(std::uint16_t);
 	if (frame_payload_bytes == 0) {
 		throw std::runtime_error("frame payload size is zero");
 	}
-	const bool use_multiframe_eot = options.frames > 1;
-	if (use_multiframe_eot && options.fragments_per_frame != 1) {
+	if (frame_payload_bytes >
+	    static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max())) {
 		throw std::runtime_error(
-		    "multi-frame synthetic source currently requires fragments-per-frame=1");
+		    "synthetic frame payload exceeds 32-bit fragment length");
 	}
+	const auto offset_table_mode = select_offset_table_mode(options);
 
+	std::vector<std::uint32_t> basic_offsets;
 	std::vector<std::uint64_t> eot_offsets;
 	std::vector<std::uint64_t> eot_lengths;
-	if (use_multiframe_eot) {
+	switch (offset_table_mode) {
+	case OffsetTableMode::basic:
+		basic_offsets.reserve(static_cast<std::size_t>(options.frames));
+		break;
+	case OffsetTableMode::extended:
 		eot_offsets.reserve(static_cast<std::size_t>(options.frames));
 		eot_lengths.reserve(static_cast<std::size_t>(options.frames));
+		break;
+	case OffsetTableMode::empty_basic:
+		break;
 	}
 
-	std::vector<std::uint8_t> encapsulated_pixel_value;
-	append_u16_le(encapsulated_pixel_value, 0xFFFEu);
-	append_u16_le(encapsulated_pixel_value, 0xE000u);
-	append_u32_le(encapsulated_pixel_value, 0u);
+	std::vector<std::uint8_t> fragment_items;
 	std::uint64_t next_frame_offset = 0;
 
 	for (int frame_index = 0; frame_index < options.frames; ++frame_index) {
 		std::vector<std::uint8_t> frame_bytes(frame_payload_bytes);
-		for (std::size_t pixel_index = 0; pixel_index < frame_payload_bytes / 2u;
-		     ++pixel_index) {
+		for (std::size_t pixel_index = 0; pixel_index < samples_per_frame; ++pixel_index) {
 			const std::uint16_t value = static_cast<std::uint16_t>(
 			    (frame_index + pixel_index) & 0xFFFFu);
 			frame_bytes[pixel_index * 2u] =
@@ -287,50 +325,76 @@ std::vector<std::uint8_t> build_multiframe_encapsulated_uncompressed_body(
 			    static_cast<std::uint8_t>((value >> 8) & 0xFFu);
 		}
 
-		if (use_multiframe_eot) {
+		switch (offset_table_mode) {
+		case OffsetTableMode::basic:
+			if (next_frame_offset >
+			    static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max())) {
+				throw std::runtime_error(
+				    "synthetic frame offset exceeds 32-bit basic offset table range");
+			}
+			basic_offsets.push_back(static_cast<std::uint32_t>(next_frame_offset));
+			break;
+		case OffsetTableMode::extended:
 			eot_offsets.push_back(next_frame_offset);
-			eot_lengths.push_back(frame_payload_bytes);
-			append_u16_le(encapsulated_pixel_value, 0xFFFEu);
-			append_u16_le(encapsulated_pixel_value, 0xE000u);
-			append_u32_le(encapsulated_pixel_value,
-			    static_cast<std::uint32_t>(frame_payload_bytes));
-			encapsulated_pixel_value.insert(encapsulated_pixel_value.end(),
-			    frame_bytes.begin(), frame_bytes.end());
-			next_frame_offset += 8u + static_cast<std::uint64_t>(frame_payload_bytes);
-			continue;
+			break;
+		case OffsetTableMode::empty_basic:
+			break;
 		}
 
 		const std::size_t fragment_count =
 		    static_cast<std::size_t>(options.fragments_per_frame);
-		const std::size_t base_fragment_size =
-		    frame_payload_bytes / fragment_count;
+		const std::size_t base_fragment_samples = samples_per_frame / fragment_count;
 		const std::size_t fragment_remainder =
-		    frame_payload_bytes % fragment_count;
+		    samples_per_frame % fragment_count;
 		std::size_t offset = 0;
+		std::size_t encoded_frame_bytes = 0;
 		for (std::size_t fragment_index = 0; fragment_index < fragment_count;
 		     ++fragment_index) {
-			const std::size_t fragment_size = base_fragment_size +
+			const std::size_t fragment_samples = base_fragment_samples +
 			    (fragment_index < fragment_remainder ? 1u : 0u);
+			const std::size_t fragment_size = fragment_samples * sizeof(std::uint16_t);
 			if (fragment_size == 0) {
 				continue;
 			}
-			append_u16_le(encapsulated_pixel_value, 0xFFFEu);
-			append_u16_le(encapsulated_pixel_value, 0xE000u);
-			append_u32_le(encapsulated_pixel_value,
+			append_u16_le(fragment_items, 0xFFFEu);
+			append_u16_le(fragment_items, 0xE000u);
+			append_u32_le(fragment_items,
 			    static_cast<std::uint32_t>(fragment_size));
-			encapsulated_pixel_value.insert(encapsulated_pixel_value.end(),
+			fragment_items.insert(fragment_items.end(),
 			    frame_bytes.begin() + static_cast<std::ptrdiff_t>(offset),
 			    frame_bytes.begin() +
 			        static_cast<std::ptrdiff_t>(offset + fragment_size));
 			offset += fragment_size;
+			encoded_frame_bytes += fragment_size;
+			next_frame_offset += 8u + static_cast<std::uint64_t>(fragment_size);
+		}
+		if (offset != frame_bytes.size()) {
+			throw std::runtime_error("synthetic frame fragmentation mismatch");
+		}
+		if (offset_table_mode == OffsetTableMode::extended) {
+			eot_lengths.push_back(encoded_frame_bytes);
 		}
 	}
 
+	std::vector<std::uint8_t> encapsulated_pixel_value;
+	std::vector<std::uint8_t> basic_offset_table_bytes;
+	if (offset_table_mode == OffsetTableMode::basic) {
+		basic_offset_table_bytes.reserve(basic_offsets.size() * sizeof(std::uint32_t));
+		for (const auto value : basic_offsets) {
+			append_u32_le(basic_offset_table_bytes, value);
+		}
+	}
+	append_u16_le(encapsulated_pixel_value, 0xFFFEu);
+	append_u16_le(encapsulated_pixel_value, 0xE000u);
+	append_u32_le(encapsulated_pixel_value,
+	    static_cast<std::uint32_t>(basic_offset_table_bytes.size()));
+	append_bytes(encapsulated_pixel_value, basic_offset_table_bytes);
+	append_bytes(encapsulated_pixel_value, fragment_items);
 	append_u16_le(encapsulated_pixel_value, 0xFFFEu);
 	append_u16_le(encapsulated_pixel_value, 0xE0DDu);
 	append_u32_le(encapsulated_pixel_value, 0u);
 
-	if (use_multiframe_eot) {
+	if (offset_table_mode == OffsetTableMode::extended) {
 		std::vector<std::uint8_t> eot_offsets_bytes;
 		std::vector<std::uint8_t> eot_lengths_bytes;
 		eot_offsets_bytes.reserve(eot_offsets.size() * sizeof(std::uint64_t));
@@ -414,6 +478,112 @@ std::optional<std::uint64_t> current_rss_bytes() {
 #endif
 }
 
+void observe_peak_bytes(
+    std::atomic<std::uint64_t>& peak_bytes, std::uint64_t candidate) {
+	auto current = peak_bytes.load(std::memory_order_relaxed);
+	while (candidate > current &&
+	       !peak_bytes.compare_exchange_weak(
+	           current, candidate, std::memory_order_relaxed)) {
+	}
+}
+
+class RssPeakSampler final {
+public:
+	explicit RssPeakSampler(
+	    std::chrono::milliseconds interval = std::chrono::milliseconds(1))
+	    : interval_(interval) {
+		if (const auto rss = current_rss_bytes()) {
+			peak_bytes_.store(*rss, std::memory_order_relaxed);
+			active_ = true;
+			worker_ = std::thread([this]() { run(); });
+		}
+	}
+
+	~RssPeakSampler() {
+		stop();
+	}
+
+	void stop() {
+		if (!worker_.joinable()) {
+			return;
+		}
+		stop_requested_.store(true, std::memory_order_relaxed);
+		worker_.join();
+	}
+
+	[[nodiscard]] std::optional<std::uint64_t> peak_bytes() const noexcept {
+		if (!active_) {
+			return std::nullopt;
+		}
+		return peak_bytes_.load(std::memory_order_relaxed);
+	}
+
+private:
+	void run() {
+		while (!stop_requested_.load(std::memory_order_relaxed)) {
+			if (const auto rss = current_rss_bytes()) {
+				observe_peak_bytes(peak_bytes_, *rss);
+			}
+			std::this_thread::sleep_for(interval_);
+		}
+		if (const auto rss = current_rss_bytes()) {
+			observe_peak_bytes(peak_bytes_, *rss);
+		}
+	}
+
+	std::chrono::milliseconds interval_;
+	std::atomic<bool> stop_requested_{false};
+	std::atomic<std::uint64_t> peak_bytes_{0};
+	std::thread worker_{};
+	bool active_{false};
+};
+
+std::string make_temp_output_path_or_throw(std::size_t iteration) {
+#if defined(_WIN32)
+	char temp_dir[MAX_PATH + 1]{};
+	const auto temp_dir_length = GetTempPathA(MAX_PATH, temp_dir);
+	if (temp_dir_length == 0 || temp_dir_length > MAX_PATH) {
+		throw std::runtime_error("GetTempPathA failed while creating benchmark output");
+	}
+	char temp_path[MAX_PATH + 1]{};
+	if (GetTempFileNameA(temp_dir, "dcm", 0u, temp_path) == 0) {
+		throw std::runtime_error("GetTempFileNameA failed while creating benchmark output");
+	}
+	return std::string(temp_path);
+#else
+	std::string temp_dir = "/tmp";
+	if (const char* env_temp_dir = std::getenv("TMPDIR");
+	    env_temp_dir != nullptr && env_temp_dir[0] != '\0') {
+		temp_dir = env_temp_dir;
+	}
+	if (!temp_dir.empty() && temp_dir.back() != '/') {
+		temp_dir.push_back('/');
+	}
+	std::string templ = temp_dir + "dicomsdl_streaming_write_stress_" +
+	    std::to_string(static_cast<unsigned long long>(iteration)) + "_XXXXXX";
+	std::vector<char> path_template(templ.begin(), templ.end());
+	path_template.push_back('\0');
+	const int fd = mkstemp(path_template.data());
+	if (fd < 0) {
+		throw std::runtime_error("mkstemp failed while creating benchmark output");
+	}
+	::close(fd);
+	return std::string(path_template.data());
+#endif
+}
+
+std::size_t file_size_or_throw(const std::string& path) {
+	std::ifstream input(path, std::ios::binary | std::ios::ate);
+	if (!input) {
+		throw std::runtime_error("failed to open benchmark output for size read");
+	}
+	const auto end = input.tellg();
+	if (end < 0) {
+		throw std::runtime_error("tellg failed while reading benchmark output size");
+	}
+	return static_cast<std::size_t>(end);
+}
+
 class NullStreamBuf final : public std::streambuf {
 public:
 	std::size_t bytes_written() const noexcept { return bytes_written_; }
@@ -451,19 +621,20 @@ std::size_t run_one_write(dicom::DicomFile& source,
     dicom::uid::WellKnown target_ts, SinkMode sink_mode, std::size_t iteration) {
 	switch (sink_mode) {
 	case SinkMode::file: {
-		const auto temp_dir = std::filesystem::temp_directory_path();
-		const auto output_path = temp_dir /
-		    ("dicomsdl_streaming_write_stress_" + std::to_string(iteration) + ".dcm");
-		source.write_with_transfer_syntax(output_path.string(), target_ts);
-		const auto bytes = std::filesystem::file_size(output_path);
-		std::error_code ec;
-		std::filesystem::remove(output_path, ec);
-		return static_cast<std::size_t>(bytes);
+		const auto output_path = make_temp_output_path_or_throw(iteration);
+		source.write_with_transfer_syntax(output_path, target_ts);
+		const auto bytes = file_size_or_throw(output_path);
+		std::remove(output_path.c_str());
+		return bytes;
 	}
 	case SinkMode::seekable_memory: {
 		std::ostringstream os(std::ios::binary);
 		source.write_with_transfer_syntax(os, target_ts);
-		return os.str().size();
+		const auto end = os.tellp();
+		if (end < 0) {
+			throw std::runtime_error("tellp failed for seekable_memory sink");
+		}
+		return static_cast<std::size_t>(end);
 	}
 	case SinkMode::nonseekable_null: {
 		NullStreamBuf buf;
@@ -503,6 +674,7 @@ std::string format_mib(std::optional<std::uint64_t> bytes) {
 int main(int argc, char** argv) {
 	try {
 		const auto options = parse_args_or_throw(argc, argv);
+		const auto offset_table_mode = select_offset_table_mode(options);
 		const auto body =
 		    build_multiframe_encapsulated_uncompressed_body(options);
 		const auto source_bytes = build_part10(
@@ -531,6 +703,7 @@ int main(int argc, char** argv) {
 		std::cout << "source_ts=EncapsulatedUncompressedExplicitVRLittleEndian"
 		          << " target_ts=" << options.target_ts.value()
 		          << " sink=" << sink_mode_name(options.sink)
+		          << " offset_table_mode=" << offset_table_mode_name(offset_table_mode)
 		          << " rows=" << options.rows
 		          << " cols=" << options.cols
 		          << " frames=" << options.frames
@@ -541,9 +714,11 @@ int main(int argc, char** argv) {
 
 		const auto t0 = std::chrono::steady_clock::now();
 		for (int iteration = 0; iteration < options.repeat; ++iteration) {
+			RssPeakSampler rss_sampler;
 			total_output_bytes += run_one_write(
 			    *source, options.target_ts, options.sink,
 			    static_cast<std::size_t>(iteration));
+			rss_sampler.stop();
 			const auto materialized = count_materialized_source_frames(*source);
 			max_materialized = std::max(max_materialized, materialized);
 			if (materialized != 0) {
@@ -551,11 +726,13 @@ int main(int argc, char** argv) {
 				    "source frame cache materialized during streaming write");
 			}
 			const auto rss = current_rss_bytes();
-			if (rss && (!max_rss || *rss > *max_rss)) {
-				max_rss = rss;
+			const auto sampled_peak_rss = rss_sampler.peak_bytes();
+			if (sampled_peak_rss && (!max_rss || *sampled_peak_rss > *max_rss)) {
+				max_rss = sampled_peak_rss;
 			}
 			std::cout << "iteration=" << (iteration + 1)
 			          << " current_rss_mib=" << format_mib(rss)
+			          << " sampled_peak_rss_mib=" << format_mib(sampled_peak_rss)
 			          << " materialized_source_frames=" << materialized
 			          << "\n";
 		}
@@ -565,7 +742,7 @@ int main(int argc, char** argv) {
 
 		std::cout << "elapsed_ms=" << elapsed_ms.count()
 		          << " total_output_bytes=" << total_output_bytes
-		          << " max_observed_rss_mib=" << format_mib(max_rss)
+		          << " max_sampled_rss_mib=" << format_mib(max_rss)
 		          << " max_materialized_source_frames=" << max_materialized
 		          << "\n";
 		return 0;

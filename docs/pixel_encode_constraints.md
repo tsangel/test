@@ -240,7 +240,12 @@ Benchmark/stress coverage:
 
 - `benchmarks/streaming_write_stress.cpp`
   - build with `-DDICOM_BUILD_BENCHMARKS=ON`
-  - generates a synthetic large multi-frame encapsulated-uncompressed source
+  - default workload generates a synthetic large multi-frame multi-fragment
+    encapsulated-uncompressed source (`--fragments-per-frame 4`)
+  - multi-frame single-fragment runs use `ExtendedOffsetTable`; multi-frame
+    multi-fragment runs use a populated Basic Offset Table
   - repeatedly calls `write_with_transfer_syntax(...)`
-  - reports elapsed time, observed RSS, and whether source frame caches were
-    materialized during the write path
+  - reports elapsed time, sampled RSS (1 ms polling), and whether source frame
+    caches were materialized during the write path
+  - `seekable_memory` intentionally retains the full output bytes in RAM, so
+    compare its RSS separately from `file` / `nonseekable_null`
