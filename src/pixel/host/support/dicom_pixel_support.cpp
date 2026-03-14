@@ -84,7 +84,8 @@ NativeSourceElement select_native_source_element(
 }
 
 EncapsulatedFrameSource load_encapsulated_frame_source_or_throw(
-    const PixelSequence& pixel_sequence, std::size_t frame_index) {
+    const PixelSequence& pixel_sequence, std::size_t frame_index,
+    bool allow_sequence_cache) {
 	const auto frame_count = pixel_sequence.number_of_frames();
 	if (frame_index >= frame_count) {
 		throw_decode_frame_source_error(
@@ -114,11 +115,13 @@ EncapsulatedFrameSource load_encapsulated_frame_source_or_throw(
 		}
 	}
 
-	auto* mutable_sequence = const_cast<PixelSequence*>(&pixel_sequence);
-	source.contiguous = mutable_sequence->frame_encoded_span(frame_index);
-	if (!source.contiguous.empty()) {
-		source.total_size = source.contiguous.size();
-		return source;
+	if (allow_sequence_cache) {
+		auto* mutable_sequence = const_cast<PixelSequence*>(&pixel_sequence);
+		source.contiguous = mutable_sequence->frame_encoded_span(frame_index);
+		if (!source.contiguous.empty()) {
+			source.total_size = source.contiguous.size();
+			return source;
+		}
 	}
 
 	const auto* stream = pixel_sequence.stream();
@@ -158,7 +161,24 @@ EncapsulatedFrameSource load_encapsulated_frame_source_or_throw(
 		throw_decode_frame_source_error("PixelData sequence is missing");
 	}
 
-	return load_encapsulated_frame_source_or_throw(*pixel_sequence, frame_index);
+	return load_encapsulated_frame_source_or_throw(
+	    *pixel_sequence, frame_index, true);
+}
+
+EncapsulatedFrameSource load_encapsulated_frame_source_without_cache_or_throw(
+    const DataSet& ds, std::size_t frame_index) {
+	const auto& pixel_data = ds["PixelData"_tag];
+	if (!pixel_data || !pixel_data.vr().is_pixel_sequence()) {
+		throw_decode_frame_source_error("encapsulated decode requires PixelData sequence");
+	}
+
+	const auto* pixel_sequence = pixel_data.as_pixel_sequence();
+	if (!pixel_sequence) {
+		throw_decode_frame_source_error("PixelData sequence is missing");
+	}
+
+	return load_encapsulated_frame_source_or_throw(
+	    *pixel_sequence, frame_index, false);
 }
 
 NativeDecodeSourceView build_native_decode_source_view_or_throw(
@@ -293,7 +313,35 @@ PreparedDecodeFrameSource prepare_decode_frame_source_or_throw(
     const PixelSequence& pixel_sequence, std::size_t frame_index) {
 	PreparedDecodeFrameSource prepared_source{};
 	const auto source =
-	    load_encapsulated_frame_source_or_throw(pixel_sequence, frame_index);
+	    load_encapsulated_frame_source_or_throw(pixel_sequence, frame_index, true);
+	prepared_source.bytes = materialize_encapsulated_frame_source_or_throw(
+	    source, prepared_source.owned_bytes);
+	return prepared_source;
+}
+
+PreparedDecodeFrameSource prepare_decode_frame_source_without_cache_or_throw(
+    const DicomFile& df, const PixelDataInfo& info, std::size_t frame_index) {
+	const auto& ds = df.dataset();
+
+	PreparedDecodeFrameSource prepared_source{};
+	if (info.ts.is_uncompressed() && !info.ts.is_encapsulated()) {
+		const auto source = build_native_decode_source_view_or_throw(ds, info);
+		prepared_source.bytes = native_decode_frame_bytes_or_throw(source, frame_index);
+		return prepared_source;
+	}
+
+	const auto source =
+	    load_encapsulated_frame_source_without_cache_or_throw(ds, frame_index);
+	prepared_source.bytes = materialize_encapsulated_frame_source_or_throw(
+	    source, prepared_source.owned_bytes);
+	return prepared_source;
+}
+
+PreparedDecodeFrameSource prepare_decode_frame_source_without_cache_or_throw(
+    const PixelSequence& pixel_sequence, std::size_t frame_index) {
+	PreparedDecodeFrameSource prepared_source{};
+	const auto source =
+	    load_encapsulated_frame_source_or_throw(pixel_sequence, frame_index, false);
 	prepared_source.bytes = materialize_encapsulated_frame_source_or_throw(
 	    source, prepared_source.owned_bytes);
 	return prepared_source;

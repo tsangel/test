@@ -166,6 +166,129 @@ int main() {
 		return std::pair{std::move(source_bytes), source};
 	};
 
+	auto append_u16_le = [](std::vector<std::uint8_t>& out, std::uint16_t v) {
+		out.push_back(static_cast<std::uint8_t>(v & 0xFFu));
+		out.push_back(static_cast<std::uint8_t>((v >> 8) & 0xFFu));
+	};
+	auto append_u32_le = [](std::vector<std::uint8_t>& out, std::uint32_t v) {
+		out.push_back(static_cast<std::uint8_t>(v & 0xFFu));
+		out.push_back(static_cast<std::uint8_t>((v >> 8) & 0xFFu));
+		out.push_back(static_cast<std::uint8_t>((v >> 16) & 0xFFu));
+		out.push_back(static_cast<std::uint8_t>((v >> 24) & 0xFFu));
+	};
+	auto append_bytes = [](std::vector<std::uint8_t>& out,
+	                        const std::vector<std::uint8_t>& value) {
+		out.insert(out.end(), value.begin(), value.end());
+	};
+	auto append_explicit_vr_le_16 =
+	    [&](std::vector<std::uint8_t>& out, dicom::Tag tag,
+	        char vr0, char vr1, const std::vector<std::uint8_t>& value) {
+		    if (value.size() > 0xFFFFu) {
+			    fail("append_explicit_vr_le_16 value too large");
+		    }
+		    append_u16_le(out, tag.group());
+		    append_u16_le(out, tag.element());
+		    out.push_back(static_cast<std::uint8_t>(vr0));
+		    out.push_back(static_cast<std::uint8_t>(vr1));
+		    append_u16_le(out, static_cast<std::uint16_t>(value.size()));
+		    append_bytes(out, value);
+	    };
+	auto append_explicit_vr_le_32 =
+	    [&](std::vector<std::uint8_t>& out, dicom::Tag tag,
+	        char vr0, char vr1, const std::vector<std::uint8_t>& value,
+	        bool undefined_length = false) {
+		    append_u16_le(out, tag.group());
+		    append_u16_le(out, tag.element());
+		    out.push_back(static_cast<std::uint8_t>(vr0));
+		    out.push_back(static_cast<std::uint8_t>(vr1));
+		    append_u16_le(out, 0u);
+		    append_u32_le(out, undefined_length
+		                           ? 0xFFFFFFFFu
+		                           : static_cast<std::uint32_t>(value.size()));
+		    append_bytes(out, value);
+	    };
+	auto ui_value = [](std::string uid) {
+		if (uid.empty() || uid.back() != '\0') {
+			uid.push_back('\0');
+		}
+		if ((uid.size() & 1u) != 0u) {
+			uid.push_back('\0');
+		}
+		return std::vector<std::uint8_t>(uid.begin(), uid.end());
+	};
+	auto build_part10 = [&](std::string transfer_syntax_uid,
+	                         const std::vector<std::uint8_t>& body) {
+		std::vector<std::uint8_t> meta_ts;
+		append_explicit_vr_le_16(
+		    meta_ts, dicom::Tag(0x0002u, 0x0010u), 'U', 'I',
+		    ui_value(std::move(transfer_syntax_uid)));
+
+		std::vector<std::uint8_t> meta_gl_value;
+		append_u32_le(meta_gl_value, static_cast<std::uint32_t>(meta_ts.size()));
+
+		std::vector<std::uint8_t> out(128, 0);
+		out.insert(out.end(), {'D', 'I', 'C', 'M'});
+		append_explicit_vr_le_16(
+		    out, dicom::Tag(0x0002u, 0x0000u), 'U', 'L', meta_gl_value);
+		append_bytes(out, meta_ts);
+		append_bytes(out, body);
+		return out;
+	};
+	auto build_multifragment_encapsulated_uncompressed_body = [&]() {
+		std::vector<std::uint8_t> body;
+		append_explicit_vr_le_16(
+		    body, dicom::Tag(0x0028u, 0x0002u), 'U', 'S',
+		    std::vector<std::uint8_t>{0x01u, 0x00u});
+		append_explicit_vr_le_16(
+		    body, dicom::Tag(0x0028u, 0x0004u), 'C', 'S',
+		    std::vector<std::uint8_t>{
+		        'M', 'O', 'N', 'O', 'C', 'H', 'R', 'O', 'M', 'E', '2', ' '});
+		append_explicit_vr_le_16(
+		    body, dicom::Tag(0x0028u, 0x0010u), 'U', 'S',
+		    std::vector<std::uint8_t>{0x01u, 0x00u});
+		append_explicit_vr_le_16(
+		    body, dicom::Tag(0x0028u, 0x0011u), 'U', 'S',
+		    std::vector<std::uint8_t>{0x02u, 0x00u});
+		append_explicit_vr_le_16(
+		    body, dicom::Tag(0x0028u, 0x0100u), 'U', 'S',
+		    std::vector<std::uint8_t>{0x10u, 0x00u});
+		append_explicit_vr_le_16(
+		    body, dicom::Tag(0x0028u, 0x0101u), 'U', 'S',
+		    std::vector<std::uint8_t>{0x10u, 0x00u});
+		append_explicit_vr_le_16(
+		    body, dicom::Tag(0x0028u, 0x0102u), 'U', 'S',
+		    std::vector<std::uint8_t>{0x0Fu, 0x00u});
+		append_explicit_vr_le_16(
+		    body, dicom::Tag(0x0028u, 0x0103u), 'U', 'S',
+		    std::vector<std::uint8_t>{0x00u, 0x00u});
+
+		std::vector<std::uint8_t> encapsulated_pixel_value;
+		append_u16_le(encapsulated_pixel_value, 0xFFFEu);
+		append_u16_le(encapsulated_pixel_value, 0xE000u);
+		append_u32_le(encapsulated_pixel_value, 0u);
+
+		append_u16_le(encapsulated_pixel_value, 0xFFFEu);
+		append_u16_le(encapsulated_pixel_value, 0xE000u);
+		append_u32_le(encapsulated_pixel_value, 2u);
+		encapsulated_pixel_value.push_back(0x34u);
+		encapsulated_pixel_value.push_back(0x12u);
+
+		append_u16_le(encapsulated_pixel_value, 0xFFFEu);
+		append_u16_le(encapsulated_pixel_value, 0xE000u);
+		append_u32_le(encapsulated_pixel_value, 2u);
+		encapsulated_pixel_value.push_back(0x78u);
+		encapsulated_pixel_value.push_back(0x56u);
+
+		append_u16_le(encapsulated_pixel_value, 0xFFFEu);
+		append_u16_le(encapsulated_pixel_value, 0xE0DDu);
+		append_u32_le(encapsulated_pixel_value, 0u);
+
+		append_explicit_vr_le_32(
+		    body, dicom::Tag(0x7FE0u, 0x0010u), 'O', 'B',
+		    encapsulated_pixel_value, true);
+		return body;
+	};
+
 	{
 		auto [source_bytes, source] = make_u16_source();
 		dicom::DicomFile native_file;
@@ -502,9 +625,51 @@ int main() {
 		}
 	}
 
+	{
+		const auto source_bytes = build_part10(
+		    "1.2.840.10008.1.2.1.98",
+		    build_multifragment_encapsulated_uncompressed_body());
+		auto source = read_bytes(
+		    "write-with-ts-no-cache-source", source_bytes.data(), source_bytes.size());
+		if (!source) fail("write_with_transfer_syntax no-cache source returned null");
+		auto& pixel_data = source->get_dataelement("PixelData"_tag);
+		if (pixel_data.is_missing() || !pixel_data.vr().is_pixel_sequence()) {
+			fail("write_with_transfer_syntax no-cache source should be encapsulated");
+		}
+		auto* pixel_sequence = pixel_data.as_pixel_sequence();
+		if (!pixel_sequence || pixel_sequence->number_of_frames() != 1) {
+			fail("write_with_transfer_syntax no-cache source frame count mismatch");
+		}
+		const auto* frame0_before = pixel_sequence->frame(0);
+		if (!frame0_before) {
+			fail("write_with_transfer_syntax no-cache source frame 0 missing");
+		}
+		if (frame0_before->encoded_data_size() != 0) {
+			fail("write_with_transfer_syntax no-cache source should start without materialized frame cache");
+		}
+
+		std::ostringstream os(std::ios::binary);
+		source->write_with_transfer_syntax(os, "ExplicitVRLittleEndian"_uid);
+		const auto output = os.str();
+		auto roundtrip = read_bytes(
+		    "write-with-ts-no-cache-roundtrip",
+		    reinterpret_cast<const std::uint8_t*>(output.data()), output.size());
+		if (!roundtrip) fail("write_with_transfer_syntax no-cache roundtrip returned null");
+		const std::vector<std::uint8_t> expected_frame{
+		    0x34u, 0x12u, 0x78u, 0x56u};
+		if (roundtrip->pixel_data(0) != expected_frame) {
+			fail("write_with_transfer_syntax no-cache roundtrip mismatch");
+		}
+		const auto* frame0_after = pixel_sequence->frame(0);
+		if (!frame0_after || frame0_after->encoded_data_size() != 0) {
+			fail("write_with_transfer_syntax should not materialize source frame cache");
+		}
+	}
+
 	if (dicom::test::kJpegLsBuiltin) {
 		const std::vector<std::uint8_t> lossy_source_bytes{
 		    0x10u, 0x20u, 0x30u, 0x40u, 0x50u, 0x60u};
+		const int near_lossless_error = 2;
 		dicom::pixel::PixelSource lossy_source{};
 		lossy_source.bytes = std::span<const std::uint8_t>(
 		    lossy_source_bytes.data(), lossy_source_bytes.size());
@@ -533,8 +698,25 @@ int main() {
 		        .to_string_view().value_or("") != std::string_view("01")) {
 			fail("write_with_transfer_syntax JPEG-LS lossy should set LossyImageCompression to 01");
 		}
-		if (roundtrip->pixel_data(0) != lossy_source_bytes) {
-			fail("write_with_transfer_syntax JPEG-LS lossy roundtrip mismatch");
+		const auto lossy_ratio =
+		    roundtrip->get_dataelement("LossyImageCompressionRatio"_tag)
+		        .to_double_vector();
+		if (!lossy_ratio || lossy_ratio->empty() || (*lossy_ratio)[0] <= 0.0) {
+			fail("write_with_transfer_syntax JPEG-LS lossy should backpatch LossyImageCompressionRatio");
+		}
+		const auto roundtrip_frame = roundtrip->pixel_data(0);
+		if (roundtrip_frame.size() != lossy_source_bytes.size()) {
+			fail("write_with_transfer_syntax JPEG-LS lossy frame size mismatch");
+		}
+		for (std::size_t i = 0; i < roundtrip_frame.size(); ++i) {
+			int diff = static_cast<int>(roundtrip_frame[i]) -
+			    static_cast<int>(lossy_source_bytes[i]);
+			if (diff < 0) {
+				diff = -diff;
+			}
+			if (diff > near_lossless_error) {
+				fail("write_with_transfer_syntax JPEG-LS lossy max abs error exceeded");
+			}
 		}
 	}
 

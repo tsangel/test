@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstring>
 #include <cstdint>
@@ -255,6 +256,12 @@ private:
 	bool active_{true};
 };
 
+struct LossyRatioBackpatchState {
+	std::size_t token_offset_in_value{0};
+	std::size_t token_width{0};
+	std::size_t absolute_token_offset{0};
+};
+
 [[nodiscard]] std::uint32_t checked_u32(std::size_t value, std::string_view label) {
 	if (value > std::numeric_limits<std::uint32_t>::max()) {
 		diag::error_and_throw("write_to_stream reason={} exceeds 32-bit range", label);
@@ -328,6 +335,9 @@ void write_tag(Writer& writer, Tag tag) {
 	}
 	return vr;
 }
+
+template <typename Writer>
+void write_data_element(const DataElement& element, Writer& writer, bool explicit_vr);
 
 template <typename Writer>
 void write_element_header(Writer& writer, Tag tag, VR vr, std::uint32_t value_length,
@@ -937,6 +947,189 @@ void append_streaming_write_pixel_metadata_tags(std::vector<Tag>& tags) {
 	    kStreamingWritePixelMetadataTags.end());
 }
 
+[[nodiscard]] bool has_prior_lossy_history_for_streaming_write(
+    const DataSet& dataset) {
+	const auto lossy_value =
+	    dataset["LossyImageCompression"_tag].to_string_view();
+	return lossy_value && *lossy_value == "01";
+}
+
+[[nodiscard]] std::vector<std::string> read_lossy_method_values_for_streaming_write(
+    const DataSet& dataset) {
+	std::vector<std::string> methods;
+	const auto parsed =
+	    dataset["LossyImageCompressionMethod"_tag].to_string_views();
+	if (!parsed) {
+		return methods;
+	}
+	methods.reserve(parsed->size());
+	for (const auto value : *parsed) {
+		methods.emplace_back(value);
+	}
+	return methods;
+}
+
+[[nodiscard]] std::vector<double> read_lossy_ratio_values_for_streaming_write(
+    const DataSet& dataset) {
+	const auto parsed =
+	    dataset["LossyImageCompressionRatio"_tag].to_double_vector();
+	return parsed.value_or(std::vector<double>{});
+}
+
+[[nodiscard]] std::string format_lossy_ratio_ds_value_or_throw(
+    std::string_view file_path, uid::WellKnown transfer_syntax, double value) {
+	if (!std::isfinite(value) || value <= 0.0) {
+		diag::error_and_throw(
+		    "write_with_transfer_syntax file={} ts={} reason=invalid lossy compression ratio {}",
+		    file_path, transfer_syntax.value(), value);
+	}
+
+	for (int precision = 17; precision >= 1; --precision) {
+		auto text = fmt::format("{:.{}g}", value, precision);
+		if (text.size() <= 16u) {
+			return text;
+		}
+	}
+
+	diag::error_and_throw(
+	    "write_with_transfer_syntax file={} ts={} reason=lossy compression ratio {} does not fit DS VM item width",
+	    file_path, transfer_syntax.value(), value);
+}
+
+[[nodiscard]] LossyRatioBackpatchState
+prepare_lossy_metadata_placeholder_for_streaming_write(
+    DataSet& dataset, std::string_view file_path,
+    uid::WellKnown transfer_syntax, uint32_t codec_profile_code) {
+	const auto method =
+	    pixel::detail::lossy_method_for_encode_profile(codec_profile_code);
+	if (!method) {
+		diag::error_and_throw(
+		    "write_with_transfer_syntax file={} ts={} reason=missing lossy compression method mapping for transfer syntax",
+		    file_path, transfer_syntax.value());
+	}
+
+	bool ok = true;
+	const bool had_prior_lossy =
+	    has_prior_lossy_history_for_streaming_write(dataset);
+	std::vector<std::string> methods;
+	std::vector<double> ratios;
+	if (had_prior_lossy) {
+		methods = read_lossy_method_values_for_streaming_write(dataset);
+		ratios = read_lossy_ratio_values_for_streaming_write(dataset);
+		const auto paired_count = std::min(methods.size(), ratios.size());
+		methods.resize(paired_count);
+		ratios.resize(paired_count);
+	}
+	methods.emplace_back(*method);
+
+	std::vector<std::string_view> method_views;
+	method_views.reserve(methods.size());
+	for (const auto& value : methods) {
+		method_views.emplace_back(value);
+	}
+
+	auto& lossy_elem = dataset.add_dataelement("LossyImageCompression"_tag, VR::CS);
+	ok &= lossy_elem.from_string_view("01");
+
+	auto& method_elem =
+	    dataset.add_dataelement("LossyImageCompressionMethod"_tag, VR::CS);
+	ok &= method_elem.from_string_views(
+	    std::span<const std::string_view>(method_views.data(), method_views.size()));
+
+	std::string ratio_text;
+	ratio_text.reserve((ratios.size() * 18u) + 16u);
+	for (std::size_t index = 0; index < ratios.size(); ++index) {
+		if (index != 0) {
+			ratio_text.push_back('\\');
+		}
+		ratio_text += format_lossy_ratio_ds_value_or_throw(
+		    file_path, transfer_syntax, ratios[index]);
+	}
+	if (!ratio_text.empty()) {
+		ratio_text.push_back('\\');
+	}
+
+	const auto token_offset_in_value = ratio_text.size();
+	static constexpr std::string_view kRatioPlaceholder = "0               ";
+	ratio_text.append(kRatioPlaceholder);
+
+	auto& ratio_elem =
+	    dataset.add_dataelement("LossyImageCompressionRatio"_tag, VR::DS);
+	ratio_elem.set_value_bytes(std::span<const std::uint8_t>(
+	    reinterpret_cast<const std::uint8_t*>(ratio_text.data()), ratio_text.size()));
+
+	if (!ok) {
+		diag::error_and_throw(
+		    "write_with_transfer_syntax file={} ts={} reason=failed to update lossy compression metadata placeholder method={} history_vm={}",
+		    file_path, transfer_syntax.value(), *method, methods.size());
+	}
+
+	return LossyRatioBackpatchState{
+	    token_offset_in_value,
+	    kRatioPlaceholder.size(),
+	    0u,
+	};
+}
+
+[[nodiscard]] std::size_t measure_dataset_value_offset_or_throw(
+    const DataSet& dataset, Tag target_tag, bool explicit_vr,
+    bool skip_group_0002) {
+	CountingWriter measuring_writer;
+	for (const auto& element : dataset) {
+		if (skip_group_0002 && element.tag().group() == 0x0002u) {
+			continue;
+		}
+		if (element.tag() == kExtendedOffsetTableTag ||
+		    element.tag() == kExtendedOffsetTableLengthsTag) {
+			continue;
+		}
+		if (element.tag() == target_tag) {
+			const auto normalized_vr =
+			    normalize_vr_for_write(element.tag(), element.vr());
+			const auto raw_length = element.value_span().size();
+			const auto full_length = padded_length(raw_length);
+			write_element_header(measuring_writer, element.tag(), normalized_vr,
+			    checked_u32(full_length, "element length"), false, explicit_vr);
+			return measuring_writer.written;
+		}
+		write_data_element(element, measuring_writer, explicit_vr);
+	}
+
+	diag::error_and_throw(
+	    "write_with_transfer_syntax reason=expected metadata tag {} not found while preparing backpatch",
+	    target_tag.to_string());
+}
+
+template <typename Writer>
+void backpatch_lossy_ratio_or_throw(Writer& writer,
+    std::string_view file_path, uid::WellKnown transfer_syntax,
+    std::size_t uncompressed_payload_bytes, std::size_t encoded_payload_bytes,
+    const LossyRatioBackpatchState& backpatch_state) {
+	if (encoded_payload_bytes == 0 || uncompressed_payload_bytes == 0) {
+		diag::error_and_throw(
+		    "write_with_transfer_syntax file={} ts={} reason=cannot compute lossy compression ratio from zero payload size (uncompressed={} encoded={})",
+		    file_path, transfer_syntax.value(), uncompressed_payload_bytes,
+		    encoded_payload_bytes);
+	}
+
+	const double ratio = static_cast<double>(uncompressed_payload_bytes) /
+	    static_cast<double>(encoded_payload_bytes);
+	auto ratio_text =
+	    format_lossy_ratio_ds_value_or_throw(file_path, transfer_syntax, ratio);
+	if (ratio_text.size() > backpatch_state.token_width) {
+		diag::error_and_throw(
+		    "write_with_transfer_syntax file={} ts={} reason=lossy compression ratio {} exceeds placeholder width {}",
+		    file_path, transfer_syntax.value(), ratio,
+		    backpatch_state.token_width);
+	}
+	ratio_text.resize(backpatch_state.token_width, ' ');
+
+	writer.overwrite(backpatch_state.absolute_token_offset,
+	    std::span<const std::uint8_t>(
+	        reinterpret_cast<const std::uint8_t*>(ratio_text.data()),
+	        ratio_text.size()));
+}
+
 template <typename Fn>
 void for_each_file_meta_element(const DataSet& dataset, Fn&& fn) {
 	for (const auto& element : dataset) {
@@ -1338,6 +1531,11 @@ void write_with_transfer_syntax_impl(DicomFile& file, Writer& writer,
 
 		bool use_multicomponent_transform = false;
 		pixel::Photometric output_photometric = source_descriptor.photometric;
+		const bool backpatch_lossy_ratio =
+		    target_is_encapsulated &&
+		    pixel::detail::encode_profile_uses_lossy_compression(
+		        codec_profile_code) &&
+		    writer.can_overwrite();
 		if (target_is_encapsulated) {
 			use_multicomponent_transform =
 			    pixel::detail::should_use_multicomponent_transform(
@@ -1353,7 +1551,8 @@ void write_with_transfer_syntax_impl(DicomFile& file, Writer& writer,
 		std::size_t encoded_payload_bytes = 0;
 		std::vector<std::uint8_t> decoded_frame{};
 		if (target_is_encapsulated &&
-		    pixel::detail::encode_profile_uses_lossy_compression(codec_profile_code)) {
+		    pixel::detail::encode_profile_uses_lossy_compression(codec_profile_code) &&
+		    !backpatch_lossy_ratio) {
 			if (needs_native_to_encapsulated) {
 				const auto source_bytes = source_descriptor.bytes;
 				encoded_payload_bytes =
@@ -1378,7 +1577,7 @@ void write_with_transfer_syntax_impl(DicomFile& file, Writer& writer,
 					        auto frame_span = std::span<std::uint8_t>(
 					            decoded_frame.data(), decoded_frame.size());
 					        const auto prepared_source =
-					            pixel::support_detail::prepare_decode_frame_source_or_throw(
+					            pixel::support_detail::prepare_decode_frame_source_without_cache_or_throw(
 					                file, info, frame_index);
 					        pixel::detail::dispatch_decode_prepared_frame(
 					            file.path(), frame_index, prepared_source.bytes,
@@ -1397,9 +1596,17 @@ void write_with_transfer_syntax_impl(DicomFile& file, Writer& writer,
 		    source_layout.bits_stored, source_layout.high_bit,
 		    source_layout.pixel_representation, source_layout.source_row_stride,
 		    source_layout.source_frame_stride);
-		pixel::detail::update_lossy_compression_metadata_for_set_pixel_data(
-		    dataset, file.path(), target_transfer_syntax, codec_profile_code,
-		    source_layout.destination_total_bytes, encoded_payload_bytes);
+		std::optional<LossyRatioBackpatchState> lossy_ratio_backpatch{};
+		if (backpatch_lossy_ratio) {
+			lossy_ratio_backpatch =
+			    prepare_lossy_metadata_placeholder_for_streaming_write(
+			        dataset, file.path(), target_transfer_syntax,
+			        codec_profile_code);
+		} else {
+			pixel::detail::update_lossy_compression_metadata_for_set_pixel_data(
+			    dataset, file.path(), target_transfer_syntax, codec_profile_code,
+			    source_layout.destination_total_bytes, encoded_payload_bytes);
+		}
 		pixel::detail::update_transfer_syntax_uid_element_after_set_pixel_data_or_throw(
 		    file, target_transfer_syntax);
 		if (!options.keep_existing_meta) {
@@ -1413,6 +1620,14 @@ void write_with_transfer_syntax_impl(DicomFile& file, Writer& writer,
 		}
 		if (options.write_file_meta) {
 			write_file_meta_group(writer, dataset);
+		}
+		if (lossy_ratio_backpatch) {
+			lossy_ratio_backpatch->absolute_token_offset =
+			    writer.position() +
+			    measure_dataset_value_offset_or_throw(dataset,
+			        "LossyImageCompressionRatio"_tag,
+			        encoding.explicit_vr, true) +
+			    lossy_ratio_backpatch->token_offset_in_value;
 		}
 
 		if (target_is_encapsulated) {
@@ -1480,6 +1695,17 @@ void write_with_transfer_syntax_impl(DicomFile& file, Writer& writer,
 						            source_layout.source_frame_size_bytes);
 					        },
 					        [&](std::size_t, std::vector<std::uint8_t>&& encoded_frame) {
+						        if (lossy_ratio_backpatch) {
+							        if (encoded_payload_bytes >
+							            std::numeric_limits<std::size_t>::max() -
+							                encoded_frame.size()) {
+								        diag::error_and_throw(
+								            "write_with_transfer_syntax file={} target_ts={} reason=encoded payload size overflow during streamed write",
+								            file.path(),
+								            target_transfer_syntax.value());
+							        }
+							        encoded_payload_bytes += encoded_frame.size();
+						        }
 						        if (write_extended_offset_table) {
 							        extended_offsets.push_back(next_frame_offset);
 							        extended_lengths.push_back(encoded_frame.size());
@@ -1504,7 +1730,7 @@ void write_with_transfer_syntax_impl(DicomFile& file, Writer& writer,
 						        auto frame_span = std::span<std::uint8_t>(
 						            decoded_frame.data(), decoded_frame.size());
 						        const auto prepared_source =
-						            pixel::support_detail::prepare_decode_frame_source_or_throw(
+						            pixel::support_detail::prepare_decode_frame_source_without_cache_or_throw(
 						                file, info, frame_index);
 						        pixel::detail::dispatch_decode_prepared_frame(
 						            file.path(), frame_index, prepared_source.bytes,
@@ -1514,6 +1740,17 @@ void write_with_transfer_syntax_impl(DicomFile& file, Writer& writer,
 						            source_layout.source_frame_size_bytes);
 					        },
 					        [&](std::size_t, std::vector<std::uint8_t>&& encoded_frame) {
+						        if (lossy_ratio_backpatch) {
+							        if (encoded_payload_bytes >
+							            std::numeric_limits<std::size_t>::max() -
+							                encoded_frame.size()) {
+								        diag::error_and_throw(
+								            "write_with_transfer_syntax file={} target_ts={} reason=encoded payload size overflow during streamed write",
+								            file.path(),
+								            target_transfer_syntax.value());
+							        }
+							        encoded_payload_bytes += encoded_frame.size();
+						        }
 						        if (write_extended_offset_table) {
 							        extended_offsets.push_back(next_frame_offset);
 							        extended_lengths.push_back(encoded_frame.size());
@@ -1545,6 +1782,12 @@ void write_with_transfer_syntax_impl(DicomFile& file, Writer& writer,
 					            extended_lengths_bytes.size()));
 				    }
 			    });
+			if (lossy_ratio_backpatch) {
+				backpatch_lossy_ratio_or_throw(writer, file.path(),
+				    target_transfer_syntax,
+				    source_layout.destination_total_bytes,
+				    encoded_payload_bytes, *lossy_ratio_backpatch);
+			}
 		} else {
 			if (decoded_frame.size() != decode_plan->strides.frame) {
 				decoded_frame.resize(decode_plan->strides.frame);
@@ -1564,7 +1807,7 @@ void write_with_transfer_syntax_impl(DicomFile& file, Writer& writer,
 					        auto frame_span = std::span<std::uint8_t>(
 					            decoded_frame.data(), decoded_frame.size());
 					        const auto prepared_source =
-					            pixel::support_detail::prepare_decode_frame_source_or_throw(
+					            pixel::support_detail::prepare_decode_frame_source_without_cache_or_throw(
 					                file, info, frame_index);
 					        pixel::detail::dispatch_decode_prepared_frame(
 					            file.path(), frame_index, prepared_source.bytes,
