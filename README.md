@@ -281,34 +281,48 @@ pip install cmake
 pip wheel . --no-build-isolation --no-deps -w dist
 ```
 
+On macOS, if `MACOSX_DEPLOYMENT_TARGET` is unset, wheel builds default to
+`10.15` for `x86_64` and `11.0` for `arm64`/`universal2`. Export
+`MACOSX_DEPLOYMENT_TARGET=...` first if you need a different minimum target.
+
 After building, install the wheel:
 
 ```
 pip install dist/dicomsdl-*.whl
 ```
 
-### Static wheel wrappers (`build-wheel-static.bat` / `build-wheel-static.sh`)
+### Quick wheel wrappers (`build-wheel-static.*` / `build-wheel-shared.*`)
 
-Use the static wrapper scripts when you want a clean static wheel build pipeline.
+Use the quick wrapper scripts when you want a fast wheel packaging pass without
+full regression coverage.
 
 ```bash
-# macOS / Linux
+# macOS / Linux: static wheel
 ./build-wheel-static.sh
+
+# macOS / Linux: shared-plugin wheel
+./build-wheel-shared.sh
 ```
 
 ```cmd
-:: Windows (cmd.exe)
+:: Windows (cmd.exe): static wheel
 build-wheel-static.bat
+
+:: Windows (cmd.exe): shared-plugin wheel
+build-wheel-shared.bat
 ```
 
-Default behavior:
+Quick-wrapper behavior:
 
 - Pre-clean old outputs before build:
   - `${BUILD_DIR}` (default: `build-wheel-static`)
   - `build/temp.*`, `build/lib.*`, `build/bdist.*`
   - `${WHEEL_DIR}` (default: `dist-static`)
 - Force wheel build to Release (`FORCE_WHEEL_RELEASE=1`, `BUILD_TYPE=Release`).
-- Run `build.sh` / `build.bat` to produce a new wheel.
+- On macOS, default `MACOSX_DEPLOYMENT_TARGET` to `10.15` for `x86_64` and
+  `11.0` for `arm64`/`universal2` when the variable is unset.
+- Run `build.sh` / `build.bat` to produce a new wheel quickly.
+- Keep regression testing off by default (`BUILD_TESTING=OFF`, `RUN_TESTS=0`).
 
 Useful toggles:
 
@@ -319,7 +333,49 @@ Install the built wheel manually when needed:
 
 ```bash
 pip install --force-reinstall --no-deps --no-cache-dir dist-static/dicomsdl-*.whl
+# or: dist-shared/dicomsdl-*.whl
 ```
+
+### Wheel Wrapper With Tests (`build-wheel-with-tests.bat` / `build-wheel-with-tests.sh`)
+
+Use this wrapper for release-candidate validation. It reuses the existing static/shared
+wheel wrappers, enables CTest, then runs `pytest -q tests/python` after the wheel build.
+
+```bash
+# static profile (default)
+./build-wheel-with-tests.sh
+
+# shared profile
+DICOMSDL_WHEEL_PROFILE=shared ./build-wheel-with-tests.sh
+```
+
+```cmd
+:: static profile (default)
+build-wheel-with-tests.bat
+
+:: shared profile
+set DICOMSDL_WHEEL_PROFILE=shared
+build-wheel-with-tests.bat
+```
+
+Defaults:
+
+- `DICOMSDL_WHEEL_PROFILE=static`
+- `BUILD_TESTING=ON`
+- `RUN_TESTS=1`
+- `WHEEL_ONLY=0`
+- `DICOM_BUILD_EXAMPLES=OFF`
+- `PIP_WHEEL_VERBOSE=1`
+
+Optional:
+
+- `PYTEST_ARGS="..."` to forward extra arguments to `pytest`
+- `BUILD_DIR` / `WHEEL_DIR` to override regression output locations
+
+Default wheel-with-tests outputs:
+
+- `static`: `dist-static-with-tests`
+- `shared`: `dist-shared-with-tests`
 
 ### Run Python examples
 
@@ -485,6 +541,9 @@ python -c "import dicomsdl as dicom; tag, vr = dicom.keyword_to_tag_vr('PatientN
 python -c "import dicomsdl as dicom; df = dicom.read_file('sample.dcm'); print(df.path, type(df.dataset).__name__)"
 python -c "import dicomsdl as dicom; data = b'DICM'; df = dicom.read_bytes(data, name='inline'); print(df.path, len(data))"
 ```
+
+On macOS, the local wheel command above uses `10.15` (`x86_64`) or `11.0`
+(`arm64`/`universal2`) when `MACOSX_DEPLOYMENT_TARGET` is not already set.
 
 ### Windows (PowerShell)
 

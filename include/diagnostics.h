@@ -1,5 +1,6 @@
 #pragma once
 
+#include <filesystem>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -72,7 +73,8 @@ public:
 //   dicom::diag::info("written to dicom.log");
 class FileReporter : public Reporter {
 public:
-	explicit FileReporter(std::string path) : out_(std::move(path), std::ios::app) {}
+	explicit FileReporter(std::filesystem::path path)
+	    : out_(normalize_log_path(std::move(path)), std::ios::app) {}
 
 	void report(LogLevel level, std::string_view message) override {
 		if (!out_) return;
@@ -81,6 +83,11 @@ public:
 	}
 
 private:
+	static std::filesystem::path normalize_log_path(std::filesystem::path path) {
+		const auto normalized_path = path.lexically_normal();
+		return normalized_path.empty() ? path : normalized_path;
+	}
+
 	static const char* level_to_str(LogLevel level) {
 		switch (level) {
 			case LogLevel::Info: return "INFO";

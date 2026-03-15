@@ -18,7 +18,7 @@ jobs:
             macos_env: ""
           - os: macos-15-intel
             archs: x86_64
-            macos_env: "MACOSX_DEPLOYMENT_TARGET=10.13"
+            macos_env: "MACOSX_DEPLOYMENT_TARGET=10.15"
           - os: macos-14
             archs: arm64
             macos_env: "MACOSX_DEPLOYMENT_TARGET=11.0"

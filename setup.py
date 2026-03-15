@@ -1,5 +1,6 @@
 import os
 import pathlib
+import platform
 import re
 import shlex
 import shutil
@@ -9,6 +10,11 @@ import sysconfig
 from typing import Optional
 from setuptools import Extension, setup
 from setuptools.command.build_ext import build_ext
+
+try:
+    from setuptools.command.bdist_wheel import bdist_wheel
+except ImportError:
+    bdist_wheel = None
 
 ROOT_DIR = pathlib.Path(__file__).resolve().parent
 VERSION_HEADER_FILE = ROOT_DIR / "include" / "dicom_const.h"
@@ -52,6 +58,67 @@ PROJECT_URLS = {
     "Issues": f"{PROJECT_URL}/issues",
 }
 README_TEXT = README_FILE.read_text(encoding="utf-8")
+
+
+def extract_macos_architectures(hint: str) -> set[str]:
+    text = hint.strip().lower()
+    if not text:
+        return set()
+
+    archs: set[str] = set()
+    if "universal2" in text:
+        archs.update({"arm64", "x86_64"})
+    if "arm64" in text or "aarch64" in text:
+        archs.add("arm64")
+    if "x86_64" in text or "amd64" in text:
+        archs.add("x86_64")
+    return archs
+
+
+def infer_macos_architecture(plat_name_hint: Optional[str] = None) -> str:
+    archs: set[str] = set()
+    hints = (
+        os.environ.get("CMAKE_OSX_ARCHITECTURES", ""),
+        os.environ.get("ARCHFLAGS", ""),
+        plat_name_hint or "",
+        os.environ.get("_PYTHON_HOST_PLATFORM", ""),
+        sysconfig.get_platform(),
+        platform.machine(),
+    )
+    for hint in hints:
+        archs.update(extract_macos_architectures(str(hint)))
+
+    if {"arm64", "x86_64"}.issubset(archs):
+        return "universal2"
+    if "arm64" in archs:
+        return "arm64"
+    if "x86_64" in archs:
+        return "x86_64"
+    return "arm64" if platform.machine().lower() in {"arm64", "aarch64"} else "x86_64"
+
+
+def configure_macos_deployment_target(plat_name_hint: Optional[str] = None) -> Optional[str]:
+    if sys.platform != "darwin":
+        return None
+
+    arch = infer_macos_architecture(plat_name_hint)
+    target = os.environ.get("MACOSX_DEPLOYMENT_TARGET", "").strip()
+    if not target:
+        target = "11.0" if arch in {"arm64", "universal2"} else "10.15"
+        os.environ["MACOSX_DEPLOYMENT_TARGET"] = target
+
+    sysconfig.get_config_vars()["MACOSX_DEPLOYMENT_TARGET"] = target
+
+    auto_host_platform = os.environ.get("DICOMSDL_AUTO_PYTHON_HOST_PLATFORM", "").strip()
+    host_platform = os.environ.get("_PYTHON_HOST_PLATFORM", "").strip()
+    if not host_platform or auto_host_platform in TRUTHY_ENV_VALUES:
+        os.environ["_PYTHON_HOST_PLATFORM"] = f"macosx-{target}-{arch}"
+        os.environ["DICOMSDL_AUTO_PYTHON_HOST_PLATFORM"] = "1"
+
+    return target
+
+
+configure_macos_deployment_target()
 
 
 def refresh_temp_version_files(
@@ -226,6 +293,8 @@ class CMakeExtension(Extension):
 
 class CMakeBuild(build_ext):
     def build_extension(self, ext: Extension) -> None:
+        configure_macos_deployment_target(getattr(self, "plat_name", None))
+
         ext_full_path = pathlib.Path(self.get_ext_fullpath(ext.name)).resolve()
         extdir = ext_full_path.parent
         extdir.mkdir(parents=True, exist_ok=True)
@@ -385,6 +454,18 @@ class CMakeBuild(build_ext):
         remove_windows_debug_sidecars(extdir)
 
 
+cmdclass = {"build_ext": CMakeBuild}
+
+if bdist_wheel is not None:
+    class DicomSdlBdistWheel(bdist_wheel):
+        def finalize_options(self) -> None:
+            configure_macos_deployment_target(getattr(self, "plat_name", None))
+            super().finalize_options()
+            configure_macos_deployment_target(getattr(self, "plat_name", None))
+
+    cmdclass["bdist_wheel"] = DicomSdlBdistWheel
+
+
 setup(
     name="dicomsdl",
     version=PACKAGE_VERSION,
@@ -421,7 +502,7 @@ setup(
     package_dir={"dicomsdl": "bindings/python/dicomsdl"},
     package_data={"dicomsdl": ["py.typed", "*.pyi", "*.dll", "*.so", "*.dylib"]},
     ext_modules=[CMakeExtension("dicomsdl._dicomsdl")],
-    cmdclass={"build_ext": CMakeBuild},
+    cmdclass=cmdclass,
     entry_points={
         "console_scripts": [
             "dicomdump=dicomsdl.dicomdump:main",

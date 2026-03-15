@@ -687,7 +687,7 @@ DicomFile::const_iterator DicomFile::cend() const {
 	return dataset().cend();
 }
 
-void DicomFile::attach_to_file(const std::string& path) {
+void DicomFile::attach_to_file(const std::filesystem::path& path) {
 	root_dataset_.attach_to_file(path);
 }
 
@@ -1143,7 +1143,7 @@ void DicomFile::set_specific_charset(
 	root_dataset_.set_specific_charset(charsets, errors, out_replaced);
 }
 
-std::unique_ptr<DicomFile> read_file(const std::string& path, ReadOptions options) {
+std::unique_ptr<DicomFile> read_file(const std::filesystem::path& path, ReadOptions options) {
 	auto dicom_file = std::make_unique<DicomFile>();
 	dicom_file->attach_to_file(path);
 	dicom_file->read_attached_stream(options);

@@ -95,13 +95,34 @@ def test_literal_and_file(tmp_path):
 
 	dcm_path = tmp_path / "dummy.dcm"
 	dcm_path.write_bytes(b"DICM")
-	obj = dicom.read_file(str(dcm_path))
+	obj = dicom.read_file(dcm_path)
 	assert pathlib.Path(obj.path).resolve() == dcm_path.resolve()
 	assert obj.has_error is False
 	assert obj.error_message is None
 
 	mem = dicom.read_bytes(b"TEST", name="memory-buffer")
 	assert mem.path == "memory-buffer"
+
+
+def test_python_pathlike_support(tmp_path):
+	source = dicom.read_file(pathlib.Path(_test_file()))
+	out_path = tmp_path / "pathlike-roundtrip.dcm"
+	source.write_file(out_path)
+	roundtrip = dicom.read_file(out_path)
+	assert pathlib.Path(roundtrip.path).resolve() == out_path.resolve()
+	assert roundtrip.has_error is False
+
+	log_path = tmp_path / "dicomsdl.log"
+	reporter = dicom.FileReporter(log_path)
+	dicom.set_thread_reporter(reporter)
+	try:
+		dicom.log_warn("python-pathlike-smoke")
+	finally:
+		dicom.set_thread_reporter(None)
+	assert "python-pathlike-smoke" in log_path.read_text()
+
+	with pytest.raises(ValueError):
+		dicom.register_external_codec_plugin(tmp_path / "missing.plugin")
 
 
 def test_keep_on_error_records_parse_failure():
@@ -310,8 +331,8 @@ def test_write_roundtrip_sequence_and_pixel(tmp_path):
 	assert rt_pixel.pixel_sequence.number_of_frames == 1
 
 	out_path = tmp_path / "roundtrip_write.dcm"
-	roundtrip.write_file(str(out_path))
-	from_file = dicom.read_file(str(out_path))
+	roundtrip.write_file(out_path)
+	from_file = dicom.read_file(out_path)
 	assert from_file.get_dataelement("ReferencedStudySequence").is_sequence
 	assert from_file.get_dataelement("PixelData").is_pixel_sequence
 

@@ -2,9 +2,9 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
-#include <cstdio>
 #include <cstdlib>
 #include <exception>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <mutex>
@@ -30,29 +30,40 @@ int main() {
 		std::exit(1);
 	};
 
-	std::string tmp_dir = ".";
-	if (const char* env = std::getenv("TMPDIR"); env && *env) {
-		tmp_dir = env;
-	} else if (const char* env = std::getenv("TEMP"); env && *env) {
-		tmp_dir = env;
-	} else if (const char* env = std::getenv("TMP"); env && *env) {
-		tmp_dir = env;
+	namespace fs = std::filesystem;
+	std::error_code path_ec;
+	fs::path tmp_dir = fs::temp_directory_path(path_ec);
+	if (path_ec || tmp_dir.empty()) {
+		path_ec.clear();
+		tmp_dir = fs::current_path(path_ec);
 	}
-	if (!tmp_dir.empty() && tmp_dir.back() != '/' && tmp_dir.back() != '\\') {
-		tmp_dir.push_back('/');
+	if (path_ec || tmp_dir.empty()) {
+		fail("failed to resolve temp directory");
 	}
 
-	const std::string file_path = tmp_dir + "dicomsdl_pixel_io_smoke.dcm";
+	auto remove_file_or_fail = [&](const fs::path& path, const char* label) {
+		std::error_code remove_ec;
+		const bool removed = fs::remove(path, remove_ec);
+		if (remove_ec) {
+			fail(std::string(label) + " cleanup failed: " + remove_ec.message());
+		}
+		if (!removed) {
+			fail(std::string(label) + " cleanup failed: file was not removed");
+		}
+	};
+
+	const fs::path file_path = (tmp_dir / "dicomsdl_pixel_io_smoke.dcm").lexically_normal();
+	const std::string file_path_text = file_path.string();
 	{
 		std::ofstream os(file_path, std::ios::binary);
 		os << "DICM";
 	}
 	{
-		const auto file = read_file(file_path);
+		const auto file = read_file(file_path_text);
 		if (!file) fail("read_file returned null");
 		if (file->has_error()) fail("read_file should not record errors for valid input");
 		if (!file->error_message().empty()) fail("error_message should be empty when no read error exists");
-		if (file->path() != file_path) fail("file path mismatch");
+		if (file->path() != file_path_text) fail("file path mismatch");
 		if (file->stream().attached_size() != 4) fail("file data_size mismatch");
 		if (file->size() != file->dataset().size()) fail("DicomFile size forwarding mismatch");
 
@@ -79,8 +90,8 @@ int main() {
 		}
 
 		DataSet manual;
-		manual.attach_to_file(file_path);
-		if (manual.path() != file_path) fail("manual path mismatch");
+		manual.attach_to_file(file_path_text);
+		if (manual.path() != file_path_text) fail("manual path mismatch");
 		if (manual.stream().attached_size() != 4) fail("manual data_size mismatch");
 	}
 
@@ -846,16 +857,18 @@ int main() {
 			fail("roundtrip pixel payload mismatch");
 		}
 
-		const std::string roundtrip_path = tmp_dir + "dicomsdl_pixel_io_smoke_roundtrip.dcm";
-		generated.write_file(roundtrip_path, write_opts);
-		const auto generated_roundtrip_file = read_file(roundtrip_path);
+		const fs::path roundtrip_path =
+		    (tmp_dir / "dicomsdl_pixel_io_smoke_roundtrip.dcm").lexically_normal();
+		const std::string roundtrip_path_text = roundtrip_path.string();
+		generated.write_file(roundtrip_path_text, write_opts);
+		const auto generated_roundtrip_file = read_file(roundtrip_path_text);
 		if (!generated_roundtrip_file) fail("write_file roundtrip read returned null");
 		if (generated_roundtrip_file->get_dataelement("PixelData"_tag).is_missing()) {
 			fail("write_file roundtrip missing pixel data");
 		}
-		std::remove(roundtrip_path.c_str());
+		remove_file_or_fail(roundtrip_path, "roundtrip file");
 	}
 
-	std::remove(file_path.c_str());
+	remove_file_or_fail(file_path, "input file");
 	return 0;
 }

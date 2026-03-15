@@ -10,36 +10,65 @@ pip wheel . --no-build-isolation --no-deps -w dist
 pip install --force-reinstall dist/dicomsdl-*.whl
 ```
 
-2.1 Static wheel wrapper scripts (optional, recommended for static-wheel workflow)
+On macOS, if `MACOSX_DEPLOYMENT_TARGET` is unset, wheel builds default to
+`10.15` for `x86_64` and `11.0` for `arm64`/`universal2`. Export
+`MACOSX_DEPLOYMENT_TARGET=...` first if you need a different minimum target.
+
+2.1 Quick wheel wrapper scripts (optional, fast packaging only)
 
 ```bash
-# macOS / Linux
+# macOS / Linux: static wheel
 ./build-wheel-static.sh
+
+# macOS / Linux: shared-plugin wheel
+./build-wheel-shared.sh
 ```
 
 ```cmd
-:: Windows (cmd.exe)
+:: Windows (cmd.exe): static wheel
 build-wheel-static.bat
+
+:: Windows (cmd.exe): shared-plugin wheel
+build-wheel-shared.bat
 ```
 
 Wrapper defaults:
 
 - Remove old outputs at start (`BUILD_DIR`, `build/temp.*`, `build/lib.*`, `build/bdist.*`, `WHEEL_DIR`).
 - Force wheel build to Release (`FORCE_WHEEL_RELEASE=1`, `BUILD_TYPE=Release`).
-- Build a fresh wheel.
+- On macOS, default `MACOSX_DEPLOYMENT_TARGET` to `10.15` for `x86_64` and `11.0`
+  for `arm64`/`universal2` when the variable is unset.
+- Build a fresh wheel quickly without regression tests (`BUILD_TESTING=OFF`, `RUN_TESTS=0`).
 
 To disable defaults:
 
 - `STATIC_PRE_CLEAN_OUTPUTS=0` disables pre-clean.
 - `FORCE_WHEEL_RELEASE=0` allows non-Release wheel builds.
+
+2.2 Wheel wrapper with tests
+
+```bash
+# static profile (default)
+./build-wheel-with-tests.sh
+
+# shared profile
+DICOMSDL_WHEEL_PROFILE=shared ./build-wheel-with-tests.sh
+```
+
+This path enables CTest and then runs `pytest -q tests/python` after building the wheel.
+
+Useful build-script toggles:
+
 - `DICOMSDL_MSVC_ENABLE_LTCG=OFF` disables MSVC `/GL` + `/LTCG` for the wheel build.
 - `DICOMSDL_MSVC_PGO=OFF|GEN|USE` controls MSVC PGO mode (`OFF` default).
 - `DICOMSDL_MSVC_PGO_DIR=...` chooses where `.pgd/.pgc` profile data is stored.
+- `PYTEST_ARGS="..."` forwards extra arguments to `pytest`.
 
 Then install the built wheel manually:
 
 ```bash
-pip install --force-reinstall --no-deps --no-cache-dir dist-static/dicomsdl-*.whl
+pip install --force-reinstall --no-deps --no-cache-dir dist-static-with-tests/dicomsdl-*.whl
+# or: dist-shared-with-tests/dicomsdl-*.whl
 ```
 
 3. Five-line example

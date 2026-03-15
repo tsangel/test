@@ -1,4 +1,5 @@
 #include "instream.h"
+#include "stream_path_detail.hpp"
 
 #include <algorithm>
 #include <cstring>
@@ -234,8 +235,10 @@ void InFileStream::attach_file(const std::string& file_path) {
 	if (file_path.empty()) {
 		throw std::invalid_argument("file_path cannot be empty");
 	}
+	const std::string normalized_path =
+	    detail::normalize_stream_identifier_path(std::string_view(file_path));
 #if defined(_WIN32)
-	file_handle_ = CreateFileA(file_path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+	file_handle_ = CreateFileA(normalized_path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
 	if (file_handle_ == INVALID_HANDLE_VALUE) {
 		throw std::system_error(static_cast<int>(GetLastError()), std::system_category(), "Failed to open file");
 	}
@@ -268,9 +271,10 @@ void InFileStream::attach_file(const std::string& file_path) {
 	offset_ = 0;
 	endoffset_ = filesize;
 	root_stream_ = this;
-	filename_ = file_path;
+	filename_ = normalized_path;
+	identifier_ = filename_;
 #else
-	fd_ = ::open(file_path.c_str(), O_RDONLY);
+	fd_ = ::open(normalized_path.c_str(), O_RDONLY);
 	if (fd_ < 0) {
 		throw std::system_error(errno, std::generic_category(), "Failed to open file");
 	}
@@ -296,7 +300,8 @@ void InFileStream::attach_file(const std::string& file_path) {
 	offset_ = 0;
 	endoffset_ = filesize;
 	root_stream_ = this;
-	filename_ = file_path;
+	filename_ = normalized_path;
+	identifier_ = filename_;
 	own_data_ = filesize > 0;
 #endif
 }
@@ -304,6 +309,7 @@ void InFileStream::attach_file(const std::string& file_path) {
 void InFileStream::detach_file() {
 	reset_internal_buffer();
 	filename_.clear();
+	identifier_ = "<unattached>";
 }
 
 InSubStream::InSubStream(InStream* base_stream, std::size_t size) {

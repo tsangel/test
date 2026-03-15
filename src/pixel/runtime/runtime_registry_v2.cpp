@@ -7,6 +7,7 @@
 #include <string_view>
 #include <vector>
 
+#include "shared_library_path_v2.hpp"
 #include "shared_plugin_loader_v2.hpp"
 
 namespace pixel::runtime_v2 {
@@ -161,17 +162,23 @@ bool register_external_codec_plugin_from_library(
     return false;
   }
 
+  std::string library_path_text{};
+  if (!detail::resolve_shared_library_path(
+          library_path, &library_path_text, out_error)) {
+    return false;
+  }
+
   auto& state = runtime_registry_state_v2();
   std::lock_guard<std::mutex> lock(state.mutex);
   ensure_initialized_locked(state);
 
   ExternalPluginEntryV2 entry{};
   entry.owns_shared_library = true;
-  const std::string library_path_text(library_path);
   const auto load_status =
       load_shared_plugin_v2(library_path_text.c_str(), &entry.shared_plugin);
   if (load_status != SharedPluginLoadStatusV2::kOk) {
-    set_optional_error(out_error, load_status_message(load_status));
+    set_optional_error(out_error,
+        load_status_message(load_status) + ": " + library_path_text);
     return false;
   }
 

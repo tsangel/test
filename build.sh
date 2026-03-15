@@ -53,6 +53,26 @@ clean_python_wheel_build_dirs() {
 	done
 }
 
+ensure_macos_wheel_deployment_target() {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		return 0
+	fi
+	if [[ -n "${MACOSX_DEPLOYMENT_TARGET:-}" ]]; then
+		return 0
+	fi
+
+	local arch_hint="${CMAKE_OSX_ARCHITECTURES:-${ARCHFLAGS:-$(uname -m)}}"
+	local target="10.15"
+	case "${arch_hint}" in
+		*universal2*|*arm64*|*aarch64*)
+			target="11.0"
+			;;
+	esac
+
+	export MACOSX_DEPLOYMENT_TARGET="${target}"
+	echo "Defaulting MACOSX_DEPLOYMENT_TARGET=${MACOSX_DEPLOYMENT_TARGET} for wheel build"
+}
+
 pixel_v2_args=(
 	-DDICOMSDL_PIXEL_CORE=ON
 	-DDICOMSDL_PIXEL_RUNTIME=ON
@@ -282,6 +302,7 @@ if [[ "${BUILD_WHEEL}" != "0" ]]; then
 		exit 1
 	fi
 	ensure_python_wheel_build_requirements "$PYTHON_BIN"
+	ensure_macos_wheel_deployment_target
 	echo "Building Python wheel into ${WHEEL_DIR}"
 	mkdir -p "$WHEEL_DIR"
 	tmp_wheel_dir="$(mktemp -d "${WHEEL_DIR}/.wheel-build.XXXXXX")"

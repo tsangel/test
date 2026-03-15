@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstring>
 #include <deque>
+#include <filesystem>
 #include <initializer_list>
 #include <limits>
 #include <iterator>
@@ -1734,7 +1735,7 @@ public:
 
 	/// Attach the dataset to a DICOM file on disk. Lazy: parsing happens on first access.
 	/// @param path Filesystem path to the DICOM file.
-	void attach_to_file(const std::string& path);
+	void attach_to_file(const std::filesystem::path& path);
 
 	/// Attach to an in-memory buffer.
 	/// @param data Pointer to the buffer.
@@ -1960,7 +1961,7 @@ public:
 	void rebuild_file_meta();
 	void write_to_stream(std::ostream& os, const WriteOptions& options = {});
 	[[nodiscard]] std::vector<std::uint8_t> write_bytes(const WriteOptions& options = {});
-	void write_file(const std::string& path, const WriteOptions& options = {});
+	void write_file(const std::filesystem::path& path, const WriteOptions& options = {});
 	/// Serialize this dataset using `transfer_syntax` without mutating the source DicomFile.
 	/// When the target PixelData is encapsulated and `os` is seekable, the writer backpatches
 	/// ExtendedOffsetTable / ExtendedOffsetTableLengths for the streamed frames.
@@ -1981,12 +1982,12 @@ public:
 	/// Convenience overload that writes to a regular file path.
 	/// The output file stream is seekable, so streamed encapsulated output can include
 	/// backpatched ExtendedOffsetTable / ExtendedOffsetTableLengths when applicable.
-	void write_with_transfer_syntax(const std::string& path,
+	void write_with_transfer_syntax(const std::filesystem::path& path,
 	    uid::WellKnown transfer_syntax, const WriteOptions& options = {});
-	void write_with_transfer_syntax(const std::string& path,
+	void write_with_transfer_syntax(const std::filesystem::path& path,
 	    uid::WellKnown transfer_syntax, const pixel::EncoderContext& encoder_ctx,
 	    const WriteOptions& options = {});
-	void write_with_transfer_syntax(const std::string& path,
+	void write_with_transfer_syntax(const std::filesystem::path& path,
 	    uid::WellKnown transfer_syntax,
 	    std::span<const pixel::CodecOptionTextKv> codec_opt,
 	    const WriteOptions& options = {});
@@ -2012,7 +2013,7 @@ public:
 	const_iterator cbegin() const;
 	const_iterator cend() const;
 
-	void attach_to_file(const std::string& path);
+	void attach_to_file(const std::filesystem::path& path);
 	void attach_to_memory(const std::uint8_t* data, std::size_t size, bool copy = true);
 	void attach_to_memory(const std::string& name, const std::uint8_t* data,
 	    std::size_t size, bool copy = true);
@@ -2383,7 +2384,7 @@ inline const PixelSequence* DataElement::as_pixel_sequence() const {
 
 /// Read a DICOM file/session from disk (eager up to options.load_until).
 /// When options.keep_on_error is true, parse errors are captured in DicomFile::error_message().
-std::unique_ptr<DicomFile> read_file(const std::string& path, ReadOptions options = {});
+std::unique_ptr<DicomFile> read_file(const std::filesystem::path& path, ReadOptions options = {});
 /// Read from a raw memory buffer (identifier set to "<memory>"); copies unless options.copy is false.
 std::unique_ptr<DicomFile> read_bytes(const std::uint8_t* data, std::size_t size,
     ReadOptions options = {});

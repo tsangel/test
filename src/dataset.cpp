@@ -6,6 +6,7 @@
 #include "charset/charset_mutation_detail.hpp"
 #include "dataset_deflate_codec.h"
 #include "dataset_endian_converter.h"
+#include "stream_path_detail.hpp"
 #include <instream.h>
 
 #include <algorithm>
@@ -244,9 +245,10 @@ void DataSet::set_specific_charset(std::span<const SpecificCharacterSet> charset
 	diag::error_and_throw("DataSet::set_specific_charset reason={}", error);
 }
 
-void DataSet::attach_to_file(const std::string& path) {
-	auto stream = make_file_stream(path);
-	attach_to_stream(path, std::move(stream));
+void DataSet::attach_to_file(const std::filesystem::path& path) {
+	const auto normalized_path = detail::normalize_stream_identifier_path(path);
+	auto stream = make_file_stream(normalized_path);
+	attach_to_stream(normalized_path, std::move(stream));
 }
 
 void DataSet::attach_to_memory(const std::uint8_t* data, std::size_t size, bool copy) {

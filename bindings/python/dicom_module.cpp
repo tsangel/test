@@ -50,6 +50,31 @@ namespace {
 
 std::string_view vr_to_string_view(const VR& vr);
 
+std::string python_path_to_string(nb::handle value, const char* arg_name) {
+	PyObject* fs_path = PyOS_FSPath(value.ptr());
+	if (fs_path == nullptr) {
+		throw nb::python_error();
+	}
+
+	nb::object path_obj = nb::steal<nb::object>(fs_path);
+	if (PyUnicode_Check(path_obj.ptr())) {
+		return nb::cast<std::string>(path_obj);
+	}
+
+	if (PyBytes_Check(path_obj.ptr())) {
+		char* data = nullptr;
+		Py_ssize_t size = 0;
+		if (PyBytes_AsStringAndSize(path_obj.ptr(), &data, &size) != 0) {
+			throw nb::python_error();
+		}
+		return std::string(data, static_cast<std::size_t>(size));
+	}
+
+	std::string message = arg_name;
+	message += " must be str, bytes, or os.PathLike";
+	throw nb::type_error(message.c_str());
+}
+
 bool transfer_syntax_has_runtime_encode_support(Uid uid) noexcept {
 	if (!uid.valid() || uid.uid_type() != dicom::UidType::TransferSyntax) {
 		return false;
@@ -2282,7 +2307,11 @@ NB_MODULE(_dicomsdl, m) {
 
 	nb::class_<diag::FileReporter, diag::Reporter>(
 	    m, "FileReporter")
-			.def(nb::init<std::string>(), nb::arg("path"),
+			.def("__init__",
+			    [](diag::FileReporter* self, nb::handle path) {
+				    new (self) diag::FileReporter(python_path_to_string(path, "path"));
+			    },
+			    nb::arg("path"),
 			    "Append log lines to the given file path");
 
 	nb::class_<diag::BufferingReporter, diag::Reporter>(
@@ -3355,9 +3384,9 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::arg("encoder_context"),
 		    "Set PixelData from transfer syntax text using a preconfigured EncoderContext.")
 		.def("write_file",
-		    [](DicomFile& self, const std::string& path, bool include_preamble,
+		    [](DicomFile& self, nb::handle path, bool include_preamble,
 		        bool write_file_meta, bool keep_existing_meta) {
-			    self.write_file(path,
+			    self.write_file(python_path_to_string(path, "path"),
 			        make_write_options(include_preamble, write_file_meta, keep_existing_meta));
 		    },
 		    nb::arg("path"),
@@ -3596,7 +3625,7 @@ NB_MODULE(_dicomsdl, m) {
 	    "Create an EncoderContext from transfer syntax text and optional codec options.");
 
 	m.def("read_file",
-    [](const std::string& path, std::optional<Tag> load_until, std::optional<bool> keep_on_error) {
+    [](nb::handle path, std::optional<Tag> load_until, std::optional<bool> keep_on_error) {
 	    dicom::ReadOptions opts;
 	    if (load_until) {
 		    opts.load_until = *load_until;
@@ -3604,7 +3633,7 @@ NB_MODULE(_dicomsdl, m) {
 	    if (keep_on_error) {
 		    opts.keep_on_error = *keep_on_error;
 	    }
-	    return dicom::read_file(path, opts);
+	    return dicom::read_file(python_path_to_string(path, "path"), opts);
     },
     nb::arg("path"),
     nb::arg("load_until") = nb::none(),
@@ -3613,7 +3642,7 @@ NB_MODULE(_dicomsdl, m) {
     "\n"
     "Parameters\n"
     "----------\n"
-    "path : str\n"
+    "path : str | os.PathLike\n"
     "    Filesystem path to the DICOM Part 10 file.\n"
     "load_until : Tag | None, optional\n"
     "    Stop after this tag is read (inclusive). Defaults to reading entire file.\n"
@@ -3753,10 +3782,10 @@ m.def("use_openjpeg_for_htj2k_decoding",
     "Prefer the OpenJPEG HTJ2K decoder before first pixel runtime use.");
 
 m.def("register_external_codec_plugin",
-    [](const std::string& library_path) {
+    [](nb::handle library_path) {
 	    std::string error{};
 	    if (!dicom::pixel::register_external_codec_plugin_from_library(
-	            library_path, &error)) {
+	            python_path_to_string(library_path, "library_path"), &error)) {
 		    if (error.empty()) {
 			    error = "failed to register external codec plugin";
 		    }
@@ -3764,7 +3793,12 @@ m.def("register_external_codec_plugin",
 	    }
     },
     nb::arg("library_path"),
-    "Load an external codec plugin shared library (.dll/.so/.dylib).");
+    "Load an external codec plugin shared library (.dll/.so/.dylib).\n"
+    "\n"
+    "Parameters\n"
+    "----------\n"
+    "library_path : str | os.PathLike\n"
+    "    Filesystem path to the shared library to load.");
 
 m.def("clear_external_codec_plugins",
     []() {

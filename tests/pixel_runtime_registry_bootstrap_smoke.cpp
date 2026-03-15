@@ -1,5 +1,6 @@
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
 #include <iostream>
 #include <string>
 #include <string_view>
@@ -35,8 +36,14 @@ int main(int argc, char** argv) {
     fail("plugin path argument is required");
   }
 
+  const std::filesystem::path plugin_path =
+      std::filesystem::absolute(argv[1]);
+  const std::filesystem::path plugin_alias_path =
+      plugin_path.parent_path() / "." / plugin_path.filename();
+
   std::vector<std::string> plugin_paths;
-  plugin_paths.emplace_back(argv[1]);
+  plugin_paths.emplace_back(plugin_path.string());
+  plugin_paths.emplace_back(plugin_alias_path.string());
 
   pixel::runtime_v2::BindingRegistryRuntimeV2 state{};
   pixel::runtime_v2::RegistryBootstrapResultV2 result{};
@@ -44,7 +51,7 @@ int main(int argc, char** argv) {
       pixel::runtime_v2::initialize_registry_v2(plugin_paths, &state, &result),
       "initialize registry");
 
-  expect_eq(result.requested_plugin_count, 1u, "requested plugin count");
+  expect_eq(result.requested_plugin_count, 2u, "requested plugin count");
   expect_eq(result.loaded_plugin_count, 1u, "loaded plugin count");
   expect_eq(result.registered_plugin_count, 1u, "registered plugin count");
 
@@ -52,7 +59,7 @@ int main(int argc, char** argv) {
   expect_true(
       pixel::runtime_v2::initialize_registry_v2(plugin_paths, &state, &second_result),
       "second initialize registry");
-  expect_eq(second_result.requested_plugin_count, 1u, "second requested plugin count");
+  expect_eq(second_result.requested_plugin_count, 2u, "second requested plugin count");
   expect_eq(second_result.loaded_plugin_count, 1u, "second loaded plugin count");
   expect_eq(second_result.registered_plugin_count, 1u, "second registered plugin count");
 

@@ -1,5 +1,9 @@
 #include "registry_bootstrap_v2.hpp"
 
+#include <unordered_set>
+
+#include "shared_library_path_v2.hpp"
+
 namespace pixel::runtime_v2 {
 
 namespace {
@@ -11,14 +15,21 @@ RegistryBootstrapResultV2 initialize_once_impl(
 
   init_builtin_registry_v2(&state->registry);
   state->loaded_shared_plugins.reserve(plugin_paths.size());
+  std::unordered_set<std::string> loaded_library_paths{};
+  loaded_library_paths.reserve(plugin_paths.size());
 
   for (const std::string& plugin_path : plugin_paths) {
-    if (plugin_path.empty()) {
+    std::string resolved_plugin_path{};
+    if (!detail::resolve_shared_library_path(
+            plugin_path, &resolved_plugin_path, nullptr)) {
+      continue;
+    }
+    if (!loaded_library_paths.insert(resolved_plugin_path).second) {
       continue;
     }
 
     LoadedSharedPluginV2 loaded{};
-    if (load_shared_plugin_v2(plugin_path.c_str(), &loaded) !=
+    if (load_shared_plugin_v2(resolved_plugin_path.c_str(), &loaded) !=
         SharedPluginLoadStatusV2::kOk) {
       continue;
     }

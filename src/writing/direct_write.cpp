@@ -1,13 +1,56 @@
 #include "writing/detail/write_metadata.hpp"
 #include "writing/transcoded_write.hpp"
 
+#include <filesystem>
 #include <fstream>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 namespace dicom {
 using namespace dicom::literals;
 
 namespace {
+namespace fs = std::filesystem;
+
+fs::path normalize_output_path(std::string_view raw_path) {
+	if (raw_path.empty()) {
+		return {};
+	}
+	const fs::path normalized_path = fs::path(std::string(raw_path)).lexically_normal();
+	return normalized_path.empty() ? fs::path(std::string(raw_path)) : normalized_path;
+}
+
+fs::path normalize_output_path(const fs::path& raw_path) {
+	if (raw_path.empty()) {
+		return {};
+	}
+	const fs::path normalized_path = raw_path.lexically_normal();
+	return normalized_path.empty() ? raw_path : normalized_path;
+}
+
+template <typename Fn>
+void with_output_file_stream(const fs::path& raw_path, const char* operation_name, Fn&& fn) {
+	const fs::path normalized_path = normalize_output_path(raw_path);
+	const std::string path_text =
+	    normalized_path.empty() ? raw_path.string() : normalized_path.string();
+
+	std::ofstream os(normalized_path, std::ios::binary | std::ios::trunc);
+	if (!os) {
+		diag::error_and_throw("{} path={} reason=failed to open output file",
+		    operation_name, path_text);
+	}
+
+	std::vector<char> file_buffer(1 << 20);
+	os.rdbuf()->pubsetbuf(file_buffer.data(), static_cast<std::streamsize>(file_buffer.size()));
+
+	std::forward<Fn>(fn)(os);
+	os.flush();
+	if (!os) {
+		diag::error_and_throw("{} path={} reason=failed to flush output file",
+		    operation_name, path_text);
+	}
+}
 
 template <typename Writer>
 void write_impl(DicomFile& file, Writer& writer, const WriteOptions& options) {
@@ -119,20 +162,9 @@ std::vector<std::uint8_t> DicomFile::write_bytes(const WriteOptions& options) {
 	return output;
 }
 
-void DicomFile::write_file(const std::string& path, const WriteOptions& options) {
-	std::ofstream os(path, std::ios::binary | std::ios::trunc);
-	if (!os) {
-		diag::error_and_throw("write_file path={} reason=failed to open output file", path);
-	}
-
-	std::vector<char> file_buffer(1 << 20);
-	os.rdbuf()->pubsetbuf(file_buffer.data(), static_cast<std::streamsize>(file_buffer.size()));
-
-	this->write_to_stream(os, options);
-	os.flush();
-	if (!os) {
-		diag::error_and_throw("write_file path={} reason=failed to flush output file", path);
-	}
+void DicomFile::write_file(const std::filesystem::path& path, const WriteOptions& options) {
+	with_output_file_stream(path, "write_file",
+	    [&](std::ostream& os) { this->write_to_stream(os, options); });
 }
 
 void DicomFile::write_with_transfer_syntax(std::ostream& os,
@@ -162,64 +194,27 @@ void DicomFile::write_with_transfer_syntax(std::ostream& os,
 	    codec_opt, nullptr, options);
 }
 
-void DicomFile::write_with_transfer_syntax(const std::string& path,
+void DicomFile::write_with_transfer_syntax(const std::filesystem::path& path,
     uid::WellKnown transfer_syntax, const WriteOptions& options) {
-	std::ofstream os(path, std::ios::binary | std::ios::trunc);
-	if (!os) {
-		diag::error_and_throw(
-		    "write_with_transfer_syntax path={} reason=failed to open output file", path);
-	}
-
-	std::vector<char> file_buffer(1 << 20);
-	os.rdbuf()->pubsetbuf(file_buffer.data(), static_cast<std::streamsize>(file_buffer.size()));
-
-	write_with_transfer_syntax(os, transfer_syntax, options);
-	os.flush();
-	if (!os) {
-		diag::error_and_throw(
-		    "write_with_transfer_syntax path={} reason=failed to flush output file", path);
-	}
+	with_output_file_stream(path, "write_with_transfer_syntax",
+	    [&](std::ostream& os) { write_with_transfer_syntax(os, transfer_syntax, options); });
 }
 
-void DicomFile::write_with_transfer_syntax(const std::string& path,
+void DicomFile::write_with_transfer_syntax(const std::filesystem::path& path,
     uid::WellKnown transfer_syntax, const pixel::EncoderContext& encoder_ctx,
     const WriteOptions& options) {
-	std::ofstream os(path, std::ios::binary | std::ios::trunc);
-	if (!os) {
-		diag::error_and_throw(
-		    "write_with_transfer_syntax path={} reason=failed to open output file", path);
-	}
-
-	std::vector<char> file_buffer(1 << 20);
-	os.rdbuf()->pubsetbuf(file_buffer.data(), static_cast<std::streamsize>(file_buffer.size()));
-
-	write_with_transfer_syntax(os, transfer_syntax, encoder_ctx, options);
-	os.flush();
-	if (!os) {
-		diag::error_and_throw(
-		    "write_with_transfer_syntax path={} reason=failed to flush output file", path);
-	}
+	with_output_file_stream(path, "write_with_transfer_syntax", [&](std::ostream& os) {
+		write_with_transfer_syntax(os, transfer_syntax, encoder_ctx, options);
+	});
 }
 
-void DicomFile::write_with_transfer_syntax(const std::string& path,
+void DicomFile::write_with_transfer_syntax(const std::filesystem::path& path,
     uid::WellKnown transfer_syntax,
     std::span<const pixel::CodecOptionTextKv> codec_opt,
     const WriteOptions& options) {
-	std::ofstream os(path, std::ios::binary | std::ios::trunc);
-	if (!os) {
-		diag::error_and_throw(
-		    "write_with_transfer_syntax path={} reason=failed to open output file", path);
-	}
-
-	std::vector<char> file_buffer(1 << 20);
-	os.rdbuf()->pubsetbuf(file_buffer.data(), static_cast<std::streamsize>(file_buffer.size()));
-
-	write_with_transfer_syntax(os, transfer_syntax, codec_opt, options);
-	os.flush();
-	if (!os) {
-		diag::error_and_throw(
-		    "write_with_transfer_syntax path={} reason=failed to flush output file", path);
-	}
+	with_output_file_stream(path, "write_with_transfer_syntax", [&](std::ostream& os) {
+		write_with_transfer_syntax(os, transfer_syntax, codec_opt, options);
+	});
 }
 
 }  // namespace dicom

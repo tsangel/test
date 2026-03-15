@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import enum
+import os
 from typing import Any, Callable, Literal, Optional, Sequence, overload
 
 DICOM_STANDARD_VERSION: str
@@ -92,7 +93,7 @@ class StderrReporter(Reporter):
 
 
 class FileReporter(Reporter):
-    def __init__(self, path: str) -> None: ...
+    def __init__(self, path: str | os.PathLike[str]) -> None: ...
 
 
 class BufferingReporter(Reporter):
@@ -294,7 +295,7 @@ class DicomFile:
     ) -> None: ...
     def write_file(
         self,
-        path: str,
+        path: str | os.PathLike[str],
         *,
         include_preamble: bool = ...,
         write_file_meta: bool = ...,
@@ -725,7 +726,7 @@ def create_encoder_context(
 
 
 def read_file(
-    path: str,
+    path: str | os.PathLike[str],
     load_until: Tag | None = ...,
     keep_on_error: bool | None = ...,
 ) -> DicomFile: ...
@@ -758,7 +759,9 @@ def use_openjph_for_htj2k_decoding() -> None: ...
 def use_openjpeg_for_htj2k_decoding() -> None: ...
 
 
-def register_external_codec_plugin(library_path: str) -> None: ...
+def register_external_codec_plugin(
+    library_path: str | os.PathLike[str],
+) -> None: ...
 
 def clear_external_codec_plugins() -> None: ...
 

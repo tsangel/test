@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 
 if(APPLE)
-    set(_dicomsdl_macos_min_target "10.13")
+    set(_dicomsdl_macos_min_target "10.15")
     set(_dicomsdl_macos_architectures "")
 
     if(DEFINED CMAKE_OSX_ARCHITECTURES AND NOT CMAKE_OSX_ARCHITECTURES STREQUAL "")

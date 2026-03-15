@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <array>
+#include <filesystem>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -15,6 +16,7 @@
 #include <thread>
 
 #include <dicom.h>
+#include <diagnostics.h>
 #include <instream.h>
 #include "codec_builtin_flags.hpp"
 
@@ -59,6 +61,41 @@ int main() {
 
 	const dicom::Tag literal_tag = "Rows"_tag;
 	if (literal_tag.value() != 0x00280010u) fail("literal tag mismatch");
+
+	{
+		dicom::InFileStream direct_stream;
+		const auto fixture_dir = std::filesystem::path(__FILE__).parent_path();
+		const auto raw_path = (fixture_dir / "." / "test_le.dcm").string();
+		direct_stream.attach_file(raw_path);
+		const auto expected_path =
+		    (fixture_dir / "test_le.dcm").lexically_normal().string();
+		if (direct_stream.identifier() != expected_path) {
+			fail("InFileStream identifier should store normalized file path");
+		}
+		if (!direct_stream.is_valid()) {
+			fail("InFileStream attach_file should expose mapped file data");
+		}
+	}
+
+	{
+		const auto log_path = std::filesystem::temp_directory_path() / "dicomsdl_basic_smoke.log";
+		const auto reporter_path = log_path.parent_path() / "." / log_path.filename();
+		std::filesystem::remove(log_path);
+		auto reporter = std::make_shared<dicom::diag::FileReporter>(reporter_path);
+		dicom::diag::set_thread_reporter(reporter);
+		dicom::diag::warn("basic-smoke-file-reporter");
+		dicom::diag::set_thread_reporter(nullptr);
+
+		std::ifstream log_file(log_path);
+		std::string line;
+		if (!std::getline(log_file, line)) {
+			fail("FileReporter should append a log line");
+		}
+		if (line.find("basic-smoke-file-reporter") == std::string::npos) {
+			fail("FileReporter log line mismatch");
+		}
+		std::filesystem::remove(log_path);
+	}
 
 	if (!dicom::uid::is_valid_uid_text_strict(
 	        dicom::uid::uid_prefix())) {
