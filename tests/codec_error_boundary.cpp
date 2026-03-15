@@ -310,5 +310,40 @@ int main() {
 		    "plugin_lookup");
 	}
 
+	{
+		dicom::DicomFile df{};
+		df.set_transfer_syntax("ExplicitVRLittleEndian"_uid);
+		configure_minimal_integral_pixel_metadata(df);
+		df.set_native_pixel_data(std::vector<std::uint8_t>{0x34, 0x12});
+		df.set_transfer_syntax("RLELossless"_uid);
+
+		const auto baseline_frame = df.pixel_data(0);
+		if (baseline_frame != std::vector<std::uint8_t>{0x34, 0x12}) {
+			fail("encapsulated baseline decode mismatch");
+		}
+
+		std::string long_option_key(129, 'k');
+		const std::array<dicom::pixel::CodecOptionTextKv, 1> invalid_options{{
+		    {long_option_key, "1"},
+		}};
+		try {
+			df.set_transfer_syntax(
+			    "JPEG2000Lossless"_uid,
+			    std::span<const dicom::pixel::CodecOptionTextKv>(invalid_options));
+			fail("encapsulated transcode invalid option should throw");
+		} catch (const std::exception& e) {
+			const std::string what = e.what();
+			expect_contains(what, "max_option_key_bytes",
+			    "encapsulated transcode invalid option should throw");
+		}
+
+		if (df.transfer_syntax_uid() != "RLELossless"_uid) {
+			fail("encapsulated transcode failure should preserve source transfer syntax");
+		}
+		if (df.pixel_data(0) != baseline_frame) {
+			fail("encapsulated transcode failure should preserve source pixel data");
+		}
+	}
+
 	return 0;
 }

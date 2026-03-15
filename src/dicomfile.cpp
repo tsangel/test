@@ -383,6 +383,35 @@ enum class ApplyTransferSyntaxEncodeMode : std::uint8_t {
 	use_encoder_context,
 };
 
+void restore_encapsulated_pixel_sequence_after_failed_transcode_or_throw(
+    DicomFile& file, std::unique_ptr<PixelSequence>&& snapshot,
+    std::optional<long> original_number_of_frames) {
+	if (!snapshot) {
+		return;
+	}
+
+	auto& dataset = file.dataset();
+	auto& pixel_data = dataset.add_dataelement("PixelData"_tag, VR::PX);
+	auto* pixel_sequence = pixel_data.as_pixel_sequence();
+	if (pixel_sequence == nullptr) {
+		diag::error_and_throw(
+		    "DicomFile::apply_transfer_syntax file={} reason=failed to recreate encapsulated PixelData while restoring failed transcode",
+		    file.path());
+	}
+	*pixel_sequence = std::move(*snapshot);
+
+	if (original_number_of_frames.has_value()) {
+		auto& number_of_frames = dataset.add_dataelement("NumberOfFrames"_tag, VR::IS);
+		if (!number_of_frames.from_long(*original_number_of_frames)) {
+			diag::error_and_throw(
+			    "DicomFile::apply_transfer_syntax file={} reason=failed to restore NumberOfFrames after failed encapsulated transcode",
+			    file.path());
+		}
+	} else {
+		dataset.remove_dataelement("NumberOfFrames"_tag);
+	}
+}
+
 void transcode_encapsulated_pixel_data_to_encapsulated(DicomFile& file,
     uid::WellKnown target_transfer_syntax,
     ApplyTransferSyntaxEncodeMode encode_mode,
@@ -412,8 +441,8 @@ void transcode_encapsulated_pixel_data_to_encapsulated(DicomFile& file,
 		    "DicomFile::apply_transfer_syntax file={} target_ts={} reason=encapsulated PixelData sequence is missing during streaming transcode",
 		    file.path(), target_transfer_syntax.value());
 	}
-	auto source_pixel_sequence_snapshot =
-	    std::make_unique<PixelSequence>(std::move(*source_pixel_sequence));
+	const auto original_number_of_frames =
+	    file.dataset()["NumberOfFrames"_tag].to_long();
 
 	auto source_descriptor = build_set_pixel_source_from_decoded_native_frames(
 	    file, target_transfer_syntax, info, decode_plan);
@@ -434,21 +463,31 @@ void transcode_encapsulated_pixel_data_to_encapsulated(DicomFile& file,
 		    file.path(), target_transfer_syntax.value());
 	}
 
-	pixel::detail::run_set_pixel_data_from_frame_provider_streaming_with_computed_codec_options(
-	    file, target_transfer_syntax, source_descriptor,
-	    active_encoder_ctx->codec_options(),
-	    [&](std::size_t frame_index) -> std::span<const std::uint8_t> {
-		    auto frame_span = std::span<std::uint8_t>(
-		        decoded_frame.data(), decoded_frame.size());
-		    auto prepared_source =
-		        pixel::support_detail::prepare_decode_frame_source_or_throw(
-		            *source_pixel_sequence_snapshot, frame_index);
-		    pixel::detail::dispatch_decode_prepared_frame(
-		        file.path(), frame_index, prepared_source.bytes, frame_span,
-		        decode_plan);
-		    source_pixel_sequence_snapshot->clear_frame_encoded_data(frame_index);
-		    return std::span<const std::uint8_t>(frame_span.data(), frame_span.size());
-	    });
+	auto source_pixel_sequence_snapshot =
+	    std::make_unique<PixelSequence>(std::move(*source_pixel_sequence));
+	try {
+		pixel::detail::run_set_pixel_data_from_frame_provider_streaming_with_computed_codec_options(
+		    file, target_transfer_syntax, source_descriptor,
+		    active_encoder_ctx->codec_options(),
+		    [&](std::size_t frame_index) -> std::span<const std::uint8_t> {
+			    auto frame_span = std::span<std::uint8_t>(
+			        decoded_frame.data(), decoded_frame.size());
+			    auto prepared_source =
+			        pixel::support_detail::prepare_decode_frame_source_or_throw(
+			            *source_pixel_sequence_snapshot, frame_index);
+			    pixel::detail::dispatch_decode_prepared_frame(
+			        file.path(), frame_index, prepared_source.bytes, frame_span,
+			        decode_plan);
+			    source_pixel_sequence_snapshot->clear_frame_encoded_data(frame_index);
+			    return std::span<const std::uint8_t>(
+			        frame_span.data(), frame_span.size());
+		    });
+		source_pixel_sequence_snapshot.reset();
+	} catch (...) {
+		restore_encapsulated_pixel_sequence_after_failed_transcode_or_throw(
+		    file, std::move(source_pixel_sequence_snapshot), original_number_of_frames);
+		throw;
+	}
 }
 
 [[nodiscard]] bool apply_transfer_syntax_impl(DicomFile& file,
