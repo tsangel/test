@@ -239,6 +239,7 @@ struct WellKnown {
 	[[nodiscard]] constexpr bool is_rle() const noexcept;
 	[[nodiscard]] constexpr bool is_uncompressed() const noexcept;
 	[[nodiscard]] constexpr bool is_encapsulated() const noexcept;
+	[[nodiscard]] constexpr bool uses_explicit_vr() const noexcept;
 	[[nodiscard]] constexpr bool is_lossless() const noexcept;
 	[[nodiscard]] constexpr bool is_lossy() const noexcept;
 	[[nodiscard]] constexpr bool supports_pixel_encode() const noexcept;
@@ -965,6 +966,11 @@ inline constexpr bool WellKnown::is_uncompressed() const noexcept {
 
 inline constexpr bool WellKnown::is_encapsulated() const noexcept {
 	return detail::ts_mask(raw_index()) & detail::kTSEncapsulated;
+}
+
+inline constexpr bool WellKnown::uses_explicit_vr() const noexcept {
+	return !valid() || (*this != "ImplicitVRLittleEndian"_uid &&
+	    *this != "Papyrus3ImplicitVRLittleEndian"_uid);
 }
 
 inline constexpr bool WellKnown::is_lossless() const noexcept {

@@ -140,7 +140,7 @@ raw pre-split로 인한 손상을 만들지 않는다.
 
 관련 파일:
 
-- `src/dicom_write.cpp`
+- `src/writing/direct_write.cpp`
 
 현재 역할:
 

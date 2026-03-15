@@ -58,14 +58,6 @@ IndexIter lower_bound_element_index(
 
 } // namespace
 
-[[nodiscard]] bool transfer_syntax_uses_explicit_vr(uid::WellKnown transfer_syntax) noexcept {
-	if (!transfer_syntax.valid()) {
-		return true;
-	}
-	return transfer_syntax != "ImplicitVRLittleEndian"_uid &&
-	    transfer_syntax != "Papyrus3ImplicitVRLittleEndian"_uid;
-}
-
 std::unique_ptr<InFileStream> make_file_stream(const std::string& path) {
 	auto stream = std::make_unique<InFileStream>();
 	stream->attach_file(path);
@@ -198,7 +190,7 @@ std::optional<Tag> parse_private_creator_tag(DataSetPtr* dataset, std::string_vi
 	return std::nullopt;
 }
 DataSet::DataSet() : root_dataset_(this) {
-	explicit_vr_ = transfer_syntax_uses_explicit_vr("ExplicitVRLittleEndian"_uid);
+	explicit_vr_ = "ExplicitVRLittleEndian"_uid.uses_explicit_vr();
 	effective_charset_ = charset::detail::default_charset_spec();
 }
 
@@ -206,7 +198,7 @@ DataSet::DataSet(DataSet* parent_dataset)
     : root_file_(parent_dataset ? parent_dataset->root_file_ : nullptr),
       root_dataset_(parent_dataset ? parent_dataset->root_dataset_ : this),
       parent_dataset_(parent_dataset) {
-	explicit_vr_ = transfer_syntax_uses_explicit_vr("ExplicitVRLittleEndian"_uid);
+	explicit_vr_ = "ExplicitVRLittleEndian"_uid.uses_explicit_vr();
 	if (parent_dataset_) {
 		explicit_vr_ = parent_dataset_->explicit_vr_;
 		effective_charset_ = parent_dataset_->effective_charset_;
@@ -216,7 +208,7 @@ DataSet::DataSet(DataSet* parent_dataset)
 }
 
 DataSet::DataSet(DicomFile* root_file) : root_file_(root_file), root_dataset_(this) {
-	explicit_vr_ = transfer_syntax_uses_explicit_vr("ExplicitVRLittleEndian"_uid);
+	explicit_vr_ = "ExplicitVRLittleEndian"_uid.uses_explicit_vr();
 	effective_charset_ = charset::detail::default_charset_spec();
 }
 
@@ -702,7 +694,7 @@ void DataSet::read_attached_stream(const ReadOptions& options) {
 	if (root_file_) {
 		root_file_->set_transfer_syntax_state_only("ExplicitVRLittleEndian"_uid);
 	} else {
-		explicit_vr_ = transfer_syntax_uses_explicit_vr("ExplicitVRLittleEndian"_uid);
+		explicit_vr_ = "ExplicitVRLittleEndian"_uid.uses_explicit_vr();
 	}
 
 	// parse DICOM stream, starting with skipping the 128-byte preamble.
@@ -723,7 +715,7 @@ void DataSet::read_attached_stream(const ReadOptions& options) {
 		if (root_file_) {
 			root_file_->set_transfer_syntax_state_only(*well_known);
 		} else {
-			explicit_vr_ = transfer_syntax_uses_explicit_vr(*well_known);
+			explicit_vr_ = well_known->uses_explicit_vr();
 		}
 	} else if (auto uid_value = transfer_syntax.to_uid_string()) {
 		diag::error(

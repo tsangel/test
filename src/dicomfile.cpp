@@ -22,14 +22,6 @@ using namespace dicom::literals;
 
 namespace {
 
-[[nodiscard]] bool transfer_syntax_uses_explicit_vr(uid::WellKnown transfer_syntax) noexcept {
-	if (!transfer_syntax.valid()) {
-		return true;
-	}
-	return transfer_syntax != "ImplicitVRLittleEndian"_uid &&
-	    transfer_syntax != "Papyrus3ImplicitVRLittleEndian"_uid;
-}
-
 class LastErrorCapturingReporter final : public diag::Reporter {
 public:
 	explicit LastErrorCapturingReporter(std::shared_ptr<diag::Reporter> downstream)
@@ -1007,7 +999,7 @@ PixelFrame* DicomFile::add_encoded_pixel_frame(std::vector<std::uint8_t>&& encod
 
 void DicomFile::set_transfer_syntax_state_only(uid::WellKnown transfer_syntax) {
 	transfer_syntax_uid_ = transfer_syntax.valid() ? transfer_syntax : uid::WellKnown{};
-	root_dataset_.explicit_vr_ = transfer_syntax_uses_explicit_vr(transfer_syntax_uid_);
+	root_dataset_.explicit_vr_ = transfer_syntax_uid_.uses_explicit_vr();
 }
 
 void DicomFile::apply_transfer_syntax(uid::WellKnown transfer_syntax) {

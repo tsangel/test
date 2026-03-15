@@ -1,6 +1,6 @@
 #pragma once
 
-#include "serialization/detail/write_core.hpp"
+#include "writing/detail/write_metadata.hpp"
 #include "pixel/host/encode/encode_target_policy.hpp"
 
 #include <cmath>
@@ -22,6 +22,7 @@ struct OverlayEntry {
 	std::vector<std::uint8_t> value_bytes{};
 };
 
+// Holds write-time replacements/deletions without mutating the source DataSet.
 class TransientWriteOverlay {
 public:
 	void upsert(Tag tag, VR vr, std::span<const std::uint8_t> value_bytes) {
@@ -49,6 +50,7 @@ public:
 	}
 
 	void finalize() {
+		// Stable sort keeps last-write-wins semantics when multiple updates touch one tag.
 		std::stable_sort(entries_.begin(), entries_.end(),
 		    [](const OverlayEntry& lhs, const OverlayEntry& rhs) {
 			    return lhs.tag < rhs.tag;
@@ -98,6 +100,7 @@ struct MergedElementRef {
 	[[nodiscard]] bool from_overlay() const noexcept { return overlay != nullptr; }
 };
 
+// Tracks the exact byte range for late lossy-ratio backpatching.
 struct LossyRatioBackpatchState {
 	std::size_t token_offset_in_value{0};
 	std::size_t token_width{0};
@@ -130,6 +133,7 @@ template <typename Builder>
 void overlay_build_and_upsert_or_throw(TransientWriteOverlay& overlay,
     std::string_view error_context, std::string_view file_path, Tag tag, VR vr,
     Builder&& builder) {
+	// Build values through DataElement helpers so VR-specific formatting stays consistent.
 	DataElement element(tag, vr, 0, 0, nullptr);
 	if (!builder(element)) {
 		diag::error_and_throw(
@@ -171,7 +175,7 @@ inline void overlay_upsert_transfer_syntax_uid_or_throw(TransientWriteOverlay& o
     std::string_view error_context, std::string_view file_path,
     uid::WellKnown transfer_syntax) {
 	overlay_build_and_upsert_or_throw(overlay, error_context, file_path,
-	    kTransferSyntaxUidTag, VR::UI, [&](DataElement& element) {
+	    "TransferSyntaxUID"_tag, VR::UI, [&](DataElement& element) {
 		    return element.from_transfer_syntax_uid(transfer_syntax);
 	    });
 }
@@ -193,8 +197,8 @@ inline void overlay_upsert_value_bytes(TransientWriteOverlay& overlay, Tag tag, 
 }
 
 [[nodiscard]] inline bool is_body_overlay_tag(Tag tag) noexcept {
-	return tag.group() != 0x0002u && tag != kExtendedOffsetTableTag &&
-	    tag != kExtendedOffsetTableLengthsTag;
+	return tag.group() != 0x0002u && tag != "ExtendedOffsetTable"_tag &&
+	    tag != "ExtendedOffsetTableLengths"_tag;
 }
 
 template <typename Fn>
@@ -210,6 +214,7 @@ void for_each_merged_file_meta_element(const DataSet& dataset,
 		}
 	};
 
+	// When rebuilding file meta, ignore source group 0002 entirely and emit overlay only.
 	if (overlay.replaces_file_meta_group()) {
 		for (; overlay_it != overlay_end && is_file_meta_tag(overlay_it->tag); ++overlay_it) {
 			emit_overlay(*overlay_it);
@@ -217,6 +222,7 @@ void for_each_merged_file_meta_element(const DataSet& dataset,
 		return;
 	}
 
+	// Otherwise perform a tag-ordered merge where overlay entries replace matching source tags.
 	for (const auto& element : dataset) {
 		const auto group = element.tag().group();
 		if (group < 0x0002u) {
@@ -261,6 +267,7 @@ void for_each_merged_body_element(const DataSet& dataset,
 		}
 	};
 
+	// Merge non-meta elements in tag order while letting overlay hide deleted tags.
 	for (const auto& element : dataset) {
 		if (element.tag().group() == 0x0002u) {
 			continue;
@@ -337,6 +344,7 @@ inline void update_pixel_metadata_for_streaming_write_overlay(
     const pixel::PixelSource& source, bool target_is_rle,
     pixel::Photometric output_photometric, int bits_allocated, int bits_stored,
     int high_bit, int pixel_representation) {
+	// Rewrite core pixel description tags to match the streamed output payload.
 	overlay_upsert_long_or_throw(overlay, "write_with_transfer_syntax", file_path,
 	    "Rows"_tag, VR::US, static_cast<long>(source.rows));
 	overlay_upsert_long_or_throw(overlay, "write_with_transfer_syntax", file_path,
@@ -383,6 +391,7 @@ inline void update_lossy_metadata_for_streaming_write_overlay(
 	const bool had_prior_lossy =
 	    has_prior_lossy_history_for_streaming_write(source_dataset);
 
+	// Preserve prior lossy history when reserializing a dataset that is already lossy.
 	if (!current_encode_is_lossy) {
 		overlay_upsert_string_view_or_throw(overlay, "write_with_transfer_syntax",
 		    file_path, "LossyImageCompression"_tag, VR::CS,
@@ -418,6 +427,7 @@ inline void update_lossy_metadata_for_streaming_write_overlay(
 		    encoded_payload_bytes);
 	}
 
+	// Append the current lossy step to any pre-existing method/ratio history.
 	std::vector<std::string> methods;
 	std::vector<double> ratios;
 	if (had_prior_lossy) {
@@ -478,6 +488,7 @@ prepare_lossy_metadata_placeholder_for_streaming_write_overlay(
 		method_views.emplace_back(value);
 	}
 
+	// Reserve a fixed-width token so seekable outputs can patch the final ratio later.
 	std::string ratio_text;
 	ratio_text.reserve((ratios.size() * 18u) + 16u);
 	for (std::size_t index = 0; index < ratios.size(); ++index) {
@@ -514,13 +525,14 @@ prepare_lossy_metadata_placeholder_for_streaming_write_overlay(
 inline void build_rebuilt_file_meta_overlay_or_throw(const DicomFile& file,
     const DataSet& source_dataset, uid::WellKnown target_transfer_syntax,
     TransientWriteOverlay& overlay) {
+	// Rebuild the minimal Part 10 file meta set against the target transfer syntax.
 	overlay.replace_file_meta_group(true);
 
 	std::string sop_class_uid;
-	if (auto value = source_dataset[kSopClassUidTag].to_uid_string();
+	if (auto value = source_dataset["SOPClassUID"_tag].to_uid_string();
 	    value && !value->empty()) {
 		sop_class_uid = uid::normalize_uid_text(*value);
-	} else if (auto value = source_dataset[kMediaStorageSopClassUidTag].to_uid_string();
+	} else if (auto value = source_dataset["MediaStorageSOPClassUID"_tag].to_uid_string();
 	           value && !value->empty()) {
 		sop_class_uid = uid::normalize_uid_text(*value);
 	} else {
@@ -531,10 +543,10 @@ inline void build_rebuilt_file_meta_overlay_or_throw(const DicomFile& file,
 	}
 
 	std::string sop_instance_uid;
-	if (auto value = source_dataset[kSopInstanceUidTag].to_uid_string();
+	if (auto value = source_dataset["SOPInstanceUID"_tag].to_uid_string();
 	    value && !value->empty()) {
 		sop_instance_uid = uid::normalize_uid_text(*value);
-	} else if (auto value = source_dataset[kMediaStorageSopInstanceUidTag].to_uid_string();
+	} else if (auto value = source_dataset["MediaStorageSOPInstanceUID"_tag].to_uid_string();
 	           value && !value->empty()) {
 		sop_instance_uid = uid::normalize_uid_text(*value);
 	} else {
@@ -550,26 +562,27 @@ inline void build_rebuilt_file_meta_overlay_or_throw(const DicomFile& file,
 
 	const std::array<std::uint8_t, 2> meta_version{{0x00u, 0x01u}};
 	overlay_upsert_value_bytes(
-	    overlay, kFileMetaInformationVersionTag, VR::OB, meta_version);
+	    overlay, "FileMetaInformationVersion"_tag, VR::OB, meta_version);
 	overlay_upsert_uid_or_throw(
 	    overlay, "write_with_transfer_syntax", file.path(),
-	    kMediaStorageSopClassUidTag, sop_class_uid);
+	    "MediaStorageSOPClassUID"_tag, sop_class_uid);
 	overlay_upsert_uid_or_throw(
 	    overlay, "write_with_transfer_syntax", file.path(),
-	    kMediaStorageSopInstanceUidTag, sop_instance_uid);
+	    "MediaStorageSOPInstanceUID"_tag, sop_instance_uid);
 	overlay_upsert_transfer_syntax_uid_or_throw(
 	    overlay, "write_with_transfer_syntax", file.path(), target_transfer_syntax);
 	overlay_upsert_uid_or_throw(
 	    overlay, "write_with_transfer_syntax", file.path(),
-	    kImplementationClassUidTag, uid::implementation_class_uid());
+	    "ImplementationClassUID"_tag, uid::implementation_class_uid());
 	overlay_upsert_string_view_or_throw(
 	    overlay, "write_with_transfer_syntax", file.path(),
-	    kImplementationVersionNameTag, VR::SH, uid::implementation_version_name());
+	    "ImplementationVersionName"_tag, VR::SH, uid::implementation_version_name());
 }
 
 [[nodiscard]] inline std::size_t measure_dataset_value_offset_or_throw_with_overlay(
     const DataSet& dataset, const TransientWriteOverlay& overlay, Tag target_tag,
     bool explicit_vr) {
+	// Measure exactly where a merged body element's value will land after serialization.
 	CountingWriter measuring_writer;
 	bool found = false;
 	for_each_merged_body_element(dataset, overlay, [&](const MergedElementRef& element) {
@@ -633,7 +646,7 @@ void backpatch_lossy_ratio_or_throw(Writer& writer, std::string_view file_path,
     const DataSet& dataset, const TransientWriteOverlay& overlay) {
 	CountingWriter measuring_writer;
 	for_each_merged_file_meta_element(dataset, overlay, [&](const MergedElementRef& element) {
-		if (element.tag() == kFileMetaGroupLengthTag) {
+		if (element.tag() == "FileMetaInformationGroupLength"_tag) {
 			return;
 		}
 		write_non_sequence_element(measuring_writer, element.tag(), element.vr(),
@@ -645,15 +658,16 @@ void backpatch_lossy_ratio_or_throw(Writer& writer, std::string_view file_path,
 template <typename Writer>
 void write_file_meta_group_with_overlay(Writer& writer, const DataSet& dataset,
     const TransientWriteOverlay& overlay) {
+	// Emit group length from the merged meta view, then stream the rest of group 0002.
 	const auto meta_group_length =
 	    measure_meta_group_length_with_overlay(dataset, overlay);
 	std::array<std::uint8_t, 4> meta_group_length_bytes{};
 	endian::store_le<std::uint32_t>(meta_group_length_bytes.data(), meta_group_length);
 	write_non_sequence_element(
-	    writer, kFileMetaGroupLengthTag, VR::UL, meta_group_length_bytes, true);
+	    writer, "FileMetaInformationGroupLength"_tag, VR::UL, meta_group_length_bytes, true);
 
 	for_each_merged_file_meta_element(dataset, overlay, [&](const MergedElementRef& element) {
-		if (element.tag() == kFileMetaGroupLengthTag) {
+		if (element.tag() == "FileMetaInformationGroupLength"_tag) {
 			return;
 		}
 		write_non_sequence_element(writer, element.tag(), element.vr(),
@@ -665,8 +679,9 @@ template <typename Writer, typename PixelWriter>
 void write_dataset_with_overlay_and_pixel_writer(const DataSet& dataset,
     const TransientWriteOverlay& overlay, Writer& writer, bool explicit_vr,
     PixelWriter&& pixel_writer) {
+	// Overlay supplies metadata replacements, but PixelData still comes from the source element.
 	for_each_merged_body_element(dataset, overlay, [&](const MergedElementRef& element) {
-		if (element.tag() == kPixelDataTag) {
+		if (element.tag() == "PixelData"_tag) {
 			if (element.source == nullptr) {
 				diag::error_and_throw(
 				    "write_with_transfer_syntax reason=PixelData cannot be supplied from overlay");
@@ -686,29 +701,31 @@ void write_dataset_with_overlay_and_pixel_writer(const DataSet& dataset,
 template <typename Writer, typename PixelWriter>
 void write_dataset_body_with_overlay_and_pixel_writer(Writer& writer,
     const DataSet& dataset, const TransientWriteOverlay& overlay,
-    const DatasetEncoding& encoding, const std::string& file_path,
+    const DatasetWritePlan& write_plan, const std::string& file_path,
     PixelWriter&& pixel_writer) {
-	if (encoding.convert_body_to_big_endian && encoding.deflate_body) {
+	if (write_plan.convert_body_to_big_endian && write_plan.deflate_body) {
 		diag::error_and_throw(
 		    "write_to_stream reason=unsupported encoding pipeline: both big-endian conversion and deflate requested");
 	}
 
-	if (!encoding.convert_body_to_big_endian && !encoding.deflate_body) {
+	if (!write_plan.convert_body_to_big_endian && !write_plan.deflate_body) {
+		// Fast path: stream merged body directly when no post-processing is needed.
 		write_dataset_with_overlay_and_pixel_writer(dataset, overlay, writer,
-		    encoding.explicit_vr, std::forward<PixelWriter>(pixel_writer));
+		    write_plan.explicit_vr, std::forward<PixelWriter>(pixel_writer));
 		return;
 	}
 
 	std::vector<std::uint8_t> body;
 	body.reserve(4096);
-	VectorWriter body_writer(body);
+	BufferWriter body_writer(body);
+	// Slow path: materialize merged bytes first so endian conversion/deflate can rewrite them.
 	write_dataset_with_overlay_and_pixel_writer(dataset, overlay, body_writer,
-	    encoding.explicit_vr, std::forward<PixelWriter>(pixel_writer));
+	    write_plan.explicit_vr, std::forward<PixelWriter>(pixel_writer));
 
-	if (encoding.convert_body_to_big_endian) {
+	if (write_plan.convert_body_to_big_endian) {
 		body = convert_little_endian_dataset_to_big_endian(body, 0, file_path);
 	}
-	if (encoding.deflate_body) {
+	if (write_plan.deflate_body) {
 		body = deflate_dataset_body(body, file_path);
 	}
 	if (!body.empty()) {
@@ -717,11 +734,12 @@ void write_dataset_body_with_overlay_and_pixel_writer(Writer& writer,
 }
 
 template <typename Writer>
-void write_current_dataset_direct_with_overlay(const DicomFile& file,
+void write_current_dataset_with_overlay(const DicomFile& file,
     const TransientWriteOverlay& overlay, Writer& writer,
     uid::WellKnown transfer_syntax, const WriteOptions& options) {
+	// Reuse the normal write path but substitute merged metadata from the transient overlay.
 	const auto& dataset = file.dataset();
-	const auto encoding = determine_dataset_encoding(transfer_syntax, dataset);
+	const auto write_plan = determine_dataset_write_plan(transfer_syntax, dataset);
 
 	if (options.include_preamble) {
 		write_preamble(writer);
@@ -730,7 +748,7 @@ void write_current_dataset_direct_with_overlay(const DicomFile& file,
 		write_file_meta_group_with_overlay(writer, dataset, overlay);
 	}
 	write_dataset_body_with_overlay_and_pixel_writer(writer, dataset, overlay,
-	    encoding, file.path(),
+	    write_plan, file.path(),
 	    [&](const DataElement& element, auto& direct_writer, bool explicit_vr) {
 		    write_data_element(element, direct_writer, explicit_vr);
 	    });

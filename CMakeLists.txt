@@ -126,8 +126,8 @@ add_library(dicomsdl STATIC
     src/dumpdataset.cpp
     src/dicomfile.cpp
     src/dicomfile_pixel_encode.cpp
-    src/dicom_write.cpp
-    src/serialization/transfer_syntax_write.cpp
+    src/writing/direct_write.cpp
+    src/writing/transcoded_write.cpp
     src/person_name.cpp
     src/uid_utils.cpp
     src/sequence.cpp
