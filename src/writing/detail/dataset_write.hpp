@@ -176,8 +176,11 @@ void write_pixel_sequence_element(const DataElement& element, Writer& writer,
 
 	const InStream* seq_stream = pixel_sequence->stream();
 	const auto offset_tables = compute_pixel_sequence_offset_tables(*pixel_sequence, seq_stream);
-	// Emit Extended Offset Table elements ahead of PixelData when BOT cannot represent offsets.
-	if (offset_tables.use_extended) {
+	const DataSet* owning_dataset = element.parent();
+	const bool allow_extended_offset_table = owning_dataset != nullptr &&
+	    owning_dataset == owning_dataset->root_dataset();
+	// Extended Offset Tables are only synthesized for the instance-level PixelData.
+	if (offset_tables.use_extended && allow_extended_offset_table) {
 		const auto extended_offsets_bytes =
 		    u64_values_as_bytes(offset_tables.extended_offsets);
 		const auto extended_lengths_bytes =
