@@ -9,6 +9,7 @@
 - Sources: `misc/dictionary/part06.xml`, `part03.xml`, `_dicom_version.txt`, `include/dicom_const.h`, etc.
 - Scripts: `misc/dictionary/extract_part06_tables.py` and `generate_*` produce TSV → headers (`include/dataelement_registry.hpp`, `include/dataelement_lookup_tables.hpp`, `include/uid_registry.hpp`, `include/specific_character_set_registry.hpp`).
 - Version extraction: `CMakeLists.txt` parses `include/dicom_const.h` and writes temporary VERSION cache files under the build directory.
+- Docs version: `docs/conf.py` also reads `DICOMSDL_VERSION` directly from `include/dicom_const.h`.
 
 ## Naming/style
 - C++ public API uses snake_case; private members use trailing underscore (e.g., `path_`).

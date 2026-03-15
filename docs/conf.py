@@ -1,13 +1,27 @@
 import pathlib
+import re
 import sys
 
 # Project paths
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+
+def _read_dicomsdl_version() -> str:
+    header_path = ROOT / "include" / "dicom_const.h"
+    pattern = re.compile(r'^\s*#define\s+DICOMSDL_VERSION\s+"([^"]+)"\s*$')
+
+    for line in header_path.read_text(encoding="utf-8").splitlines():
+        match = pattern.match(line)
+        if match:
+            return match.group(1).strip()
+
+    raise RuntimeError(f"Could not find DICOMSDL_VERSION macro in {header_path}")
+
+
 project = "dicomsdl"
 author = "dicomsdl contributors"
-release = version = (ROOT / "VERSION").read_text().strip()
+release = version = _read_dicomsdl_version()
 
 extensions = [
     "myst_parser",

@@ -13,6 +13,7 @@ from setuptools.command.build_ext import build_ext
 ROOT_DIR = pathlib.Path(__file__).resolve().parent
 VERSION_HEADER_FILE = ROOT_DIR / "include" / "dicom_const.h"
 VERSION_EXTRACTOR_SCRIPT = ROOT_DIR / "scripts" / "extract_version_from_const_header.py"
+README_FILE = ROOT_DIR / "README.md"
 TEMP_VERSION_FILE = pathlib.Path(
     os.environ.get(
         "DICOMSDL_TEMP_VERSION_FILE",
@@ -42,6 +43,15 @@ CODEC_PIXEL_PLUGIN_OPTIONS = {
 }
 VALID_CODEC_MODES = {"builtin", "shared", "none"}
 TRUTHY_ENV_VALUES = {"1", "true", "yes", "on"}
+PROJECT_URL = "https://github.com/tsangel/dicomsdl"
+PYPI_URL = "https://pypi.org/project/dicomsdl/"
+PROJECT_URLS = {
+    "Homepage": PROJECT_URL,
+    "PyPI": PYPI_URL,
+    "Source": PROJECT_URL,
+    "Issues": f"{PROJECT_URL}/issues",
+}
+README_TEXT = README_FILE.read_text(encoding="utf-8")
 
 
 def refresh_temp_version_files(
@@ -378,9 +388,35 @@ class CMakeBuild(build_ext):
 setup(
     name="dicomsdl",
     version=PACKAGE_VERSION,
-    author="DicomProject Authors",
-    description="Python bindings for dicomsdl",
+    author="Kim, Tae-Sung",
+    description="A fast and light-weighted DICOM software development library",
+    long_description=README_TEXT,
+    long_description_content_type="text/markdown",
+    license="MIT",
+    license_files=["LICENSE"],
+    url=PROJECT_URL,
+    project_urls=PROJECT_URLS,
     python_requires=">=3.9",
+    classifiers=[
+        "Development Status :: 4 - Beta",
+        "Intended Audience :: Developers",
+        "Intended Audience :: Healthcare Industry",
+        "Intended Audience :: Science/Research",
+        "License :: OSI Approved :: MIT License",
+        "Operating System :: MacOS :: MacOS X",
+        "Operating System :: Microsoft :: Windows",
+        "Operating System :: POSIX :: Linux",
+        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.13",
+        "Programming Language :: Python :: 3.14",
+        "Programming Language :: C++",
+        "Topic :: Scientific/Engineering",
+        "Topic :: Scientific/Engineering :: Medical Science Apps.",
+    ],
     packages=["dicomsdl"],
     package_dir={"dicomsdl": "bindings/python/dicomsdl"},
     package_data={"dicomsdl": ["py.typed", "*.pyi", "*.dll", "*.so", "*.dylib"]},

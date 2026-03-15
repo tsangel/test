@@ -1,5 +1,7 @@
 #include "shared_plugin_loader_v2.hpp"
 
+#include <cstddef>
+
 #if defined(_WIN32)
 #define NOMINMAX
 #include <windows.h>
