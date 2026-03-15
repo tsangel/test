@@ -303,6 +303,9 @@ int main() {
 		dicom::DicomFile df{};
 		df.set_transfer_syntax("MPEG2MPML"_uid);
 		configure_minimal_integral_pixel_metadata(df);
+		// Provide an encapsulated PixelData sequence so the decode path reaches codec lookup.
+		df.reset_encapsulated_pixel_data(1);
+		df.set_encoded_pixel_frame(0, std::vector<std::uint8_t>{0x00});
 		const auto plan = df.create_decode_plan(dicom::pixel::DecodeOptions{});
 		expect_decode_throw("unsupported ts decode throw message", df, 0,
 		    std::span<std::uint8_t>{}, plan,
