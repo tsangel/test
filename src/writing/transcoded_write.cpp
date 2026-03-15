@@ -16,19 +16,6 @@
 namespace dicom::write_detail {
 namespace {
 
-// Maps a target transfer syntax to the runtime codec profile used by host encode paths.
-[[nodiscard]] uint32_t encode_codec_profile_code_from_transfer_syntax_or_throw(
-    std::string_view file_path, uid::WellKnown transfer_syntax) {
-	uint32_t codec_profile_code = PIXEL_CODEC_PROFILE_UNKNOWN_V2;
-	if (::pixel::runtime_v2::codec_profile_code_from_transfer_syntax(
-	        transfer_syntax, &codec_profile_code)) {
-		return codec_profile_code;
-	}
-	diag::error_and_throw(
-	    "write_with_transfer_syntax file={} ts={} reason=transfer syntax is not mapped to a runtime codec profile",
-	    file_path, transfer_syntax.value());
-}
-
 // Builds a PixelSource descriptor for frame-by-frame re-encode after decode planning.
 [[nodiscard]] pixel::PixelSource build_set_pixel_source_from_decoded_native_frames_for_write(
     DicomFile& file, uid::WellKnown target_ts, const pixel::PixelDataInfo& info,
@@ -295,18 +282,6 @@ struct PreparedStreamingTranscodeState {
 	DatasetWritePlan write_plan{};
 };
 
-// Fetches decodable pixel metadata once for write paths that need pixel transformation.
-[[nodiscard]] pixel::PixelDataInfo pixel_data_info_for_streaming_write_or_throw(
-    DicomFile& file, uid::WellKnown target_transfer_syntax) {
-	const auto info = file.pixeldata_info();
-	if (!info.has_pixel_data) {
-		diag::error_and_throw(
-		    "write_with_transfer_syntax file={} target_ts={} reason=PixelData metadata is not decodable for the requested transfer syntax conversion",
-		    file.path(), target_transfer_syntax.value());
-	}
-	return info;
-}
-
 // Resolves the frame layout used by downstream encode/write loops.
 void prepare_streaming_source_descriptor_or_throw(
     PreparedStreamingTranscodeState& state, DicomFile& file,
@@ -372,9 +347,13 @@ void prepare_streaming_encode_policy_or_throw(
     PreparedStreamingTranscodeState& state, DicomFile& file,
     uid::WellKnown target_transfer_syntax,
     const TransferSyntaxWriteDecision& decision, bool writer_can_overwrite) {
-	state.codec_profile_code =
-	    encode_codec_profile_code_from_transfer_syntax_or_throw(
-	        file.path(), target_transfer_syntax);
+	state.codec_profile_code = PIXEL_CODEC_PROFILE_UNKNOWN_V2;
+	if (!::pixel::runtime_v2::codec_profile_code_from_transfer_syntax(
+	        target_transfer_syntax, &state.codec_profile_code)) {
+		diag::error_and_throw(
+		    "write_with_transfer_syntax file={} ts={} reason=transfer syntax is not mapped to a runtime codec profile",
+		    file.path(), target_transfer_syntax.value());
+	}
 	state.source_layout =
 	    pixel::support_detail::compute_encode_source_layout_without_source_bytes_or_throw(
 	        state.source_descriptor, file.path());
@@ -480,17 +459,6 @@ void prepare_streaming_overlay_or_throw(PreparedStreamingTranscodeState& state,
 	state.write_plan = determine_dataset_write_plan(target_transfer_syntax, dataset);
 }
 
-// Restores the encoder context pointer after state moves out of the prepare function.
-void rebind_active_encoder_ctx_after_prepare(
-    PreparedStreamingTranscodeState& state,
-    const pixel::EncoderContext* fallback_encoder_ctx) {
-	if (state.staged_encoder_ctx.configured()) {
-		state.active_encoder_ctx = &state.staged_encoder_ctx;
-		return;
-	}
-	state.active_encoder_ctx = fallback_encoder_ctx;
-}
-
 [[nodiscard]] PreparedStreamingTranscodeState
 prepare_streaming_transcode_state_or_throw(DicomFile& file, DataSet& dataset,
     uid::WellKnown target_transfer_syntax, WriteEncoderConfigSource encode_mode,
@@ -499,8 +467,12 @@ prepare_streaming_transcode_state_or_throw(DicomFile& file, DataSet& dataset,
     const TransferSyntaxWriteDecision& decision, bool writer_can_overwrite) {
 	PreparedStreamingTranscodeState state{};
 	// Build state in the same order the write pipeline will consume it.
-	state.info =
-	    pixel_data_info_for_streaming_write_or_throw(file, target_transfer_syntax);
+	state.info = file.pixeldata_info();
+	if (!state.info.has_pixel_data) {
+		diag::error_and_throw(
+		    "write_with_transfer_syntax file={} target_ts={} reason=PixelData metadata is not decodable for the requested transfer syntax conversion",
+		    file.path(), target_transfer_syntax.value());
+	}
 	prepare_streaming_source_descriptor_or_throw(
 	    state, file, target_transfer_syntax, decision);
 	prepare_streaming_encoder_context_or_throw(state, file, target_transfer_syntax,
@@ -738,7 +710,10 @@ void write_with_transfer_syntax_impl(DicomFile& file, Writer& writer,
 	auto state = prepare_streaming_transcode_state_or_throw(file, dataset,
 	    target_transfer_syntax, encode_mode, codec_opt_override, encoder_ctx, options,
 	    decision, writer.can_overwrite());
-	rebind_active_encoder_ctx_after_prepare(state, encoder_ctx);
+	// State is moved out of prepare(), so restore the pointer to whichever encoder context survived.
+	state.active_encoder_ctx = state.staged_encoder_ctx.configured()
+	    ? &state.staged_encoder_ctx
+	    : encoder_ctx;
 	if (options.include_preamble) {
 		write_preamble(writer);
 	}

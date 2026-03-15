@@ -70,32 +70,6 @@ void rebuild_registry_locked(RuntimeRegistryStateV2& state) {
   ++state.generation;
 }
 
-std::string load_status_message(SharedPluginLoadStatusV2 status) {
-  switch (status) {
-  case SharedPluginLoadStatusV2::kOk:
-    return "ok";
-  case SharedPluginLoadStatusV2::kInvalidArgument:
-    return "invalid argument";
-  case SharedPluginLoadStatusV2::kOpenFailed:
-    return "failed to open shared library";
-  case SharedPluginLoadStatusV2::kNoApiEntrypoint:
-    return "v2 plugin entrypoint is missing";
-  case SharedPluginLoadStatusV2::kDecoderHandshakeFailed:
-    return "decoder ABI handshake failed";
-  case SharedPluginLoadStatusV2::kEncoderHandshakeFailed:
-    return "encoder ABI handshake failed";
-  }
-  return "unknown plugin load failure";
-}
-
-std::vector<ExternalPluginEntryV2>::iterator find_library_plugin_entry(
-    RuntimeRegistryStateV2& state, std::string_view library_path) {
-  return std::find_if(state.external_plugins.begin(), state.external_plugins.end(),
-      [library_path](const ExternalPluginEntryV2& entry) {
-        return entry.owns_shared_library && entry.library_path == library_path;
-      });
-}
-
 }  // namespace
 
 const BindingRegistryV2* current_registry() noexcept {
@@ -177,8 +151,32 @@ bool register_external_codec_plugin_from_library(
   const auto load_status =
       load_shared_plugin_v2(library_path_text.c_str(), &entry.shared_plugin);
   if (load_status != SharedPluginLoadStatusV2::kOk) {
+    std::string status_message;
+    switch (load_status) {
+    case SharedPluginLoadStatusV2::kOk:
+      status_message = "ok";
+      break;
+    case SharedPluginLoadStatusV2::kInvalidArgument:
+      status_message = "invalid argument";
+      break;
+    case SharedPluginLoadStatusV2::kOpenFailed:
+      status_message = "failed to open shared library";
+      break;
+    case SharedPluginLoadStatusV2::kNoApiEntrypoint:
+      status_message = "v2 plugin entrypoint is missing";
+      break;
+    case SharedPluginLoadStatusV2::kDecoderHandshakeFailed:
+      status_message = "decoder ABI handshake failed";
+      break;
+    case SharedPluginLoadStatusV2::kEncoderHandshakeFailed:
+      status_message = "encoder ABI handshake failed";
+      break;
+    default:
+      status_message = "unknown plugin load failure";
+      break;
+    }
     set_optional_error(out_error,
-        load_status_message(load_status) + ": " + library_path_text);
+        std::move(status_message) + ": " + library_path_text);
     return false;
   }
 
@@ -198,7 +196,12 @@ bool register_external_codec_plugin_from_library(
 
   entry.library_path = library_path_text;
 
-  auto it = find_library_plugin_entry(state, library_path_text);
+  // Replace an existing plugin loaded from the same resolved library path.
+  auto it = std::find_if(state.external_plugins.begin(), state.external_plugins.end(),
+      [&library_path_text](const ExternalPluginEntryV2& existing_entry) {
+        return existing_entry.owns_shared_library &&
+            existing_entry.library_path == library_path_text;
+      });
   if (it != state.external_plugins.end()) {
     if (it->owns_shared_library) {
       unload_shared_plugin_v2(&it->shared_plugin);

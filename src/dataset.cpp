@@ -59,24 +59,6 @@ IndexIter lower_bound_element_index(
 
 } // namespace
 
-std::unique_ptr<InFileStream> make_file_stream(const std::string& path) {
-	auto stream = std::make_unique<InFileStream>();
-	stream->attach_file(path);
-	return stream;
-}
-
-std::unique_ptr<InStringStream> make_memory_stream(const std::uint8_t* data, std::size_t size, bool copy) {
-	auto stream = std::make_unique<InStringStream>();
-	stream->attach_memory(data, size, copy);
-	return stream;
-}
-
-std::unique_ptr<InStringStream> make_memory_stream(std::vector<std::uint8_t>&& buffer) {
-	auto stream = std::make_unique<InStringStream>();
-	stream->attach_memory(std::move(buffer));
-	return stream;
-}
-
 // Trim leading/trailing ASCII whitespace.
 inline std::string_view trim(std::string_view sv) {
 	while (!sv.empty() && std::isspace(static_cast<unsigned char>(sv.front()))) {
@@ -247,22 +229,27 @@ void DataSet::set_specific_charset(std::span<const SpecificCharacterSet> charset
 
 void DataSet::attach_to_file(const std::filesystem::path& path) {
 	const auto normalized_path = detail::normalize_stream_identifier_path(path);
-	auto stream = make_file_stream(normalized_path);
+	// Use the same normalized path for both the stream attachment and dataset identifier.
+	auto stream = std::make_unique<InFileStream>();
+	stream->attach_file(normalized_path);
 	attach_to_stream(normalized_path, std::move(stream));
 }
 
 void DataSet::attach_to_memory(const std::uint8_t* data, std::size_t size, bool copy) {
-	auto stream = make_memory_stream(data, size, copy);
+	auto stream = std::make_unique<InStringStream>();
+	stream->attach_memory(data, size, copy);
 	attach_to_stream(std::string{"<memory>"}, std::move(stream));
 }
 
 void DataSet::attach_to_memory(const std::string& name, const std::uint8_t* data, std::size_t size, bool copy) {
-	auto stream = make_memory_stream(data, size, copy);
+	auto stream = std::make_unique<InStringStream>();
+	stream->attach_memory(data, size, copy);
 	attach_to_stream(name, std::move(stream));
 }
 
 void DataSet::attach_to_memory(std::string name, std::vector<std::uint8_t>&& buffer) {
-	auto stream = make_memory_stream(std::move(buffer));
+	auto stream = std::make_unique<InStringStream>();
+	stream->attach_memory(std::move(buffer));
 	attach_to_stream(std::move(name), std::move(stream));
 }
 

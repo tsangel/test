@@ -3,7 +3,6 @@
 
 #include <filesystem>
 #include <fstream>
-#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -12,14 +11,6 @@ using namespace dicom::literals;
 
 namespace {
 namespace fs = std::filesystem;
-
-fs::path normalize_output_path(std::string_view raw_path) {
-	if (raw_path.empty()) {
-		return {};
-	}
-	const fs::path normalized_path = fs::path(std::string(raw_path)).lexically_normal();
-	return normalized_path.empty() ? fs::path(std::string(raw_path)) : normalized_path;
-}
 
 fs::path normalize_output_path(const fs::path& raw_path) {
 	if (raw_path.empty()) {
