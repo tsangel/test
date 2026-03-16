@@ -630,11 +630,6 @@ DataElement& DicomFile::add_dataelement(Tag tag, VR vr) {
 	return root_dataset_.add_dataelement(tag, vr);
 }
 
-DataElement& DicomFile::add_dataelement(
-    Tag tag, VR vr, std::size_t offset, std::size_t length) {
-	return root_dataset_.add_dataelement(tag, vr, offset, length);
-}
-
 DataElement& DicomFile::ensure_dataelement(Tag tag, VR vr) {
 	return root_dataset_.ensure_dataelement(tag, vr);
 }

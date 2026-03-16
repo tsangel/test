@@ -263,40 +263,41 @@ int main() {
 		}
 		{
 			DataSet ds;
-			auto& no_binding = ds.add_dataelement("Rows"_tag, dicom::VR::US);
-			if (no_binding.storage_kind() != dicom::DataElement::StorageKind::none) {
+			auto& inserted = ds.add_dataelement("Rows"_tag, dicom::VR::US);
+			if (inserted.storage_kind() != dicom::DataElement::StorageKind::none) {
 				fail("DataSet::add_dataelement(tag, vr) should keep storage_kind none");
 			}
-			auto& bound = ds.add_dataelement("Rows"_tag, dicom::VR::US, 123, 2);
-			if (bound.storage_kind() != dicom::DataElement::StorageKind::stream ||
-			    bound.offset() != 123) {
-				fail("DataSet::add_dataelement(tag, vr, offset, length) should bind stream metadata");
+			auto& replaced = ds.add_dataelement("Rows"_tag, dicom::VR::UL);
+			if (&replaced != &inserted || replaced.vr() != dicom::VR::UL ||
+			    replaced.storage_kind() != dicom::DataElement::StorageKind::none ||
+			    replaced.length() != 0) {
+				fail("DataSet::add_dataelement(tag, vr) should replace an existing element in place");
 			}
-			auto& rebound = ds.add_dataelement("Rows"_tag, dicom::VR::US);
-			if (rebound.storage_kind() != dicom::DataElement::StorageKind::none) {
-				fail("DataSet::add_dataelement(tag, vr) should clear prior stream binding on replace");
+			auto& preserved_vr = ds.add_dataelement("Rows"_tag);
+			if (&preserved_vr != &inserted || preserved_vr.vr() != dicom::VR::UL ||
+			    preserved_vr.storage_kind() != dicom::DataElement::StorageKind::none) {
+				fail("DataSet::add_dataelement(tag) should preserve the existing VR when omitted");
 			}
 		}
 		{
 			DataSet ds;
-			auto& bound = ds.add_dataelement("Rows"_tag, dicom::VR::US, 321, 2);
+			auto& inserted = ds.add_dataelement("Rows"_tag, dicom::VR::US);
 			auto& preserved = ds.ensure_dataelement("Rows"_tag);
-			if (&preserved != &bound ||
-			    preserved.storage_kind() != dicom::DataElement::StorageKind::stream ||
-			    preserved.offset() != 321) {
+			if (&preserved != &inserted ||
+			    preserved.storage_kind() != dicom::DataElement::StorageKind::none) {
 				fail("DataSet::ensure_dataelement(tag) should preserve an existing element");
 			}
 
 			auto& overridden = ds.ensure_dataelement("Rows"_tag, dicom::VR::UL);
-			if (&overridden != &bound || overridden.vr() != dicom::VR::US ||
-			    overridden.storage_kind() != dicom::DataElement::StorageKind::stream ||
-			    overridden.offset() != 321) {
-				fail("DataSet::ensure_dataelement(tag, vr) should preserve an existing element unchanged");
+			if (&overridden != &inserted || overridden.vr() != dicom::VR::UL ||
+			    overridden.storage_kind() != dicom::DataElement::StorageKind::none ||
+			    overridden.length() != 0) {
+				fail("DataSet::ensure_dataelement(tag, vr) should reset an existing element to the requested VR");
 			}
 
-			auto& inserted = ds.ensure_dataelement("Columns"_tag);
-			if (!inserted || inserted.vr() != dicom::VR::US ||
-			    inserted.storage_kind() != dicom::DataElement::StorageKind::none) {
+			auto& inserted_missing = ds.ensure_dataelement("Columns"_tag);
+			if (!inserted_missing || inserted_missing.vr() != dicom::VR::US ||
+			    inserted_missing.storage_kind() != dicom::DataElement::StorageKind::none) {
 				fail("DataSet::ensure_dataelement(tag) should insert missing standard tags using dictionary VR");
 			}
 
@@ -324,24 +325,23 @@ int main() {
 			if (!partial_set) {
 				fail("partial read_file for set_value should succeed");
 			}
-			if (!partial_set->set_value("Rows"_tag, 1024L)) {
-				fail("set_value should load through Rows on partially loaded datasets");
+			bool set_rows_threw = false;
+			try {
+				(void)partial_set->set_value("Rows"_tag, 1024L);
+			} catch (const std::exception&) {
+				set_rows_threw = true;
 			}
-			if (!partial_set->set_value("PixelRepresentation"_tag, 0L)) {
-				fail("set_value should keep loading through later tags on partially loaded datasets");
+			if (!set_rows_threw) {
+				fail("set_value should throw beyond the current load frontier");
 			}
-			auto rows = partial_set->get_value<long>("Rows"_tag);
-			if (!rows || *rows != 1024L) {
-				fail("set_value should update Rows after loading through the target tag");
+			bool set_repr_threw = false;
+			try {
+				(void)partial_set->set_value("PixelRepresentation"_tag, 0L);
+			} catch (const std::exception&) {
+				set_repr_threw = true;
 			}
-			std::size_t rows_count = 0;
-			for (const auto& element : partial_set->dataset()) {
-				if (element.tag() == "Rows"_tag) {
-					++rows_count;
-				}
-			}
-			if (rows_count != 1) {
-				fail("set_value on a partially loaded dataset should not duplicate root tags");
+			if (!set_repr_threw) {
+				fail("set_value should throw for later root tags beyond the current load frontier");
 			}
 
 			auto partial_add = read_file(fixture_path, opts);
@@ -380,11 +380,10 @@ int main() {
 			if (!private_mid.from_long(16)) {
 				fail("DataSet::add_dataelement should allow assigning an out-of-order private element");
 			}
-			auto& private_bound =
-			    ds.add_dataelement(dicom::Tag(0x0009, 0x1031), dicom::VR::LO, 123, 5);
-			if (private_bound.storage_kind() != dicom::DataElement::StorageKind::stream ||
-			    private_bound.offset() != 123) {
-				fail("DataSet::add_dataelement should preserve stream binding for out-of-order inserts");
+			auto& private_late =
+			    ds.add_dataelement(dicom::Tag(0x0009, 0x1031), dicom::VR::LO);
+			if (private_late.storage_kind() != dicom::DataElement::StorageKind::none) {
+				fail("DataSet::add_dataelement should keep public inserts unbound from stream storage");
 			}
 			const std::vector<std::uint32_t> expected_tags = {
 			    dicom::Tag(0x0009, 0x1030).value(),
@@ -403,7 +402,7 @@ int main() {
 			if (ds.get_dataelement(dicom::Tag(0x0009, 0x1030))) {
 				fail("DataSet::remove_dataelement should erase out-of-order private elements");
 			}
-			if (ds.get_dataelement(dicom::Tag(0x0009, 0x1031)).offset() != 123) {
+			if (ds.get_dataelement(dicom::Tag(0x0009, 0x1031)).length() != 0) {
 				fail("Removing one map-backed element should not disturb neighboring map-backed elements");
 			}
 		}
@@ -465,6 +464,13 @@ int main() {
 			if (ds.get_dataelement(private_tag).vr() != dicom::VR::UL ||
 			    ds.get_value<long long>(private_tag).value_or(0) != 17LL) {
 				fail("DataSet explicit-VR override mismatch");
+			}
+			if (ds.set_value(private_tag, dicom::VR::SQ, 18LL)) {
+				fail("DataSet::set_value(tag, vr, value) should fail when assigning a scalar to SQ");
+			}
+			if (ds.get_dataelement(private_tag).vr() != dicom::VR::SQ ||
+			    ds.get_dataelement(private_tag).length() != 0) {
+				fail("DataSet explicit-VR SQ failure should leave the target reset to SQ");
 			}
 
 			const std::array<long long, 0> empty_rows{};

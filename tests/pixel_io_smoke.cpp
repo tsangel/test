@@ -79,7 +79,7 @@ int main() {
 			fail("DicomFile dump(include_offset=false) should hide OFFSET column");
 		}
 
-		auto& rows = file->add_dataelement("Rows"_tag, dicom::VR::US, 0, 2);
+		auto& rows = file->add_dataelement("Rows"_tag, dicom::VR::US);
 		if (!rows) fail("DicomFile add_dataelement failed");
 		if (file->dump().find("'00280010'") == std::string::npos) {
 			fail("DicomFile dump should include Rows");
@@ -804,7 +804,7 @@ int main() {
 		dicom::DicomFile generated;
 		auto add_text_element = [&](dicom::Tag tag, dicom::VR vr, std::string_view value)
 		    -> dicom::DataElement& {
-			auto& element = generated.add_dataelement(tag, vr, 0, value.size());
+			auto& element = generated.add_dataelement(tag, vr);
 			element.set_value_bytes(std::span<const std::uint8_t>(
 			    reinterpret_cast<const std::uint8_t*>(value.data()), value.size()));
 			return element;
@@ -822,7 +822,7 @@ int main() {
 		auto* sequence_item = sequence->add_dataset();
 		if (!sequence_item) fail("failed to append sequence item");
 		auto& referenced_uid =
-		    sequence_item->add_dataelement("ReferencedSOPInstanceUID"_tag, dicom::VR::UI, 0, 12);
+		    sequence_item->add_dataelement("ReferencedSOPInstanceUID"_tag, dicom::VR::UI);
 		const std::array<std::uint8_t, 12> uid_value{
 		    '1', '.', '2', '.', '3', '.', '4', '.', '5', '.', '6', '\0'};
 		referenced_uid.set_value_bytes(uid_value);

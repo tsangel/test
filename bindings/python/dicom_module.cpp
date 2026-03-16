@@ -2074,34 +2074,19 @@ Tag dataset_assignment_key_to_tag(nb::handle key);
 
 bool dataset_try_set_value_py(DataSet& self, nb::handle key, nb::handle value) {
 	const Tag tag = dataset_assignment_key_to_tag(key);
-	self.ensure_loaded(tag);
 	return dataelement_set_value_py(self.ensure_dataelement(tag), value);
 }
 
 bool dataset_try_set_value_with_vr_py(
     DataSet& self, nb::handle key, VR vr, nb::handle value) {
 	const Tag tag = dataset_assignment_key_to_tag(key);
-	self.ensure_loaded(tag);
-	DataElement& existing = self.get_dataelement(tag);
-	if (existing.is_present()) {
-		if (vr == VR::None || existing.vr() == vr) {
-			return dataelement_set_value_py(existing, value);
-		}
-		if (existing.vr().is_sequence() || existing.vr().is_pixel_sequence() ||
-		    vr.is_sequence() || vr.is_pixel_sequence()) {
-			return false;
-		}
-		DataElement& target = self.add_dataelement(tag, vr);
-		return dataelement_set_value_py(target, value);
-	}
-
 	if (vr == VR::None) {
 		return dataset_try_set_value_py(self, key, value);
 	}
-	if (vr.is_sequence() || vr.is_pixel_sequence()) {
+	DataElement& target = self.ensure_dataelement(tag, vr);
+	if (target.vr().is_sequence() || target.vr().is_pixel_sequence()) {
 		return false;
 	}
-	DataElement& target = self.add_dataelement(tag, vr);
 	return dataelement_set_value_py(target, value);
 }
 
@@ -3160,17 +3145,14 @@ NB_MODULE(_dicomsdl, m) {
 		.def("size", &DataSet::size,
 		    "Number of active DataElements currently available in this DataSet")
 		.def("add_dataelement",
-		    [](DataSet& self, const Tag& tag, std::optional<VR> vr,
-		        std::size_t offset, std::size_t length) -> DataElement& {
-		        const VR resolved = vr.value_or(VR::None);
-		        return self.add_dataelement(tag, resolved, offset, length);
+		    [](DataSet& self, const Tag& tag, std::optional<VR> vr) -> DataElement& {
+		        return self.add_dataelement(tag, vr.value_or(VR::None));
 		    },
 		    nb::arg("tag"), nb::arg("vr") = nb::none(),
-		    nb::arg("offset") = 0, nb::arg("length") = 0,
 		    nb::rv_policy::reference_internal,
 		    "Add or replace a DataElement and return a reference to it. "
-		    "On partially loaded file-backed datasets, unread future tags raise; "
-		    "use set_value() when you want loading to continue through the target tag.")
+		    "On partially loaded file-backed datasets, unread future tags raise instead of "
+		    "implicitly continuing the load.")
 		.def("ensure_dataelement",
 		    [](DataSet& self, nb::handle key, std::optional<VR> vr) -> DataElement& {
 		        const Tag tag = dataset_assignment_key_to_tag(key);
@@ -3181,7 +3163,8 @@ NB_MODULE(_dicomsdl, m) {
 		    "Return the existing DataElement for a Tag, packed int, or keyword/tag string, "
 		    "or add a new zero-length element when missing. When `vr` is omitted/None, an "
 		    "existing element is preserved as-is. When `vr` is explicit and differs from the "
-		    "existing element VR, the existing element is still preserved unchanged. "
+		    "existing element VR, the existing element is reset in place so the requested VR "
+		    "is guaranteed. "
 		    "On partially loaded file-backed datasets, unread future tags raise instead of "
 		    "mutating past the current load frontier.")
 		.def("remove_dataelement",
@@ -3247,20 +3230,20 @@ NB_MODULE(_dicomsdl, m) {
 		    "Best-effort typed assignment by Tag, packed int, or keyword string. "
 		    "Returns True on success, False when the value cannot be encoded for "
 		    "the target VR, and treats `None` as a zero-length present value. "
-		    "On partially loaded file-backed datasets, this loads through the target tag before "
-		    "mutating it. On failure, the DataSet remains valid but the destination element state "
-		    "is unspecified.")
+		    "On partially loaded file-backed datasets, unread future tags raise instead of "
+		    "implicitly continuing the load. On assignment failure, the "
+		    "DataSet remains valid but the destination element state is unspecified.")
 		.def("set_value",
 		    [](DataSet& self, nb::object key, VR vr, nb::handle value) {
 			    return dataset_try_set_value_with_vr_py(self, key, vr, value);
 		    },
 		    nb::arg("key"), nb::arg("vr"), nb::arg("value"),
 		    "Overload: set_value(key, vr, value). Uses the explicit VR when creating "
-		    "a missing element and can override an existing non-SQ/non-PX element VR. "
-		    "Returns False when the value cannot be encoded or the existing VR must not be replaced. "
-		    "`None` writes a zero-length value for the resolved VR. On partially loaded file-backed "
-		    "datasets, this loads through the target tag before mutating it. On failure, the DataSet "
-		    "remains valid but the destination element state is unspecified.")
+		    "a missing element and enforces that VR on existing elements before assignment. "
+		    "Returns False when the value cannot be encoded for the resolved VR. `None` writes "
+		    "a zero-length value for that VR. On partially loaded file-backed datasets, unread "
+		    "future tags raise instead of implicitly continuing the load. On assignment failure, "
+		    "the DataSet remains valid but the destination element state is unspecified.")
 		.def("__getitem__",
 		    [](DataSet& self, nb::object key) -> DataElement& {
 			    return dataset_lookup_dataelement_py(

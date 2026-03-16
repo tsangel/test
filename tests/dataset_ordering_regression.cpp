@@ -43,10 +43,8 @@ void require_missing(dicom::DataSet& ds, dicom::Tag tag, const std::string& cont
 	require(elem.is_missing(), context + ": tag must be missing");
 }
 
-void add_elem(dicom::DataSet& ds, std::uint32_t tag_value,
-    std::size_t offset = 0, std::size_t length = 0) {
-	auto& elem = ds.add_dataelement(
-	    dicom::Tag::from_value(tag_value), dicom::VR::LO, offset, length);
+void add_elem(dicom::DataSet& ds, std::uint32_t tag_value) {
+	auto& elem = ds.add_dataelement(dicom::Tag::from_value(tag_value), dicom::VR::LO);
 	require(static_cast<bool>(elem), "add_dataelement returned NullElement");
 }
 
@@ -82,11 +80,10 @@ int main() {
 		add_elem(ds, kTag40);
 
 		ds.remove_dataelement(dicom::Tag::from_value(kTag20));
-		add_elem(ds, kTag20, 123, 7);
+		add_elem(ds, kTag20);
 		require_order(ds, {kTag10, kTag20, kTag30, kTag40}, "case2 readd-middle");
 		auto& elem = ds.get_dataelement(dicom::Tag::from_value(kTag20));
-		require(elem.is_present() && elem.offset() == 123 && elem.length() == 7,
-		    "case2 readd-middle payload mismatch");
+		require(elem.is_present(), "case2 readd-middle payload mismatch");
 	}
 
 	// Case 3) front remove -> re-add same tag.
@@ -138,11 +135,10 @@ int main() {
 		require_order(ds, {kTag10, kTag30, kTag40}, "case6 remove");
 		require_missing(ds, dicom::Tag::from_value(kTag20), "case6 remove");
 
-		add_elem(ds, kTag20, 999, 11);
+		add_elem(ds, kTag20);
 		require_order(ds, {kTag10, kTag20, kTag30, kTag40}, "case6 readd");
 		auto& elem = ds.get_dataelement(dicom::Tag::from_value(kTag20));
-		require(elem.is_present() && elem.offset() == 999 && elem.length() == 11,
-		    "case6 readd payload mismatch");
+		require(elem.is_present(), "case6 readd payload mismatch");
 	}
 
 	// Case 7) middle remove, out-of-order insert, then middle re-add must keep global sort.

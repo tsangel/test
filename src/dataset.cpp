@@ -13,6 +13,7 @@
 #include <array>
 #include <atomic>
 #include <bit>
+#include <cassert>
 #include <cctype>
 #include <cstring>
 #include <fmt/format.h>
@@ -435,7 +436,7 @@ bool DataSet::should_append_to_elements(std::uint32_t tag_value) const noexcept 
 [[noreturn]] void DataSet::throw_beyond_last_loaded_tag(Tag tag, const char* api_name) const {
 	diag::error_and_throw(
 	    "{} file={} tag={} last_loaded={} reason=tag is beyond the loaded frontier; "
-	    "call ensure_loaded(tag) or use set_value()",
+	    "call ensure_loaded(tag) or fully load the dataset before mutating this tag",
 	    api_name, path(), tag.to_string(), last_tag_loaded_.to_string());
 }
 
@@ -573,6 +574,7 @@ DataElement& DataSet::add_dataelement(Tag tag, VR vr) {
 		throw_beyond_last_loaded_tag(tag, "DataSet::add_dataelement");
 	}
 	const auto tag_value = tag.value();
+	// Fast append path for in-order growth: create a fresh zero-length element at the tail.
 	if (should_append_to_elements(tag_value)) {
 		if (vr == VR::None) {
 			vr = resolve_vr_or_throw(this, tag, vr, "DataSet::add_dataelement");
@@ -588,11 +590,14 @@ DataElement& DataSet::add_dataelement(Tag tag, VR vr) {
 		return *element;
 	}
 
+	// Deque-backed slot lookup: replace present elements, or revive tombstones in place.
 	if (auto* element = find_dataelement_in_elements(tag_value)) {
 		if (element->is_present()) {
+			// Present element path: always reset, keeping the current VR only when `vr` is omitted.
 			const VR target_vr = (vr == VR::None) ? element->vr() : vr;
 			element->reset(tag, target_vr, 0, 0, this, false);
 		} else {
+			// Tombstone revive path: resolve the requested/default VR, then reactivate in place.
 			if (vr == VR::None) {
 				vr = resolve_vr_or_throw(this, tag, vr, "DataSet::add_dataelement");
 			}
@@ -605,101 +610,26 @@ DataElement& DataSet::add_dataelement(Tag tag, VR vr) {
 		return *element;
 	}
 
+	// Map-backed out-of-order slot lookup: map entries are present-only and replaced in place.
 	auto map_it = element_map_.lower_bound(tag_value);
 	if (map_it != element_map_.end() && map_it->first == tag_value) {
 		auto& element = map_it->second;
-		if (element.is_present()) {
-			const VR target_vr = (vr == VR::None) ? element.vr() : vr;
-			element.reset(tag, target_vr, 0, 0, this, false);
-		} else {
-			if (vr == VR::None) {
-				vr = resolve_vr_or_throw(this, tag, vr, "DataSet::add_dataelement");
-			}
-			element.reset_without_release(tag, vr, 0, 0, this, false);
-			++active_element_count_;
-		}
+		assert(element.is_present());
+		const VR target_vr = (vr == VR::None) ? element.vr() : vr;
+		element.reset(tag, target_vr, 0, 0, this, false);
 		if (tag == charset::detail::kSpecificCharacterSetTag) {
 			on_specific_character_set_changed();
 		}
 		return element;
 	}
 
+	// Missing out-of-order tag: materialize a new map-backed zero-length element.
 	if (vr == VR::None) {
 		vr = resolve_vr_or_throw(this, tag, vr, "DataSet::add_dataelement");
 	}
 	auto insert_it = element_map_.try_emplace(map_it, tag_value);
 	auto& element = insert_it->second;
 	element.reset_without_release(tag, vr, 0, 0, this, false);
-	++active_element_count_;
-	if (tag == charset::detail::kSpecificCharacterSetTag) {
-		on_specific_character_set_changed();
-	}
-	return element;
-}
-
-DataElement& DataSet::add_dataelement(
-    Tag tag, VR vr, std::size_t offset, std::size_t length) {
-	if (is_beyond_last_loaded_tag(tag)) [[unlikely]] {
-		throw_beyond_last_loaded_tag(tag, "DataSet::add_dataelement");
-	}
-	const auto tag_value = tag.value();
-	if (should_append_to_elements(tag_value)) {
-		if (vr == VR::None) {
-			vr = resolve_vr_or_throw(this, tag, vr, "DataSet::add_dataelement");
-		}
-		elements_.emplace_back();
-		auto* element = &elements_.back();
-		element->reset_without_release(tag, vr, length, offset, this, true);
-		element_index_.emplace_back(tag, element);
-		++active_element_count_;
-		if (tag == charset::detail::kSpecificCharacterSetTag) {
-			on_specific_character_set_changed();
-		}
-		return *element;
-	}
-
-	if (auto* element = find_dataelement_in_elements(tag_value)) {
-		if (element->is_present()) {
-			const VR target_vr = (vr == VR::None) ? element->vr() : vr;
-			element->reset(tag, target_vr, length, offset, this, true);
-		} else {
-			if (vr == VR::None) {
-				vr = resolve_vr_or_throw(this, tag, vr, "DataSet::add_dataelement");
-			}
-			element->reset_without_release(tag, vr, length, offset, this, true);
-			++active_element_count_;
-		}
-		if (tag == charset::detail::kSpecificCharacterSetTag) {
-			on_specific_character_set_changed();
-		}
-		return *element;
-	}
-
-	auto map_it = element_map_.lower_bound(tag_value);
-	if (map_it != element_map_.end() && map_it->first == tag_value) {
-		auto& element = map_it->second;
-		if (element.is_present()) {
-			const VR target_vr = (vr == VR::None) ? element.vr() : vr;
-			element.reset(tag, target_vr, length, offset, this, true);
-		} else {
-			if (vr == VR::None) {
-				vr = resolve_vr_or_throw(this, tag, vr, "DataSet::add_dataelement");
-			}
-			element.reset_without_release(tag, vr, length, offset, this, true);
-			++active_element_count_;
-		}
-		if (tag == charset::detail::kSpecificCharacterSetTag) {
-			on_specific_character_set_changed();
-		}
-		return element;
-	}
-
-	if (vr == VR::None) {
-		vr = resolve_vr_or_throw(this, tag, vr, "DataSet::add_dataelement");
-	}
-	auto insert_it = element_map_.try_emplace(map_it, tag_value);
-	auto& element = insert_it->second;
-	element.reset_without_release(tag, vr, length, offset, this, true);
 	++active_element_count_;
 	if (tag == charset::detail::kSpecificCharacterSetTag) {
 		on_specific_character_set_changed();
@@ -742,6 +672,7 @@ DataElement& DataSet::ensure_dataelement(Tag tag, VR vr) {
 		throw_beyond_last_loaded_tag(tag, "DataSet::ensure_dataelement");
 	}
 	const auto tag_value = tag.value();
+	// Fast append path for in-order growth: create a fresh zero-length element at the tail.
 	if (should_append_to_elements(tag_value)) {
 		if (vr == VR::None) {
 			vr = resolve_vr_or_throw(this, tag, vr, "DataSet::ensure_dataelement");
@@ -757,10 +688,19 @@ DataElement& DataSet::ensure_dataelement(Tag tag, VR vr) {
 		return *element;
 	}
 
+	// Deque-backed slot lookup: keep present elements as-is unless an explicit VR must be enforced.
 	if (auto* element = find_dataelement_in_elements(tag_value)) {
 		if (element->is_present()) {
+			// Present element only. Tombstones (VR::None) are revived below without release.
+			if (vr != VR::None && element->vr() != vr) {
+				element->reset(tag, vr, 0, 0, this, false);
+				if (tag == charset::detail::kSpecificCharacterSetTag) {
+					on_specific_character_set_changed();
+				}
+			}
 			return *element;
 		}
+		// Tombstone revive path: resolve the requested/default VR, then reactivate in place.
 		if (vr == VR::None) {
 			vr = resolve_vr_or_throw(this, tag, vr, "DataSet::ensure_dataelement");
 		}
@@ -772,23 +712,21 @@ DataElement& DataSet::ensure_dataelement(Tag tag, VR vr) {
 		return *element;
 	}
 
+	// Map-backed out-of-order slot lookup: same semantics as the deque-backed path above.
 	auto map_it = element_map_.lower_bound(tag_value);
 	if (map_it != element_map_.end() && map_it->first == tag_value) {
 		auto& element = map_it->second;
-		if (element.is_present()) {
-			return element;
-		}
-		if (vr == VR::None) {
-			vr = resolve_vr_or_throw(this, tag, vr, "DataSet::ensure_dataelement");
-		}
-		element.reset_without_release(tag, vr, 0, 0, this, false);
-		++active_element_count_;
-		if (tag == charset::detail::kSpecificCharacterSetTag) {
-			on_specific_character_set_changed();
+		assert(element.is_present());
+		if (vr != VR::None && element.vr() != vr) {
+			element.reset(tag, vr, 0, 0, this, false);
+			if (tag == charset::detail::kSpecificCharacterSetTag) {
+				on_specific_character_set_changed();
+			}
 		}
 		return element;
 	}
 
+	// Missing out-of-order tag: materialize a new map-backed zero-length element.
 	if (vr == VR::None) {
 		vr = resolve_vr_or_throw(this, tag, vr, "DataSet::ensure_dataelement");
 	}
@@ -815,14 +753,17 @@ DataElement& DataSet::ensure_dataelement(Tag tag, VR vr) {
 //   - Returns a falsey DataElement (VR::None) when the tag (or nested dataset) is missing
 //   - Uses diag::error_and_throw for malformed strings, non-sequence traversal, bad indices, etc.
 DataElement& DataSet::get_dataelement(std::string_view tag_path) {
+	// Walk the path one dataset level at a time, starting from this dataset.
 	DataSet* current = this;
 	std::string_view remaining = trim(tag_path);
 
 	while (!remaining.empty()) {
+		// Split the next tag token from the optional ".index.rest" suffix.
 		const auto dot_pos = remaining.find('.');
 		auto tag_token = strip_parens(trim(remaining.substr(0, dot_pos)));
 		remaining = (dot_pos == std::string_view::npos) ? std::string_view{} : remaining.substr(dot_pos + 1);
 
+		// Resolve the textual token as either a standard tag/keyword or a private-creator tag.
 		Tag tag{};
 		try {
 			tag = Tag(tag_token);
@@ -834,18 +775,22 @@ DataElement& DataSet::get_dataelement(std::string_view tag_path) {
 			tag = *private_tag;
 		}
 
+		// Look up the current level; a miss anywhere in the path returns the falsey sentinel.
 		DataElement& element = current->get_dataelement(tag);
 		if (element.is_missing()) {
 			return element;
 		}
+		// Stop once the final tag token resolves successfully.
 		if (dot_pos == std::string_view::npos) {
 			return element;
 		}
 
+		// Parse the next sequence item index before descending into the child dataset.
 		const auto next_dot = remaining.find('.');
 		auto index_token = trim(remaining.substr(0, next_dot));
 		remaining = (next_dot == std::string_view::npos) ? std::string_view{} : remaining.substr(next_dot + 1);
 
+		// Nested traversal is only valid through sequence elements.
 		if (!element.vr().is_sequence()) {
 			diag::error_and_throw("Element {} is not a sequence; cannot index into it",
 			    element.tag().to_string());
@@ -863,24 +808,29 @@ DataElement& DataSet::get_dataelement(std::string_view tag_path) {
 			diag::error_and_throw("Malformed sequence index in tag path");
 		}
 
+		// Advance to the indexed item dataset and continue with the remaining path.
 		current = seq->get_dataset(idx);
 		if (!current) {
 			return *NullElement();
 		}
 	}
 
+	// Empty or fully consumed paths fall back to the falsey sentinel.
 	return *NullElement();
 }
 
 const DataElement& DataSet::get_dataelement(std::string_view tag_path) const {
+	// Walk the path one dataset level at a time, starting from this dataset.
 	const DataSet* current = this;
 	std::string_view remaining = trim(tag_path);
 
 	while (!remaining.empty()) {
+		// Split the next tag token from the optional ".index.rest" suffix.
 		const auto dot_pos = remaining.find('.');
 		auto tag_token = strip_parens(trim(remaining.substr(0, dot_pos)));
 		remaining = (dot_pos == std::string_view::npos) ? std::string_view{} : remaining.substr(dot_pos + 1);
 
+		// Resolve the textual token as either a standard tag/keyword or a private-creator tag.
 		Tag tag{};
 		try {
 			tag = Tag(tag_token);
@@ -892,18 +842,22 @@ const DataElement& DataSet::get_dataelement(std::string_view tag_path) const {
 			tag = *private_tag;
 		}
 
+		// Look up the current level; a miss anywhere in the path returns the falsey sentinel.
 		const DataElement& element = current->get_dataelement(tag);
 		if (element.is_missing()) {
 			return element;
 		}
+		// Stop once the final tag token resolves successfully.
 		if (dot_pos == std::string_view::npos) {
 			return element;
 		}
 
+		// Parse the next sequence item index before descending into the child dataset.
 		const auto next_dot = remaining.find('.');
 		auto index_token = trim(remaining.substr(0, next_dot));
 		remaining = (next_dot == std::string_view::npos) ? std::string_view{} : remaining.substr(next_dot + 1);
 
+		// Nested traversal is only valid through sequence elements.
 		if (!element.vr().is_sequence()) {
 			diag::error_and_throw("Element {} is not a sequence; cannot index into it",
 			    element.tag().to_string());
@@ -921,12 +875,14 @@ const DataElement& DataSet::get_dataelement(std::string_view tag_path) const {
 			diag::error_and_throw("Malformed sequence index in tag path");
 		}
 
+		// Advance to the indexed item dataset and continue with the remaining path.
 		current = seq->get_dataset(idx);
 		if (!current) {
 			return *NullElement();
 		}
 	}
 
+	// Empty or fully consumed paths fall back to the falsey sentinel.
 	return *NullElement();
 }
 

@@ -27,8 +27,8 @@ print(len(df))
 for elem in df:
     print(elem.tag, elem.vr, elem.length)
 
-# Add an element (offset/length refer to original file offsets)
-df.add_dataelement(tag=dicom.keyword_to_tag_vr("PatientName")[0], vr=dicom.VR.PN, offset=0, length=0)
+# Add an element
+df.add_dataelement(tag=dicom.keyword_to_tag_vr("PatientName")[0], vr=dicom.VR.PN)
 
 # Hide OFFSET column when needed
 print(df.dump(include_offset=False))
@@ -49,7 +49,7 @@ assert ds.set_value(0x00090030, dicom.VR.US, 16)
 Partial-load note:
 
 - `get_value(...)` does not implicitly continue loading unread tail elements.
-- `set_value(...)` loads through the target tag before mutating it.
+- `set_value(...)` also does not implicitly continue loading unread tail elements.
 - direct `add_dataelement(...)` / `ensure_dataelement(...)` calls for tags beyond the current
   load frontier raise instead of mutating unread tail data.
 

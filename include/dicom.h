@@ -1854,7 +1854,7 @@ public:
 		    errors, out_replaced);
 	}
 
-	/// Add or replace a data element with no stream binding (offset/length = 0).
+	/// Add or replace a zero-length data element owned by this DataSet.
 	/// Direct edits to `(0008,0005) Specific Character Set` keep the effective charset
 	/// cache synchronized, but the charset-specific setter APIs remain preferred because
 	/// they make intent clearer and validate multi-term combinations explicitly.
@@ -1863,16 +1863,6 @@ public:
 	///         allocation failures, or when called on a partially loaded attached dataset
 	///         for a tag beyond the current load frontier.
 	DataElement& add_dataelement(Tag tag, VR vr = VR::None);
-
-	/// Add or replace a data element with explicit stream binding metadata.
-	/// Direct edits to `(0008,0005) Specific Character Set` keep the effective charset
-	/// cache synchronized, but the charset-specific setter APIs remain preferred because
-	/// they make intent clearer and validate multi-term combinations explicitly.
-	/// @return Reference to the inserted/replaced element.
-	/// @throws Exception on validation errors (for example: VR::None with unknown tag),
-	///         allocation failures, or when called on a partially loaded attached dataset
-	///         for a tag beyond the current load frontier.
-	DataElement& add_dataelement(Tag tag, VR vr, std::size_t offset, std::size_t length);
 
 	/// Remove a data element by tag (no-op if missing).
 	/// Removing `(0008,0005)` through this API also refreshes the effective charset cache,
@@ -1890,9 +1880,11 @@ public:
 	const DataElement& get_dataelement(Tag tag) const;
 
 	/// Ensure that a data element exists for a tag.
-	/// When the element already exists it is preserved as-is, regardless of the requested `vr`.
-	/// When the element is missing, `vr` is used for insertion; if `vr == VR::None`, the
-	/// dictionary VR is resolved for standard tags and unknown/private tags throw.
+	/// When the element already exists and `vr == VR::None`, it is preserved as-is.
+	/// When the element already exists and `vr` is explicit and different, it is reset in place
+	/// so the requested VR is guaranteed. When the element is missing, `vr` is used for
+	/// insertion; if `vr == VR::None`, the dictionary VR is resolved for standard tags and
+	/// unknown/private tags throw.
 	/// @return Reference to the existing or inserted element.
 	/// @throws Exception under the same conditions as add_dataelement (for example:
 	///         VR::None with unknown/private tags), allocation failures, or when
@@ -1991,7 +1983,7 @@ public:
 	/// On failure these return false and leave the DataSet valid, but the destination
 	/// element state is unspecified. Callers that need rollback semantics must preserve
 	/// and restore the previous element value themselves. On partially loaded attached
-	/// datasets, these load through the target tag before mutating it.
+	/// datasets, these throw when the target tag lies beyond the current loaded frontier.
 	[[nodiscard]] bool set_value(Tag tag, int value);
 	[[nodiscard]] bool set_value(Tag tag, long value);
 	[[nodiscard]] bool set_value(Tag tag, long long value);
@@ -2157,10 +2149,6 @@ public:
 	/// @return Reference to the inserted/replaced element.
 	/// @throws Exception under the same conditions as DataSet::add_dataelement.
 	DataElement& add_dataelement(Tag tag, VR vr = VR::None);
-	/// Forwarding helper to the root DataSet::add_dataelement with stream metadata.
-	/// @return Reference to the inserted/replaced element.
-	/// @throws Exception under the same conditions as DataSet::add_dataelement.
-	DataElement& add_dataelement(Tag tag, VR vr, std::size_t offset, std::size_t length);
 	/// Forwarding helper to the root DataSet::ensure_dataelement.
 	/// @return Reference to the existing/inserted/replaced element.
 	/// @throws Exception under the same conditions as DataSet::ensure_dataelement.

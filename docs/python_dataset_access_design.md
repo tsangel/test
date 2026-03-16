@@ -128,9 +128,10 @@ private_value = ds.ensure_dataelement(0x00090030, dicom.VR.US)
 Rules:
 
 - if the element already exists and `vr` is omitted or `None`, the existing element is returned unchanged
-- if the element already exists and `vr` is explicit but different, the existing element is still returned unchanged
+- if the element already exists and `vr` is explicit but different, the existing element is reset
+  in place so the requested VR is guaranteed
 - if the element is missing, a new zero-length element is inserted
-- unlike `add_dataelement(...)`, this API does not replace an existing element
+- unlike `add_dataelement(...)`, this API only resets when an explicit VR must be enforced
 - on partially loaded file-backed datasets, calling `ensure_dataelement(...)` for a tag beyond the
   current load frontier raises instead of implicitly continuing the load
 
@@ -305,9 +306,9 @@ assert ds.set_value("Rows", None)   # present, zero-length US
 
 This is the best path when you want create/update by key in one call.
 
-On partially loaded file-backed datasets, `set_value(...)` first loads through the target
-tag before mutating it. This avoids creating duplicate root-level elements when unread tail
-data is parsed later.
+On partially loaded file-backed datasets, `set_value(...)` does not load through the target
+tag. If the target lies beyond the current loaded frontier, it raises just like
+`add_dataelement(...)` / `ensure_dataelement(...)`.
 
 Failure model:
 

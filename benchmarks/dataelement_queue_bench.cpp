@@ -202,7 +202,9 @@ public:
 		if (!first_tag_) {
 			first_tag_ = tag;
 		}
-		return &data_set_.add_dataelement(tag, vr, offset, length);
+		(void)offset;
+		(void)length;
+		return &data_set_.add_dataelement(tag, vr);
 	}
 
 	const dicom::DataElement* front_ptr() const {
@@ -262,7 +264,9 @@ class CurrentDataSetAdapter {
 public:
 	dicom::DataElement* add_dataelement(dicom::Tag tag, dicom::VR vr,
 	    std::size_t offset, std::size_t length) {
-		return &data_set_.add_dataelement(tag, vr, offset, length);
+		(void)offset;
+		(void)length;
+		return &data_set_.add_dataelement(tag, vr);
 	}
 
 	const dicom::DataElement* get_dataelement(dicom::Tag tag) const {

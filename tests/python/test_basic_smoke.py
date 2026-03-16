@@ -319,7 +319,7 @@ def test_remove_dataelement_accepts_tag_int_and_str_keys():
 	assert ds.get_value("PatientName") is None
 
 
-def test_ensure_dataelement_preserves_existing_elements():
+def test_ensure_dataelement_preserves_or_resets_existing_elements():
 	ds = dicom.DataSet()
 	ds.Rows = 512
 
@@ -328,8 +328,12 @@ def test_ensure_dataelement_preserves_existing_elements():
 	assert preserved.value == 512
 
 	overridden = ds.ensure_dataelement("Rows", dicom.VR.UL)
-	assert overridden.vr == dicom.VR.US
-	assert overridden.value == 512
+	assert overridden.vr == dicom.VR.UL
+	assert overridden.length == 0
+
+	assert not ds.set_value("Rows", dicom.VR.SQ, 1)
+	assert ds["Rows"].vr == dicom.VR.SQ
+	assert ds["Rows"].length == 0
 
 	inserted = ds.ensure_dataelement("Columns")
 	assert inserted.vr == dicom.VR.US
@@ -343,14 +347,14 @@ def test_ensure_dataelement_preserves_existing_elements():
 	assert df["BitsAllocated"].vr == dicom.VR.US
 
 
-def test_partial_load_set_value_loads_target_but_add_ensure_fail():
+def test_partial_load_set_value_add_and_ensure_fail_beyond_frontier():
 	df = dicom.read_file(_test_file(), load_until=dicom.Tag("StudyTime"))
 	assert df.get_value("Rows") is None
 
-	assert df.set_value("Rows", 1024)
-	assert df.set_value("PixelRepresentation", 0)
-	assert df.get_value("Rows") == 1024
-	assert sum(1 for elem in df if int(elem.tag) == int(dicom.Tag("Rows"))) == 1
+	with pytest.raises(Exception):
+		df.set_value("Rows", 1024)
+	with pytest.raises(Exception):
+		df.set_value("PixelRepresentation", 0)
 
 	partial_add = dicom.read_file(_test_file(), load_until=dicom.Tag("StudyTime"))
 	with pytest.raises(Exception):
@@ -381,9 +385,8 @@ def test_out_of_order_add_dataelement_keeps_sorted_iteration_and_lookup():
 	private_mid = ds.add_dataelement(dicom.Tag.from_value(0x00091030), dicom.VR.US)
 	private_mid.value = 16
 
-	private_bound = ds.add_dataelement(dicom.Tag.from_value(0x00091031), dicom.VR.LO, 123, 5)
-	assert private_bound.offset == 123
-	assert private_bound.length == 5
+	private_late = ds.add_dataelement(dicom.Tag.from_value(0x00091031), dicom.VR.LO)
+	assert private_late.length == 0
 
 	assert [int(elem.tag) for elem in ds] == [
 		0x00091030,
@@ -394,7 +397,7 @@ def test_out_of_order_add_dataelement_keeps_sorted_iteration_and_lookup():
 
 	ds.remove_dataelement(0x00091030)
 	assert not ds.get_dataelement(0x00091030)
-	assert ds.get_dataelement(0x00091031).offset == 123
+	assert ds.get_dataelement(0x00091031).length == 0
 
 
 def test_dicomfile_dir_includes_dataset_members():

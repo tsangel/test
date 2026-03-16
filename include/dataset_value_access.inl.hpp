@@ -115,37 +115,7 @@ T DataSet::get_value(std::string_view tag_path, T default_value) const {
 
 template <typename AssignFn>
 bool DataSet::set_value_impl(Tag tag, VR vr, AssignFn&& assign_fn) {
-	constexpr Tag kSpecificCharacterSetTag(0x0008u, 0x0005u);
-	if (is_beyond_last_loaded_tag(tag)) {
-		ensure_loaded(tag);
-	}
-	auto& existing = get_dataelement(tag);
-	if (existing.is_present()) {
-		if (vr == VR::None || existing.vr() == vr) {
-			return assign_fn(existing);
-		}
-		if (existing.vr().is_sequence() || existing.vr().is_pixel_sequence() ||
-		    vr.is_sequence() || vr.is_pixel_sequence()) {
-			return false;
-		}
-		DataElement& target = add_dataelement_nocheck(tag, vr);
-		if (tag == kSpecificCharacterSetTag) {
-			on_specific_character_set_changed();
-		}
-		return assign_fn(target);
-	}
-
-	if (vr != VR::None) {
-		if (vr.is_sequence() || vr.is_pixel_sequence()) {
-			return false;
-		}
-	}
-
-	DataElement& target = add_dataelement_nocheck(tag, vr);
-	if (tag == kSpecificCharacterSetTag) {
-		on_specific_character_set_changed();
-	}
-	return assign_fn(target);
+	return assign_fn(ensure_dataelement(tag, vr));
 }
 
 inline bool DataSet::set_value(Tag tag, std::string_view value) {
