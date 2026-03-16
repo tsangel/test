@@ -136,15 +136,15 @@ bool register_external_codec_plugin_from_library(
     return false;
   }
 
+  auto& state = runtime_registry_state_v2();
+  std::lock_guard<std::mutex> lock(state.mutex);
+  ensure_initialized_locked(state);
+
   std::string library_path_text{};
   if (!detail::resolve_shared_library_path(
           library_path, &library_path_text, out_error)) {
     return false;
   }
-
-  auto& state = runtime_registry_state_v2();
-  std::lock_guard<std::mutex> lock(state.mutex);
-  ensure_initialized_locked(state);
 
   ExternalPluginEntryV2 entry{};
   entry.owns_shared_library = true;
