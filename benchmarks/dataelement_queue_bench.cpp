@@ -10,6 +10,7 @@
 #include <iomanip>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <numeric>
 #include <string>
 #include <utility>
@@ -149,6 +150,11 @@ std::size_t make_offset(std::size_t index) {
 	return index * sizeof(std::uint32_t);
 }
 
+template <typename... Args>
+std::unique_ptr<dicom::DataElement> make_owned_element(Args&&... args) {
+	return std::make_unique<dicom::DataElement>(std::forward<Args>(args)...);
+}
+
 class VectorQueue {
 public:
 	explicit VectorQueue(std::size_t reserve_count = 0) {
@@ -159,17 +165,17 @@ public:
 
 	dicom::DataElement* push_back(dicom::Tag tag, dicom::VR vr,
 	    std::size_t offset, std::size_t length) {
-		elements_.emplace_back(tag, vr, length, offset, &owner_);
-		return &elements_.back();
+		elements_.push_back(make_owned_element(tag, vr, length, offset, &owner_));
+		return elements_.back().get();
 	}
 
 	const dicom::DataElement* front_ptr() const {
-		return elements_.empty() ? nullptr : &elements_.front();
+		return elements_.empty() ? nullptr : elements_.front().get();
 	}
 
 private:
 	dicom::DataSet owner_;
-	std::vector<dicom::DataElement> elements_;
+	std::vector<std::unique_ptr<dicom::DataElement>> elements_;
 };
 
 class DequeQueue {
@@ -196,11 +202,11 @@ public:
 		if (!first_tag_) {
 			first_tag_ = tag;
 		}
-		return data_set_.add_dataelement(tag, vr, offset, length);
+		return &data_set_.add_dataelement(tag, vr, offset, length);
 	}
 
 	const dicom::DataElement* front_ptr() const {
-		return first_tag_ ? data_set_.get_dataelement(first_tag_) : nullptr;
+		return first_tag_ ? &data_set_.get_dataelement(first_tag_) : nullptr;
 	}
 
 private:
@@ -222,10 +228,9 @@ public:
 
 		auto it = std::lower_bound(element_index_.begin(), element_index_.end(), tag_value,
 		    [](const dicom::DataElement* element, std::uint32_t value) {
-			return element->tag().value() < value;
-		});
+				return element->tag().value() < value;
+			});
 		if (it != element_index_.end() && (*it)->tag().value() == tag_value) {
-			*(*it) = dicom::DataElement(tag, vr, length, offset, &owner_);
 			return *it;
 		}
 
@@ -257,23 +262,22 @@ class CurrentDataSetAdapter {
 public:
 	dicom::DataElement* add_dataelement(dicom::Tag tag, dicom::VR vr,
 	    std::size_t offset, std::size_t length) {
-		return data_set_.add_dataelement(tag, vr, offset, length);
+		return &data_set_.add_dataelement(tag, vr, offset, length);
 	}
 
 	const dicom::DataElement* get_dataelement(dicom::Tag tag) const {
-		return data_set_.get_dataelement(tag);
+		const auto& element = data_set_.get_dataelement(tag);
+		return element ? &element : nullptr;
 	}
 
 private:
 	dicom::DataSet data_set_;
 };
 
-class LegacyVectorMapDataSet {
+class LegacyMapFallbackDataSet {
 public:
-	explicit LegacyVectorMapDataSet(std::size_t reserve_count = 0) {
-		if (reserve_count != 0) {
-			elements_.reserve(reserve_count);
-		}
+	explicit LegacyMapFallbackDataSet(std::size_t reserve_count = 0) {
+		(void)reserve_count;
 	}
 
 	dicom::DataElement* add_dataelement(dicom::Tag tag, dicom::VR vr,
@@ -297,18 +301,17 @@ public:
 		};
 
 		if (auto* element = find_in_elements(tag_value)) {
-			*element = dicom::DataElement(tag, vr, length, offset, &owner_);
 			return element;
 		}
 
 		auto map_it = element_map_.lower_bound(tag_value);
 		if (map_it != element_map_.end() && map_it->first == tag_value) {
-			map_it->second = dicom::DataElement(tag, vr, length, offset, &owner_);
 			return &map_it->second;
 		}
 
-		auto insert_it = element_map_.emplace_hint(
-		    map_it, tag_value, dicom::DataElement(tag, vr, length, offset, &owner_));
+		auto insert_it = element_map_.emplace_hint(map_it, std::piecewise_construct,
+		    std::forward_as_tuple(tag_value),
+		    std::forward_as_tuple(tag, vr, length, offset, &owner_));
 		return &insert_it->second;
 	}
 
@@ -330,7 +333,7 @@ public:
 
 private:
 	dicom::DataSet owner_;
-	std::vector<dicom::DataElement> elements_;
+	std::deque<dicom::DataElement> elements_;
 	std::map<std::uint32_t, dicom::DataElement> element_map_;
 };
 
@@ -339,15 +342,15 @@ public:
 	explicit VectorLookup(std::size_t elements) {
 		elements_.reserve(elements);
 		for (std::size_t idx = 0; idx < elements; ++idx) {
-			elements_.emplace_back(
-			    make_tag(idx), dicom::VR::UL, sizeof(std::uint32_t), make_offset(idx), &owner_);
+			elements_.push_back(make_owned_element(
+			    make_tag(idx), dicom::VR::UL, sizeof(std::uint32_t), make_offset(idx), &owner_));
 		}
 	}
 
 	const dicom::DataElement* find(dicom::Tag tag) const {
 		for (const auto& element : elements_) {
-			if (element.tag() == tag) {
-				return &element;
+			if (element->tag() == tag) {
+				return element.get();
 			}
 		}
 		return nullptr;
@@ -355,7 +358,7 @@ public:
 
 private:
 	dicom::DataSet owner_;
-	std::vector<dicom::DataElement> elements_;
+	std::vector<std::unique_ptr<dicom::DataElement>> elements_;
 };
 
 class VectorBinaryLookup {
@@ -363,26 +366,26 @@ public:
 	explicit VectorBinaryLookup(std::size_t elements) {
 		elements_.reserve(elements);
 		for (std::size_t idx = 0; idx < elements; ++idx) {
-			elements_.emplace_back(
-			    make_tag(idx), dicom::VR::UL, sizeof(std::uint32_t), make_offset(idx), &owner_);
+			elements_.push_back(make_owned_element(
+			    make_tag(idx), dicom::VR::UL, sizeof(std::uint32_t), make_offset(idx), &owner_));
 		}
 	}
 
 	const dicom::DataElement* find(dicom::Tag tag) const {
 		const auto tag_value = tag.value();
 		const auto it = std::lower_bound(elements_.begin(), elements_.end(), tag_value,
-		    [](const dicom::DataElement& element, std::uint32_t value) {
-			return element.tag().value() < value;
-		});
-		if (it != elements_.end() && it->tag().value() == tag_value) {
-			return &(*it);
+		    [](const std::unique_ptr<dicom::DataElement>& element, std::uint32_t value) {
+				return element->tag().value() < value;
+			});
+		if (it != elements_.end() && (*it)->tag().value() == tag_value) {
+			return it->get();
 		}
 		return nullptr;
 	}
 
 private:
 	dicom::DataSet owner_;
-	std::vector<dicom::DataElement> elements_;
+	std::vector<std::unique_ptr<dicom::DataElement>> elements_;
 };
 
 class DequePointerLookup {
@@ -759,9 +762,9 @@ int main(int argc, char** argv) {
 		const auto current_add =
 		    run_add_micro_case("current_dataset_add", options, elements,
 		        [] { return CurrentDataSetAdapter{}; });
-		const auto legacy_vector_map_add =
-		    run_add_micro_case("legacy_vector_map_add", options, elements,
-		        [elements] { return LegacyVectorMapDataSet{elements}; });
+		const auto legacy_map_fallback_add =
+		    run_add_micro_case("legacy_map_fallback_add", options, elements,
+		        [elements] { return LegacyMapFallbackDataSet{elements}; });
 		const auto indexed_deque_add =
 		    run_add_micro_case("indexed_deque_add", options, elements,
 		        [] { return IndexedDequeDataSet{}; });
@@ -773,16 +776,16 @@ int main(int argc, char** argv) {
 						data_set.add_dataelement(
 						    make_tag(idx), dicom::VR::UL, make_offset(idx), sizeof(std::uint32_t));
 					}
-			});
-		const auto legacy_vector_map_get =
-		    run_get_micro_case("legacy_vector_map_get", options, elements,
-		        [](std::size_t count) { return LegacyVectorMapDataSet{count}; },
-		        [](LegacyVectorMapDataSet& data_set, std::size_t count) {
+				});
+		const auto legacy_map_fallback_get =
+		    run_get_micro_case("legacy_map_fallback_get", options, elements,
+		        [](std::size_t count) { return LegacyMapFallbackDataSet{count}; },
+		        [](LegacyMapFallbackDataSet& data_set, std::size_t count) {
 					for (std::size_t idx = 0; idx < count; ++idx) {
 						data_set.add_dataelement(
 						    make_tag(idx), dicom::VR::UL, make_offset(idx), sizeof(std::uint32_t));
 					}
-			});
+				});
 		const auto indexed_deque_get =
 		    run_get_micro_case("indexed_deque_get", options, elements,
 		        [](std::size_t) { return IndexedDequeDataSet{}; },
@@ -791,12 +794,12 @@ int main(int argc, char** argv) {
 						data_set.add_dataelement(
 						    make_tag(idx), dicom::VR::UL, make_offset(idx), sizeof(std::uint32_t));
 					}
-			});
+				});
 		print_sized_case(current_add, "ns_total");
-		print_sized_case(legacy_vector_map_add, "ns_total");
+		print_sized_case(legacy_map_fallback_add, "ns_total");
 		print_sized_case(indexed_deque_add, "ns_total");
 		print_sized_case(current_get, "ns_per_lookup");
-		print_sized_case(legacy_vector_map_get, "ns_per_lookup");
+		print_sized_case(legacy_map_fallback_get, "ns_per_lookup");
 		print_sized_case(indexed_deque_get, "ns_per_lookup");
 	}
 	std::cout << "lookup_sink=" << g_lookup_sink << "\n";

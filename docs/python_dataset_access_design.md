@@ -26,6 +26,7 @@ That keeps common reads short, while still making VR/length/tag metadata easy to
 | `ds.get_value("Rows", default=None)` | typed value or `default` | returns `default` | optional value lookup |
 | `ds["Rows"]` | `DataElement` | returns a falsey `NullElement` sentinel, no exception | element-oriented access aligned with C++ |
 | `ds.get_dataelement("Rows")` | `DataElement` | returns a falsey `NullElement` sentinel, no exception | optional metadata lookup with chaining |
+| `ds.ensure_dataelement("Rows", vr=None)` | `DataElement` | returns existing or inserts zero-length element | chaining-friendly ensure/create API |
 | `ds.set_value("Rows", 512)` | `bool` | writes or zero-lengths | one-shot typed assignment |
 | `ds.set_value(0x00090030, dicom.VR.US, 16)` | `bool` | creates or overrides by explicit VR | private or ambiguous tags |
 
@@ -114,6 +115,22 @@ if elem:
 ```
 
 It uses the same missing-element sentinel behavior as `ds[...]`.
+
+### Ensure-or-create lookup
+
+`ensure_dataelement(...)` is the chaining-friendly "make sure this element exists" API:
+
+```python
+rows = ds.ensure_dataelement("Rows")
+private_value = ds.ensure_dataelement(0x00090030, dicom.VR.US)
+```
+
+Rules:
+
+- if the element already exists and `vr` is omitted or `None`, the existing element is returned unchanged
+- if the element already exists and `vr` is explicit but different, the existing element is still returned unchanged
+- if the element is missing, a new zero-length element is inserted
+- unlike `add_dataelement(...)`, this API does not replace an existing element
 
 ### Iteration and size
 

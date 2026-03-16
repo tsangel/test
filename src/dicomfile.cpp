@@ -635,6 +635,10 @@ DataElement& DicomFile::add_dataelement(
 	return root_dataset_.add_dataelement(tag, vr, offset, length);
 }
 
+DataElement& DicomFile::ensure_dataelement(Tag tag, VR vr) {
+	return root_dataset_.ensure_dataelement(tag, vr);
+}
+
 void DicomFile::remove_dataelement(Tag tag) {
 	root_dataset_.remove_dataelement(tag);
 }

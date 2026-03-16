@@ -11,6 +11,7 @@
 #include <limits>
 #include <iterator>
 #include <iosfwd>
+#include <map>
 #include <memory>
 #include <cstdio>
 #include <span>
@@ -1635,6 +1636,8 @@ private:
 	void initialize_storage(std::size_t offset, bool bind_to_parent_stream) noexcept;
 	void reset(Tag tag, VR vr, std::size_t length, std::size_t offset,
 	    DataSet* parent, bool bind_to_parent_stream) noexcept;
+	void reset_without_release(Tag tag, VR vr, std::size_t length, std::size_t offset,
+	    DataSet* parent, bool bind_to_parent_stream) noexcept;
 	void set_value_bytes_nocheck(std::vector<std::uint8_t>&& bytes);
 	void adopt_value_bytes_nocheck(std::vector<std::uint8_t>&& bytes);
 	void adopt_value_bytes_impl(
@@ -1651,8 +1654,8 @@ template <typename T>
 
 }  // namespace detail
 
-template <typename IndexIter, typename Ref, typename Ptr>
-/// Forward iterator over the sorted active element index.
+template <typename IndexIter, typename MapIter, typename Ref, typename Ptr>
+/// Forward iterator over active deque-backed elements plus out-of-order map entries.
 class DataElementIterator {
 public:
 	using iterator_category = std::forward_iterator_tag;
@@ -1663,22 +1666,22 @@ public:
 
 	constexpr DataElementIterator() = default;
 
-	DataElementIterator(IndexIter index_it, IndexIter index_end)
-	    : index_it_(index_it), index_end_(index_end) {
-		skip_inactive();
+	DataElementIterator(IndexIter index_it, IndexIter index_end, MapIter map_it, MapIter map_end)
+	    : index_it_(index_it), index_end_(index_end), map_it_(map_it), map_end_(map_end) {
+		select_source();
 	}
 
 	reference operator*() const {
-		return *(index_it_->element);
+		return use_index_ ? *(index_it_->element) : map_it_->second;
 	}
 
 	pointer operator->() const {
-		return index_it_->element;
+		return &(**this);
 	}
 
 	DataElementIterator& operator++() {
-		++index_it_;
-		skip_inactive();
+		advance_active();
+		select_source();
 		return *this;
 	}
 
@@ -1689,7 +1692,7 @@ public:
 	}
 
 	friend bool operator==(const DataElementIterator& lhs, const DataElementIterator& rhs) {
-		return lhs.index_it_ == rhs.index_it_;
+		return lhs.index_it_ == rhs.index_it_ && lhs.map_it_ == rhs.map_it_;
 	}
 
 	friend bool operator!=(const DataElementIterator& lhs, const DataElementIterator& rhs) {
@@ -1697,18 +1700,52 @@ public:
 	}
 
 private:
-	void skip_inactive() {
-		while (index_it_ != index_end_) {
-			const auto* element = index_it_->element;
-			if (element != nullptr && element->vr() != VR::None) {
+	void advance_active() {
+		if (use_index_) {
+			if (index_it_ != index_end_) {
+				++index_it_;
+			}
+		} else if (map_it_ != map_end_) {
+			++map_it_;
+		}
+	}
+
+	void select_source() {
+		while (true) {
+			const bool index_done = index_it_ == index_end_;
+			const bool map_done = map_it_ == map_end_;
+
+			if (index_done && map_done) {
+				use_index_ = false;
 				return;
 			}
-			++index_it_;
+
+			if (!index_done && (map_done || index_it_->tag.value() <= map_it_->first)) {
+				const auto* element = index_it_->element;
+				if (element == nullptr || element->vr() == VR::None) {
+					++index_it_;
+					continue;
+				}
+				use_index_ = true;
+				return;
+			}
+
+			if (!map_done) {
+				if (map_it_->second.vr() == VR::None) {
+					++map_it_;
+					continue;
+				}
+				use_index_ = false;
+				return;
+			}
 		}
 	}
 
 	IndexIter index_it_{};
 	IndexIter index_end_{};
+	MapIter map_it_{};
+	MapIter map_end_{};
+	bool use_index_{false};
 };
 
 struct ElementRef {
@@ -1726,9 +1763,10 @@ struct ElementRef {
 class DataSet {
 public:
 	using iterator = DataElementIterator<std::vector<ElementRef>::iterator,
-	    DataElement&, DataElement*>;
+	    std::map<std::uint32_t, DataElement>::iterator, DataElement&, DataElement*>;
 	using const_iterator = DataElementIterator<std::vector<ElementRef>::const_iterator,
-	    const DataElement&, const DataElement*>;
+	    std::map<std::uint32_t, DataElement>::const_iterator, const DataElement&,
+	    const DataElement*>;
 
 	/// Construct an empty root dataset.
 	DataSet();
@@ -1848,6 +1886,15 @@ public:
 	/// Does not load implicitly; call ensure_loaded(tag) or read_attached_stream() first.
 	/// Missing lookups return a falsey DataElement (VR::None).
 	const DataElement& get_dataelement(Tag tag) const;
+
+	/// Ensure that a data element exists for a tag.
+	/// When the element already exists it is preserved as-is, regardless of the requested `vr`.
+	/// When the element is missing, `vr` is used for insertion; if `vr == VR::None`, the
+	/// dictionary VR is resolved for standard tags and unknown/private tags throw.
+	/// @return Reference to the existing or inserted element.
+	/// @throws Exception under the same conditions as add_dataelement (for example:
+	///         VR::None with unknown/private tags) or allocation failures.
+	DataElement& ensure_dataelement(Tag tag, VR vr = VR::None);
 
 	/// Low-level dotted tag-path resolver (e.g., "00540016.0.00181075").
 	/// Caller must ensure_loaded() the needed prefixes.
@@ -2004,6 +2051,13 @@ private:
 	friend bool charset::detail::apply_declared_charset(
 	    DataSet& dataset, const charset::detail::ParsedSpecificCharacterSet& parsed,
 	    std::string* out_error);
+	using element_index_iterator = std::vector<ElementRef>::iterator;
+	[[nodiscard]] element_index_iterator lower_bound_element_index_mutable(std::uint32_t tag_value);
+	[[nodiscard]] bool should_append_to_elements(std::uint32_t tag_value) const noexcept;
+	[[nodiscard]] DataElement* find_dataelement_in_elements(std::uint32_t tag_value);
+	[[nodiscard]] const DataElement* find_dataelement_in_elements(std::uint32_t tag_value) const;
+	DataElement& append_parsed_dataelement_nocheck(
+	    Tag tag, VR vr, std::size_t offset, std::size_t length);
 	DataElement& add_dataelement_nocheck(Tag tag, VR vr);
 	DataElement& add_dataelement_nocheck(Tag tag, VR vr, std::size_t offset, std::size_t length);
 	void remove_dataelement_nocheck(Tag tag);
@@ -2024,7 +2078,9 @@ private:
 	Tag last_tag_loaded_{Tag::from_value(0)};
 	bool explicit_vr_{true};
 	std::size_t offset_{0};  // absolute offset within the root stream where this dataset starts
+	std::size_t active_element_count_{0};
 	std::deque<DataElement> elements_;
+	std::map<std::uint32_t, DataElement> element_map_;
 	std::vector<ElementRef> element_index_;
 };
 
@@ -2091,6 +2147,10 @@ public:
 	/// @return Reference to the inserted/replaced element.
 	/// @throws Exception under the same conditions as DataSet::add_dataelement.
 	DataElement& add_dataelement(Tag tag, VR vr, std::size_t offset, std::size_t length);
+	/// Forwarding helper to the root DataSet::ensure_dataelement.
+	/// @return Reference to the existing/inserted/replaced element.
+	/// @throws Exception under the same conditions as DataSet::ensure_dataelement.
+	DataElement& ensure_dataelement(Tag tag, VR vr = VR::None);
 	void remove_dataelement(Tag tag);
 	DataElement& get_dataelement(Tag tag);
 	const DataElement& get_dataelement(Tag tag) const;
@@ -2479,6 +2539,11 @@ inline void DataElement::initialize_storage(
 inline void DataElement::reset(Tag tag, VR vr, std::size_t length, std::size_t offset,
     DataSet* parent, bool bind_to_parent_stream) noexcept {
 	release_storage();
+	reset_without_release(tag, vr, length, offset, parent, bind_to_parent_stream);
+}
+
+inline void DataElement::reset_without_release(Tag tag, VR vr, std::size_t length,
+    std::size_t offset, DataSet* parent, bool bind_to_parent_stream) noexcept {
 	tag_ = tag;
 	vr_ = vr;
 	length_ = length;

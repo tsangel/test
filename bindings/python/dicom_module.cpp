@@ -2074,13 +2074,7 @@ Tag dataset_assignment_key_to_tag(nb::handle key);
 
 bool dataset_try_set_value_py(DataSet& self, nb::handle key, nb::handle value) {
 	const Tag tag = dataset_assignment_key_to_tag(key);
-	DataElement& existing = self.get_dataelement(tag);
-	const bool existed = existing.is_present();
-	DataElement* target = existed ? &existing : nullptr;
-	if (!target) {
-		target = &self.add_dataelement(tag, VR::None);
-	}
-	return dataelement_set_value_py(*target, value);
+	return dataelement_set_value_py(self.ensure_dataelement(tag), value);
 }
 
 bool dataset_try_set_value_with_vr_py(
@@ -3110,6 +3104,17 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::arg("offset") = 0, nb::arg("length") = 0,
 		    nb::rv_policy::reference_internal,
 		    "Add or update a DataElement and return a reference to it")
+		.def("ensure_dataelement",
+		    [](DataSet& self, nb::handle key, std::optional<VR> vr) -> DataElement& {
+		        const Tag tag = dataset_assignment_key_to_tag(key);
+		        return self.ensure_dataelement(tag, vr.value_or(VR::None));
+		    },
+		    nb::arg("tag"), nb::arg("vr") = nb::none(),
+		    nb::rv_policy::reference_internal,
+		    "Return the existing DataElement for a Tag, packed int, or keyword/tag string, "
+		    "or add a new zero-length element when missing. When `vr` is omitted/None, an "
+		    "existing element is preserved as-is. When `vr` is explicit and differs from the "
+		    "existing element VR, the existing element is still preserved unchanged.")
 		.def("remove_dataelement",
 		    [](DataSet& self, nb::handle key) {
 		        self.remove_dataelement(dataset_assignment_key_to_tag(key));

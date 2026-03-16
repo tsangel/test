@@ -25,7 +25,7 @@ namespace dicom::write_detail {
 		}
 	}
 
-	if (auto from_meta = dataset["TransferSyntaxUID"_tag].to_uid_string();
+	if (auto from_meta = dataset.get_value<std::string>("TransferSyntaxUID"_tag);
 	    from_meta && !from_meta->empty()) {
 		if (auto normalized = normalize_valid_uid_text_or_empty(*from_meta);
 		    !normalized.empty()) {
@@ -133,14 +133,6 @@ void for_each_file_meta_element(const DataSet& dataset, Fn&& fn) {
 	return checked_u32(measuring_writer.written, "file meta group length");
 }
 
-inline void set_dataelement_uid(DataSet& dataset, Tag tag, std::string_view value) {
-	DataElement& element = dataset.add_dataelement(tag, VR::UI);
-	if (!element.from_uid_string(value)) {
-		diag::error_and_throw(
-		    "rebuild_file_meta reason=invalid UID tag={} value={}", tag.to_string(), value);
-	}
-}
-
 inline void clear_existing_meta_group(DataSet& dataset) {
 	std::vector<Tag> tags;
 	for (const auto& element : dataset) {
@@ -156,7 +148,7 @@ inline void clear_existing_meta_group(DataSet& dataset) {
 // Rebuild helpers prefer a normalized TS UID but fall back to Explicit VR Little Endian.
 [[nodiscard]] inline std::string determine_transfer_syntax_uid_for_rebuild(
     const DicomFile& file, const DataSet& dataset) {
-	if (auto from_meta = dataset["TransferSyntaxUID"_tag].to_uid_string();
+	if (auto from_meta = dataset.get_value<std::string>("TransferSyntaxUID"_tag);
 	    from_meta && !from_meta->empty()) {
 		if (auto normalized = normalize_valid_uid_text_or_empty(*from_meta);
 		    !normalized.empty()) {

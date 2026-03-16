@@ -76,9 +76,9 @@ auto reporter = std::make_shared<dicom::diag::BufferingReporter>(256);
 dicom::diag::set_thread_reporter(reporter);
 
 bool ok = true;
-ok &= ds.add_dataelement("Rows"_tag, dicom::VR::US).from_long(512);
-ok &= ds.add_dataelement("Columns"_tag, dicom::VR::US).from_long(-1);
-ok &= ds.add_dataelement("BitsAllocated"_tag, dicom::VR::US).from_long(16);
+ok &= ds.set_value("Rows"_tag, 512L);
+ok &= ds.set_value("Columns"_tag, -1L);
+ok &= ds.set_value("BitsAllocated"_tag, 16L);
 
 if (!ok) {
   auto messages = reporter->take_messages();
@@ -89,6 +89,23 @@ dicom::diag::set_thread_reporter(nullptr);
 ```
 
 Note: `add_dataelement(...)` returns `DataElement&` and can still throw on validation/allocation errors.
+
+For chaining-friendly "ensure presence" code, `ensure_dataelement(...)` is often a better fit:
+
+```cpp
+auto& rows = ds.ensure_dataelement("Rows"_tag);
+auto& private_elem = ds.ensure_dataelement(dicom::Tag(0x0009, 0x0030), dicom::VR::US);
+```
+
+- If the element already exists and `vr == VR::None`, the existing element is returned unchanged.
+- If the element already exists, it is returned unchanged even when `vr` is explicit and different.
+- If the element is missing, a new zero-length element is inserted.
+- `add_dataelement(...)` remains the always-replace API; `ensure_dataelement(...)` only inserts when needed.
+
+See also the runnable examples:
+
+- `examples/dataset_access_example.cpp`
+- `examples/batch_assign_with_error_check.cpp`
 
 ## DataSet attachment methods
 

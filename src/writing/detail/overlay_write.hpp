@@ -293,32 +293,6 @@ void for_each_merged_body_element(const DataSet& dataset,
 	}
 }
 
-[[nodiscard]] inline bool has_prior_lossy_history_for_streaming_write(
-    const DataSet& dataset) {
-	const auto lossy_value = dataset["LossyImageCompression"_tag].to_string_view();
-	return lossy_value && *lossy_value == "01";
-}
-
-[[nodiscard]] inline std::vector<std::string> read_lossy_method_values_for_streaming_write(
-    const DataSet& dataset) {
-	std::vector<std::string> methods;
-	const auto parsed = dataset["LossyImageCompressionMethod"_tag].to_string_views();
-	if (!parsed) {
-		return methods;
-	}
-	methods.reserve(parsed->size());
-	for (const auto value : *parsed) {
-		methods.emplace_back(value);
-	}
-	return methods;
-}
-
-[[nodiscard]] inline std::vector<double> read_lossy_ratio_values_for_streaming_write(
-    const DataSet& dataset) {
-	const auto parsed = dataset["LossyImageCompressionRatio"_tag].to_double_vector();
-	return parsed.value_or(std::vector<double>{});
-}
-
 [[nodiscard]] inline std::string format_lossy_ratio_ds_value_or_throw(
     std::string_view file_path, uid::WellKnown transfer_syntax, double value) {
 	if (!std::isfinite(value) || value <= 0.0) {
@@ -389,7 +363,8 @@ inline void update_lossy_metadata_for_streaming_write_overlay(
 	const bool current_encode_is_lossy =
 	    pixel::detail::encode_profile_uses_lossy_compression(codec_profile_code);
 	const bool had_prior_lossy =
-	    has_prior_lossy_history_for_streaming_write(source_dataset);
+	    source_dataset.get_value<std::string_view>("LossyImageCompression"_tag)
+	        .value_or(std::string_view()) == "01";
 
 	// Preserve prior lossy history when reserializing a dataset that is already lossy.
 	if (!current_encode_is_lossy) {
@@ -431,8 +406,12 @@ inline void update_lossy_metadata_for_streaming_write_overlay(
 	std::vector<std::string> methods;
 	std::vector<double> ratios;
 	if (had_prior_lossy) {
-		methods = read_lossy_method_values_for_streaming_write(source_dataset);
-		ratios = read_lossy_ratio_values_for_streaming_write(source_dataset);
+		methods = source_dataset.get_value<std::vector<std::string>>(
+		                  "LossyImageCompressionMethod"_tag)
+		                  .value_or(std::vector<std::string>{});
+		ratios = source_dataset.get_value<std::vector<double>>(
+		                 "LossyImageCompressionRatio"_tag)
+		                 .value_or(std::vector<double>{});
 		const auto paired_count = std::min(methods.size(), ratios.size());
 		methods.resize(paired_count);
 		ratios.resize(paired_count);
@@ -470,12 +449,17 @@ prepare_lossy_metadata_placeholder_for_streaming_write_overlay(
 	}
 
 	const bool had_prior_lossy =
-	    has_prior_lossy_history_for_streaming_write(source_dataset);
+	    source_dataset.get_value<std::string_view>("LossyImageCompression"_tag)
+	        .value_or(std::string_view()) == "01";
 	std::vector<std::string> methods;
 	std::vector<double> ratios;
 	if (had_prior_lossy) {
-		methods = read_lossy_method_values_for_streaming_write(source_dataset);
-		ratios = read_lossy_ratio_values_for_streaming_write(source_dataset);
+		methods = source_dataset.get_value<std::vector<std::string>>(
+		                  "LossyImageCompressionMethod"_tag)
+		                  .value_or(std::vector<std::string>{});
+		ratios = source_dataset.get_value<std::vector<double>>(
+		                 "LossyImageCompressionRatio"_tag)
+		                 .value_or(std::vector<double>{});
 		const auto paired_count = std::min(methods.size(), ratios.size());
 		methods.resize(paired_count);
 		ratios.resize(paired_count);
@@ -529,10 +513,11 @@ inline void build_rebuilt_file_meta_overlay_or_throw(const DicomFile& file,
 	overlay.replace_file_meta_group(true);
 
 	std::string sop_class_uid;
-	if (auto value = source_dataset["SOPClassUID"_tag].to_uid_string();
+	if (auto value = source_dataset.get_value<std::string>("SOPClassUID"_tag);
 	    value && !value->empty()) {
 		sop_class_uid = uid::normalize_uid_text(*value);
-	} else if (auto value = source_dataset["MediaStorageSOPClassUID"_tag].to_uid_string();
+	} else if (auto value =
+	               source_dataset.get_value<std::string>("MediaStorageSOPClassUID"_tag);
 	           value && !value->empty()) {
 		sop_class_uid = uid::normalize_uid_text(*value);
 	} else {
@@ -543,10 +528,11 @@ inline void build_rebuilt_file_meta_overlay_or_throw(const DicomFile& file,
 	}
 
 	std::string sop_instance_uid;
-	if (auto value = source_dataset["SOPInstanceUID"_tag].to_uid_string();
+	if (auto value = source_dataset.get_value<std::string>("SOPInstanceUID"_tag);
 	    value && !value->empty()) {
 		sop_instance_uid = uid::normalize_uid_text(*value);
-	} else if (auto value = source_dataset["MediaStorageSOPInstanceUID"_tag].to_uid_string();
+	} else if (auto value =
+	               source_dataset.get_value<std::string>("MediaStorageSOPInstanceUID"_tag);
 	           value && !value->empty()) {
 		sop_instance_uid = uid::normalize_uid_text(*value);
 	} else {

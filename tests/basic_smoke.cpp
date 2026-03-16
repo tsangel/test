@@ -279,6 +279,76 @@ int main() {
 		}
 		{
 			DataSet ds;
+			auto& bound = ds.add_dataelement("Rows"_tag, dicom::VR::US, 321, 2);
+			auto& preserved = ds.ensure_dataelement("Rows"_tag);
+			if (&preserved != &bound ||
+			    preserved.storage_kind() != dicom::DataElement::StorageKind::stream ||
+			    preserved.offset() != 321) {
+				fail("DataSet::ensure_dataelement(tag) should preserve an existing element");
+			}
+
+			auto& overridden = ds.ensure_dataelement("Rows"_tag, dicom::VR::UL);
+			if (&overridden != &bound || overridden.vr() != dicom::VR::US ||
+			    overridden.storage_kind() != dicom::DataElement::StorageKind::stream ||
+			    overridden.offset() != 321) {
+				fail("DataSet::ensure_dataelement(tag, vr) should preserve an existing element unchanged");
+			}
+
+			auto& inserted = ds.ensure_dataelement("Columns"_tag);
+			if (!inserted || inserted.vr() != dicom::VR::US ||
+			    inserted.storage_kind() != dicom::DataElement::StorageKind::none) {
+				fail("DataSet::ensure_dataelement(tag) should insert missing standard tags using dictionary VR");
+			}
+
+			try {
+				(void)ds.ensure_dataelement(dicom::Tag(0x0009, 0x1030));
+				fail("DataSet::ensure_dataelement(private tag) without VR should throw");
+			} catch (const std::exception&) {
+			}
+		}
+		{
+			DataSet ds;
+			auto& rows = ds.add_dataelement("Rows"_tag, dicom::VR::US);
+			if (!rows.from_long(512)) {
+				fail("DataSet::add_dataelement should allow assigning a standard element");
+			}
+			auto& columns = ds.add_dataelement("Columns"_tag, dicom::VR::US);
+			if (!columns.from_long(256)) {
+				fail("DataSet::add_dataelement should allow assigning a second standard element");
+			}
+			auto& private_mid = ds.add_dataelement(dicom::Tag(0x0009, 0x1030), dicom::VR::US);
+			if (!private_mid.from_long(16)) {
+				fail("DataSet::add_dataelement should allow assigning an out-of-order private element");
+			}
+			auto& private_bound =
+			    ds.add_dataelement(dicom::Tag(0x0009, 0x1031), dicom::VR::LO, 123, 5);
+			if (private_bound.storage_kind() != dicom::DataElement::StorageKind::stream ||
+			    private_bound.offset() != 123) {
+				fail("DataSet::add_dataelement should preserve stream binding for out-of-order inserts");
+			}
+			const std::vector<std::uint32_t> expected_tags = {
+			    dicom::Tag(0x0009, 0x1030).value(),
+			    dicom::Tag(0x0009, 0x1031).value(),
+			    "Rows"_tag.value(),
+			    "Columns"_tag.value(),
+			};
+			std::vector<std::uint32_t> iterated_tags;
+			for (const auto& element : ds) {
+				iterated_tags.push_back(element.tag().value());
+			}
+			if (iterated_tags != expected_tags) {
+				fail("DataSet iteration should remain sorted after out-of-order inserts");
+			}
+			ds.remove_dataelement(dicom::Tag(0x0009, 0x1030));
+			if (ds.get_dataelement(dicom::Tag(0x0009, 0x1030))) {
+				fail("DataSet::remove_dataelement should erase out-of-order private elements");
+			}
+			if (ds.get_dataelement(dicom::Tag(0x0009, 0x1031)).offset() != 123) {
+				fail("Removing one map-backed element should not disturb neighboring map-backed elements");
+			}
+		}
+		{
+			DataSet ds;
 			if (!ds.set_value("Rows"_tag, 512L)) {
 				fail("DataSet::set_value should encode scalar long");
 			}
@@ -357,6 +427,10 @@ int main() {
 			DicomFile df;
 			if (!df.set_value("Rows"_tag, 1024L)) {
 				fail("DicomFile::set_value should forward to the root dataset");
+			}
+			auto& ensured = df.ensure_dataelement("Columns"_tag);
+			if (!ensured || ensured.vr() != dicom::VR::US) {
+				fail("DicomFile::ensure_dataelement should forward to the root dataset");
 			}
 			auto rows = df.get_value<long>("Rows"_tag);
 			if (!rows || *rows != 1024L) {

@@ -57,11 +57,20 @@ def test_stub_all_matches_runtime_all():
 
 def test_stub_dataset_methods_include_runtime_mutation_api():
     tree = _stub_tree()
-    methods = _class_method_names(tree, "DataSet")
-    assert {"add_dataelement", "remove_dataelement", "get_dataelement"} <= methods
+    dataset_methods = _class_method_names(tree, "DataSet")
+    assert {
+        "add_dataelement",
+        "ensure_dataelement",
+        "remove_dataelement",
+        "get_dataelement",
+        "get_value",
+        "set_value",
+    } <= dataset_methods
+    dicomfile_methods = _class_method_names(tree, "DicomFile")
+    assert {"ensure_dataelement", "get_value", "set_value"} <= dicomfile_methods
     dataelement_methods = _class_method_names(tree, "DataElement")
     assert "__bool__" in dataelement_methods
-    assert {"is_present", "is_missing"} <= dataelement_methods
+    assert {"is_present", "is_missing", "value", "get_value", "set_value"} <= dataelement_methods
 
 
 def test_stub_vr_does_not_expose_removed_first_second():

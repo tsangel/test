@@ -53,8 +53,27 @@ IndexIter lower_bound_element_index(
     IndexIter begin, IndexIter end, std::uint32_t tag_value) {
 	return std::lower_bound(begin, end, tag_value,
 	    [](const ElementRef& ref, std::uint32_t value) {
-		return ref.tag.value() < value;
-	});
+			return ref.tag.value() < value;
+		});
+}
+
+template <typename ElementIter>
+ElementIter lower_bound_elements(
+    ElementIter begin, ElementIter end, std::uint32_t tag_value) {
+	return std::lower_bound(begin, end, tag_value,
+	    [](const DataElement& element, std::uint32_t value) {
+			return element.tag().value() < value;
+		});
+}
+
+VR resolve_vr_or_throw(DataSet* dataset, Tag tag, VR vr, const char* opname) {
+	const auto vr_value = lookup::tag_to_vr(tag.value());
+	if (vr_value == 0) {
+		diag::error_and_throw(
+		    "{} file={} tag={} reason=VR required for unknown tag",
+		    opname, dataset->root_dataset()->path(), tag.to_string());
+	}
+	return VR(vr_value);
 }
 
 } // namespace
@@ -370,15 +389,17 @@ bool DataSet::refresh_effective_charset_cache(
 }
 
 std::size_t DataSet::size() const {
-	return element_index_.size();
+	return active_element_count_;
 }
 
 DataSet::iterator DataSet::begin() {
-	return iterator(element_index_.begin(), element_index_.end());
+	return iterator(
+	    element_index_.begin(), element_index_.end(), element_map_.begin(), element_map_.end());
 }
 
 DataSet::iterator DataSet::end() {
-	return iterator(element_index_.end(), element_index_.end());
+	return iterator(
+	    element_index_.end(), element_index_.end(), element_map_.end(), element_map_.end());
 }
 
 DataSet::const_iterator DataSet::begin() const {
@@ -390,18 +411,50 @@ DataSet::const_iterator DataSet::end() const {
 }
 
 DataSet::const_iterator DataSet::cbegin() const {
-	return const_iterator(element_index_.cbegin(), element_index_.cend());
+	return const_iterator(
+	    element_index_.cbegin(), element_index_.cend(), element_map_.cbegin(), element_map_.cend());
 }
 
 DataSet::const_iterator DataSet::cend() const {
-	return const_iterator(element_index_.cend(), element_index_.cend());
+	return const_iterator(
+	    element_index_.cend(), element_index_.cend(), element_map_.cend(), element_map_.cend());
 }
 
-// Stores stable DataElement bodies in deque storage and keeps a sorted
-// tag/pointer index for lookup and iteration.
+// Keeps deque storage append-only and uses the map for out-of-order inserts.
+// element_index_ mirrors only active deque-backed elements.
+DataSet::element_index_iterator DataSet::lower_bound_element_index_mutable(
+    std::uint32_t tag_value) {
+	return lower_bound_element_index(element_index_.begin(), element_index_.end(), tag_value);
+}
+
+bool DataSet::should_append_to_elements(std::uint32_t tag_value) const noexcept {
+	return element_index_.empty() || element_index_.back().tag.value() < tag_value;
+}
+
+DataElement* DataSet::find_dataelement_in_elements(std::uint32_t tag_value) {
+	if (element_index_.empty() || tag_value > element_index_.back().tag.value()) {
+		return nullptr;
+	}
+	auto it = lower_bound_elements(elements_.begin(), elements_.end(), tag_value);
+	if (it != elements_.end() && it->tag().value() == tag_value) {
+		return &(*it);
+	}
+	return nullptr;
+}
+
+const DataElement* DataSet::find_dataelement_in_elements(std::uint32_t tag_value) const {
+	if (element_index_.empty() || tag_value > element_index_.back().tag.value()) {
+		return nullptr;
+	}
+	auto it = lower_bound_elements(elements_.cbegin(), elements_.cend(), tag_value);
+	if (it != elements_.cend() && it->tag().value() == tag_value) {
+		return &(*it);
+	}
+	return nullptr;
+}
+
 DataElement& DataSet::add_dataelement_nocheck(Tag tag, VR vr) {
 	const auto tag_value = tag.value();
-
 	if (vr == VR::None) {
 		const auto vr_value = lookup::tag_to_vr(tag_value);
 		if (vr_value == 0) {
@@ -412,41 +465,45 @@ DataElement& DataSet::add_dataelement_nocheck(Tag tag, VR vr) {
 		vr = VR(vr_value);
 	}
 
-	if (element_index_.empty() || element_index_.back().tag.value() < tag_value) {
+	if (should_append_to_elements(tag_value)) {
 		elements_.emplace_back();
 		auto* element = &elements_.back();
 		element->reset(tag, vr, 0, 0, this, false);
 		element_index_.emplace_back(tag, element);
+		++active_element_count_;
 		return *element;
 	}
 
-	auto index_it = lower_bound_element_index(
-	    element_index_.begin(), element_index_.end(), tag_value);
-	if (index_it != element_index_.end() && index_it->tag.value() == tag_value) {
-		index_it->element->reset(tag, vr, 0, 0, this, false);
-		index_it->tag = tag;
-		return *index_it->element;
+	if (auto* element = find_dataelement_in_elements(tag_value)) {
+		const bool was_missing = element->is_missing();
+		element->reset(tag, vr, 0, 0, this, false);
+		if (was_missing) {
+			++active_element_count_;
+		}
+		return *element;
 	}
 
-	elements_.emplace_back();
-	auto* element = &elements_.back();
-	element->reset(tag, vr, 0, 0, this, false);
-	element_index_.insert(index_it, ElementRef{tag, element});
-	return *element;
-}
-
-DataElement& DataSet::add_dataelement(Tag tag, VR vr) {
-	auto& element = add_dataelement_nocheck(tag, vr);
-	if (tag == charset::detail::kSpecificCharacterSetTag) {
-		on_specific_character_set_changed();
+	auto map_it = element_map_.lower_bound(tag_value);
+	if (map_it != element_map_.end() && map_it->first == tag_value) {
+		auto& element = map_it->second;
+		const bool was_missing = element.is_missing();
+		element.reset(tag, vr, 0, 0, this, false);
+		if (was_missing) {
+			++active_element_count_;
+		}
+		return element;
 	}
+
+	auto insert_it = element_map_.try_emplace(map_it, tag_value);
+	auto& element = insert_it->second;
+	element.reset(tag, vr, 0, 0, this, false);
+	++active_element_count_;
 	return element;
 }
 
 DataElement& DataSet::add_dataelement_nocheck(
     Tag tag, VR vr, std::size_t offset, std::size_t length) {
 	const auto tag_value = tag.value();
-
 	if (vr == VR::None) {
 		const auto vr_value = lookup::tag_to_vr(tag_value);
 		if (vr_value == 0) {
@@ -457,32 +514,179 @@ DataElement& DataSet::add_dataelement_nocheck(
 		vr = VR(vr_value);
 	}
 
-	if (element_index_.empty() || element_index_.back().tag.value() < tag_value) {
+	if (should_append_to_elements(tag_value)) {
 		elements_.emplace_back();
 		auto* element = &elements_.back();
 		element->reset(tag, vr, length, offset, this, true);
 		element_index_.emplace_back(tag, element);
+		++active_element_count_;
 		return *element;
 	}
 
-	auto index_it = lower_bound_element_index(
-	    element_index_.begin(), element_index_.end(), tag_value);
-	if (index_it != element_index_.end() && index_it->tag.value() == tag_value) {
-		index_it->element->reset(tag, vr, length, offset, this, true);
-		index_it->tag = tag;
-		return *index_it->element;
+	if (auto* element = find_dataelement_in_elements(tag_value)) {
+		const bool was_missing = element->is_missing();
+		element->reset(tag, vr, length, offset, this, true);
+		if (was_missing) {
+			++active_element_count_;
+		}
+		return *element;
 	}
 
+	auto map_it = element_map_.lower_bound(tag_value);
+	if (map_it != element_map_.end() && map_it->first == tag_value) {
+		auto& element = map_it->second;
+		const bool was_missing = element.is_missing();
+		element.reset(tag, vr, length, offset, this, true);
+		if (was_missing) {
+			++active_element_count_;
+		}
+		return element;
+	}
+
+	auto insert_it = element_map_.try_emplace(map_it, tag_value);
+	auto& element = insert_it->second;
+	element.reset(tag, vr, length, offset, this, true);
+	++active_element_count_;
+	return element;
+}
+
+DataElement& DataSet::append_parsed_dataelement_nocheck(
+    Tag tag, VR vr, std::size_t offset, std::size_t length) {
 	elements_.emplace_back();
 	auto* element = &elements_.back();
-	element->reset(tag, vr, length, offset, this, true);
-	element_index_.insert(index_it, ElementRef{tag, element});
+	element->reset_without_release(tag, vr, length, offset, this, true);
+	element_index_.emplace_back(tag, element);
+	++active_element_count_;
 	return *element;
+}
+
+DataElement& DataSet::add_dataelement(Tag tag, VR vr) {
+	const auto tag_value = tag.value();
+	if (should_append_to_elements(tag_value)) {
+		if (vr == VR::None) {
+			vr = resolve_vr_or_throw(this, tag, vr, "DataSet::add_dataelement");
+		}
+		elements_.emplace_back();
+		auto* element = &elements_.back();
+		element->reset_without_release(tag, vr, 0, 0, this, false);
+		element_index_.emplace_back(tag, element);
+		++active_element_count_;
+		if (tag == charset::detail::kSpecificCharacterSetTag) {
+			on_specific_character_set_changed();
+		}
+		return *element;
+	}
+
+	if (auto* element = find_dataelement_in_elements(tag_value)) {
+		if (element->is_present()) {
+			const VR target_vr = (vr == VR::None) ? element->vr() : vr;
+			element->reset(tag, target_vr, 0, 0, this, false);
+		} else {
+			if (vr == VR::None) {
+				vr = resolve_vr_or_throw(this, tag, vr, "DataSet::add_dataelement");
+			}
+			element->reset_without_release(tag, vr, 0, 0, this, false);
+			++active_element_count_;
+		}
+		if (tag == charset::detail::kSpecificCharacterSetTag) {
+			on_specific_character_set_changed();
+		}
+		return *element;
+	}
+
+	auto map_it = element_map_.lower_bound(tag_value);
+	if (map_it != element_map_.end() && map_it->first == tag_value) {
+		auto& element = map_it->second;
+		if (element.is_present()) {
+			const VR target_vr = (vr == VR::None) ? element.vr() : vr;
+			element.reset(tag, target_vr, 0, 0, this, false);
+		} else {
+			if (vr == VR::None) {
+				vr = resolve_vr_or_throw(this, tag, vr, "DataSet::add_dataelement");
+			}
+			element.reset_without_release(tag, vr, 0, 0, this, false);
+			++active_element_count_;
+		}
+		if (tag == charset::detail::kSpecificCharacterSetTag) {
+			on_specific_character_set_changed();
+		}
+		return element;
+	}
+
+	if (vr == VR::None) {
+		vr = resolve_vr_or_throw(this, tag, vr, "DataSet::add_dataelement");
+	}
+	auto insert_it = element_map_.try_emplace(map_it, tag_value);
+	auto& element = insert_it->second;
+	element.reset_without_release(tag, vr, 0, 0, this, false);
+	++active_element_count_;
+	if (tag == charset::detail::kSpecificCharacterSetTag) {
+		on_specific_character_set_changed();
+	}
+	return element;
 }
 
 DataElement& DataSet::add_dataelement(
     Tag tag, VR vr, std::size_t offset, std::size_t length) {
-	auto& element = add_dataelement_nocheck(tag, vr, offset, length);
+	const auto tag_value = tag.value();
+	if (should_append_to_elements(tag_value)) {
+		if (vr == VR::None) {
+			vr = resolve_vr_or_throw(this, tag, vr, "DataSet::add_dataelement");
+		}
+		elements_.emplace_back();
+		auto* element = &elements_.back();
+		element->reset_without_release(tag, vr, length, offset, this, true);
+		element_index_.emplace_back(tag, element);
+		++active_element_count_;
+		if (tag == charset::detail::kSpecificCharacterSetTag) {
+			on_specific_character_set_changed();
+		}
+		return *element;
+	}
+
+	if (auto* element = find_dataelement_in_elements(tag_value)) {
+		if (element->is_present()) {
+			const VR target_vr = (vr == VR::None) ? element->vr() : vr;
+			element->reset(tag, target_vr, length, offset, this, true);
+		} else {
+			if (vr == VR::None) {
+				vr = resolve_vr_or_throw(this, tag, vr, "DataSet::add_dataelement");
+			}
+			element->reset_without_release(tag, vr, length, offset, this, true);
+			++active_element_count_;
+		}
+		if (tag == charset::detail::kSpecificCharacterSetTag) {
+			on_specific_character_set_changed();
+		}
+		return *element;
+	}
+
+	auto map_it = element_map_.lower_bound(tag_value);
+	if (map_it != element_map_.end() && map_it->first == tag_value) {
+		auto& element = map_it->second;
+		if (element.is_present()) {
+			const VR target_vr = (vr == VR::None) ? element.vr() : vr;
+			element.reset(tag, target_vr, length, offset, this, true);
+		} else {
+			if (vr == VR::None) {
+				vr = resolve_vr_or_throw(this, tag, vr, "DataSet::add_dataelement");
+			}
+			element.reset_without_release(tag, vr, length, offset, this, true);
+			++active_element_count_;
+		}
+		if (tag == charset::detail::kSpecificCharacterSetTag) {
+			on_specific_character_set_changed();
+		}
+		return element;
+	}
+
+	if (vr == VR::None) {
+		vr = resolve_vr_or_throw(this, tag, vr, "DataSet::add_dataelement");
+	}
+	auto insert_it = element_map_.try_emplace(map_it, tag_value);
+	auto& element = insert_it->second;
+	element.reset_without_release(tag, vr, length, offset, this, true);
+	++active_element_count_;
 	if (tag == charset::detail::kSpecificCharacterSetTag) {
 		on_specific_character_set_changed();
 	}
@@ -491,24 +695,94 @@ DataElement& DataSet::add_dataelement(
 
 DataElement& DataSet::get_dataelement(Tag tag) {
 	const auto tag_value = tag.value();
-
-	auto index_it = lower_bound_element_index(
-	    element_index_.begin(), element_index_.end(), tag_value);
-	if (index_it != element_index_.end() && index_it->tag.value() == tag_value) {
-		return *index_it->element;
+	if (!element_index_.empty() && tag_value > element_index_.back().tag.value()) {
+		return *NullElement();
+	}
+	if (auto* element = find_dataelement_in_elements(tag_value);
+	    element && element->is_present()) {
+		return *element;
+	}
+	if (auto map_it = element_map_.find(tag_value); map_it != element_map_.end()) {
+		return map_it->second;
 	}
 	return *NullElement();
 }
 
 const DataElement& DataSet::get_dataelement(Tag tag) const {
 	const auto tag_value = tag.value();
-
-	auto index_it = lower_bound_element_index(
-	    element_index_.cbegin(), element_index_.cend(), tag_value);
-	if (index_it != element_index_.cend() && index_it->tag.value() == tag_value) {
-		return *index_it->element;
+	if (!element_index_.empty() && tag_value > element_index_.back().tag.value()) {
+		return *NullElement();
+	}
+	if (const auto* element = find_dataelement_in_elements(tag_value);
+	    element && element->is_present()) {
+		return *element;
+	}
+	if (auto map_it = element_map_.find(tag_value); map_it != element_map_.end()) {
+		return map_it->second;
 	}
 	return *NullElement();
+}
+
+DataElement& DataSet::ensure_dataelement(Tag tag, VR vr) {
+	const auto tag_value = tag.value();
+	if (should_append_to_elements(tag_value)) {
+		if (vr == VR::None) {
+			vr = resolve_vr_or_throw(this, tag, vr, "DataSet::ensure_dataelement");
+		}
+		elements_.emplace_back();
+		auto* element = &elements_.back();
+		element->reset_without_release(tag, vr, 0, 0, this, false);
+		element_index_.emplace_back(tag, element);
+		++active_element_count_;
+		if (tag == charset::detail::kSpecificCharacterSetTag) {
+			on_specific_character_set_changed();
+		}
+		return *element;
+	}
+
+	if (auto* element = find_dataelement_in_elements(tag_value)) {
+		if (element->is_present()) {
+			return *element;
+		}
+		if (vr == VR::None) {
+			vr = resolve_vr_or_throw(this, tag, vr, "DataSet::ensure_dataelement");
+		}
+		element->reset_without_release(tag, vr, 0, 0, this, false);
+		++active_element_count_;
+		if (tag == charset::detail::kSpecificCharacterSetTag) {
+			on_specific_character_set_changed();
+		}
+		return *element;
+	}
+
+	auto map_it = element_map_.lower_bound(tag_value);
+	if (map_it != element_map_.end() && map_it->first == tag_value) {
+		auto& element = map_it->second;
+		if (element.is_present()) {
+			return element;
+		}
+		if (vr == VR::None) {
+			vr = resolve_vr_or_throw(this, tag, vr, "DataSet::ensure_dataelement");
+		}
+		element.reset_without_release(tag, vr, 0, 0, this, false);
+		++active_element_count_;
+		if (tag == charset::detail::kSpecificCharacterSetTag) {
+			on_specific_character_set_changed();
+		}
+		return element;
+	}
+
+	if (vr == VR::None) {
+		vr = resolve_vr_or_throw(this, tag, vr, "DataSet::ensure_dataelement");
+	}
+	auto insert_it = element_map_.try_emplace(map_it, tag_value);
+	auto& inserted = insert_it->second;
+	inserted.reset_without_release(tag, vr, 0, 0, this, false);
+	++active_element_count_;
+	if (tag == charset::detail::kSpecificCharacterSetTag) {
+		on_specific_character_set_changed();
+	}
+	return inserted;
 }
 
 // Parse a tag path expressed as text and resolve it to a DataElement.
@@ -649,13 +923,16 @@ const DataElement& DataSet::operator[](Tag tag) const {
 
 void DataSet::remove_dataelement_nocheck(Tag tag) {
 	const auto tag_value = tag.value();
-
-	auto index_it = lower_bound_element_index(
-	    element_index_.begin(), element_index_.end(), tag_value);
-	if (index_it != element_index_.end() && index_it->tag.value() == tag_value) {
-		auto* element = index_it->element;
+	if (auto* element = find_dataelement_in_elements(tag_value);
+	    element && element->is_present()) {
 		element->reset(tag, VR::None, 0, 0, this, false);
-		element_index_.erase(index_it);
+		--active_element_count_;
+		return;
+	}
+
+	if (auto map_it = element_map_.find(tag_value); map_it != element_map_.end()) {
+		element_map_.erase(map_it);
+		--active_element_count_;
 	}
 }
 
@@ -676,8 +953,10 @@ void DataSet::read_attached_stream(const ReadOptions& options) {
 	}
 
 	elements_.clear();
+	element_map_.clear();
 	element_index_.clear();
 	element_index_.reserve(load_root_elements_reserve_hint());
+	active_element_count_ = 0;
 	effective_charset_ = charset::detail::default_charset_spec();
 	last_tag_loaded_ = Tag::from_value(0);
 	if (root_file_) {
@@ -886,7 +1165,7 @@ void DataSet::read_elements_until(Tag load_until, InStream* stream) {
 				length = stream->bytes_remaining();
 			}
 
-			DataElement& elem = add_dataelement_nocheck(tag, VR::SQ, offset, length);
+			DataElement& elem = append_parsed_dataelement_nocheck(tag, VR::SQ, offset, length);
 			Sequence *seq = elem.as_sequence();
 			InSubStream subs(stream, length);
 
@@ -901,7 +1180,7 @@ void DataSet::read_elements_until(Tag load_until, InStream* stream) {
 			if (length != 0xffffffff) {
 				if ((get_dataelement("BitsAllocated"_tag).to_long().value_or(0) > 8) && (vr == VR::OB))
 					vr = VR::OW;
-				add_dataelement_nocheck(tag, vr, offset, length);
+				append_parsed_dataelement_nocheck(tag, vr, offset, length);
 				if (stream->skip(length) != length) {
 					diag::error_and_throw(
 					    "DataSet::read_elements_until file={} offset=0x{:X} tag={} vr={} length={} reason=failed to skip pixel data bytes",
@@ -910,7 +1189,7 @@ void DataSet::read_elements_until(Tag load_until, InStream* stream) {
 			} else {
 				vr = VR::PX;
 
-				DataElement& elem = add_dataelement_nocheck(tag, VR::PX, offset, length);
+				DataElement& elem = append_parsed_dataelement_nocheck(tag, VR::PX, offset, length);
 				PixelSequence *pixseq = elem.as_pixel_sequence();
 
 				// process basic offset table of the pixel sequence
@@ -924,7 +1203,7 @@ void DataSet::read_elements_until(Tag load_until, InStream* stream) {
 		}
 		else {
 			if (length != 0xffffffff) {
-				add_dataelement_nocheck(tag, vr, offset, length);
+				append_parsed_dataelement_nocheck(tag, vr, offset, length);
 				auto n = stream->skip(length);
 				if (n != length) {
 					diag::error_and_throw(
@@ -937,7 +1216,7 @@ void DataSet::read_elements_until(Tag load_until, InStream* stream) {
 				length = stream->bytes_remaining();
 				vr = VR::SQ;
 				
-				DataElement& elem = add_dataelement_nocheck(tag, VR::SQ, offset, length);
+				DataElement& elem = append_parsed_dataelement_nocheck(tag, VR::SQ, offset, length);
 				Sequence *seq = elem.as_sequence();
 				InSubStream subs(stream, length);
 
@@ -977,6 +1256,11 @@ void DataSet::dump_elements() const {
 	std::cout << "-- elements_ --\n";
 	for (const auto& element : elements_) {
 		std::cout << element.tag().value() << " VR=" << element.vr().str() << " len=" << element.length() << " off=" << element.offset() << "\n";
+	}
+	std::cout << "-- element_map_ --\n";
+	for (const auto& [tag_value, element] : element_map_) {
+		std::cout << tag_value << " VR=" << element.vr().str() << " len=" << element.length()
+		          << " off=" << element.offset() << "\n";
 	}
 	std::cout << "-- element_index_ --\n";
 	for (const auto& ref : element_index_) {

@@ -37,36 +37,6 @@ namespace {
 	}
 }
 
-[[nodiscard]] bool has_prior_lossy_history(const DataSet& dataset) {
-	const auto& lossy = dataset["LossyImageCompression"_tag];
-	const auto lossy_value = lossy.to_string_view();
-	return lossy_value && *lossy_value == "01";
-}
-
-[[nodiscard]] std::vector<std::string> read_lossy_method_values(
-    const DataSet& dataset) {
-	std::vector<std::string> methods;
-	const auto& method_elem = dataset["LossyImageCompressionMethod"_tag];
-	const auto parsed = method_elem.to_string_views();
-	if (!parsed) {
-		return methods;
-	}
-	methods.reserve(parsed->size());
-	for (const auto value : *parsed) {
-		methods.emplace_back(value);
-	}
-	return methods;
-}
-
-[[nodiscard]] std::vector<double> read_lossy_ratio_values(const DataSet& dataset) {
-	const auto& ratio_elem = dataset["LossyImageCompressionRatio"_tag];
-	const auto parsed = ratio_elem.to_double_vector();
-	if (!parsed) {
-		return {};
-	}
-	return *parsed;
-}
-
 } // namespace
 
 std::size_t encoded_payload_size_from_pixel_sequence(const DataSet& dataset,
@@ -111,12 +81,14 @@ void update_lossy_compression_metadata_for_set_pixel_data(DataSet& dataset,
     std::size_t encoded_payload_bytes) {
 	const bool current_encode_is_lossy =
 	    encode_profile_uses_lossy_compression(codec_profile_code);
-	const bool had_prior_lossy = has_prior_lossy_history(dataset);
+	const bool had_prior_lossy =
+	    dataset.get_value<std::string_view>("LossyImageCompression"_tag)
+	        .value_or(std::string_view()) == "01";
 
 	bool ok = true;
 	if (!current_encode_is_lossy) {
-		auto& lossy_elem = dataset.add_dataelement("LossyImageCompression"_tag, VR::CS);
-		ok &= lossy_elem.from_string_view(had_prior_lossy ? "01" : "00");
+		ok &= dataset.set_value("LossyImageCompression"_tag,
+		    std::string_view(had_prior_lossy ? "01" : "00"));
 		if (!had_prior_lossy) {
 			dataset.remove_dataelement("LossyImageCompressionRatio"_tag);
 			dataset.remove_dataelement("LossyImageCompressionMethod"_tag);
@@ -154,8 +126,12 @@ void update_lossy_compression_metadata_for_set_pixel_data(DataSet& dataset,
 	std::vector<std::string> methods;
 	std::vector<double> ratios;
 	if (had_prior_lossy) {
-		methods = read_lossy_method_values(dataset);
-		ratios = read_lossy_ratio_values(dataset);
+		methods = dataset.get_value<std::vector<std::string>>(
+		              "LossyImageCompressionMethod"_tag)
+		              .value_or(std::vector<std::string>{});
+		ratios = dataset.get_value<std::vector<double>>(
+		             "LossyImageCompressionRatio"_tag)
+		             .value_or(std::vector<double>{});
 		const auto paired_count = std::min(methods.size(), ratios.size());
 		methods.resize(paired_count);
 		ratios.resize(paired_count);
@@ -169,15 +145,10 @@ void update_lossy_compression_metadata_for_set_pixel_data(DataSet& dataset,
 		method_views.emplace_back(value);
 	}
 
-	auto& lossy_elem = dataset.add_dataelement("LossyImageCompression"_tag, VR::CS);
-	ok &= lossy_elem.from_string_view("01");
-
-	auto& ratio_elem = dataset.add_dataelement("LossyImageCompressionRatio"_tag, VR::DS);
-	ok &= ratio_elem.from_double_vector(
+	ok &= dataset.set_value("LossyImageCompression"_tag, std::string_view("01"));
+	ok &= dataset.set_value("LossyImageCompressionRatio"_tag,
 	    std::span<const double>(ratios.data(), ratios.size()));
-
-	auto& method_elem = dataset.add_dataelement("LossyImageCompressionMethod"_tag, VR::CS);
-	ok &= method_elem.from_string_views(
+	ok &= dataset.set_value("LossyImageCompressionMethod"_tag,
 	    std::span<const std::string_view>(method_views.data(), method_views.size()));
 
 	if (!ok) {
@@ -193,28 +164,21 @@ void update_pixel_metadata_for_set_pixel_data(DataSet& dataset, std::string_view
     int high_bit, int pixel_representation,
     std::size_t source_row_stride, std::size_t source_frame_stride) {
 	bool ok = true;
-	ok &= dataset.add_dataelement("Rows"_tag, VR::US)
-	          .from_long(static_cast<long>(source.rows));
-	ok &= dataset.add_dataelement("Columns"_tag, VR::US)
-	          .from_long(static_cast<long>(source.cols));
-	ok &= dataset.add_dataelement("SamplesPerPixel"_tag, VR::US)
-	          .from_long(static_cast<long>(source.samples_per_pixel));
-	ok &= dataset.add_dataelement("BitsAllocated"_tag, VR::US)
-	          .from_long(static_cast<long>(bits_allocated));
-	ok &= dataset.add_dataelement("BitsStored"_tag, VR::US)
-	          .from_long(static_cast<long>(bits_stored));
-	ok &= dataset.add_dataelement("HighBit"_tag, VR::US)
-	          .from_long(static_cast<long>(high_bit));
-	ok &= dataset.add_dataelement("PixelRepresentation"_tag, VR::US)
-	          .from_long(static_cast<long>(pixel_representation));
+	ok &= dataset.set_value("Rows"_tag, static_cast<long>(source.rows));
+	ok &= dataset.set_value("Columns"_tag, static_cast<long>(source.cols));
+	ok &= dataset.set_value(
+	    "SamplesPerPixel"_tag, static_cast<long>(source.samples_per_pixel));
+	ok &= dataset.set_value("BitsAllocated"_tag, static_cast<long>(bits_allocated));
+	ok &= dataset.set_value("BitsStored"_tag, static_cast<long>(bits_stored));
+	ok &= dataset.set_value("HighBit"_tag, static_cast<long>(high_bit));
+	ok &= dataset.set_value(
+	    "PixelRepresentation"_tag, static_cast<long>(pixel_representation));
 
 	const auto photometric_text = to_photometric_text(output_photometric);
-	ok &= dataset.add_dataelement("PhotometricInterpretation"_tag, VR::CS)
-	          .from_string_view(photometric_text);
+	ok &= dataset.set_value("PhotometricInterpretation"_tag, photometric_text);
 
 	if (source.frames > 1) {
-		ok &= dataset.add_dataelement("NumberOfFrames"_tag, VR::IS)
-		          .from_long(static_cast<long>(source.frames));
+		ok &= dataset.set_value("NumberOfFrames"_tag, static_cast<long>(source.frames));
 	} else {
 		dataset.remove_dataelement("NumberOfFrames"_tag);
 	}
@@ -222,8 +186,7 @@ void update_pixel_metadata_for_set_pixel_data(DataSet& dataset, std::string_view
 		const long planar_configuration = target_is_rle
 		                                      ? 1L
 		                                      : (source.planar == pixel::Planar::planar ? 1L : 0L);
-		ok &= dataset.add_dataelement("PlanarConfiguration"_tag, VR::US)
-		          .from_long(planar_configuration);
+		ok &= dataset.set_value("PlanarConfiguration"_tag, planar_configuration);
 	} else {
 		dataset.remove_dataelement("PlanarConfiguration"_tag);
 	}
@@ -240,9 +203,7 @@ void update_pixel_metadata_for_set_pixel_data(DataSet& dataset, std::string_view
 
 void update_transfer_syntax_uid_element_after_set_pixel_data_or_throw(
     DicomFile& file, uid::WellKnown transfer_syntax) {
-	DataElement& transfer_syntax_element =
-	    file.add_dataelement("(0002,0010)"_tag, VR::UI);
-	if (!transfer_syntax_element.from_transfer_syntax_uid(transfer_syntax)) {
+	if (!file.set_value("(0002,0010)"_tag, VR::UI, transfer_syntax.value())) {
 		diag::error_and_throw(
 		    "DicomFile::set_pixel_data file={} reason=failed to update (0002,0010) TransferSyntaxUID",
 		    file.path());

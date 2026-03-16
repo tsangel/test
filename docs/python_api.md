@@ -15,7 +15,7 @@ import dicomsdl as dicom
 - `generate_uid() -> str`: create a new UID under DICOMSDL prefix.
 - `append_uid(base_uid: str, component: int) -> str`: append one UID component with fallback policy.
 - `DicomFile`: owns root dataset/session state; use `.dataset` for explicit root access.
-- `DataSet`: container of DICOM elements; supports `__iter__`, `size()`, `add_dataelement`, `get_dataelement`, `__getitem__`, attribute access.
+- `DataSet`: container of DICOM elements; supports `__iter__`, `size()`, `add_dataelement`, `ensure_dataelement`, `get_dataelement`, `get_value`, `set_value`, `__getitem__`, attribute access.
 - `VR`: DICOM VR enum; constants like `VR.AE`, `VR.UI`, string via `str(vr)` or `vr.str()`.
 
 ## DataSet usage
@@ -40,9 +40,16 @@ rows_elem = ds["Rows"]
 print(rows_elem.tag, rows_elem.vr, rows_elem.length, rows_elem.value)
 rows_fast = ds.get_value("Rows")
 rows_elem.value = rows_fast
+ensured = ds.ensure_dataelement("Rows")
+assert ensured.vr == dicom.VR.US
 assert ds.set_value("Rows", rows_fast)
 assert ds.set_value(0x00090030, dicom.VR.US, 16)
 ```
+
+Runnable Python examples:
+
+- `examples/python/dataset_access_example.py`
+- `examples/python/dump_dataset_example.py`
 
 For the full user guide covering `DataSet`, `DicomFile`, `DataElement`,
 recommended access patterns, and read/write examples, see

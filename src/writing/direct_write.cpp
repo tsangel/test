@@ -74,11 +74,11 @@ void DicomFile::rebuild_file_meta() {
 	dataset.ensure_loaded(Tag(0xFFFFu, 0xFFFFu));
 
 	std::string sop_class_uid;
-	if (auto value = dataset["SOPClassUID"_tag].to_uid_string();
+	if (auto value = dataset.get_value<std::string>("SOPClassUID"_tag);
 	    value && !value->empty()) {
 		sop_class_uid = uid::normalize_uid_text(*value);
 	} else if (auto value =
-	               dataset["MediaStorageSOPClassUID"_tag].to_uid_string();
+	               dataset.get_value<std::string>("MediaStorageSOPClassUID"_tag);
 	           value && !value->empty()) {
 		sop_class_uid = uid::normalize_uid_text(*value);
 	} else {
@@ -89,11 +89,11 @@ void DicomFile::rebuild_file_meta() {
 	}
 
 	std::string sop_instance_uid;
-	if (auto value = dataset["SOPInstanceUID"_tag].to_uid_string();
+	if (auto value = dataset.get_value<std::string>("SOPInstanceUID"_tag);
 	    value && !value->empty()) {
 		sop_instance_uid = uid::normalize_uid_text(*value);
 	} else if (auto value =
-	               dataset["MediaStorageSOPInstanceUID"_tag].to_uid_string();
+	               dataset.get_value<std::string>("MediaStorageSOPInstanceUID"_tag);
 	           value && !value->empty()) {
 		sop_instance_uid = uid::normalize_uid_text(*value);
 	} else {
@@ -111,25 +111,45 @@ void DicomFile::rebuild_file_meta() {
 	    write_detail::determine_transfer_syntax_uid_for_rebuild(*this, dataset);
 
 	write_detail::clear_existing_meta_group(dataset);
-	dataset.add_dataelement("FileMetaInformationGroupLength"_tag, VR::UL);
 	const std::array<std::uint8_t, 2> meta_version{{0x00u, 0x01u}};
 	dataset.add_dataelement("FileMetaInformationVersion"_tag, VR::OB)
 	    .set_value_bytes(meta_version);
-	write_detail::set_dataelement_uid(
-	    dataset, "MediaStorageSOPClassUID"_tag, sop_class_uid);
-	write_detail::set_dataelement_uid(
-	    dataset, "MediaStorageSOPInstanceUID"_tag, sop_instance_uid);
-	write_detail::set_dataelement_uid(
-	    dataset, "TransferSyntaxUID"_tag, transfer_syntax_uid);
-	write_detail::set_dataelement_uid(
-	    dataset, "ImplementationClassUID"_tag,
-	    uid::implementation_class_uid());
-	dataset.add_dataelement("ImplementationVersionName"_tag, VR::SH)
-	    .from_string_view(uid::implementation_version_name());
+	if (!dataset.set_value("MediaStorageSOPClassUID"_tag, VR::UI, sop_class_uid)) {
+		diag::error_and_throw(
+		    "rebuild_file_meta reason=invalid UID tag={} value={}",
+		    "MediaStorageSOPClassUID"_tag.to_string(), sop_class_uid);
+	}
+	if (!dataset.set_value("MediaStorageSOPInstanceUID"_tag, VR::UI, sop_instance_uid)) {
+		diag::error_and_throw(
+		    "rebuild_file_meta reason=invalid UID tag={} value={}",
+		    "MediaStorageSOPInstanceUID"_tag.to_string(), sop_instance_uid);
+	}
+	if (!dataset.set_value("TransferSyntaxUID"_tag, VR::UI, transfer_syntax_uid)) {
+		diag::error_and_throw(
+		    "rebuild_file_meta reason=invalid UID tag={} value={}",
+		    "TransferSyntaxUID"_tag.to_string(), transfer_syntax_uid);
+	}
+	if (!dataset.set_value(
+	        "ImplementationClassUID"_tag, VR::UI, uid::implementation_class_uid())) {
+		diag::error_and_throw(
+		    "rebuild_file_meta reason=invalid UID tag={} value={}",
+		    "ImplementationClassUID"_tag.to_string(), uid::implementation_class_uid());
+	}
+	if (!dataset.set_value(
+	        "ImplementationVersionName"_tag, uid::implementation_version_name())) {
+		diag::error_and_throw(
+		    "rebuild_file_meta reason=failed to set tag={} value={}",
+		    "ImplementationVersionName"_tag.to_string(),
+		    uid::implementation_version_name());
+	}
 
 	const auto meta_group_length = write_detail::measure_meta_group_length(dataset);
-	dataset.get_dataelement("FileMetaInformationGroupLength"_tag)
-	    .from_long(meta_group_length);
+	if (!dataset.set_value(
+	        "FileMetaInformationGroupLength"_tag, static_cast<long>(meta_group_length))) {
+		diag::error_and_throw(
+		    "rebuild_file_meta reason=failed to set tag={} value={}",
+		    "FileMetaInformationGroupLength"_tag.to_string(), meta_group_length);
+	}
 }
 
 void DicomFile::write_to_stream(std::ostream& os, const WriteOptions& options) {

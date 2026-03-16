@@ -288,15 +288,15 @@ std::uint64_t touch_lookup_hot(
 	    "PixelData"_tag,
 	};
 
-	std::uint64_t checksum = 0;
-	for (int i = 0; i < inner_iterations; ++i) {
-		for (const auto tag : kTags) {
-			const auto* element = ds.get_dataelement(tag);
-			checksum += static_cast<std::uint64_t>(element->tag().value());
-			checksum += static_cast<std::uint64_t>(element->length());
-			checksum += static_cast<std::uint64_t>(element->offset());
+		std::uint64_t checksum = 0;
+		for (int i = 0; i < inner_iterations; ++i) {
+			for (const auto tag : kTags) {
+				const auto& element = ds.get_dataelement(tag);
+				checksum += static_cast<std::uint64_t>(element.tag().value());
+				checksum += static_cast<std::uint64_t>(element.length());
+				checksum += static_cast<std::uint64_t>(element.offset());
+			}
 		}
-	}
 	return checksum;
 }
 

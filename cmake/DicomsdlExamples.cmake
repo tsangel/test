@@ -26,6 +26,11 @@ if(DICOM_BUILD_EXAMPLES)
     )
     target_link_libraries(simple_read PRIVATE dicomsdl)
 
+    add_executable(dataset_access_example
+        examples/dataset_access_example.cpp
+    )
+    target_link_libraries(dataset_access_example PRIVATE dicomsdl)
+
     add_executable(dicomdump
         examples/dicomdump.cpp
     )

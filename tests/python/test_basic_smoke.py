@@ -318,6 +318,54 @@ def test_remove_dataelement_accepts_tag_int_and_str_keys():
 	assert ds.get_value("PatientName") is None
 
 
+def test_ensure_dataelement_preserves_existing_elements():
+	ds = dicom.DataSet()
+	ds.Rows = 512
+
+	preserved = ds.ensure_dataelement("Rows")
+	assert preserved.vr == dicom.VR.US
+	assert preserved.value == 512
+
+	overridden = ds.ensure_dataelement("Rows", dicom.VR.UL)
+	assert overridden.vr == dicom.VR.US
+	assert overridden.value == 512
+
+	inserted = ds.ensure_dataelement("Columns")
+	assert inserted.vr == dicom.VR.US
+	assert inserted.length == 0
+
+	with pytest.raises(Exception):
+		ds.ensure_dataelement(0x00091030)
+
+	df = dicom.DicomFile()
+	df.ensure_dataelement("BitsAllocated", dicom.VR.US)
+	assert df["BitsAllocated"].vr == dicom.VR.US
+
+
+def test_out_of_order_add_dataelement_keeps_sorted_iteration_and_lookup():
+	ds = dicom.DataSet()
+	ds.add_dataelement(dicom.Tag("Rows"), dicom.VR.US).value = 512
+	ds.add_dataelement(dicom.Tag("Columns"), dicom.VR.US).value = 256
+
+	private_mid = ds.add_dataelement(dicom.Tag.from_value(0x00091030), dicom.VR.US)
+	private_mid.value = 16
+
+	private_bound = ds.add_dataelement(dicom.Tag.from_value(0x00091031), dicom.VR.LO, 123, 5)
+	assert private_bound.offset == 123
+	assert private_bound.length == 5
+
+	assert [int(elem.tag) for elem in ds] == [
+		0x00091030,
+		0x00091031,
+		int(dicom.Tag("Rows")),
+		int(dicom.Tag("Columns")),
+	]
+
+	ds.remove_dataelement(0x00091030)
+	assert not ds.get_dataelement(0x00091030)
+	assert ds.get_dataelement(0x00091031).offset == 123
+
+
 def test_dicomfile_dir_includes_dataset_members():
 	df = dicom.read_file(_test_file())
 	names = dir(df)

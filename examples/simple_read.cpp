@@ -27,7 +27,8 @@ int main(int argc, char* argv[]) {
     std::cout << "Rows: " << row_count << "\n";
     std::cout << "Columns: " << col_count << "\n";
     std::cout << "TransferSyntaxUID: "
-              << transfer_syntax.to_uid_string().value_or("<missing>") << "\n";
+              << transfer_syntax.to_uid_string().value_or("<missing>")
+              << "\n";
 
     return 0;
 }
