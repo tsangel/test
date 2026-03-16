@@ -294,6 +294,7 @@ void DataSet::attach_to_stream(std::string identifier, std::unique_ptr<InStream>
 	}
 	stream->set_identifier(std::move(identifier));
 	stream_ = std::move(stream);
+	last_tag_loaded_ = stream_->is_valid() ? Tag::from_value(0) : Tag(0xFFFFu, 0xFFFFu);
 }
 
 const std::string& DataSet::path() const {
@@ -431,6 +432,13 @@ bool DataSet::should_append_to_elements(std::uint32_t tag_value) const noexcept 
 	return element_index_.empty() || element_index_.back().tag.value() < tag_value;
 }
 
+[[noreturn]] void DataSet::throw_beyond_last_loaded_tag(Tag tag, const char* api_name) const {
+	diag::error_and_throw(
+	    "{} file={} tag={} last_loaded={} reason=tag is beyond the loaded frontier; "
+	    "call ensure_loaded(tag) or use set_value()",
+	    api_name, path(), tag.to_string(), last_tag_loaded_.to_string());
+}
+
 DataElement* DataSet::find_dataelement_in_elements(std::uint32_t tag_value) {
 	if (element_index_.empty() || tag_value > element_index_.back().tag.value()) {
 		return nullptr;
@@ -561,6 +569,9 @@ DataElement& DataSet::append_parsed_dataelement_nocheck(
 }
 
 DataElement& DataSet::add_dataelement(Tag tag, VR vr) {
+	if (is_beyond_last_loaded_tag(tag)) [[unlikely]] {
+		throw_beyond_last_loaded_tag(tag, "DataSet::add_dataelement");
+	}
 	const auto tag_value = tag.value();
 	if (should_append_to_elements(tag_value)) {
 		if (vr == VR::None) {
@@ -628,6 +639,9 @@ DataElement& DataSet::add_dataelement(Tag tag, VR vr) {
 
 DataElement& DataSet::add_dataelement(
     Tag tag, VR vr, std::size_t offset, std::size_t length) {
+	if (is_beyond_last_loaded_tag(tag)) [[unlikely]] {
+		throw_beyond_last_loaded_tag(tag, "DataSet::add_dataelement");
+	}
 	const auto tag_value = tag.value();
 	if (should_append_to_elements(tag_value)) {
 		if (vr == VR::None) {
@@ -724,6 +738,9 @@ const DataElement& DataSet::get_dataelement(Tag tag) const {
 }
 
 DataElement& DataSet::ensure_dataelement(Tag tag, VR vr) {
+	if (is_beyond_last_loaded_tag(tag)) [[unlikely]] {
+		throw_beyond_last_loaded_tag(tag, "DataSet::ensure_dataelement");
+	}
 	const auto tag_value = tag.value();
 	if (should_append_to_elements(tag_value)) {
 		if (vr == VR::None) {

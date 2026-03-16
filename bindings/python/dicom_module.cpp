@@ -49,6 +49,8 @@ namespace diag = dicom::diag;
 namespace {
 
 std::string_view vr_to_string_view(const VR& vr);
+nb::object readonly_memoryview_from_span(
+    const void* data, std::size_t size, nb::handle owner = nb::handle());
 
 std::string python_path_to_string(nb::handle value, const char* arg_name) {
 	PyObject* fs_path = PyOS_FSPath(value.ptr());
@@ -97,14 +99,6 @@ bool transfer_syntax_has_runtime_encode_support(Uid uid) noexcept {
 #else
 	return codec_profile_code == PIXEL_CODEC_PROFILE_NATIVE_UNCOMPRESSED_V2;
 #endif
-}
-
-nb::object readonly_memoryview_from_span(const void* data, std::size_t size) {
-	char* ptr = size == 0
-	                ? const_cast<char*>("")
-	                : const_cast<char*>(reinterpret_cast<const char*>(data));
-	return nb::steal<nb::object>(
-	    PyMemoryView_FromMemory(ptr, static_cast<Py_ssize_t>(size), PyBUF_READ));
 }
 
 nb::object empty_py_list() {
@@ -1363,13 +1357,19 @@ private:
 };
 
 nb::object dataelement_get_value_py(DataElement& element, nb::handle parent = nb::handle()) {
+	const auto owner = [&]() -> nb::object {
+		if (parent.is_valid() && !parent.is_none()) {
+			return nb::borrow<nb::object>(parent);
+		}
+		return nb::cast(&element, nb::rv_policy::reference);
+	}();
 	const auto raw_bytes = [&element]() -> nb::object {
 		auto span = element.value_span();
 		return nb::bytes(reinterpret_cast<const char*>(span.data()), span.size());
 	};
-	const auto raw_memoryview = [&element]() -> nb::object {
+	const auto raw_memoryview = [&element, &owner]() -> nb::object {
 		auto span = element.value_span();
-		return readonly_memoryview_from_span(span.data(), span.size());
+		return readonly_memoryview_from_span(span.data(), span.size(), owner);
 	};
 	const auto raw_string_scalar = [&element, &raw_bytes]() -> nb::object {
 		if (auto v = element.to_string_view()) {
@@ -2074,12 +2074,14 @@ Tag dataset_assignment_key_to_tag(nb::handle key);
 
 bool dataset_try_set_value_py(DataSet& self, nb::handle key, nb::handle value) {
 	const Tag tag = dataset_assignment_key_to_tag(key);
+	self.ensure_loaded(tag);
 	return dataelement_set_value_py(self.ensure_dataelement(tag), value);
 }
 
 bool dataset_try_set_value_with_vr_py(
     DataSet& self, nb::handle key, VR vr, nb::handle value) {
 	const Tag tag = dataset_assignment_key_to_tag(key);
+	self.ensure_loaded(tag);
 	DataElement& existing = self.get_dataelement(tag);
 	if (existing.is_present()) {
 		if (vr == VR::None || existing.vr() == vr) {
@@ -2131,28 +2133,28 @@ void dataset_set_value_py(DataSet& self, nb::handle key, nb::handle value) {
 	}
 }
 
+bool is_dicom_assignment_attr_name(std::string_view attr_name) {
+	const auto [tag, _vr] = dicom::lookup::keyword_to_tag_vr(attr_name);
+	return static_cast<bool>(tag);
+}
+
 int dataset_setattro(PyObject* obj, PyObject* name, PyObject* value) {
 	if (!name || !PyUnicode_Check(name)) {
 		return PyObject_GenericSetAttr(obj, name, value);
 	}
 	try {
 		std::string attr_name = nb::cast<std::string>(nb::handle(name));
-		if (!attr_name.empty() && attr_name[0] != '_') {
-			DataSet* self = nb::inst_ptr<DataSet>(nb::handle(obj));
-			if (value == nullptr) {
-				return PyObject_GenericSetAttr(obj, name, value);
-			}
-			try {
-				dataset_set_value_py(*self, nb::handle(name), nb::handle(value));
-				return 0;
-			} catch (const nb::python_error&) {
-				throw;
-			} catch (const std::exception&) {
-				// fall through to generic attribute handling
-			}
+		if (attr_name.empty() || attr_name[0] == '_' || value == nullptr ||
+		    !is_dicom_assignment_attr_name(attr_name)) {
+			return PyObject_GenericSetAttr(obj, name, value);
 		}
-		return PyObject_GenericSetAttr(obj, name, value);
+		DataSet* self = nb::inst_ptr<DataSet>(nb::handle(obj));
+		dataset_set_value_py(*self, nb::handle(name), nb::handle(value));
+		return 0;
 	} catch (const nb::python_error&) {
+		return -1;
+	} catch (const std::exception& ex) {
+		PyErr_SetString(PyExc_RuntimeError, ex.what());
 		return -1;
 	}
 }
@@ -2163,22 +2165,17 @@ int dicomfile_setattro(PyObject* obj, PyObject* name, PyObject* value) {
 	}
 	try {
 		std::string attr_name = nb::cast<std::string>(nb::handle(name));
-		if (!attr_name.empty() && attr_name[0] != '_') {
-			DicomFile* self = nb::inst_ptr<DicomFile>(nb::handle(obj));
-			if (value == nullptr) {
-				return PyObject_GenericSetAttr(obj, name, value);
-			}
-			try {
-				dataset_set_value_py(self->dataset(), nb::handle(name), nb::handle(value));
-				return 0;
-			} catch (const nb::python_error&) {
-				throw;
-			} catch (const std::exception&) {
-				// fall through to generic attribute handling
-			}
+		if (attr_name.empty() || attr_name[0] == '_' || value == nullptr ||
+		    !is_dicom_assignment_attr_name(attr_name)) {
+			return PyObject_GenericSetAttr(obj, name, value);
 		}
-		return PyObject_GenericSetAttr(obj, name, value);
+		DicomFile* self = nb::inst_ptr<DicomFile>(nb::handle(obj));
+		dataset_set_value_py(self->dataset(), nb::handle(name), nb::handle(value));
+		return 0;
 	} catch (const nb::python_error&) {
+		return -1;
+	} catch (const std::exception& ex) {
+		PyErr_SetString(PyExc_RuntimeError, ex.what());
 		return -1;
 	}
 }
@@ -2244,6 +2241,66 @@ nb::object uid_or_none(std::optional<WellKnown> uid) {
 std::string generated_uid_to_string(const dicom::uid::Generated& uid) {
 	const auto value = uid.value();
 	return std::string(value.data(), value.size());
+}
+
+struct ReadonlySpanExporter {
+	PyObject_HEAD
+	const char* data;
+	Py_ssize_t size;
+	PyObject* owner;
+};
+
+int readonly_span_exporter_getbuffer(PyObject* exporter, Py_buffer* view, int flags) {
+	auto* self = reinterpret_cast<ReadonlySpanExporter*>(exporter);
+	char* ptr = self->size == 0 ? const_cast<char*>("") : const_cast<char*>(self->data);
+	return PyBuffer_FillInfo(view, exporter, ptr, self->size, 1, flags);
+}
+
+void readonly_span_exporter_dealloc(PyObject* exporter) {
+	auto* self = reinterpret_cast<ReadonlySpanExporter*>(exporter);
+	Py_XDECREF(self->owner);
+	Py_TYPE(exporter)->tp_free(exporter);
+}
+
+PyTypeObject* readonly_span_exporter_type() {
+	static PyBufferProcs buffer_procs = {
+	    .bf_getbuffer = readonly_span_exporter_getbuffer,
+	    .bf_releasebuffer = nullptr,
+	};
+	static PyTypeObject type = {
+	    PyVarObject_HEAD_INIT(nullptr, 0)
+	};
+	static bool initialized = false;
+	if (!initialized) {
+		type.tp_name = "dicomsdl._ReadonlySpanExporter";
+		type.tp_basicsize = sizeof(ReadonlySpanExporter);
+		type.tp_flags = Py_TPFLAGS_DEFAULT;
+		type.tp_dealloc = readonly_span_exporter_dealloc;
+		type.tp_as_buffer = &buffer_procs;
+		if (PyType_Ready(&type) < 0) {
+			throw nb::python_error();
+		}
+		initialized = true;
+	}
+	return &type;
+}
+
+nb::object readonly_memoryview_from_span(
+    const void* data, std::size_t size, nb::handle owner) {
+	auto* type = readonly_span_exporter_type();
+	auto* exporter = PyObject_New(ReadonlySpanExporter, type);
+	if (exporter == nullptr) {
+		throw nb::python_error();
+	}
+	exporter->data = reinterpret_cast<const char*>(data);
+	exporter->size = static_cast<Py_ssize_t>(size);
+	exporter->owner = (!owner.is_valid() || owner.is_none()) ? nullptr : Py_NewRef(owner.ptr());
+	nb::object exporter_obj = nb::steal<nb::object>(reinterpret_cast<PyObject*>(exporter));
+	PyObject* memoryview = PyMemoryView_FromObject(exporter_obj.ptr());
+	if (memoryview == nullptr) {
+		throw nb::python_error();
+	}
+	return nb::steal<nb::object>(memoryview);
 }
 
 std::optional<dicom::SpecificCharacterSet> parse_specific_character_set_option(
@@ -2678,13 +2735,16 @@ NB_MODULE(_dicomsdl, m) {
 		.def_prop_ro("vm", &DataElement::vm)
 		.def_prop_rw("value",
 		    [](DataElement& element) -> nb::object {
-			    return dataelement_get_value_py(element);
+			    return dataelement_get_value_py(
+			        element, nb::cast(&element, nb::rv_policy::reference));
 		    },
 		    [](DataElement& element, nb::handle value) {
 			    dataelement_set_value_or_throw_py(element, value);
 		    },
 		    "Best-effort typed value property. Reading mirrors get_value(); writing "
-		    "accepts the same Python types as set_value(); `None` writes a zero-length value.")
+		    "accepts the same Python types as set_value(); `None` writes a zero-length value. "
+		    "Binary memoryviews keep the owning DataElement alive but are still invalidated if the "
+		    "underlying value bytes are replaced.")
 		.def("__bool__",
 		    [](const DataElement& element) {
 			    return static_cast<bool>(element);
@@ -3017,20 +3077,25 @@ NB_MODULE(_dicomsdl, m) {
 		.def("to_double_vector", &dataelement_to_double_vector_py, nb::arg("default") = nb::none())
 		.def("get_value",
 		    [](DataElement& element) -> nb::object {
-			    return dataelement_get_value_py(element);
+			    return dataelement_get_value_py(
+			        element, nb::cast(&element, nb::rv_policy::reference));
 		    },
 		    "Best-effort typed access: returns Sequence / PixelSequence for SQ/PX, "
 		    "int/float/list for numeric-like VRs (including [] for zero-length numeric values), "
 		    "UTF-8 strings for charset-aware text, "
 		    "PersonName / list[PersonName] for PN when possible, raw strings for other text, "
 		    "and falls back to raw bytes when charset decode/parsing fails or to raw bytes "
-		    "(memoryview) for binary VRs; returns None for missing elements.")
+		    "(memoryview) for binary VRs; returns None for missing elements. Binary "
+		    "memoryviews keep the owning DataElement alive but are still invalidated if the "
+		    "underlying value bytes are replaced.")
 		.def("value_span",
-		    [](const DataElement& element) {
+		    [](DataElement& element) {
 			    auto span = element.value_span();
-			    return readonly_memoryview_from_span(span.data(), span.size());
+			    nb::object owner = nb::cast(&element, nb::rv_policy::reference);
+			    return readonly_memoryview_from_span(span.data(), span.size(), owner);
 		    },
-		    "Return the raw value bytes as a read-only memoryview")
+		    "Return the raw value bytes as a read-only memoryview. The owning DataElement is kept alive, "
+		    "but the view is still invalidated if the underlying value bytes are replaced.")
 		.def("__repr__", &dataelement_repr);
 
 	nb::class_<PySequenceIterator>(m, "SequenceIterator")
@@ -3103,7 +3168,9 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::arg("tag"), nb::arg("vr") = nb::none(),
 		    nb::arg("offset") = 0, nb::arg("length") = 0,
 		    nb::rv_policy::reference_internal,
-		    "Add or update a DataElement and return a reference to it")
+		    "Add or replace a DataElement and return a reference to it. "
+		    "On partially loaded file-backed datasets, unread future tags raise; "
+		    "use set_value() when you want loading to continue through the target tag.")
 		.def("ensure_dataelement",
 		    [](DataSet& self, nb::handle key, std::optional<VR> vr) -> DataElement& {
 		        const Tag tag = dataset_assignment_key_to_tag(key);
@@ -3114,7 +3181,9 @@ NB_MODULE(_dicomsdl, m) {
 		    "Return the existing DataElement for a Tag, packed int, or keyword/tag string, "
 		    "or add a new zero-length element when missing. When `vr` is omitted/None, an "
 		    "existing element is preserved as-is. When `vr` is explicit and differs from the "
-		    "existing element VR, the existing element is still preserved unchanged.")
+		    "existing element VR, the existing element is still preserved unchanged. "
+		    "On partially loaded file-backed datasets, unread future tags raise instead of "
+		    "mutating past the current load frontier.")
 		.def("remove_dataelement",
 		    [](DataSet& self, nb::handle key) {
 		        self.remove_dataelement(dataset_assignment_key_to_tag(key));
@@ -3168,7 +3237,8 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::arg("key"), nb::arg("default") = nb::none(),
 		    "Best-effort typed lookup by Tag, packed int, or tag-path string. "
 		    "Returns `default` only when the element is missing; zero-length present "
-		    "elements still return typed empty values such as [], '', or an empty container.")
+		    "elements still return typed empty values such as [], '', or an empty container. "
+		    "This API does not implicitly continue partial loading.")
 		.def("set_value",
 		    [](DataSet& self, nb::object key, nb::handle value) {
 			    return dataset_try_set_value_py(self, key, value);
@@ -3177,7 +3247,9 @@ NB_MODULE(_dicomsdl, m) {
 		    "Best-effort typed assignment by Tag, packed int, or keyword string. "
 		    "Returns True on success, False when the value cannot be encoded for "
 		    "the target VR, and treats `None` as a zero-length present value. "
-		    "On failure, the DataSet remains valid but the destination element state is unspecified.")
+		    "On partially loaded file-backed datasets, this loads through the target tag before "
+		    "mutating it. On failure, the DataSet remains valid but the destination element state "
+		    "is unspecified.")
 		.def("set_value",
 		    [](DataSet& self, nb::object key, VR vr, nb::handle value) {
 			    return dataset_try_set_value_with_vr_py(self, key, vr, value);
@@ -3186,8 +3258,9 @@ NB_MODULE(_dicomsdl, m) {
 		    "Overload: set_value(key, vr, value). Uses the explicit VR when creating "
 		    "a missing element and can override an existing non-SQ/non-PX element VR. "
 		    "Returns False when the value cannot be encoded or the existing VR must not be replaced. "
-		    "`None` writes a zero-length value for the resolved VR. On failure, the DataSet remains "
-		    "valid but the destination element state is unspecified.")
+		    "`None` writes a zero-length value for the resolved VR. On partially loaded file-backed "
+		    "datasets, this loads through the target tag before mutating it. On failure, the DataSet "
+		    "remains valid but the destination element state is unspecified.")
 		.def("__getitem__",
 		    [](DataSet& self, nb::object key) -> DataElement& {
 			    return dataset_lookup_dataelement_py(
@@ -4174,7 +4247,8 @@ m.def("clear_external_codec_plugins",
 		.def("encoded_memoryview",
 		    [](dicom::PixelFrame& f) {
 			    auto span = f.encoded_data_view();
-			    return readonly_memoryview_from_span(span.data(), span.size());
+			    return readonly_memoryview_from_span(
+			        span.data(), span.size(), nb::cast(&f, nb::rv_policy::reference));
 		    },
 		    "Return a read-only memoryview over encoded pixel data (no copy); "
 		    "invalidated if the frame's encoded data is cleared");
@@ -4202,7 +4276,8 @@ m.def("clear_external_codec_plugins",
 		.def("frame_encoded_memoryview",
 		    [](dicom::PixelSequence& self, std::size_t index) {
 			    auto span = self.frame_encoded_span(index);
-			    return readonly_memoryview_from_span(span.data(), span.size());
+			    return readonly_memoryview_from_span(
+			        span.data(), span.size(), nb::cast(&self, nb::rv_policy::reference));
 		    },
 		    nb::arg("index"),
 		    "Return a read-only memoryview over encoded pixel data for a frame (no copy)")

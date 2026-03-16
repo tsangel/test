@@ -27,6 +27,8 @@ int main() {
 - Use `if (auto& e = dataset[tag]; e)` only when element presence itself matters.
 - Use `get_dataelement(...)` when you want an explicitly named lookup API or tag-path parsing.
   It returns `DataElement&` and yields a falsey element (`VR::None`) on miss.
+- `get_value(...)` does not implicitly continue partial loading; unread future tags still behave as missing.
+- `set_value(...)` does load through the target tag before mutating it on partially loaded attached datasets.
 - `set_value(...)` returns `false` on encode/assignment failure. The `DataSet` remains valid,
   but the destination element state is unspecified; callers that need rollback must restore it themselves.
 
@@ -88,6 +90,10 @@ if (!ok) {
 dicom::diag::set_thread_reporter(nullptr);
 ```
 
+On a partially loaded attached dataset, `set_value(...)` loads through the target tag
+before mutating it. Direct `add_dataelement(...)` / `ensure_dataelement(...)` calls for
+tags beyond the current load frontier throw instead of mutating unread tail data.
+
 Note: `add_dataelement(...)` returns `DataElement&` and can still throw on validation/allocation errors.
 
 For chaining-friendly "ensure presence" code, `ensure_dataelement(...)` is often a better fit:
@@ -101,6 +107,8 @@ auto& private_elem = ds.ensure_dataelement(dicom::Tag(0x0009, 0x0030), dicom::VR
 - If the element already exists, it is returned unchanged even when `vr` is explicit and different.
 - If the element is missing, a new zero-length element is inserted.
 - `add_dataelement(...)` remains the always-replace API; `ensure_dataelement(...)` only inserts when needed.
+- On partially loaded attached datasets, calling `ensure_dataelement(...)` for a tag beyond the
+  current load frontier throws instead of implicitly continuing the load.
 
 See also the runnable examples:
 

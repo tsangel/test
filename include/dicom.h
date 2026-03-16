@@ -1859,8 +1859,9 @@ public:
 	/// cache synchronized, but the charset-specific setter APIs remain preferred because
 	/// they make intent clearer and validate multi-term combinations explicitly.
 	/// @return Reference to the inserted/replaced element.
-	/// @throws Exception on validation errors (for example: VR::None with unknown tag)
-	///         or allocation failures.
+	/// @throws Exception on validation errors (for example: VR::None with unknown tag),
+	///         allocation failures, or when called on a partially loaded attached dataset
+	///         for a tag beyond the current load frontier.
 	DataElement& add_dataelement(Tag tag, VR vr = VR::None);
 
 	/// Add or replace a data element with explicit stream binding metadata.
@@ -1868,8 +1869,9 @@ public:
 	/// cache synchronized, but the charset-specific setter APIs remain preferred because
 	/// they make intent clearer and validate multi-term combinations explicitly.
 	/// @return Reference to the inserted/replaced element.
-	/// @throws Exception on validation errors (for example: VR::None with unknown tag)
-	///         or allocation failures.
+	/// @throws Exception on validation errors (for example: VR::None with unknown tag),
+	///         allocation failures, or when called on a partially loaded attached dataset
+	///         for a tag beyond the current load frontier.
 	DataElement& add_dataelement(Tag tag, VR vr, std::size_t offset, std::size_t length);
 
 	/// Remove a data element by tag (no-op if missing).
@@ -1893,7 +1895,9 @@ public:
 	/// dictionary VR is resolved for standard tags and unknown/private tags throw.
 	/// @return Reference to the existing or inserted element.
 	/// @throws Exception under the same conditions as add_dataelement (for example:
-	///         VR::None with unknown/private tags) or allocation failures.
+	///         VR::None with unknown/private tags), allocation failures, or when
+	///         called on a partially loaded attached dataset for a tag beyond the
+	///         current load frontier.
 	DataElement& ensure_dataelement(Tag tag, VR vr = VR::None);
 
 	/// Low-level dotted tag-path resolver (e.g., "00540016.0.00181075").
@@ -1907,18 +1911,23 @@ public:
 	const DataElement& get_dataelement(std::string_view tag_path) const;
 
 	/// Convenience typed lookup by tag.
+	/// Does not implicitly continue partial loading; unread future tags behave as missing
+	/// until the caller explicitly ensures the needed frontier.
 	template <typename T>
 	[[nodiscard]] std::optional<T> get_value(Tag tag) const;
 
 	/// Convenience typed lookup by dotted tag-path or keyword string.
+	/// Does not implicitly continue partial loading.
 	template <typename T>
 	[[nodiscard]] std::optional<T> get_value(std::string_view tag_path) const;
 
 	/// Convenience typed lookup with fallback by tag.
+	/// Does not implicitly continue partial loading.
 	template <typename T>
 	[[nodiscard]] T get_value(Tag tag, T default_value) const;
 
 	/// Convenience typed lookup with fallback by dotted tag-path or keyword string.
+	/// Does not implicitly continue partial loading.
 	template <typename T>
 	[[nodiscard]] T get_value(std::string_view tag_path, T default_value) const;
 
@@ -1981,7 +1990,8 @@ public:
 	/// One-shot typed assignment helpers.
 	/// On failure these return false and leave the DataSet valid, but the destination
 	/// element state is unspecified. Callers that need rollback semantics must preserve
-	/// and restore the previous element value themselves.
+	/// and restore the previous element value themselves. On partially loaded attached
+	/// datasets, these load through the target tag before mutating it.
 	[[nodiscard]] bool set_value(Tag tag, int value);
 	[[nodiscard]] bool set_value(Tag tag, long value);
 	[[nodiscard]] bool set_value(Tag tag, long long value);
@@ -2054,6 +2064,10 @@ private:
 	using element_index_iterator = std::vector<ElementRef>::iterator;
 	[[nodiscard]] element_index_iterator lower_bound_element_index_mutable(std::uint32_t tag_value);
 	[[nodiscard]] bool should_append_to_elements(std::uint32_t tag_value) const noexcept;
+	[[nodiscard]] bool is_beyond_last_loaded_tag(Tag tag) const noexcept {
+		return tag > last_tag_loaded_;
+	}
+	[[noreturn]] void throw_beyond_last_loaded_tag(Tag tag, const char* api_name) const;
 	[[nodiscard]] DataElement* find_dataelement_in_elements(std::uint32_t tag_value);
 	[[nodiscard]] const DataElement* find_dataelement_in_elements(std::uint32_t tag_value) const;
 	DataElement& append_parsed_dataelement_nocheck(
@@ -2075,7 +2089,7 @@ private:
 	DataSet* root_dataset_{nullptr};
 	DataSet* parent_dataset_{nullptr};
 	mutable const charset::detail::CharsetSpec* effective_charset_{nullptr};
-	Tag last_tag_loaded_{Tag::from_value(0)};
+	Tag last_tag_loaded_{Tag(0xFFFFu, 0xFFFFu)};
 	bool explicit_vr_{true};
 	std::size_t offset_{0};  // absolute offset within the root stream where this dataset starts
 	std::size_t active_element_count_{0};

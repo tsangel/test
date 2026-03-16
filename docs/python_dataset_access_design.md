@@ -131,6 +131,8 @@ Rules:
 - if the element already exists and `vr` is explicit but different, the existing element is still returned unchanged
 - if the element is missing, a new zero-length element is inserted
 - unlike `add_dataelement(...)`, this API does not replace an existing element
+- on partially loaded file-backed datasets, calling `ensure_dataelement(...)` for a tag beyond the
+  current load frontier raises instead of implicitly continuing the load
 
 ### Iteration and size
 
@@ -163,6 +165,10 @@ window_center = ds.get_value("WindowCenter", default=None)
 ```
 
 This is the shortest non-raising value path when you do not need the `DataElement` object.
+
+`get_value()` does not implicitly continue partial loading. If a file-backed dataset was
+loaded only up to an earlier tag, querying a later tag returns the currently available
+state instead of triggering `ensure_loaded(...)`.
 
 `default` is used only for missing elements. A present zero-length element still returns a typed empty value:
 
@@ -298,6 +304,10 @@ assert ds.set_value("Rows", None)   # present, zero-length US
 ```
 
 This is the best path when you want create/update by key in one call.
+
+On partially loaded file-backed datasets, `set_value(...)` first loads through the target
+tag before mutating it. This avoids creating duplicate root-level elements when unread tail
+data is parsed later.
 
 Failure model:
 

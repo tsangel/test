@@ -1,4 +1,5 @@
 import pathlib
+import sys
 import struct
 
 import dicomsdl as dicom
@@ -342,6 +343,36 @@ def test_ensure_dataelement_preserves_existing_elements():
 	assert df["BitsAllocated"].vr == dicom.VR.US
 
 
+def test_partial_load_set_value_loads_target_but_add_ensure_fail():
+	df = dicom.read_file(_test_file(), load_until=dicom.Tag("StudyTime"))
+	assert df.get_value("Rows") is None
+
+	assert df.set_value("Rows", 1024)
+	assert df.set_value("PixelRepresentation", 0)
+	assert df.get_value("Rows") == 1024
+	assert sum(1 for elem in df if int(elem.tag) == int(dicom.Tag("Rows"))) == 1
+
+	partial_add = dicom.read_file(_test_file(), load_until=dicom.Tag("StudyTime"))
+	with pytest.raises(Exception):
+		partial_add.add_dataelement(dicom.Tag("Rows"), dicom.VR.US)
+
+	partial_ensure = dicom.read_file(_test_file(), load_until=dicom.Tag("StudyTime"))
+	with pytest.raises(Exception):
+		partial_ensure.ensure_dataelement("Rows", dicom.VR.US)
+
+
+def test_attribute_assignment_preserves_dicom_errors():
+	ds = dicom.DataSet()
+	with pytest.raises((RuntimeError, ValueError)) as excinfo:
+		ds.Rows = -1
+	assert "Failed to assign value to (0028,0010)" in str(excinfo.value)
+
+	df = dicom.DicomFile()
+	with pytest.raises((RuntimeError, ValueError)) as excinfo:
+		df.Rows = -1
+	assert "Failed to assign value to (0028,0010)" in str(excinfo.value)
+
+
 def test_out_of_order_add_dataelement_keeps_sorted_iteration_and_lookup():
 	ds = dicom.DataSet()
 	ds.add_dataelement(dicom.Tag("Rows"), dicom.VR.US).value = 512
@@ -474,6 +505,39 @@ def test_write_roundtrip_sequence_and_pixel(tmp_path):
 	from_file = dicom.read_file(out_path)
 	assert from_file.get_dataelement("ReferencedStudySequence").is_sequence
 	assert from_file.get_dataelement("PixelData").is_pixel_sequence
+
+
+def test_binary_memoryviews_keep_dataset_owner_alive():
+	df = dicom.read_file(_test_file())
+	base_refcount = sys.getrefcount(df)
+
+	pixel_fast = df.get_value("PixelData")
+	assert isinstance(pixel_fast, memoryview)
+	assert pixel_fast.obj is not None
+	assert sys.getrefcount(df) == base_refcount + 1
+	del pixel_fast
+	assert sys.getrefcount(df) == base_refcount
+
+	pixel_attr = df.PixelData
+	assert isinstance(pixel_attr, memoryview)
+	assert pixel_attr.obj is not None
+	assert sys.getrefcount(df) == base_refcount + 1
+	del pixel_attr
+	assert sys.getrefcount(df) == base_refcount
+
+	pixel_elem = df["PixelData"]
+	elem_refcount = sys.getrefcount(pixel_elem)
+	pixel_value = pixel_elem.value
+	assert isinstance(pixel_value, memoryview)
+	assert pixel_value.obj is not None
+	assert sys.getrefcount(pixel_elem) == elem_refcount + 1
+	del pixel_value
+	assert sys.getrefcount(pixel_elem) == elem_refcount
+
+	raw_span = pixel_elem.value_span()
+	assert isinstance(raw_span, memoryview)
+	assert raw_span.obj is not None
+	assert sys.getrefcount(pixel_elem) == elem_refcount + 1
 
 
 def test_set_transfer_syntax_encapsulated_to_encapsulated_cycle():

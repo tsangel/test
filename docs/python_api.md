@@ -46,6 +46,13 @@ assert ds.set_value("Rows", rows_fast)
 assert ds.set_value(0x00090030, dicom.VR.US, 16)
 ```
 
+Partial-load note:
+
+- `get_value(...)` does not implicitly continue loading unread tail elements.
+- `set_value(...)` loads through the target tag before mutating it.
+- direct `add_dataelement(...)` / `ensure_dataelement(...)` calls for tags beyond the current
+  load frontier raise instead of mutating unread tail data.
+
 Runnable Python examples:
 
 - `examples/python/dataset_access_example.py`

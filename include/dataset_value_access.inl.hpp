@@ -116,6 +116,9 @@ T DataSet::get_value(std::string_view tag_path, T default_value) const {
 template <typename AssignFn>
 bool DataSet::set_value_impl(Tag tag, VR vr, AssignFn&& assign_fn) {
 	constexpr Tag kSpecificCharacterSetTag(0x0008u, 0x0005u);
+	if (is_beyond_last_loaded_tag(tag)) {
+		ensure_loaded(tag);
+	}
 	auto& existing = get_dataelement(tag);
 	if (existing.is_present()) {
 		if (vr == VR::None || existing.vr() == vr) {

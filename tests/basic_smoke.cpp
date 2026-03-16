@@ -307,6 +307,66 @@ int main() {
 			}
 		}
 		{
+			const auto fixture_dir = std::filesystem::path(__FILE__).parent_path();
+			const auto fixture_path = fixture_dir / "test_le.dcm";
+			dicom::ReadOptions opts{};
+			opts.load_until = "StudyTime"_tag;
+
+			auto partial_read = read_file(fixture_path, opts);
+			if (!partial_read) {
+				fail("partial read_file should succeed");
+			}
+			if (partial_read->get_value<long>("Rows"_tag).has_value()) {
+				fail("get_value should not implicitly continue partial loading");
+			}
+
+			auto partial_set = read_file(fixture_path, opts);
+			if (!partial_set) {
+				fail("partial read_file for set_value should succeed");
+			}
+			if (!partial_set->set_value("Rows"_tag, 1024L)) {
+				fail("set_value should load through Rows on partially loaded datasets");
+			}
+			if (!partial_set->set_value("PixelRepresentation"_tag, 0L)) {
+				fail("set_value should keep loading through later tags on partially loaded datasets");
+			}
+			auto rows = partial_set->get_value<long>("Rows"_tag);
+			if (!rows || *rows != 1024L) {
+				fail("set_value should update Rows after loading through the target tag");
+			}
+			std::size_t rows_count = 0;
+			for (const auto& element : partial_set->dataset()) {
+				if (element.tag() == "Rows"_tag) {
+					++rows_count;
+				}
+			}
+			if (rows_count != 1) {
+				fail("set_value on a partially loaded dataset should not duplicate root tags");
+			}
+
+			auto partial_add = read_file(fixture_path, opts);
+			bool add_threw = false;
+			try {
+				(void)partial_add->add_dataelement("Rows"_tag, dicom::VR::US);
+			} catch (const std::exception&) {
+				add_threw = true;
+			}
+			if (!add_threw) {
+				fail("add_dataelement should throw beyond the current load frontier");
+			}
+
+			auto partial_ensure = read_file(fixture_path, opts);
+			bool ensure_threw = false;
+			try {
+				(void)partial_ensure->ensure_dataelement("Rows"_tag, dicom::VR::US);
+			} catch (const std::exception&) {
+				ensure_threw = true;
+			}
+			if (!ensure_threw) {
+				fail("ensure_dataelement should throw beyond the current load frontier");
+			}
+		}
+		{
 			DataSet ds;
 			auto& rows = ds.add_dataelement("Rows"_tag, dicom::VR::US);
 			if (!rows.from_long(512)) {
