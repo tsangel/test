@@ -69,7 +69,7 @@ template <typename T>
 std::optional<std::vector<T>> load_numeric_vector(const DataElement& elem) {
     static_assert(std::is_integral_v<T> || std::is_floating_point_v<T>, "numeric load requires arithmetic type");
 	const auto span = elem.value_span();
-	if (span.empty()) return std::nullopt;
+	if (span.empty()) return std::vector<T>{};
 	if (span.size() % sizeof(T) != 0) return std::nullopt;
 
 	const auto count = span.size() / sizeof(T);
@@ -92,7 +92,7 @@ template <typename Parser>
 std::optional<std::vector<typename Parser::result_type>> parse_string_numbers(const DataElement& elem,
     Parser parser) {
 	const auto span = elem.value_span();
-	if (span.empty()) return std::nullopt;
+	if (span.empty()) return std::vector<typename Parser::result_type>{};
 	std::string_view raw{reinterpret_cast<const char*>(span.data()), span.size()};
 	std::vector<typename Parser::result_type> out;
 	std::size_t start = 0;
@@ -1767,7 +1767,8 @@ std::optional<double> DataElement::to_double() const {
 std::optional<std::vector<Tag>> DataElement::to_tag_vector() const {
 	if (vr_ != dicom::VR::AT) return std::nullopt;
 	const auto span = value_span();
-	if (span.empty() || span.size() % 4 != 0) return std::nullopt;
+	if (span.empty()) return std::vector<Tag>{};
+	if (span.size() % 4 != 0) return std::nullopt;
 	const auto count = span.size() / 4;
 	std::vector<Tag> out;
 	out.reserve(count);

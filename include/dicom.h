@@ -1484,19 +1484,19 @@ public:
 	[[nodiscard]] std::optional<long> to_long() const;
 	/// Parse value as signed long long; empty on failure.
 	[[nodiscard]] std::optional<long long> to_longlong() const;
-	/// Parse value as vector of signed int; empty on failure.
+	/// Parse value as vector of signed int; returns an empty vector for zero-length values and nullopt on failure.
 	[[nodiscard]] std::optional<std::vector<int>> to_int_vector() const;
-	/// Parse value as vector of signed long; empty on failure.
+	/// Parse value as vector of signed long; returns an empty vector for zero-length values and nullopt on failure.
 	[[nodiscard]] std::optional<std::vector<long>> to_long_vector() const;
-	/// Parse value as vector of signed long long; empty on failure.
+	/// Parse value as vector of signed long long; returns an empty vector for zero-length values and nullopt on failure.
 	[[nodiscard]] std::optional<std::vector<long long>> to_longlong_vector() const;
 	/// Parse value as double; empty on failure.
 	[[nodiscard]] std::optional<double> to_double() const;
-	/// Parse value as vector of double; empty on failure.
+	/// Parse value as vector of double; returns an empty vector for zero-length values and nullopt on failure.
 	[[nodiscard]] std::optional<std::vector<double>> to_double_vector() const;
 	/// Parse value as Tag.
 	[[nodiscard]] std::optional<Tag> to_tag() const;
-	/// Parse value as vector of Tag.
+	/// Parse value as vector of Tag; returns an empty vector for zero-length values and nullopt on failure.
 	[[nodiscard]] std::optional<std::vector<Tag>> to_tag_vector() const;
 	/// Parse value as UID string (no validation beyond VR rules).
 	[[nodiscard]] std::optional<std::string> to_uid_string() const;
@@ -1640,6 +1640,16 @@ private:
 	void adopt_value_bytes_impl(
 	    std::vector<std::uint8_t>&& bytes, bool notify_charset_parent);
 };
+
+namespace detail {
+
+template <typename T>
+inline constexpr bool dependent_false_v = false;
+
+template <typename T>
+[[nodiscard]] std::optional<T> dataelement_get_value_cpp(const DataElement& element);
+
+}  // namespace detail
 
 template <typename IndexIter, typename Ref, typename Ptr>
 /// Forward iterator over the sorted active element index.
@@ -1849,6 +1859,22 @@ public:
 	/// Missing lookups return a falsey DataElement (VR::None).
 	const DataElement& get_dataelement(std::string_view tag_path) const;
 
+	/// Convenience typed lookup by tag.
+	template <typename T>
+	[[nodiscard]] std::optional<T> get_value(Tag tag) const;
+
+	/// Convenience typed lookup by dotted tag-path or keyword string.
+	template <typename T>
+	[[nodiscard]] std::optional<T> get_value(std::string_view tag_path) const;
+
+	/// Convenience typed lookup with fallback by tag.
+	template <typename T>
+	[[nodiscard]] T get_value(Tag tag, T default_value) const;
+
+	/// Convenience typed lookup with fallback by dotted tag-path or keyword string.
+	template <typename T>
+	[[nodiscard]] T get_value(std::string_view tag_path, T default_value) const;
+
 	/// Preferred map-style access by tag. Missing lookups return a falsey DataElement (VR::None).
 	DataElement& operator[](Tag tag);
 
@@ -1905,6 +1931,70 @@ public:
 	/// Const end iterator (alias).
 	const_iterator cend() const;
 
+	/// One-shot typed assignment helpers.
+	/// On failure these return false and leave the DataSet valid, but the destination
+	/// element state is unspecified. Callers that need rollback semantics must preserve
+	/// and restore the previous element value themselves.
+	[[nodiscard]] bool set_value(Tag tag, int value);
+	[[nodiscard]] bool set_value(Tag tag, long value);
+	[[nodiscard]] bool set_value(Tag tag, long long value);
+	[[nodiscard]] bool set_value(Tag tag, double value);
+	[[nodiscard]] bool set_value(Tag tag, Tag value);
+	[[nodiscard]] bool set_value(Tag tag, std::string_view value);
+	[[nodiscard]] bool set_value(Tag tag, const PersonName& value);
+	[[nodiscard]] bool set_value(Tag tag, std::span<const int> values);
+	[[nodiscard]] bool set_value(Tag tag, std::span<const long> values);
+	[[nodiscard]] bool set_value(Tag tag, std::span<const long long> values);
+	[[nodiscard]] bool set_value(Tag tag, std::span<const double> values);
+	[[nodiscard]] bool set_value(Tag tag, std::span<const Tag> values);
+	[[nodiscard]] bool set_value(Tag tag, std::span<const std::string_view> values);
+	[[nodiscard]] bool set_value(Tag tag, std::span<const PersonName> values);
+
+	[[nodiscard]] bool set_value(std::string_view key, int value);
+	[[nodiscard]] bool set_value(std::string_view key, long value);
+	[[nodiscard]] bool set_value(std::string_view key, long long value);
+	[[nodiscard]] bool set_value(std::string_view key, double value);
+	[[nodiscard]] bool set_value(std::string_view key, Tag value);
+	[[nodiscard]] bool set_value(std::string_view key, std::string_view value);
+	[[nodiscard]] bool set_value(std::string_view key, const PersonName& value);
+	[[nodiscard]] bool set_value(std::string_view key, std::span<const int> values);
+	[[nodiscard]] bool set_value(std::string_view key, std::span<const long> values);
+	[[nodiscard]] bool set_value(std::string_view key, std::span<const long long> values);
+	[[nodiscard]] bool set_value(std::string_view key, std::span<const double> values);
+	[[nodiscard]] bool set_value(std::string_view key, std::span<const Tag> values);
+	[[nodiscard]] bool set_value(std::string_view key, std::span<const std::string_view> values);
+	[[nodiscard]] bool set_value(std::string_view key, std::span<const PersonName> values);
+
+	[[nodiscard]] bool set_value(Tag tag, VR vr, int value);
+	[[nodiscard]] bool set_value(Tag tag, VR vr, long value);
+	[[nodiscard]] bool set_value(Tag tag, VR vr, long long value);
+	[[nodiscard]] bool set_value(Tag tag, VR vr, double value);
+	[[nodiscard]] bool set_value(Tag tag, VR vr, Tag value);
+	[[nodiscard]] bool set_value(Tag tag, VR vr, std::string_view value);
+	[[nodiscard]] bool set_value(Tag tag, VR vr, const PersonName& value);
+	[[nodiscard]] bool set_value(Tag tag, VR vr, std::span<const int> values);
+	[[nodiscard]] bool set_value(Tag tag, VR vr, std::span<const long> values);
+	[[nodiscard]] bool set_value(Tag tag, VR vr, std::span<const long long> values);
+	[[nodiscard]] bool set_value(Tag tag, VR vr, std::span<const double> values);
+	[[nodiscard]] bool set_value(Tag tag, VR vr, std::span<const Tag> values);
+	[[nodiscard]] bool set_value(Tag tag, VR vr, std::span<const std::string_view> values);
+	[[nodiscard]] bool set_value(Tag tag, VR vr, std::span<const PersonName> values);
+
+	[[nodiscard]] bool set_value(std::string_view key, VR vr, int value);
+	[[nodiscard]] bool set_value(std::string_view key, VR vr, long value);
+	[[nodiscard]] bool set_value(std::string_view key, VR vr, long long value);
+	[[nodiscard]] bool set_value(std::string_view key, VR vr, double value);
+	[[nodiscard]] bool set_value(std::string_view key, VR vr, Tag value);
+	[[nodiscard]] bool set_value(std::string_view key, VR vr, std::string_view value);
+	[[nodiscard]] bool set_value(std::string_view key, VR vr, const PersonName& value);
+	[[nodiscard]] bool set_value(std::string_view key, VR vr, std::span<const int> values);
+	[[nodiscard]] bool set_value(std::string_view key, VR vr, std::span<const long> values);
+	[[nodiscard]] bool set_value(std::string_view key, VR vr, std::span<const long long> values);
+	[[nodiscard]] bool set_value(std::string_view key, VR vr, std::span<const double> values);
+	[[nodiscard]] bool set_value(std::string_view key, VR vr, std::span<const Tag> values);
+	[[nodiscard]] bool set_value(std::string_view key, VR vr, std::span<const std::string_view> values);
+	[[nodiscard]] bool set_value(std::string_view key, VR vr, std::span<const PersonName> values);
+
 private:
 	friend class DicomFile;
 	friend class DataElement;
@@ -1920,6 +2010,8 @@ private:
 	void attach_to_stream(std::string identifier, std::unique_ptr<InStream> stream);
 	void set_root_file(DicomFile* root_file) noexcept { root_file_ = root_file; }
 	void on_specific_character_set_changed() noexcept;
+	template <typename AssignFn>
+	bool set_value_impl(Tag tag, VR vr, AssignFn&& assign_fn);
 	[[nodiscard]] bool refresh_effective_charset_cache(
 	    const charset::detail::CharsetSpec* inherited, std::string* out_error = nullptr);
 	[[nodiscard]] const charset::detail::CharsetSpec* effective_charset_spec(
@@ -2004,8 +2096,76 @@ public:
 	const DataElement& get_dataelement(Tag tag) const;
 	DataElement& get_dataelement(std::string_view tag_path);
 	const DataElement& get_dataelement(std::string_view tag_path) const;
+	template <typename T>
+	[[nodiscard]] std::optional<T> get_value(Tag tag) const;
+	template <typename T>
+	[[nodiscard]] std::optional<T> get_value(std::string_view tag_path) const;
+	template <typename T>
+	[[nodiscard]] T get_value(Tag tag, T default_value) const;
+	template <typename T>
+	[[nodiscard]] T get_value(std::string_view tag_path, T default_value) const;
 	DataElement& operator[](Tag tag);
 	const DataElement& operator[](Tag tag) const;
+	/// One-shot typed assignment helpers.
+	/// On failure these return false and leave the DicomFile/root DataSet valid, but the
+	/// destination element state is unspecified. Callers that need rollback semantics
+	/// must preserve and restore the previous element value themselves.
+	[[nodiscard]] bool set_value(Tag tag, int value);
+	[[nodiscard]] bool set_value(Tag tag, long value);
+	[[nodiscard]] bool set_value(Tag tag, long long value);
+	[[nodiscard]] bool set_value(Tag tag, double value);
+	[[nodiscard]] bool set_value(Tag tag, Tag value);
+	[[nodiscard]] bool set_value(Tag tag, std::string_view value);
+	[[nodiscard]] bool set_value(Tag tag, const PersonName& value);
+	[[nodiscard]] bool set_value(Tag tag, std::span<const int> values);
+	[[nodiscard]] bool set_value(Tag tag, std::span<const long> values);
+	[[nodiscard]] bool set_value(Tag tag, std::span<const long long> values);
+	[[nodiscard]] bool set_value(Tag tag, std::span<const double> values);
+	[[nodiscard]] bool set_value(Tag tag, std::span<const Tag> values);
+	[[nodiscard]] bool set_value(Tag tag, std::span<const std::string_view> values);
+	[[nodiscard]] bool set_value(Tag tag, std::span<const PersonName> values);
+	[[nodiscard]] bool set_value(std::string_view key, int value);
+	[[nodiscard]] bool set_value(std::string_view key, long value);
+	[[nodiscard]] bool set_value(std::string_view key, long long value);
+	[[nodiscard]] bool set_value(std::string_view key, double value);
+	[[nodiscard]] bool set_value(std::string_view key, Tag value);
+	[[nodiscard]] bool set_value(std::string_view key, std::string_view value);
+	[[nodiscard]] bool set_value(std::string_view key, const PersonName& value);
+	[[nodiscard]] bool set_value(std::string_view key, std::span<const int> values);
+	[[nodiscard]] bool set_value(std::string_view key, std::span<const long> values);
+	[[nodiscard]] bool set_value(std::string_view key, std::span<const long long> values);
+	[[nodiscard]] bool set_value(std::string_view key, std::span<const double> values);
+	[[nodiscard]] bool set_value(std::string_view key, std::span<const Tag> values);
+	[[nodiscard]] bool set_value(std::string_view key, std::span<const std::string_view> values);
+	[[nodiscard]] bool set_value(std::string_view key, std::span<const PersonName> values);
+	[[nodiscard]] bool set_value(Tag tag, VR vr, int value);
+	[[nodiscard]] bool set_value(Tag tag, VR vr, long value);
+	[[nodiscard]] bool set_value(Tag tag, VR vr, long long value);
+	[[nodiscard]] bool set_value(Tag tag, VR vr, double value);
+	[[nodiscard]] bool set_value(Tag tag, VR vr, Tag value);
+	[[nodiscard]] bool set_value(Tag tag, VR vr, std::string_view value);
+	[[nodiscard]] bool set_value(Tag tag, VR vr, const PersonName& value);
+	[[nodiscard]] bool set_value(Tag tag, VR vr, std::span<const int> values);
+	[[nodiscard]] bool set_value(Tag tag, VR vr, std::span<const long> values);
+	[[nodiscard]] bool set_value(Tag tag, VR vr, std::span<const long long> values);
+	[[nodiscard]] bool set_value(Tag tag, VR vr, std::span<const double> values);
+	[[nodiscard]] bool set_value(Tag tag, VR vr, std::span<const Tag> values);
+	[[nodiscard]] bool set_value(Tag tag, VR vr, std::span<const std::string_view> values);
+	[[nodiscard]] bool set_value(Tag tag, VR vr, std::span<const PersonName> values);
+	[[nodiscard]] bool set_value(std::string_view key, VR vr, int value);
+	[[nodiscard]] bool set_value(std::string_view key, VR vr, long value);
+	[[nodiscard]] bool set_value(std::string_view key, VR vr, long long value);
+	[[nodiscard]] bool set_value(std::string_view key, VR vr, double value);
+	[[nodiscard]] bool set_value(std::string_view key, VR vr, Tag value);
+	[[nodiscard]] bool set_value(std::string_view key, VR vr, std::string_view value);
+	[[nodiscard]] bool set_value(std::string_view key, VR vr, const PersonName& value);
+	[[nodiscard]] bool set_value(std::string_view key, VR vr, std::span<const int> values);
+	[[nodiscard]] bool set_value(std::string_view key, VR vr, std::span<const long> values);
+	[[nodiscard]] bool set_value(std::string_view key, VR vr, std::span<const long long> values);
+	[[nodiscard]] bool set_value(std::string_view key, VR vr, std::span<const double> values);
+	[[nodiscard]] bool set_value(std::string_view key, VR vr, std::span<const Tag> values);
+	[[nodiscard]] bool set_value(std::string_view key, VR vr, std::span<const std::string_view> values);
+	[[nodiscard]] bool set_value(std::string_view key, VR vr, std::span<const PersonName> values);
 	iterator begin();
 	iterator end();
 	const_iterator begin() const;
@@ -2226,7 +2386,7 @@ private:
 };
 
 /// Encapsulated pixel data as defined by PS3.5: owns fragments, offset tables, and frames.
-	class PixelSequence {
+class PixelSequence {
 	public:
 		/// Construct an encapsulated pixel sequence tied to the root dataset and transfer syntax.
 		PixelSequence(DataSet* root_dataset, uid::WellKnown transfer_syntax);
@@ -2288,6 +2448,8 @@ private:
 	std::size_t extended_offset_table_count_{0};
 	std::vector<std::unique_ptr<PixelFrame>> frames_;
 };
+
+#include "dataset_value_access.inl.hpp"
 
 
 inline DataElement::DataElement(Tag tag, VR vr, std::size_t length, std::size_t offset,

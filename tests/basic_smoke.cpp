@@ -23,6 +23,7 @@
 int main() {
 	using dicom::lookup::keyword_to_tag_vr;
 	using dicom::lookup::tag_to_keyword;
+	using dicom::DicomFile;
 	using dicom::DataSet;
 	using dicom::read_bytes;
 	using dicom::read_file;
@@ -277,6 +278,92 @@ int main() {
 			}
 		}
 		{
+			DataSet ds;
+			if (!ds.set_value("Rows"_tag, 512L)) {
+				fail("DataSet::set_value should encode scalar long");
+			}
+			auto rows = ds.get_value<long>("Rows"_tag);
+			if (!rows || *rows != 512L) {
+				fail("DataSet::get_value<long> should decode scalar US");
+			}
+			if (ds.get_value<long>("Columns"_tag, -1L) != -1L) {
+				fail("DataSet::get_value<long>(default) should use fallback for missing tag");
+			}
+
+			const std::array<double, 2> window_centers{40.5, 80.25};
+			if (!ds.set_value("WindowCenter"_tag, std::span<const double>(window_centers))) {
+				fail("DataSet::set_value should encode vector<double>");
+			}
+			auto decoded_window_centers = ds.get_value<std::vector<double>>("WindowCenter"_tag);
+			if (!decoded_window_centers ||
+			    *decoded_window_centers != std::vector<double>{40.5, 80.25}) {
+				fail("DataSet::get_value<vector<double>> should decode DS values");
+			}
+
+			if (!ds.set_value("PatientName", std::string_view("DOE^JOHN"))) {
+				fail("DataSet::set_value should accept keyword string keys");
+			}
+			auto patient_name_view = ds.get_value<std::string_view>("PatientName");
+			if (!patient_name_view || *patient_name_view != std::string_view("DOE^JOHN")) {
+				fail("DataSet::get_value<string_view> should expose zero-copy string access");
+			}
+			auto patient_name = ds.get_value<std::string>("PatientName");
+			if (!patient_name || *patient_name != "DOE^JOHN") {
+				fail("DataSet::get_value<string> should decode keyword string lookups");
+			}
+			const std::array<std::string_view, 2> image_type_values{"ORIGINAL", "PRIMARY"};
+			if (!ds.set_value("ImageType"_tag, std::span<const std::string_view>(image_type_values))) {
+				fail("DataSet::set_value should encode string_view vectors");
+			}
+			auto image_type_views = ds.get_value<std::vector<std::string_view>>("ImageType"_tag);
+			if (!image_type_views ||
+			    *image_type_views != std::vector<std::string_view>{"ORIGINAL", "PRIMARY"}) {
+				fail("DataSet::get_value<vector<string_view>> should expose zero-copy multi-value access");
+			}
+
+			const dicom::Tag private_tag(0x0009, 0x0030);
+			if (!ds.set_value(private_tag, dicom::VR::US, 16LL)) {
+				fail("DataSet::set_value(tag, vr, value) should create private elements");
+			}
+			if (ds.get_dataelement(private_tag).vr() != dicom::VR::US ||
+			    ds.get_value<long long>(private_tag).value_or(0) != 16LL) {
+				fail("DataSet explicit-VR private assignment mismatch");
+			}
+			if (!ds.set_value(private_tag, dicom::VR::UL, 17LL)) {
+				fail("DataSet::set_value(tag, vr, value) should override non-SQ/non-PX VR");
+			}
+			if (ds.get_dataelement(private_tag).vr() != dicom::VR::UL ||
+			    ds.get_value<long long>(private_tag).value_or(0) != 17LL) {
+				fail("DataSet explicit-VR override mismatch");
+			}
+
+			const std::array<long long, 0> empty_rows{};
+			if (!ds.set_value("Rows"_tag, std::span<const long long>(empty_rows))) {
+				fail("DataSet::set_value should encode zero-length integer vectors");
+			}
+			auto decoded_empty_rows = ds.get_value<std::vector<long long>>("Rows"_tag);
+			if (!decoded_empty_rows || !decoded_empty_rows->empty()) {
+				fail("DataSet::get_value<vector<long long>> should preserve zero-length values");
+			}
+			if (ds.set_value("Rows"_tag, -1L)) {
+				fail("DataSet::set_value should report false for out-of-range US assignment");
+			}
+			if (!ds.set_value("Columns"_tag, 128L) ||
+			    ds.get_value<long>("Columns"_tag).value_or(0L) != 128L) {
+				fail("DataSet should remain usable after a failed write");
+			}
+		}
+		{
+			DicomFile df;
+			if (!df.set_value("Rows"_tag, 1024L)) {
+				fail("DicomFile::set_value should forward to the root dataset");
+			}
+			auto rows = df.get_value<long>("Rows"_tag);
+			if (!rows || *rows != 1024L) {
+				fail("DicomFile::get_value<long> should forward to the root dataset");
+			}
+		}
+		{
 			dicom::DataElement padded_move_elem("Rows"_tag, dicom::VR::OB, 0, 0, nullptr);
 			std::vector<std::uint8_t> odd_bytes{0x11u, 0x22u, 0x33u};
 			padded_move_elem.adopt_value_bytes(std::move(odd_bytes));
@@ -362,6 +449,24 @@ int main() {
 			if (narrow_elem.from_longlong_vector(values)) {
 				fail("DataElement::from_longlong_vector should reject out-of-range value for SL");
 			}
+
+			dicom::DataElement empty_vector_elem("Rows"_tag, dicom::VR::US, 0, 0, nullptr);
+			const std::array<long long, 0> empty_values{};
+			if (!empty_vector_elem.from_longlong_vector(empty_values)) {
+				fail("DataElement::from_longlong_vector should encode zero-length US");
+			}
+			auto empty_ints = empty_vector_elem.to_int_vector();
+			if (!empty_ints || !empty_ints->empty()) {
+				fail("DataElement::to_int_vector should return empty vector for zero-length US");
+			}
+			auto empty_longs = empty_vector_elem.to_long_vector();
+			if (!empty_longs || !empty_longs->empty()) {
+				fail("DataElement::to_long_vector should return empty vector for zero-length US");
+			}
+			auto empty_longlongs = empty_vector_elem.to_longlong_vector();
+			if (!empty_longlongs || !empty_longlongs->empty()) {
+				fail("DataElement::to_longlong_vector should return empty vector for zero-length US");
+			}
 		}
 		{
 			dicom::DataElement fd_elem("SliceThickness"_tag, dicom::VR::FD, 0, 0, nullptr);
@@ -412,6 +517,16 @@ int main() {
 			if (!ds_decoded || *ds_decoded != std::vector<double>{1.5, 2.25, 3.75}) {
 				fail("DataElement::from_double_vector DS roundtrip mismatch");
 			}
+
+			dicom::DataElement empty_ds_elem("SliceThickness"_tag, dicom::VR::DS, 0, 0, nullptr);
+			const std::array<double, 0> empty_values{};
+			if (!empty_ds_elem.from_double_vector(empty_values)) {
+				fail("DataElement::from_double_vector should encode zero-length DS");
+			}
+			auto empty_ds_decoded = empty_ds_elem.to_double_vector();
+			if (!empty_ds_decoded || !empty_ds_decoded->empty()) {
+				fail("DataElement::to_double_vector should return empty vector for zero-length DS");
+			}
 		}
 		{
 			const dicom::Tag offending_tag(0x0000, 0x0901);
@@ -437,6 +552,16 @@ int main() {
 			    *decoded != std::vector<dicom::Tag>{dicom::Tag(0x0010, 0x0010),
 			        dicom::Tag(0x0010, 0x0020), dicom::Tag(0x0008, 0x0018)}) {
 				fail("DataElement::from_tag_vector AT roundtrip mismatch");
+			}
+
+			dicom::DataElement empty_tag_vec_elem(offending_tag, dicom::VR::AT, 0, 0, nullptr);
+			const std::array<dicom::Tag, 0> empty_tags{};
+			if (!empty_tag_vec_elem.from_tag_vector(empty_tags)) {
+				fail("DataElement::from_tag_vector should encode zero-length AT");
+			}
+			auto empty_decoded = empty_tag_vec_elem.to_tag_vector();
+			if (!empty_decoded || !empty_decoded->empty()) {
+				fail("DataElement::to_tag_vector should return empty vector for zero-length AT");
 			}
 
 			dicom::DataElement unsupported_elem("Rows"_tag, dicom::VR::US, 0, 0, nullptr);

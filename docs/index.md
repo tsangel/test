@@ -15,6 +15,7 @@ Lightweight DICOM parser/wrapper with a C++ core and a nanobind-based Python mod
 quickstart
 generating_uid
 python_api
+python_dataset_access_design
 python_reference
 cpp_api
 dev_notes

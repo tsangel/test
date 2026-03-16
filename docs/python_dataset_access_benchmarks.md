@@ -1,5 +1,10 @@
 # Python DataSet access quick notes (0.1.4 vs 0.1.5)
 
+Note: these measurements were taken before the Python binding switched
+`DataSet.__getitem__` to return `DataElement`. In the current API,
+`ds["Rows"]` measures element retrieval, while one-shot scalar access is
+represented by `ds.get_value("Rows")` or `ds["Rows"].value`.
+
 Benchmarks (Apple M3 / Python 3.12, sample: `1.2.840.113619.2.99.1234.1210123180.675655_0000_000034_121066021209fb.dcm`)
 
 ## v0.1.4 (pybind11) — average of 5 runs

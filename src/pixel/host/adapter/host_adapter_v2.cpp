@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -84,19 +83,6 @@ void capture_plugin_detail(CopyFn copy_fn, const void* plugin_ctx, std::string* 
     return;
   }
   out_detail->assign(buffer.data(), buffer.data() + copied);
-}
-
-constexpr std::size_t kEncoderApiV2ContextBufferSize =
-    offsetof(pixel_encoder_plugin_api_v2, get_encoded_buffer) +
-    sizeof(pixel_encoder_get_encoded_buffer_fn_v2);
-
-bool encoder_api_supports_context_buffer(
-    const pixel_encoder_plugin_api_v2* api) noexcept {
-  if (api == nullptr || api->struct_size < kEncoderApiV2ContextBufferSize) {
-    return false;
-  }
-  return api->encode_frame_to_context_buffer != nullptr &&
-      api->get_encoded_buffer != nullptr;
 }
 
 bool resolve_source_strides(const dicom::pixel::PixelSource& source,
@@ -187,72 +173,6 @@ pixel_error_code_v2 fail_encoder(
     std::string_view reason) {
   set_detail(&ctx->last_error_detail, stage, reason);
   return ec;
-}
-
-pixel_error_code_v2 build_encoder_request(HostEncoderContextV2* ctx,
-    const dicom::pixel::PixelSource* source, std::span<const uint8_t> source_frame,
-    bool use_multicomponent_transform, pixel_output_buffer_v2 encoded_buffer,
-    uint64_t encoded_size, pixel_encoder_request_v2* out_request) {
-  if (ctx == nullptr || source == nullptr || out_request == nullptr) {
-    return PIXEL_CODEC_ERR_INVALID_ARGUMENT;
-  }
-
-  DtypeMeta source_dtype{};
-  if (!resolve_dtype_meta(source->data_type, &source_dtype)) {
-    return fail_encoder(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
-        "unsupported source dtype in PixelSource");
-  }
-  if (source->rows <= 0 || source->cols <= 0 || source->samples_per_pixel <= 0) {
-    return fail_encoder(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
-        "invalid PixelSource dimensions");
-  }
-
-  StrideMeta stride_meta{};
-  if (!resolve_source_strides(*source, source_dtype, &stride_meta)) {
-    return fail_encoder(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
-        "invalid source strides in PixelSource");
-  }
-  if (source_frame.size() < stride_meta.frame_size_bytes) {
-    return fail_encoder(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
-        "source frame bytes shorter than required source_frame_size_bytes");
-  }
-
-  const int32_t bits_allocated = static_cast<int32_t>(source_dtype.bytes * 8u);
-  const int32_t bits_stored = source->bits_stored > 0 ? source->bits_stored : bits_allocated;
-  const int32_t pixel_representation =
-      (source_dtype.is_signed && !source_dtype.is_float) ? 1 : 0;
-
-  pixel_encoder_request_v2 request{};
-  request.struct_size = sizeof(pixel_encoder_request_v2);
-  request.abi_version = PIXEL_ENCODER_PLUGIN_ABI_V2;
-
-  request.source.struct_size = sizeof(pixel_encoder_source_v2);
-  request.source.abi_version = PIXEL_ENCODER_PLUGIN_ABI_V2;
-  request.source.source_buffer.data = source_frame.data();
-  request.source.source_buffer.size = static_cast<uint64_t>(source_frame.size());
-
-  request.frame.struct_size = sizeof(pixel_encoder_frame_info_v2);
-  request.frame.abi_version = PIXEL_ENCODER_PLUGIN_ABI_V2;
-  request.frame.codec_profile_code = ctx->codec_profile_code;
-  request.frame.source_dtype = source_dtype.code;
-  request.frame.source_planar = to_planar_code(source->planar);
-  request.frame.rows = source->rows;
-  request.frame.cols = source->cols;
-  request.frame.samples_per_pixel = source->samples_per_pixel;
-  request.frame.bits_allocated = bits_allocated;
-  request.frame.bits_stored = bits_stored;
-  request.frame.pixel_representation = pixel_representation;
-  request.frame.source_row_stride = stride_meta.row_stride;
-  request.frame.source_plane_stride = stride_meta.plane_stride;
-  request.frame.source_frame_size_bytes = stride_meta.frame_size_bytes;
-  request.frame.use_multicomponent_transform = use_multicomponent_transform ? 1u : 0u;
-
-  request.output.struct_size = sizeof(pixel_encoder_output_v2);
-  request.output.abi_version = PIXEL_ENCODER_PLUGIN_ABI_V2;
-  request.output.encoded_buffer = encoded_buffer;
-  request.output.encoded_size = encoded_size;
-  *out_request = request;
-  return PIXEL_CODEC_ERR_OK;
 }
 
 }  // namespace
@@ -668,13 +588,60 @@ pixel_error_code_v2 encode_frame_with_host_context_v2(HostEncoderContextV2* ctx,
         "encoder host context is not configured");
   }
 
-  pixel_encoder_request_v2 request{};
-  const pixel_error_code_v2 build_ec = build_encoder_request(
-      ctx, source, source_frame, use_multicomponent_transform, encoded_buffer,
-      *inout_encoded_size, &request);
-  if (build_ec != PIXEL_CODEC_ERR_OK) {
-    return build_ec;
+  DtypeMeta source_dtype{};
+  if (!resolve_dtype_meta(source->data_type, &source_dtype)) {
+    return fail_encoder(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
+        "unsupported source dtype in PixelSource");
   }
+  if (source->rows <= 0 || source->cols <= 0 || source->samples_per_pixel <= 0) {
+    return fail_encoder(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
+        "invalid PixelSource dimensions");
+  }
+
+  StrideMeta stride_meta{};
+  if (!resolve_source_strides(*source, source_dtype, &stride_meta)) {
+    return fail_encoder(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
+        "invalid source strides in PixelSource");
+  }
+  if (source_frame.size() < stride_meta.frame_size_bytes) {
+    return fail_encoder(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
+        "source frame bytes shorter than required source_frame_size_bytes");
+  }
+
+  const int32_t bits_allocated = static_cast<int32_t>(source_dtype.bytes * 8u);
+  const int32_t bits_stored = source->bits_stored > 0 ? source->bits_stored : bits_allocated;
+  const int32_t pixel_representation =
+      (source_dtype.is_signed && !source_dtype.is_float) ? 1 : 0;
+
+  pixel_encoder_request_v2 request{};
+  request.struct_size = sizeof(pixel_encoder_request_v2);
+  request.abi_version = PIXEL_ENCODER_PLUGIN_ABI_V2;
+
+  request.source.struct_size = sizeof(pixel_encoder_source_v2);
+  request.source.abi_version = PIXEL_ENCODER_PLUGIN_ABI_V2;
+  request.source.source_buffer.data = source_frame.data();
+  request.source.source_buffer.size = static_cast<uint64_t>(source_frame.size());
+
+  request.frame.struct_size = sizeof(pixel_encoder_frame_info_v2);
+  request.frame.abi_version = PIXEL_ENCODER_PLUGIN_ABI_V2;
+  request.frame.codec_profile_code = ctx->codec_profile_code;
+  request.frame.source_dtype = source_dtype.code;
+  request.frame.source_planar = to_planar_code(source->planar);
+  request.frame.rows = source->rows;
+  request.frame.cols = source->cols;
+  request.frame.samples_per_pixel = source->samples_per_pixel;
+  request.frame.bits_allocated = bits_allocated;
+  request.frame.bits_stored = bits_stored;
+  request.frame.pixel_representation = pixel_representation;
+  request.frame.source_row_stride = stride_meta.row_stride;
+  request.frame.source_plane_stride = stride_meta.plane_stride;
+  request.frame.source_frame_size_bytes = stride_meta.frame_size_bytes;
+  request.frame.use_multicomponent_transform = use_multicomponent_transform ? 1u : 0u;
+
+  request.output.struct_size = sizeof(pixel_encoder_output_v2);
+  request.output.abi_version = PIXEL_ENCODER_PLUGIN_ABI_V2;
+  request.output.encoded_buffer = encoded_buffer;
+  request.output.encoded_size = *inout_encoded_size;
 
   pixel_error_code_v2 encode_ec = PIXEL_CODEC_ERR_FAILED;
   if (ctx->binding_kind == EncoderBindingKind::kCoreDirect) {
@@ -720,11 +687,12 @@ pixel_error_code_v2 encode_frame_with_host_context_v2(HostEncoderContextV2* ctx,
 
 bool host_encoder_context_supports_context_buffer_v2(
     const HostEncoderContextV2* ctx) noexcept {
-  if (ctx == nullptr || ctx->binding_kind != EncoderBindingKind::kPluginApi ||
-      ctx->plugin_api == nullptr || ctx->plugin_ctx == nullptr) {
-    return false;
-  }
-  return encoder_api_supports_context_buffer(ctx->plugin_api);
+  return ctx != nullptr &&
+      ctx->binding_kind == EncoderBindingKind::kPluginApi &&
+      ctx->plugin_api != nullptr &&
+      ctx->plugin_ctx != nullptr &&
+      ctx->plugin_api->encode_frame_to_context_buffer != nullptr &&
+      ctx->plugin_api->get_encoded_buffer != nullptr;
 }
 
 pixel_error_code_v2 encode_frame_to_context_buffer_with_host_context_v2(
@@ -735,29 +703,71 @@ pixel_error_code_v2 encode_frame_to_context_buffer_with_host_context_v2(
       out_encoded_buffer == nullptr) {
     return PIXEL_CODEC_ERR_INVALID_ARGUMENT;
   }
-  *out_encoded_buffer = {};
+  out_encoded_buffer->data = nullptr;
+  out_encoded_buffer->size = 0;
+
   if (ctx->binding_kind == EncoderBindingKind::kNone ||
       ctx->codec_profile_code == PIXEL_CODEC_PROFILE_UNKNOWN_V2) {
     return fail_encoder(ctx, PIXEL_CODEC_ERR_FAILED, "encode_frame",
         "encoder host context is not configured");
   }
-  if (ctx->binding_kind != EncoderBindingKind::kPluginApi ||
-      ctx->plugin_api == nullptr || ctx->plugin_ctx == nullptr) {
+  if (!host_encoder_context_supports_context_buffer_v2(ctx)) {
     return fail_encoder(ctx, PIXEL_CODEC_ERR_UNSUPPORTED, "encode_frame",
-        "encoder context buffer path requires plugin-backed encoder context");
-  }
-  if (!encoder_api_supports_context_buffer(ctx->plugin_api)) {
-    return fail_encoder(ctx, PIXEL_CODEC_ERR_UNSUPPORTED, "encode_frame",
-        "encoder plugin does not expose context buffer hooks");
+        "context-buffer encode is not supported for this encoder binding");
   }
 
-  pixel_encoder_request_v2 request{};
-  const pixel_error_code_v2 build_ec = build_encoder_request(
-      ctx, source, source_frame, use_multicomponent_transform,
-      pixel_output_buffer_v2{nullptr, 0u}, 0u, &request);
-  if (build_ec != PIXEL_CODEC_ERR_OK) {
-    return build_ec;
+  DtypeMeta source_dtype{};
+  if (!resolve_dtype_meta(source->data_type, &source_dtype)) {
+    return fail_encoder(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
+        "unsupported source dtype in PixelSource");
   }
+  if (source->rows <= 0 || source->cols <= 0 || source->samples_per_pixel <= 0) {
+    return fail_encoder(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
+        "invalid PixelSource dimensions");
+  }
+
+  StrideMeta stride_meta{};
+  if (!resolve_source_strides(*source, source_dtype, &stride_meta)) {
+    return fail_encoder(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
+        "invalid source strides in PixelSource");
+  }
+  if (source_frame.size() < stride_meta.frame_size_bytes) {
+    return fail_encoder(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
+        "source frame bytes shorter than required source_frame_size_bytes");
+  }
+
+  const int32_t bits_allocated = static_cast<int32_t>(source_dtype.bytes * 8u);
+  const int32_t bits_stored = source->bits_stored > 0 ? source->bits_stored : bits_allocated;
+  const int32_t pixel_representation =
+      (source_dtype.is_signed && !source_dtype.is_float) ? 1 : 0;
+
+  pixel_encoder_request_v2 request{};
+  request.struct_size = sizeof(pixel_encoder_request_v2);
+  request.abi_version = PIXEL_ENCODER_PLUGIN_ABI_V2;
+
+  request.source.struct_size = sizeof(pixel_encoder_source_v2);
+  request.source.abi_version = PIXEL_ENCODER_PLUGIN_ABI_V2;
+  request.source.source_buffer.data = source_frame.data();
+  request.source.source_buffer.size = static_cast<uint64_t>(source_frame.size());
+
+  request.frame.struct_size = sizeof(pixel_encoder_frame_info_v2);
+  request.frame.abi_version = PIXEL_ENCODER_PLUGIN_ABI_V2;
+  request.frame.codec_profile_code = ctx->codec_profile_code;
+  request.frame.source_dtype = source_dtype.code;
+  request.frame.source_planar = to_planar_code(source->planar);
+  request.frame.rows = source->rows;
+  request.frame.cols = source->cols;
+  request.frame.samples_per_pixel = source->samples_per_pixel;
+  request.frame.bits_allocated = bits_allocated;
+  request.frame.bits_stored = bits_stored;
+  request.frame.pixel_representation = pixel_representation;
+  request.frame.source_row_stride = stride_meta.row_stride;
+  request.frame.source_plane_stride = stride_meta.plane_stride;
+  request.frame.source_frame_size_bytes = stride_meta.frame_size_bytes;
+  request.frame.use_multicomponent_transform = use_multicomponent_transform ? 1u : 0u;
+
+  request.output.struct_size = sizeof(pixel_encoder_output_v2);
+  request.output.abi_version = PIXEL_ENCODER_PLUGIN_ABI_V2;
 
   pixel_error_code_v2 encode_ec =
       ctx->plugin_api->encode_frame_to_context_buffer(ctx->plugin_ctx, &request);
@@ -777,17 +787,9 @@ pixel_error_code_v2 encode_frame_to_context_buffer_with_host_context_v2(
         ctx->plugin_api->copy_last_error_detail, ctx->plugin_ctx, &ctx->last_error_detail);
     if (ctx->last_error_detail.empty()) {
       set_detail(&ctx->last_error_detail, "encode_frame",
-          "plugin encoded-buffer query failed");
+          "plugin encoded buffer lookup failed");
     }
     return encode_ec;
-  }
-  if (out_encoded_buffer->size != request.output.encoded_size) {
-    return fail_encoder(ctx, PIXEL_CODEC_ERR_FAILED, "encode_frame",
-        "plugin encoded buffer size does not match reported encoded_size");
-  }
-  if (out_encoded_buffer->data == nullptr || out_encoded_buffer->size == 0) {
-    return fail_encoder(ctx, PIXEL_CODEC_ERR_FAILED, "encode_frame",
-        "plugin encoded buffer is empty");
   }
 
   clear_detail(&ctx->last_error_detail);

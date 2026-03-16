@@ -107,6 +107,22 @@ nb::object readonly_memoryview_from_span(const void* data, std::size_t size) {
 	    PyMemoryView_FromMemory(ptr, static_cast<Py_ssize_t>(size), PyBUF_READ));
 }
 
+nb::object empty_py_list() {
+	return nb::steal<nb::object>(PyList_New(0));
+}
+
+template <typename T>
+nb::object vector_to_py_list(const std::vector<T>& values) {
+	nb::object out = empty_py_list();
+	for (const auto& value : values) {
+		nb::object py_value = nb::cast(value);
+		if (PyList_Append(out.ptr(), py_value.ptr()) != 0) {
+			throw nb::python_error();
+		}
+	}
+	return out;
+}
+
 struct DecodedArraySpec {
 	nb::dlpack::dtype dtype{};
 	std::size_t bytes_per_sample{0};
@@ -1436,48 +1452,60 @@ nb::object dataelement_get_value_py(DataElement& element, nb::handle parent = nb
 	case dicom::VR::UR_val:
 		return vm <= 1 ? raw_string_scalar() : raw_string_multi();
 	case dicom::VR::IS_val:
-		if (vm <= 1) {
-			if (auto v = element.to_longlong()) {
-				return nb::cast(*v);
+		if (vm == 0) {
+			return empty_py_list();
+		}
+		if (vm == 1) {
+			if (auto value = element.to_longlong()) {
+				return nb::cast(*value);
 			}
 			return raw_string_scalar();
 		}
-		if (auto v = element.to_longlong_vector()) {
-			return nb::cast(*v);
+		if (auto values = element.to_longlong_vector()) {
+			return vector_to_py_list(*values);
 		}
 		return raw_string_multi();
 	case dicom::VR::DS_val:
-		if (vm <= 1) {
-			if (auto v = element.to_double()) {
-				return nb::cast(*v);
+		if (vm == 0) {
+			return empty_py_list();
+		}
+		if (vm == 1) {
+			if (auto value = element.to_double()) {
+				return nb::cast(*value);
 			}
 			return raw_string_scalar();
 		}
-		if (auto v = element.to_double_vector()) {
-			return nb::cast(*v);
+		if (auto values = element.to_double_vector()) {
+			return vector_to_py_list(*values);
 		}
 		return raw_string_multi();
 	case dicom::VR::AT_val:
-		if (vm <= 1) {
-			if (auto v = element.to_tag()) {
-				return nb::cast(*v);
+		if (vm == 0) {
+			return empty_py_list();
+		}
+		if (vm == 1) {
+			if (auto value = element.to_tag()) {
+				return nb::cast(*value);
 			}
 			return raw_memoryview();
 		}
-		if (auto v = element.to_tag_vector()) {
-			return nb::cast(*v);
+		if (auto values = element.to_tag_vector()) {
+			return vector_to_py_list(*values);
 		}
 		return raw_memoryview();
 	case dicom::VR::FD_val:
 	case dicom::VR::FL_val:
-		if (vm <= 1) {
-			if (auto v = element.to_double()) {
-				return nb::cast(*v);
+		if (vm == 0) {
+			return empty_py_list();
+		}
+		if (vm == 1) {
+			if (auto value = element.to_double()) {
+				return nb::cast(*value);
 			}
 			return raw_memoryview();
 		}
-		if (auto v = element.to_double_vector()) {
-			return nb::cast(*v);
+		if (auto values = element.to_double_vector()) {
+			return vector_to_py_list(*values);
 		}
 		return raw_memoryview();
 	case dicom::VR::SL_val:
@@ -1486,14 +1514,17 @@ nb::object dataelement_get_value_py(DataElement& element, nb::handle parent = nb
 	case dicom::VR::UL_val:
 	case dicom::VR::US_val:
 	case dicom::VR::UV_val:
-		if (vm <= 1) {
-			if (auto v = element.to_longlong()) {
-				return nb::cast(*v);
+		if (vm == 0) {
+			return empty_py_list();
+		}
+		if (vm == 1) {
+			if (auto value = element.to_longlong()) {
+				return nb::cast(*value);
 			}
 			return raw_memoryview();
 		}
-		if (auto v = element.to_longlong_vector()) {
-			return nb::cast(*v);
+		if (auto values = element.to_longlong_vector()) {
+			return vector_to_py_list(*values);
 		}
 		return raw_memoryview();
 	case dicom::VR::OB_val:
@@ -1601,6 +1632,60 @@ bool dataelement_set_value_py(DataElement& element, nb::handle value) {
 	}
 	if (element.vr().is_sequence() || element.vr().is_pixel_sequence()) {
 		throw nb::type_error("Sequence and pixel-sequence elements do not support direct scalar assignment");
+	}
+	if (value.is_none()) {
+		switch (element.vr().value) {
+		case VR::PN_val: {
+			std::vector<std::string_view> empty;
+			return element.from_utf8_views(empty);
+		}
+		case VR::LO_val:
+		case VR::LT_val:
+		case VR::SH_val:
+		case VR::ST_val:
+		case VR::UC_val:
+		case VR::UT_val:
+		case VR::AE_val:
+		case VR::AS_val:
+		case VR::CS_val:
+		case VR::DA_val:
+		case VR::DT_val:
+		case VR::TM_val:
+		case VR::UI_val:
+		case VR::UR_val: {
+			std::vector<std::string_view> empty;
+			return element.vr().uses_specific_character_set() ? element.from_utf8_views(empty)
+			                                                  : element.from_string_views(empty);
+		}
+		case VR::FD_val:
+		case VR::FL_val:
+		case VR::DS_val:
+			return element.from_double_vector({});
+		case VR::IS_val:
+		case VR::SL_val:
+		case VR::SS_val:
+		case VR::SV_val:
+		case VR::UL_val:
+		case VR::US_val:
+		case VR::UV_val:
+			return element.from_longlong_vector({});
+		case VR::AT_val:
+			return element.from_tag_vector({});
+		case VR::OB_val:
+		case VR::OD_val:
+		case VR::OF_val:
+		case VR::OL_val:
+		case VR::OW_val:
+		case VR::OV_val:
+		case VR::UN_val:
+			element.adopt_value_bytes({});
+			return true;
+		case VR::SQ_val:
+		case VR::PX_val:
+		case VR::None_val:
+		default:
+			throw nb::type_error("None is not supported for this DICOM VR");
+		}
 	}
 
 	PyObject* obj = value.ptr();
@@ -1871,6 +1956,159 @@ bool dataelement_set_value_py(DataElement& element, nb::handle value) {
 	}
 }
 
+void dataelement_set_value_or_throw_py(DataElement& element, nb::handle value) {
+	const bool ok = dataelement_set_value_py(element, value);
+	if (!ok) {
+		throw nb::value_error(
+		    ("Failed to assign value to " + element.tag().to_string() + " (" +
+		        std::string(element.vr().str()) + ")")
+		        .c_str());
+	}
+}
+
+nb::object dataelement_to_tag_vector_py(const DataElement& element) {
+	if (element.vm() == 0) {
+		return empty_py_list();
+	}
+	auto values = element.to_tag_vector();
+	if (!values) {
+		return nb::none();
+	}
+	return vector_to_py_list(*values);
+}
+
+nb::object dataelement_to_int_vector_py(const DataElement& element, nb::object default_value) {
+	if (default_value.is_none() && element.vm() == 0) {
+		return empty_py_list();
+	}
+	if (default_value.is_none()) {
+		auto values = element.to_int_vector();
+		if (!values) {
+			return nb::none();
+		}
+		return vector_to_py_list(*values);
+	}
+	return vector_to_py_list(
+	    element.to_int_vector().value_or(nb::cast<std::vector<int>>(default_value)));
+}
+
+nb::object dataelement_to_long_vector_py(const DataElement& element, nb::object default_value) {
+	if (default_value.is_none() && element.vm() == 0) {
+		return empty_py_list();
+	}
+	if (default_value.is_none()) {
+		auto values = element.to_long_vector();
+		if (!values) {
+			return nb::none();
+		}
+		return vector_to_py_list(*values);
+	}
+	return vector_to_py_list(
+	    element.to_long_vector().value_or(nb::cast<std::vector<long>>(default_value)));
+}
+
+nb::object dataelement_to_longlong_vector_py(
+    const DataElement& element, nb::object default_value) {
+	if (default_value.is_none() && element.vm() == 0) {
+		return empty_py_list();
+	}
+	if (default_value.is_none()) {
+		auto values = element.to_longlong_vector();
+		if (!values) {
+			return nb::none();
+		}
+		return vector_to_py_list(*values);
+	}
+	return vector_to_py_list(
+	    element.to_longlong_vector().value_or(nb::cast<std::vector<long long>>(default_value)));
+}
+
+nb::object dataelement_to_double_vector_py(
+    const DataElement& element, nb::object default_value) {
+	if (default_value.is_none() && element.vm() == 0) {
+		return empty_py_list();
+	}
+	if (default_value.is_none()) {
+		auto values = element.to_double_vector();
+		if (!values) {
+			return nb::none();
+		}
+		return vector_to_py_list(*values);
+	}
+	return vector_to_py_list(
+	    element.to_double_vector().value_or(nb::cast<std::vector<double>>(default_value)));
+}
+
+DataElement& dataset_lookup_dataelement_py(
+    DataSet& self, nb::handle key, const char* key_error_message) {
+	if (nb::isinstance<Tag>(key)) {
+		return self.get_dataelement(nb::cast<Tag>(key));
+	}
+	if (nb::isinstance<nb::int_>(key)) {
+		return self.get_dataelement(Tag(nb::cast<std::uint32_t>(key)));
+	}
+	if (nb::isinstance<nb::str>(key)) {
+		return self.get_dataelement(nb::cast<std::string>(key));
+	}
+	throw nb::type_error(key_error_message);
+}
+
+bool dataset_contains_py(DataSet& self, nb::handle key, const char* key_error_message) {
+	if (nb::isinstance<Tag>(key)) {
+		return self.get_dataelement(nb::cast<Tag>(key)).is_present();
+	}
+	if (nb::isinstance<nb::int_>(key)) {
+		return self.get_dataelement(Tag(nb::cast<std::uint32_t>(key))).is_present();
+	}
+	if (nb::isinstance<nb::str>(key)) {
+		try {
+			return self.get_dataelement(nb::cast<std::string>(key)).is_present();
+		} catch (const std::exception&) {
+			return false;
+		}
+	}
+	throw nb::type_error(key_error_message);
+}
+
+Tag dataset_assignment_key_to_tag(nb::handle key);
+
+bool dataset_try_set_value_py(DataSet& self, nb::handle key, nb::handle value) {
+	const Tag tag = dataset_assignment_key_to_tag(key);
+	DataElement& existing = self.get_dataelement(tag);
+	const bool existed = existing.is_present();
+	DataElement* target = existed ? &existing : nullptr;
+	if (!target) {
+		target = &self.add_dataelement(tag, VR::None);
+	}
+	return dataelement_set_value_py(*target, value);
+}
+
+bool dataset_try_set_value_with_vr_py(
+    DataSet& self, nb::handle key, VR vr, nb::handle value) {
+	const Tag tag = dataset_assignment_key_to_tag(key);
+	DataElement& existing = self.get_dataelement(tag);
+	if (existing.is_present()) {
+		if (vr == VR::None || existing.vr() == vr) {
+			return dataelement_set_value_py(existing, value);
+		}
+		if (existing.vr().is_sequence() || existing.vr().is_pixel_sequence() ||
+		    vr.is_sequence() || vr.is_pixel_sequence()) {
+			return false;
+		}
+		DataElement& target = self.add_dataelement(tag, vr);
+		return dataelement_set_value_py(target, value);
+	}
+
+	if (vr == VR::None) {
+		return dataset_try_set_value_py(self, key, value);
+	}
+	if (vr.is_sequence() || vr.is_pixel_sequence()) {
+		return false;
+	}
+	DataElement& target = self.add_dataelement(tag, vr);
+	return dataelement_set_value_py(target, value);
+}
+
 Tag dataset_assignment_key_to_tag(nb::handle key) {
 	if (nb::isinstance<Tag>(key)) {
 		return nb::cast<Tag>(key);
@@ -1890,33 +2128,12 @@ Tag dataset_assignment_key_to_tag(nb::handle key) {
 
 void dataset_set_value_py(DataSet& self, nb::handle key, nb::handle value) {
 	const Tag tag = dataset_assignment_key_to_tag(key);
-	if (value.is_none()) {
-		self.remove_dataelement(tag);
-		return;
-	}
-
-	DataElement& existing = self.get_dataelement(tag);
-	const bool existed = existing.is_present();
-	DataElement* target = existed ? &existing : nullptr;
-	if (!target) {
-		target = &self.add_dataelement(tag, VR::None);
-	}
-
-	try {
-		const bool ok = dataelement_set_value_py(*target, value);
-		if (!ok) {
-			if (!existed) {
-				self.remove_dataelement(tag);
-			}
-			throw nb::value_error(
-			    ("Failed to assign value to " + tag.to_string() + " (" + std::string(target->vr().str()) + ")")
-			        .c_str());
-		}
-	} catch (...) {
-		if (!existed) {
-			self.remove_dataelement(tag);
-		}
-		throw;
+	if (!dataset_try_set_value_py(self, key, value)) {
+		const DataElement& element = self.get_dataelement(tag);
+		const VR vr = element.is_present() ? element.vr() : VR::None;
+		throw nb::value_error(
+		    ("Failed to assign value to " + tag.to_string() + " (" + std::string(vr.str()) + ")")
+		        .c_str());
 	}
 }
 
@@ -2465,6 +2682,15 @@ NB_MODULE(_dicomsdl, m) {
 		.def_prop_ro("length", &DataElement::length)
 		.def_prop_ro("offset", &DataElement::offset)
 		.def_prop_ro("vm", &DataElement::vm)
+		.def_prop_rw("value",
+		    [](DataElement& element) -> nb::object {
+			    return dataelement_get_value_py(element);
+		    },
+		    [](DataElement& element, nb::handle value) {
+			    dataelement_set_value_or_throw_py(element, value);
+		    },
+		    "Best-effort typed value property. Reading mirrors get_value(); writing "
+		    "accepts the same Python types as set_value(); `None` writes a zero-length value.")
 		.def("__bool__",
 		    [](const DataElement& element) {
 			    return static_cast<bool>(element);
@@ -2484,12 +2710,22 @@ NB_MODULE(_dicomsdl, m) {
 	    },
 	    nb::rv_policy::reference_internal,
 	    "Return the nested Sequence if present; otherwise None.")
-			.def_prop_ro("pixel_sequence",
+		.def_prop_ro("pixel_sequence",
 		    [](DataElement& element) -> dicom::PixelSequence* {
 			    return element.pixel_sequence();
 		    },
 		    nb::rv_policy::reference_internal,
 		    "Return the nested PixelSequence if present; otherwise None.")
+		.def("set_value",
+		    [](DataElement& element, nb::handle value) {
+			    return dataelement_set_value_py(element, value);
+		    },
+		    nb::arg("value"),
+		    "Best-effort typed assignment. Accepts the same Python value forms as "
+		    "DataSet.set_value() and the `value` property setter, updates this element in place, and returns "
+		    "True on success or False when the value cannot be encoded for this VR. "
+		    "`None` writes a zero-length value. On failure, the owning DataSet remains valid but this "
+		    "element's state is unspecified.")
 		.def("from_double", &DataElement::from_double, nb::arg("value"),
 		    "Encode and store a floating-point value according to this element VR.")
 		.def("from_double_vector",
@@ -2741,11 +2977,7 @@ NB_MODULE(_dicomsdl, m) {
 		        return nb::cast(element.to_tag().value_or(nb::cast<Tag>(default_value)));
 		    },
 		    nb::arg("default") = nb::none())
-		.def("to_tag_vector",
-		    [](const DataElement& element) -> nb::object {
-		        auto v = element.to_tag_vector();
-	        return v ? nb::cast(*v) : nb::none();
-	    })
+		.def("to_tag_vector", &dataelement_to_tag_vector_py)
 	.def("to_int",
 	    [](const DataElement& element, nb::object default_value) -> nb::object {
 	        if (default_value.is_none()) {
@@ -2785,52 +3017,17 @@ NB_MODULE(_dicomsdl, m) {
 	        return nb::cast(element.to_double().value_or(nb::cast<double>(default_value)));
 	    },
 	    nb::arg("default") = nb::none())
-	.def("to_int_vector",
-	    [](const DataElement& element, nb::object default_value) -> nb::object {
-	        if (default_value.is_none()) {
-	            auto v = element.to_int_vector();
-	            return v ? nb::cast(*v) : nb::none();
-	        }
-	        return nb::cast(
-	            element.to_int_vector().value_or(nb::cast<std::vector<int>>(default_value)));
-	    },
-	    nb::arg("default") = nb::none())
-	.def("to_long_vector",
-	    [](const DataElement& element, nb::object default_value) -> nb::object {
-	        if (default_value.is_none()) {
-	            auto v = element.to_long_vector();
-	            return v ? nb::cast(*v) : nb::none();
-			    }
-			    return nb::cast(
-			        element.to_long_vector().value_or(nb::cast<std::vector<long>>(default_value)));
-		    },
-		    nb::arg("default") = nb::none())
-		.def("to_longlong_vector",
-		    [](const DataElement& element, nb::object default_value) -> nb::object {
-			    if (default_value.is_none()) {
-				    auto v = element.to_longlong_vector();
-				    return v ? nb::cast(*v) : nb::none();
-			    }
-			    return nb::cast(element.to_longlong_vector().value_or(
-			        nb::cast<std::vector<long long>>(default_value)));
-		    },
-		    nb::arg("default") = nb::none())
-		.def("to_double_vector",
-		    [](const DataElement& element, nb::object default_value) -> nb::object {
-			    if (default_value.is_none()) {
-				    auto v = element.to_double_vector();
-				    return v ? nb::cast(*v) : nb::none();
-			    }
-			    return nb::cast(element.to_double_vector().value_or(
-			        nb::cast<std::vector<double>>(default_value)));
-		    },
-		    nb::arg("default") = nb::none())
+	.def("to_int_vector", &dataelement_to_int_vector_py, nb::arg("default") = nb::none())
+	.def("to_long_vector", &dataelement_to_long_vector_py, nb::arg("default") = nb::none())
+		.def("to_longlong_vector", &dataelement_to_longlong_vector_py, nb::arg("default") = nb::none())
+		.def("to_double_vector", &dataelement_to_double_vector_py, nb::arg("default") = nb::none())
 		.def("get_value",
 		    [](DataElement& element) -> nb::object {
 			    return dataelement_get_value_py(element);
 		    },
 		    "Best-effort typed access: returns Sequence / PixelSequence for SQ/PX, "
-		    "int/float for numeric VRs, UTF-8 strings for charset-aware text, "
+		    "int/float/list for numeric-like VRs (including [] for zero-length numeric values), "
+		    "UTF-8 strings for charset-aware text, "
 		    "PersonName / list[PersonName] for PN when possible, raw strings for other text, "
 		    "and falls back to raw bytes when charset decode/parsing fails or to raw bytes "
 		    "(memoryview) for binary VRs; returns None for missing elements.")
@@ -2914,11 +3111,11 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::rv_policy::reference_internal,
 		    "Add or update a DataElement and return a reference to it")
 		.def("remove_dataelement",
-		    [](DataSet& self, const Tag& tag) {
-		        self.remove_dataelement(tag);
+		    [](DataSet& self, nb::handle key) {
+		        self.remove_dataelement(dataset_assignment_key_to_tag(key));
 		    },
 		    nb::arg("tag"),
-		    "Remove a DataElement by tag if it exists")
+		    "Remove a DataElement by Tag, packed int, or keyword string if it exists")
 		.def("dump_elements", &DataSet::dump_elements,
 		    "Print internal element storage for debugging")
 		.def("dump", &DataSet::dump,
@@ -2954,37 +3151,55 @@ NB_MODULE(_dicomsdl, m) {
 		    "  - Nested sequences: '00082112.0.00081190' or\n"
 		    "    'RadiopharmaceuticalInformationSequence.0.RadionuclideTotalDose'\n"
 		    "Returns a DataElement; missing lookups return a falsey DataElement (VR::None); malformed paths raise.")
-		.def("__getitem__",
-		    [](DataSet& self, nb::object key) -> nb::object {
-			    DataElement& el = [&]() -> DataElement& {
-				    if (nb::isinstance<Tag>(key)) {
-					    return self.get_dataelement(nb::cast<Tag>(key));
-				    }
-				    if (nb::isinstance<nb::int_>(key)) {
-					    return self.get_dataelement(Tag(nb::cast<std::uint32_t>(key)));
-				    }
-				    if (nb::isinstance<nb::str>(key)) {
-					    // Allow full tag-path strings (including sequences)
-					    return self.get_dataelement(nb::cast<std::string>(key));
-				    }
-				    throw nb::type_error("DataSet indices must be Tag, int (0xGGGEEEE), or str");
-			    }();
-
+		.def("get_value",
+		    [](DataSet& self, nb::object key, nb::object default_value) -> nb::object {
+			    DataElement& el = dataset_lookup_dataelement_py(
+			        self, key, "DataSet lookup keys must be Tag, int (0xGGGEEEE), or str");
 			    if (el.is_missing()) {
-				    return nb::none();
+				    return default_value;
 			    }
 			    return dataelement_get_value_py(el, nb::cast(&self, nb::rv_policy::reference));
 		    },
-		    nb::arg("key"),
-		    "Index syntax: ds[tag|packed_int|tag_str] -> element.get_value(); returns None if missing")
-		.def("__setitem__",
+		    nb::arg("key"), nb::arg("default") = nb::none(),
+		    "Best-effort typed lookup by Tag, packed int, or tag-path string. "
+		    "Returns `default` only when the element is missing; zero-length present "
+		    "elements still return typed empty values such as [], '', or an empty container.")
+		.def("set_value",
 		    [](DataSet& self, nb::object key, nb::handle value) {
-			    dataset_set_value_py(self, key, value);
+			    return dataset_try_set_value_py(self, key, value);
 		    },
 		    nb::arg("key"), nb::arg("value"),
-		    "Assignment syntax: ds[tag|packed_int|keyword] = value.\n"
-		    "Supports Python scalars, str/list[str], PersonName/list[PersonName], Tag/list[Tag],\n"
-		    "and bytes-like objects for raw value bytes. Setting None removes the element.")
+		    "Best-effort typed assignment by Tag, packed int, or keyword string. "
+		    "Returns True on success, False when the value cannot be encoded for "
+		    "the target VR, and treats `None` as a zero-length present value. "
+		    "On failure, the DataSet remains valid but the destination element state is unspecified.")
+		.def("set_value",
+		    [](DataSet& self, nb::object key, VR vr, nb::handle value) {
+			    return dataset_try_set_value_with_vr_py(self, key, vr, value);
+		    },
+		    nb::arg("key"), nb::arg("vr"), nb::arg("value"),
+		    "Overload: set_value(key, vr, value). Uses the explicit VR when creating "
+		    "a missing element and can override an existing non-SQ/non-PX element VR. "
+		    "Returns False when the value cannot be encoded or the existing VR must not be replaced. "
+		    "`None` writes a zero-length value for the resolved VR. On failure, the DataSet remains "
+		    "valid but the destination element state is unspecified.")
+		.def("__getitem__",
+		    [](DataSet& self, nb::object key) -> DataElement& {
+			    return dataset_lookup_dataelement_py(
+			        self, key, "DataSet indices must be Tag, int (0xGGGEEEE), or str");
+		    },
+		    nb::arg("key"),
+		    nb::rv_policy::reference_internal,
+		    "Index syntax: ds[tag|packed_int|tag_str] -> DataElement. Missing lookups "
+		    "return a falsey DataElement sentinel (VR::None).")
+		.def("__contains__",
+		    [](DataSet& self, nb::object key) {
+			    return dataset_contains_py(
+			        self, key, "DataSet membership keys must be Tag, int (0xGGGEEEE), or str");
+		    },
+		    nb::arg("key"),
+		    "Presence probe: key in ds -> bool. Accepts Tag, packed int, or str; "
+		    "missing and malformed string keys return False.")
 		.def("__getattr__",
 		    [](DataSet& self, const std::string& name) -> nb::object {
 			    // Allow keyword-style attribute access: ds.PatientName -> get_value("PatientName")
@@ -3537,34 +3752,21 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::arg("plan") = nb::none(),
 		    "Alias of to_array(frame=-1, to_modality_value=False, decode_mct=True).")
 		.def("__getitem__",
-		    [](DicomFile& self, nb::object key) -> nb::object {
-			    DataSet& dataset = self.dataset();
-			    DataElement& el = [&]() -> DataElement& {
-				    if (nb::isinstance<Tag>(key)) {
-					    return dataset.get_dataelement(nb::cast<Tag>(key));
-				    }
-				    if (nb::isinstance<nb::int_>(key)) {
-					    return dataset.get_dataelement(Tag(nb::cast<std::uint32_t>(key)));
-				    }
-				    if (nb::isinstance<nb::str>(key)) {
-					    return dataset.get_dataelement(nb::cast<std::string>(key));
-				    }
-				    throw nb::type_error("DicomFile indices must be Tag, int (0xGGGEEEE), or str");
-			    }();
-
-			    if (el.is_missing()) {
-				    return nb::none();
-			    }
-			    return dataelement_get_value_py(el, nb::cast(&dataset, nb::rv_policy::reference));
+		    [](DicomFile& self, nb::object key) -> DataElement& {
+			    return dataset_lookup_dataelement_py(
+			        self.dataset(), key, "DicomFile indices must be Tag, int (0xGGGEEEE), or str");
 		    },
 		    nb::arg("key"),
-		    "Index syntax delegated to root DataSet")
-		.def("__setitem__",
-		    [](DicomFile& self, nb::object key, nb::handle value) {
-			    dataset_set_value_py(self.dataset(), key, value);
+		    nb::rv_policy::reference_internal,
+		    "Index syntax delegated to the root DataSet; returns a DataElement "
+		    "reference and preserves the missing-element sentinel behavior.")
+		.def("__contains__",
+		    [](DicomFile& self, nb::object key) {
+			    return dataset_contains_py(
+			        self.dataset(), key, "DicomFile membership keys must be Tag, int (0xGGGEEEE), or str");
 		    },
-		    nb::arg("key"), nb::arg("value"),
-		    "Assignment syntax delegated to the root DataSet.")
+		    nb::arg("key"),
+		    "Presence probe delegated to the root DataSet.")
 		.def("__getattr__",
 		    [](DicomFile& self, const std::string& name) -> nb::object {
 			    nb::object owner = nb::cast(&self, nb::rv_policy::reference);
@@ -4226,10 +4428,11 @@ m.def("generate_study_instance_uid",
 	    "DecodeOptions",
 	    "DecodePlan",
 	    "EncoderContext",
-	    "create_encoder_context",
-	    "DicomFile",
-	    "DataSet",
-	    "PersonName",
+		    "create_encoder_context",
+		    "DicomFile",
+		    "DataElement",
+		    "DataSet",
+		    "PersonName",
 	    "PersonNameGroup",
 	    "Tag",
 	    "VR",

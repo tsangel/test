@@ -1,6 +1,7 @@
 import array
 
 import dicomsdl as dicom
+import pytest
 
 
 def test_dataelement_utf8_helpers_roundtrip():
@@ -295,7 +296,7 @@ def test_binary_vr_assignment_accepts_matching_typed_arrays():
 	for index, (vr, values) in enumerate(cases, start=1):
 		tag = dicom.Tag(0x0011, 0x1000 + index)
 		elem = ds.add_dataelement(tag, vr)
-		ds[tag] = values
+		elem.value = values
 		expected = values.tobytes()
 		if len(expected) % 2 != 0:
 			expected += b"\x00"
@@ -381,15 +382,64 @@ def test_get_value_returns_bytes_when_charset_text_decode_fails():
 	assert value == b"\x1b%GA"
 
 
-def test_dataset_assignment_sugar_sets_numeric_values():
+def test_dataset_attribute_assignment_and_element_value_assignment_sets_numeric_values():
 	ds = dicom.DataSet()
 	ds.Rows = 512
-	ds["Columns"] = 256
+	ds.add_dataelement(dicom.Tag("Columns"), dicom.VR.US).value = 256
 
 	assert ds.Rows == 512
-	assert ds["Rows"] == 512
+	assert isinstance(ds["Rows"], dicom.DataElement)
+	assert ds["Rows"].value == 512
+	assert ds.get_value("Rows") == 512
 	assert ds.Columns == 256
-	assert ds["Columns"] == 256
+	assert ds["Columns"].value == 256
+	assert ds.get_value("Columns") == 256
+
+	with pytest.raises(TypeError):
+		ds["Columns"] = 128
+
+
+def test_dataelement_value_property_and_set_value_update_dataset():
+	ds = dicom.DataSet()
+	elem = ds.add_dataelement(dicom.Tag("Rows"), dicom.VR.US)
+
+	assert elem.set_value(512) is True
+	assert elem.value == 512
+	assert ds.Rows == 512
+	assert ds.get_value("Rows") == 512
+
+	elem.value = 256
+	assert elem.value == 256
+	assert ds.Rows == 256
+	assert ds.get_value("Rows") == 256
+
+	assert ds.set_value("Rows", 1024) is True
+	assert elem.value == 1024
+	assert ds.Rows == 1024
+	assert ds.get_value("Rows") == 1024
+
+	assert elem.set_value(-1) is False
+	assert ds.set_value("Rows", -1) is False
+	assert ds.set_value("Columns", 128) is True
+	assert ds.get_value("Columns") == 128
+
+
+def test_set_value_accepts_explicit_vr_for_private_creation_and_override():
+	ds = dicom.DataSet()
+	private_tag = 0x00090030
+
+	assert ds.set_value(private_tag, dicom.VR.US, 16) is True
+	assert ds[private_tag].vr == dicom.VR.US
+	assert ds[private_tag].value == 16
+
+	assert ds.set_value(private_tag, dicom.VR.UL, 17) is True
+	assert ds[private_tag].vr == dicom.VR.UL
+	assert ds[private_tag].value == 17
+
+	seq = ds.add_dataelement(dicom.Tag("ReferencedStudySequence"), dicom.VR.SQ)
+	assert ds.set_value("ReferencedStudySequence", dicom.VR.US, 1) is False
+	assert ds["ReferencedStudySequence"].vr == dicom.VR.SQ
+	assert ds["ReferencedStudySequence"].sequence is not None
 
 
 def test_dataset_assignment_sugar_sets_text_and_person_name_values():
@@ -411,9 +461,16 @@ def test_dataset_assignment_sugar_sets_text_and_person_name_values():
 	assert value.ideographic.family_name == "洪"
 
 
-def test_dataset_assignment_none_removes_element():
+def test_dataset_assignment_none_creates_zero_length_element():
 	ds = dicom.DataSet()
 	ds.Rows = 512
 	assert ds.Rows == 512
 	ds.Rows = None
-	assert ds["Rows"] is None
+	assert bool(ds["Rows"]) is True
+	assert ds["Rows"].length == 0
+	assert ds["Rows"].value == []
+	assert ds.get_value("Rows") == []
+
+	ds.remove_dataelement("Rows")
+	assert ds.get_value("Rows") is None
+	assert bool(ds["Rows"]) is False

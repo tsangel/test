@@ -35,7 +35,18 @@ print(df.dump(include_offset=False))
 
 # If you need explicit root dataset object:
 ds = df.dataset
+
+rows_elem = ds["Rows"]
+print(rows_elem.tag, rows_elem.vr, rows_elem.length, rows_elem.value)
+rows_fast = ds.get_value("Rows")
+rows_elem.value = rows_fast
+assert ds.set_value("Rows", rows_fast)
+assert ds.set_value(0x00090030, dicom.VR.US, 16)
 ```
+
+For the full user guide covering `DataSet`, `DicomFile`, `DataElement`,
+recommended access patterns, and read/write examples, see
+[Python DataSet Access Guide](python_dataset_access_design.md).
 
 ## Raw value bytes (no copy)
 
@@ -68,5 +79,6 @@ if elem:
 - On large files, prefer targeted element access over full iteration in Python hot loops.
 
 ## Related docs
+- Python DataSet Access Guide: [Python DataSet Access Guide](python_dataset_access_design.md)
 - UID generation and append details: [Generating UID](generating_uid.md)
 - Pixel encode constraints and codec-specific limits: [Pixel Encode Constraints](pixel_encode_constraints.md)

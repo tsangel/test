@@ -260,6 +260,64 @@ def test_dataelement_from_helpers_roundtrip():
 	assert [int(tag) for tag in at_vector.to_tag_vector()] == [int(tag) for tag in expected_tags]
 
 
+def test_zero_length_numeric_like_get_value_returns_empty_list_not_default():
+	ds = dicom.DataSet()
+
+	window_center = ds.add_dataelement(dicom.Tag("WindowCenter"), dicom.VR.DS)
+	number_of_frames = ds.add_dataelement(dicom.Tag("NumberOfFrames"), dicom.VR.IS)
+	slice_thickness = ds.add_dataelement(dicom.Tag("SliceThickness"), dicom.VR.FD)
+	rows = ds.add_dataelement(dicom.Tag("Rows"), dicom.VR.US)
+	frame_increment_pointer = ds.add_dataelement(dicom.Tag("FrameIncrementPointer"), dicom.VR.AT)
+
+	assert ds.get_value("PatientName", default="DEFAULT") == "DEFAULT"
+
+	assert ds.get_value("WindowCenter", default="DEFAULT") == []
+	assert window_center.value == []
+
+	assert ds.get_value("NumberOfFrames", default="DEFAULT") == []
+	assert number_of_frames.value == []
+
+	assert ds.get_value("SliceThickness", default="DEFAULT") == []
+	assert slice_thickness.value == []
+
+	assert ds.get_value("Rows", default="DEFAULT") == []
+	assert rows.value == []
+
+	assert ds.get_value("FrameIncrementPointer", default="DEFAULT") == []
+	assert frame_increment_pointer.value == []
+
+
+def test_zero_length_vector_accessors_return_empty_lists():
+	ds = dicom.DataSet()
+
+	rows = ds.add_dataelement(dicom.Tag("Rows"), dicom.VR.US)
+	window_center = ds.add_dataelement(dicom.Tag("WindowCenter"), dicom.VR.DS)
+	frame_increment_pointer = ds.add_dataelement(dicom.Tag("FrameIncrementPointer"), dicom.VR.AT)
+
+	assert rows.to_int_vector() == []
+	assert rows.to_long_vector() == []
+	assert rows.to_longlong_vector() == []
+
+	assert window_center.to_double_vector() == []
+	assert frame_increment_pointer.to_tag_vector() == []
+
+
+def test_remove_dataelement_accepts_tag_int_and_str_keys():
+	ds = dicom.DataSet()
+	ds.Rows = 512
+	ds.Columns = 256
+	ds.PatientName = "DOE^JOHN"
+
+	ds.remove_dataelement("Rows")
+	assert ds.get_value("Rows") is None
+
+	ds.remove_dataelement(0x00280011)
+	assert ds.get_value("Columns") is None
+
+	ds.remove_dataelement(dicom.Tag("PatientName"))
+	assert ds.get_value("PatientName") is None
+
+
 def test_dicomfile_dir_includes_dataset_members():
 	df = dicom.read_file(_test_file())
 	names = dir(df)
@@ -275,6 +333,14 @@ def test_len_delegates_to_root_dataset():
 	assert len(df) > 0
 
 
+def test_dicomfile_indexing_returns_dataelement():
+	df = dicom.read_file(_test_file())
+	elem = df["Rows"]
+	assert isinstance(elem, dicom.DataElement)
+	assert elem.value == df.Rows
+	assert df.get_value("Rows") == df.Rows
+
+
 def test_get_dataelement_truthiness_hides_sentinel():
 	df = dicom.read_file(_test_file())
 	present = df.dataset.get_dataelement("PatientName")
@@ -287,6 +353,31 @@ def test_get_dataelement_truthiness_hides_sentinel():
 	assert missing.is_present() is False
 	assert missing.is_missing() is True
 	assert missing.vr == getattr(dicom.VR, "None")
+
+	indexed = df.dataset["PatientName"]
+	assert bool(indexed) is True
+	assert indexed.value is not None
+
+	indexed_missing = df.dataset["NotARealKeyword"]
+	assert bool(indexed_missing) is False
+	assert indexed_missing.is_missing() is True
+	assert indexed_missing.value is None
+
+
+def test_contains_probes_dataset_and_file_presence():
+	df = dicom.read_file(_test_file())
+	ds = df.dataset
+
+	assert "Rows" in ds
+	assert dicom.Tag("Rows") in ds
+	assert 0x00280010 in ds
+	assert "NotARealKeyword" not in ds
+	assert "0008,GGGG" not in ds
+
+	assert "Rows" in df
+	assert dicom.Tag("Rows") in df
+	assert 0x00280010 in df
+	assert "NotARealKeyword" not in df
 
 
 def test_dump_available_on_file_and_dataset():

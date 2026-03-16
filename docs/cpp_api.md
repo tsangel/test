@@ -12,20 +12,28 @@ int main() {
   ds.attach_to_file("sample.dcm");
   ds.ensure_loaded("Rows"_tag);
 
-  const long rows = ds["Rows"_tag].to_long().value_or(0);
+  const long rows = ds.get_value<long>("Rows"_tag, 0L);
   // use rows
 }
 ```
 
 ## Preferred DataElement access pattern
 
-- Use `dataset[tag].to_xxx().value_or(default)` for regular reads with defaults.
+- Use `dataset.get_value<T>(tag, default)` for one-shot typed reads.
+- Use `dataset.get_value<std::string_view>(...)` or `dataset.get_value<std::vector<std::string_view>>(...)`
+  when you want zero-copy text access and can honor the returned view lifetime.
+- Use `dataset.set_value(tag, value)` for one-shot typed writes.
+- Use `dataset[tag].to_xxx().value_or(default)` when you are already working with a `DataElement`.
 - Use `if (auto& e = dataset[tag]; e)` only when element presence itself matters.
 - Use `get_dataelement(...)` when you want an explicitly named lookup API or tag-path parsing.
   It returns `DataElement&` and yields a falsey element (`VR::None`) on miss.
+- `set_value(...)` returns `false` on encode/assignment failure. The `DataSet` remains valid,
+  but the destination element state is unspecified; callers that need rollback must restore it themselves.
 
 ```cpp
-long rows = ds["Rows"_tag].to_long().value_or(0);
+long rows = ds.get_value<long>("Rows"_tag, 0L);
+bool ok = ds.set_value("StudyDescription"_tag, std::string_view("Example"));
+auto desc_view = ds.get_value<std::string_view>("StudyDescription"_tag);
 double slope = ds["RescaleSlope"_tag].to_double().value_or(1.0);
 const auto& dose =
     ds.get_dataelement("RadiopharmaceuticalInformationSequence.0.RadionuclideTotalDose");
@@ -38,6 +46,11 @@ if (dose) {
 
 For raw byte access, use `value_span()` on a `DataElement`.
 It returns `std::span<const std::uint8_t>` and does not allocate.
+
+For text VRs that can be read without charset-owned copies, `get_value<std::string_view>()`
+and `get_value<std::vector<std::string_view>>()` provide a similar zero-copy fast path.
+Those views are tied to the underlying `DataElement` storage and become invalid if the
+element is modified or removed.
 
 ```cpp
 using namespace dicom::literals;
@@ -115,6 +128,6 @@ Note: These attachment calls are intended for the root `DataSet` (the object ret
 
 :::{doxygenclass} dicom::DataSet
 :project: dicomsdl
-:members: DataSet, attach_to_file, attach_to_memory, path, add_dataelement, remove_dataelement, operator[], get_dataelement, dump_elements, read_attached_stream, ensure_loaded, is_explicit_vr, transfer_syntax_uid, begin, end, cbegin
+:members: DataSet, attach_to_file, attach_to_memory, path, add_dataelement, remove_dataelement, operator[], get_dataelement, get_value, set_value, dump_elements, read_attached_stream, ensure_loaded, is_explicit_vr, transfer_syntax_uid, begin, end, cbegin
 :undoc-members:
 :::
