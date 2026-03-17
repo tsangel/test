@@ -1863,6 +1863,9 @@ public:
 	///         allocation failures, or when called on a partially loaded attached dataset
 	///         for a tag beyond the current load frontier.
 	DataElement& add_dataelement(Tag tag, VR vr = VR::None);
+	/// Add or replace a leaf element addressed by a dotted tag path.
+	/// Intermediate sequence/item components are created as needed.
+	DataElement& add_dataelement(std::string_view tag_path, VR vr = VR::None);
 
 	/// Remove a data element by tag (no-op if missing).
 	/// Removing `(0008,0005)` through this API also refreshes the effective charset cache,
@@ -1891,6 +1894,9 @@ public:
 	///         called on a partially loaded attached dataset for a tag beyond the
 	///         current load frontier.
 	DataElement& ensure_dataelement(Tag tag, VR vr = VR::None);
+	/// Ensure that a leaf element exists for a dotted tag path.
+	/// Intermediate sequence/item components are created as needed.
+	DataElement& ensure_dataelement(std::string_view tag_path, VR vr = VR::None);
 
 	/// Low-level dotted tag-path resolver (e.g., "00540016.0.00181075").
 	/// Caller must ensure_loaded() the needed prefixes.
@@ -2045,6 +2051,11 @@ public:
 	[[nodiscard]] bool set_value(std::string_view key, VR vr, std::span<const PersonName> values);
 
 private:
+	struct TagPathParent {
+		DataSet* parent{nullptr};
+		Tag leaf_tag{};
+	};
+
 	friend class DicomFile;
 	friend class DataElement;
 	friend class Sequence;
@@ -2062,6 +2073,9 @@ private:
 	[[noreturn]] void throw_beyond_last_loaded_tag(Tag tag, const char* api_name) const;
 	[[nodiscard]] DataElement* find_dataelement_in_elements(std::uint32_t tag_value);
 	[[nodiscard]] const DataElement* find_dataelement_in_elements(std::uint32_t tag_value) const;
+	[[nodiscard]] Sequence& ensure_sequence_element(Tag tag, const char* api_name);
+	[[nodiscard]] TagPathParent ensure_tag_path_parent(
+	    std::string_view tag_path, const char* api_name);
 	DataElement& append_parsed_dataelement_nocheck(
 	    Tag tag, VR vr, std::size_t offset, std::size_t length);
 	DataElement& add_dataelement_nocheck(Tag tag, VR vr);
@@ -2072,6 +2086,8 @@ private:
 	void on_specific_character_set_changed() noexcept;
 	template <typename AssignFn>
 	bool set_value_impl(Tag tag, VR vr, AssignFn&& assign_fn);
+	template <typename AssignFn>
+	bool set_value_key_impl(std::string_view key, VR vr, AssignFn&& assign_fn);
 	[[nodiscard]] bool refresh_effective_charset_cache(
 	    const charset::detail::CharsetSpec* inherited, std::string* out_error = nullptr);
 	[[nodiscard]] const charset::detail::CharsetSpec* effective_charset_spec(
@@ -2149,10 +2165,12 @@ public:
 	/// @return Reference to the inserted/replaced element.
 	/// @throws Exception under the same conditions as DataSet::add_dataelement.
 	DataElement& add_dataelement(Tag tag, VR vr = VR::None);
+	DataElement& add_dataelement(std::string_view tag_path, VR vr = VR::None);
 	/// Forwarding helper to the root DataSet::ensure_dataelement.
 	/// @return Reference to the existing/inserted/replaced element.
 	/// @throws Exception under the same conditions as DataSet::ensure_dataelement.
 	DataElement& ensure_dataelement(Tag tag, VR vr = VR::None);
+	DataElement& ensure_dataelement(std::string_view tag_path, VR vr = VR::None);
 	void remove_dataelement(Tag tag);
 	DataElement& get_dataelement(Tag tag);
 	const DataElement& get_dataelement(Tag tag) const;

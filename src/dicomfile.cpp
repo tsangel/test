@@ -630,8 +630,16 @@ DataElement& DicomFile::add_dataelement(Tag tag, VR vr) {
 	return root_dataset_.add_dataelement(tag, vr);
 }
 
+DataElement& DicomFile::add_dataelement(std::string_view tag_path, VR vr) {
+	return root_dataset_.add_dataelement(tag_path, vr);
+}
+
 DataElement& DicomFile::ensure_dataelement(Tag tag, VR vr) {
 	return root_dataset_.ensure_dataelement(tag, vr);
+}
+
+DataElement& DicomFile::ensure_dataelement(std::string_view tag_path, VR vr) {
+	return root_dataset_.ensure_dataelement(tag_path, vr);
 }
 
 void DicomFile::remove_dataelement(Tag tag) {

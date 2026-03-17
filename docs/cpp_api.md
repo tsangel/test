@@ -101,12 +101,18 @@ For chaining-friendly "ensure presence" code, `ensure_dataelement(...)` is often
 ```cpp
 auto& rows = ds.ensure_dataelement("Rows"_tag);
 auto& private_elem = ds.ensure_dataelement(dicom::Tag(0x0009, 0x0030), dicom::VR::US);
+auto& nested =
+    ds.ensure_dataelement("ReferencedStudySequence.0.ReferencedSOPInstanceUID", dicom::VR::UI);
+bool nested_ok =
+    ds.set_value("ReferencedStudySequence.0.ReferencedSOPInstanceUID", std::string_view("1.2.3"));
 ```
 
 - If the element already exists and `vr == VR::None`, the existing element is returned unchanged.
 - If the element already exists and `vr` is explicit and different, the existing element is reset
   in place so the requested VR is guaranteed.
 - If the element is missing, a new zero-length element is inserted.
+- Dotted tag-path overloads create intermediate sequence elements/items as needed. Intermediate
+  path components must already be sequences if present.
 - `add_dataelement(...)` remains the always-replace API; `ensure_dataelement(...)` only resets
   when an explicit VR must be enforced.
 - On partially loaded attached datasets, calling `ensure_dataelement(...)` for a tag beyond the

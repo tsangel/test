@@ -44,12 +44,18 @@ ensured = ds.ensure_dataelement("Rows")
 assert ensured.vr == dicom.VR.US
 assert ds.set_value("Rows", rows_fast)
 assert ds.set_value(0x00090030, dicom.VR.US, 16)
+leaf = ds.ensure_dataelement(
+    "ReferencedStudySequence.0.ReferencedSOPInstanceUID", dicom.VR.UI
+)
+assert ds.set_value("ReferencedStudySequence.0.ReferencedSOPInstanceUID", "1.2.3")
 ```
 
 Partial-load note:
 
 - `get_value(...)` does not implicitly continue loading unread tail elements.
 - `set_value(...)` also does not implicitly continue loading unread tail elements.
+- `add_dataelement(...)`, `ensure_dataelement(...)`, and `set_value(...)` accept dotted tag-path
+  strings for nested sequence traversal and create intermediate sequence items as needed.
 - direct `add_dataelement(...)` / `ensure_dataelement(...)` calls for tags beyond the current
   load frontier raise instead of mutating unread tail data.
 

@@ -13,6 +13,7 @@
 #include <array>
 #include <atomic>
 #include <bit>
+#include <charconv>
 #include <cassert>
 #include <cctype>
 #include <cstring>
@@ -24,6 +25,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 using namespace dicom::literals;
@@ -191,6 +193,134 @@ std::optional<Tag> parse_private_creator_tag(DataSetPtr* dataset, std::string_vi
 		return std::nullopt;  // creator not found
 	}
 	return std::nullopt;
+}
+
+inline std::size_t parse_tag_path_index_or_throw(
+    std::string_view token, const char* api_name) {
+	token = trim(token);
+	if (token.empty()) {
+		diag::error_and_throw("{} reason=malformed sequence index in tag path", api_name);
+	}
+	std::size_t value = 0;
+	const auto* begin = token.data();
+	const auto* end = token.data() + token.size();
+	const auto result = std::from_chars(begin, end, value, 10);
+	if (result.ec != std::errc() || result.ptr != end) {
+		diag::error_and_throw("{} reason=malformed sequence index in tag path", api_name);
+	}
+	return value;
+}
+
+struct TagPathStep {
+	std::string_view tag_token{};
+	bool has_child = false;
+	std::string_view child_index_token{};
+};
+
+inline bool next_tag_path_step(
+    std::string_view& remaining, TagPathStep& step, const char* api_name, bool empty_is_missing) {
+	remaining = trim(remaining);
+	if (remaining.empty()) {
+		if (empty_is_missing) {
+			return false;
+		}
+		diag::error_and_throw("{} reason=empty tag path", api_name);
+	}
+
+	const auto dot_pos = remaining.find('.');
+	step.tag_token = remaining.substr(0, dot_pos);
+	step.has_child = (dot_pos != std::string_view::npos);
+	if (!step.has_child) {
+		step.child_index_token = {};
+		remaining = {};
+		return true;
+	}
+
+	remaining = remaining.substr(dot_pos + 1);
+	const auto next_dot = remaining.find('.');
+	step.child_index_token = remaining.substr(0, next_dot);
+	remaining =
+	    (next_dot == std::string_view::npos) ? std::string_view{} : remaining.substr(next_dot + 1);
+	return true;
+}
+
+template <typename DataSetPtr>
+std::optional<Tag> locate_tag_path_token(
+    DataSetPtr* dataset, std::string_view token) {
+	token = strip_parens(trim(token));
+	try {
+		return Tag(token);
+	} catch (const std::invalid_argument&) {
+		return parse_private_creator_tag(dataset, token);
+	}
+}
+
+template <typename DataSetPtr>
+using tag_path_element_ref_t =
+    std::conditional_t<std::is_const_v<DataSetPtr>, const DataElement&, DataElement&>;
+
+template <typename DataSetPtr>
+tag_path_element_ref_t<DataSetPtr> get_dataelement_by_path_impl(
+    DataSetPtr* dataset, std::string_view tag_path, const char* api_name) {
+	DataSetPtr* current = dataset;
+	std::string_view remaining = trim(tag_path);
+	if (remaining.empty()) {
+		return *NullElement();
+	}
+	if (remaining.find('.') == std::string_view::npos) {
+		const auto tag = locate_tag_path_token(current, remaining);
+		if (!tag) {
+			return *NullElement();
+		}
+		return current->get_dataelement(*tag);
+	}
+	TagPathStep step;
+	while (next_tag_path_step(remaining, step, api_name, true)) {
+		const auto tag = locate_tag_path_token(current, step.tag_token);
+		if (!tag) {
+			return *NullElement();
+		}
+
+		auto& element = current->get_dataelement(*tag);
+		if (!step.has_child || element.is_missing()) {
+			return element;
+		}
+		if (!element.vr().is_sequence()) {
+			diag::error_and_throw(
+			    "{} element={} reason=intermediate path element is not a sequence",
+			    api_name, element.tag().to_string());
+		}
+
+		auto* seq = element.as_sequence();
+		if (!seq) {
+			return *NullElement();
+		}
+
+		const std::size_t index =
+		    parse_tag_path_index_or_throw(step.child_index_token, api_name);
+		current = seq->get_dataset(index);
+		if (!current) {
+			return *NullElement();
+		}
+	}
+	return *NullElement();
+}
+
+template <typename DataSetPtr>
+Tag parse_tag_path_token_or_throw(
+    DataSetPtr* dataset, std::string_view token, const char* api_name) {
+	token = strip_parens(trim(token));
+	try {
+		return Tag(token);
+	} catch (const std::invalid_argument&) {
+		auto private_tag = parse_private_creator_tag(dataset, token);
+		if (private_tag) {
+			return *private_tag;
+		}
+		diag::error_and_throw(
+		    "{} file={} token={} reason=unable to resolve tag-path token",
+		    api_name, dataset->root_dataset()->path(), std::string(token));
+	}
 }
 DataSet::DataSet() : root_dataset_(this) {
 	explicit_vr_ = "ExplicitVRLittleEndian"_uid.uses_explicit_vr();
@@ -569,6 +699,65 @@ DataElement& DataSet::append_parsed_dataelement_nocheck(
 	return *element;
 }
 
+DataSet::TagPathParent DataSet::ensure_tag_path_parent(
+    std::string_view tag_path, const char* api_name) {
+	DataSet* current = this;
+	std::string_view remaining = trim(tag_path);
+	if (remaining.empty()) {
+		diag::error_and_throw("{} reason=empty tag path", api_name);
+	}
+	if (remaining.find('.') == std::string_view::npos) {
+		return {current, parse_tag_path_token_or_throw(current, remaining, api_name)};
+	}
+
+	TagPathStep step;
+	while (next_tag_path_step(remaining, step, api_name, false)) {
+		const Tag tag = parse_tag_path_token_or_throw(current, step.tag_token, api_name);
+		if (!step.has_child) {
+			return {current, tag};
+		}
+
+		Sequence& seq = current->ensure_sequence_element(tag, api_name);
+		const std::size_t index =
+		    parse_tag_path_index_or_throw(step.child_index_token, api_name);
+		if (auto* next = seq.get_dataset(index)) {
+			current = next;
+			continue;
+		}
+		if (index != static_cast<std::size_t>(seq.size())) {
+			diag::error_and_throw(
+			    "{} element={} index={} reason=sequence item index must be an existing item or the next append slot",
+			    api_name, tag.to_string(), index);
+		}
+		current = seq.add_dataset();
+	}
+
+	diag::error_and_throw("{} reason=empty tag path", api_name);
+}
+
+Sequence& DataSet::ensure_sequence_element(Tag tag, const char* api_name) {
+	DataElement& existing = get_dataelement(tag);
+	DataElement* sequence_element = nullptr;
+	if (existing.is_missing()) {
+		sequence_element = &ensure_dataelement(tag, VR::SQ);
+	} else {
+		if (!existing.vr().is_sequence()) {
+			diag::error_and_throw(
+			    "{} element={} reason=intermediate path element is not a sequence",
+			    api_name, existing.tag().to_string());
+		}
+		sequence_element = &existing;
+	}
+
+	auto* seq = sequence_element->as_sequence();
+	if (!seq) {
+		diag::error_and_throw(
+		    "{} element={} reason=sequence storage is unavailable",
+		    api_name, sequence_element->tag().to_string());
+	}
+	return *seq;
+}
+
 DataElement& DataSet::add_dataelement(Tag tag, VR vr) {
 	if (is_beyond_last_loaded_tag(tag)) [[unlikely]] {
 		throw_beyond_last_loaded_tag(tag, "DataSet::add_dataelement");
@@ -635,6 +824,11 @@ DataElement& DataSet::add_dataelement(Tag tag, VR vr) {
 		on_specific_character_set_changed();
 	}
 	return element;
+}
+
+DataElement& DataSet::add_dataelement(std::string_view tag_path, VR vr) {
+	auto resolved = ensure_tag_path_parent(tag_path, "DataSet::add_dataelement");
+	return resolved.parent->add_dataelement(resolved.leaf_tag, vr);
 }
 
 DataElement& DataSet::get_dataelement(Tag tag) {
@@ -740,150 +934,17 @@ DataElement& DataSet::ensure_dataelement(Tag tag, VR vr) {
 	return inserted;
 }
 
-// Parse a tag path expressed as text and resolve it to a DataElement.
-// Supported forms:
-//   - Hex tag with or without parens/comma: "00100010", "(0010,0010)"
-//   - Keyword: "PatientName"
-//   - Private creator (recommended style): "gggg,xxee,CREATOR" where gggg is odd,
-//     xx is the reserved block (literal "xx" placeholder allowed), and CREATOR is the
-//     Private Creator string present in (gggg,00xx); e.g., "0009,xx1e,GEMS_GENIE_1"
-//   - Nested sequences: "00082112.0.00081190" (sequence tag . index . child tag ...),
-//     keyword-friendly paths like "RadiopharmaceuticalInformationSequence.0.RadionuclideTotalDose" work too
-// Behavior:
-//   - Returns a falsey DataElement (VR::None) when the tag (or nested dataset) is missing
-//   - Uses diag::error_and_throw for malformed strings, non-sequence traversal, bad indices, etc.
+DataElement& DataSet::ensure_dataelement(std::string_view tag_path, VR vr) {
+	auto resolved = ensure_tag_path_parent(tag_path, "DataSet::ensure_dataelement");
+	return resolved.parent->ensure_dataelement(resolved.leaf_tag, vr);
+}
+
 DataElement& DataSet::get_dataelement(std::string_view tag_path) {
-	// Walk the path one dataset level at a time, starting from this dataset.
-	DataSet* current = this;
-	std::string_view remaining = trim(tag_path);
-
-	while (!remaining.empty()) {
-		// Split the next tag token from the optional ".index.rest" suffix.
-		const auto dot_pos = remaining.find('.');
-		auto tag_token = strip_parens(trim(remaining.substr(0, dot_pos)));
-		remaining = (dot_pos == std::string_view::npos) ? std::string_view{} : remaining.substr(dot_pos + 1);
-
-		// Resolve the textual token as either a standard tag/keyword or a private-creator tag.
-		Tag tag{};
-		try {
-			tag = Tag(tag_token);
-		} catch (const std::invalid_argument&) {
-			auto private_tag = parse_private_creator_tag(current, tag_token);
-			if (!private_tag) {
-				return *NullElement();
-			}
-			tag = *private_tag;
-		}
-
-		// Look up the current level; a miss anywhere in the path returns the falsey sentinel.
-		DataElement& element = current->get_dataelement(tag);
-		if (element.is_missing()) {
-			return element;
-		}
-		// Stop once the final tag token resolves successfully.
-		if (dot_pos == std::string_view::npos) {
-			return element;
-		}
-
-		// Parse the next sequence item index before descending into the child dataset.
-		const auto next_dot = remaining.find('.');
-		auto index_token = trim(remaining.substr(0, next_dot));
-		remaining = (next_dot == std::string_view::npos) ? std::string_view{} : remaining.substr(next_dot + 1);
-
-		// Nested traversal is only valid through sequence elements.
-		if (!element.vr().is_sequence()) {
-			diag::error_and_throw("Element {} is not a sequence; cannot index into it",
-			    element.tag().to_string());
-		}
-
-		auto* seq = element.as_sequence();
-		if (!seq) {
-			return *NullElement();
-		}
-
-		std::size_t idx = 0;
-		try {
-			idx = static_cast<std::size_t>(std::stoul(std::string(index_token), nullptr, 10));
-		} catch (const std::exception&) {
-			diag::error_and_throw("Malformed sequence index in tag path");
-		}
-
-		// Advance to the indexed item dataset and continue with the remaining path.
-		current = seq->get_dataset(idx);
-		if (!current) {
-			return *NullElement();
-		}
-	}
-
-	// Empty or fully consumed paths fall back to the falsey sentinel.
-	return *NullElement();
+	return get_dataelement_by_path_impl(this, tag_path, "DataSet::get_dataelement");
 }
 
 const DataElement& DataSet::get_dataelement(std::string_view tag_path) const {
-	// Walk the path one dataset level at a time, starting from this dataset.
-	const DataSet* current = this;
-	std::string_view remaining = trim(tag_path);
-
-	while (!remaining.empty()) {
-		// Split the next tag token from the optional ".index.rest" suffix.
-		const auto dot_pos = remaining.find('.');
-		auto tag_token = strip_parens(trim(remaining.substr(0, dot_pos)));
-		remaining = (dot_pos == std::string_view::npos) ? std::string_view{} : remaining.substr(dot_pos + 1);
-
-		// Resolve the textual token as either a standard tag/keyword or a private-creator tag.
-		Tag tag{};
-		try {
-			tag = Tag(tag_token);
-		} catch (const std::invalid_argument&) {
-			auto private_tag = parse_private_creator_tag(current, tag_token);
-			if (!private_tag) {
-				return *NullElement();
-			}
-			tag = *private_tag;
-		}
-
-		// Look up the current level; a miss anywhere in the path returns the falsey sentinel.
-		const DataElement& element = current->get_dataelement(tag);
-		if (element.is_missing()) {
-			return element;
-		}
-		// Stop once the final tag token resolves successfully.
-		if (dot_pos == std::string_view::npos) {
-			return element;
-		}
-
-		// Parse the next sequence item index before descending into the child dataset.
-		const auto next_dot = remaining.find('.');
-		auto index_token = trim(remaining.substr(0, next_dot));
-		remaining = (next_dot == std::string_view::npos) ? std::string_view{} : remaining.substr(next_dot + 1);
-
-		// Nested traversal is only valid through sequence elements.
-		if (!element.vr().is_sequence()) {
-			diag::error_and_throw("Element {} is not a sequence; cannot index into it",
-			    element.tag().to_string());
-		}
-
-		auto* seq = element.as_sequence();
-		if (!seq) {
-			return *NullElement();
-		}
-
-		std::size_t idx = 0;
-		try {
-			idx = static_cast<std::size_t>(std::stoul(std::string(index_token), nullptr, 10));
-		} catch (const std::exception&) {
-			diag::error_and_throw("Malformed sequence index in tag path");
-		}
-
-		// Advance to the indexed item dataset and continue with the remaining path.
-		current = seq->get_dataset(idx);
-		if (!current) {
-			return *NullElement();
-		}
-	}
-
-	// Empty or fully consumed paths fall back to the falsey sentinel.
-	return *NullElement();
+	return get_dataelement_by_path_impl(this, tag_path, "DataSet::get_dataelement");
 }
 
 DataElement& DataSet::operator[](Tag tag) {

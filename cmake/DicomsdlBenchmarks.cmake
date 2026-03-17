@@ -1,6 +1,12 @@
 option(DICOM_BUILD_BENCHMARKS "Build benchmark executables for dicomsdl" OFF)
 
 if(DICOM_BUILD_BENCHMARKS)
+    add_executable(dicomsdl_tag_path_access_bench
+        benchmarks/tag_path_access_bench.cpp
+    )
+    target_link_libraries(dicomsdl_tag_path_access_bench PRIVATE dicomsdl)
+    target_compile_features(dicomsdl_tag_path_access_bench PRIVATE cxx_std_20)
+
     add_executable(dicomsdl_dataelement_queue_bench
         benchmarks/dataelement_queue_bench.cpp
     )

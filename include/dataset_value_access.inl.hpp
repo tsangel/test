@@ -4,14 +4,6 @@
 
 namespace detail {
 
-inline Tag tag_key_from_text_cpp(std::string_view key, const char* api_name) {
-	if (key.find('.') != std::string_view::npos) {
-		throw std::invalid_argument(std::string(api_name) +
-		    " does not support nested tag-path strings");
-	}
-	return Tag(key);
-}
-
 inline std::optional<std::string> dataelement_get_owned_string_cpp(
     const DataElement& element) {
 	if (!element.is_present()) {
@@ -116,6 +108,11 @@ T DataSet::get_value(std::string_view tag_path, T default_value) const {
 template <typename AssignFn>
 bool DataSet::set_value_impl(Tag tag, VR vr, AssignFn&& assign_fn) {
 	return assign_fn(ensure_dataelement(tag, vr));
+}
+
+template <typename AssignFn>
+bool DataSet::set_value_key_impl(std::string_view key, VR vr, AssignFn&& assign_fn) {
+	return assign_fn(ensure_dataelement(key, vr));
 }
 
 inline bool DataSet::set_value(Tag tag, std::string_view value) {
@@ -224,23 +221,27 @@ inline bool DataSet::set_value(Tag tag, VR vr, std::span<const PersonName> value
 		    tag, VR::None, [&](DataElement& element) { return element.method_name(value); });          \
 	}                                                                                                  \
 	inline bool DataSet::set_value(std::string_view key, cpp_type value) {                            \
-		return set_value(detail::tag_key_from_text_cpp(key, "DataSet::set_value"), value);            \
+		return set_value_key_impl(                                                                     \
+		    key, VR::None, [&](DataElement& element) { return element.method_name(value); });          \
 	}                                                                                                  \
 	inline bool DataSet::set_value(Tag tag, VR vr, cpp_type value) {                                  \
 		return set_value_impl(                                                                         \
 		    tag, vr, [&](DataElement& element) { return element.method_name(value); });                \
 	}                                                                                                  \
 	inline bool DataSet::set_value(std::string_view key, VR vr, cpp_type value) {                     \
-		return set_value(detail::tag_key_from_text_cpp(key, "DataSet::set_value"), vr, value);        \
+		return set_value_key_impl(                                                                     \
+		    key, vr, [&](DataElement& element) { return element.method_name(value); });                \
 	}
 
-#define DICOMSDL_DEFINE_DATASET_SET_VALUE_SPAN(cpp_type)                                             \
+#define DICOMSDL_DEFINE_DATASET_SET_VALUE_SPAN(cpp_type, method_name)                                \
 	inline bool DataSet::set_value(std::string_view key, std::span<const cpp_type> values) {         \
-		return set_value(detail::tag_key_from_text_cpp(key, "DataSet::set_value"), values);          \
+		return set_value_key_impl(                                                                     \
+		    key, VR::None, [&](DataElement& element) { return element.method_name(values); });        \
 	}                                                                                                  \
 	inline bool DataSet::set_value(                                                                   \
 	    std::string_view key, VR vr, std::span<const cpp_type> values) {                              \
-		return set_value(detail::tag_key_from_text_cpp(key, "DataSet::set_value"), vr, values);      \
+		return set_value_key_impl(                                                                     \
+		    key, vr, [&](DataElement& element) { return element.method_name(values); });              \
 	}
 
 DICOMSDL_DEFINE_DATASET_SET_VALUE_SCALAR(int, from_int)
@@ -249,30 +250,66 @@ DICOMSDL_DEFINE_DATASET_SET_VALUE_SCALAR(long long, from_longlong)
 DICOMSDL_DEFINE_DATASET_SET_VALUE_SCALAR(double, from_double)
 DICOMSDL_DEFINE_DATASET_SET_VALUE_SCALAR(Tag, from_tag)
 
-DICOMSDL_DEFINE_DATASET_SET_VALUE_SPAN(int)
-DICOMSDL_DEFINE_DATASET_SET_VALUE_SPAN(long)
-DICOMSDL_DEFINE_DATASET_SET_VALUE_SPAN(long long)
-DICOMSDL_DEFINE_DATASET_SET_VALUE_SPAN(double)
-DICOMSDL_DEFINE_DATASET_SET_VALUE_SPAN(Tag)
-DICOMSDL_DEFINE_DATASET_SET_VALUE_SPAN(std::string_view)
-DICOMSDL_DEFINE_DATASET_SET_VALUE_SPAN(PersonName)
+DICOMSDL_DEFINE_DATASET_SET_VALUE_SPAN(int, from_int_vector)
+DICOMSDL_DEFINE_DATASET_SET_VALUE_SPAN(long, from_long_vector)
+DICOMSDL_DEFINE_DATASET_SET_VALUE_SPAN(long long, from_longlong_vector)
+DICOMSDL_DEFINE_DATASET_SET_VALUE_SPAN(double, from_double_vector)
+DICOMSDL_DEFINE_DATASET_SET_VALUE_SPAN(Tag, from_tag_vector)
 
 inline bool DataSet::set_value(std::string_view key, std::string_view value) {
-	return set_value(detail::tag_key_from_text_cpp(key, "DataSet::set_value"), value);
+	return set_value_key_impl(key, VR::None,
+	    [&](DataElement& element) {
+		    return element.vr().uses_specific_character_set() ? element.from_utf8_view(value)
+		                                                      : element.from_string_view(value);
+	    });
 }
 
 inline bool DataSet::set_value(std::string_view key, const PersonName& value) {
-	return set_value(detail::tag_key_from_text_cpp(key, "DataSet::set_value"), value);
+	return set_value_key_impl(
+	    key, VR::None, [&](DataElement& element) { return element.from_person_name(value); });
+}
+
+inline bool DataSet::set_value(
+    std::string_view key, std::span<const std::string_view> values) {
+	return set_value_key_impl(key, VR::None,
+	    [&](DataElement& element) {
+		    return detail::dataelement_set_string_values_cpp(element, values);
+	    });
+}
+
+inline bool DataSet::set_value(
+    std::string_view key, std::span<const PersonName> values) {
+	return set_value_key_impl(
+	    key, VR::None, [&](DataElement& element) { return element.from_person_names(values); });
 }
 
 inline bool DataSet::set_value(
     std::string_view key, VR vr, std::string_view value) {
-	return set_value(detail::tag_key_from_text_cpp(key, "DataSet::set_value"), vr, value);
+	return set_value_key_impl(key, vr,
+	    [&](DataElement& element) {
+		    return element.vr().uses_specific_character_set() ? element.from_utf8_view(value)
+		                                                      : element.from_string_view(value);
+	    });
 }
 
 inline bool DataSet::set_value(
     std::string_view key, VR vr, const PersonName& value) {
-	return set_value(detail::tag_key_from_text_cpp(key, "DataSet::set_value"), vr, value);
+	return set_value_key_impl(
+	    key, vr, [&](DataElement& element) { return element.from_person_name(value); });
+}
+
+inline bool DataSet::set_value(
+    std::string_view key, VR vr, std::span<const std::string_view> values) {
+	return set_value_key_impl(key, vr,
+	    [&](DataElement& element) {
+		    return detail::dataelement_set_string_values_cpp(element, values);
+	    });
+}
+
+inline bool DataSet::set_value(
+    std::string_view key, VR vr, std::span<const PersonName> values) {
+	return set_value_key_impl(
+	    key, vr, [&](DataElement& element) { return element.from_person_names(values); });
 }
 
 template <typename T>

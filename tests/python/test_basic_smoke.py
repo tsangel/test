@@ -369,12 +369,12 @@ def test_attribute_assignment_preserves_dicom_errors():
 	ds = dicom.DataSet()
 	with pytest.raises((RuntimeError, ValueError)) as excinfo:
 		ds.Rows = -1
-	assert "Failed to assign value to (0028,0010)" in str(excinfo.value)
+	assert "Failed to assign value to Rows (US)" in str(excinfo.value)
 
 	df = dicom.DicomFile()
 	with pytest.raises((RuntimeError, ValueError)) as excinfo:
 		df.Rows = -1
-	assert "Failed to assign value to (0028,0010)" in str(excinfo.value)
+	assert "Failed to assign value to Rows (US)" in str(excinfo.value)
 
 
 def test_out_of_order_add_dataelement_keeps_sorted_iteration_and_lookup():
@@ -398,6 +398,29 @@ def test_out_of_order_add_dataelement_keeps_sorted_iteration_and_lookup():
 	ds.remove_dataelement(0x00091030)
 	assert not ds.get_dataelement(0x00091030)
 	assert ds.get_dataelement(0x00091031).length == 0
+
+
+def test_nested_path_add_ensure_and_set_value():
+	ds = dicom.DataSet()
+
+	ensured = ds.ensure_dataelement(
+		"ReferencedStudySequence.0.ReferencedSOPInstanceUID", dicom.VR.UI
+	)
+	assert ensured
+	assert ensured.vr == dicom.VR.UI
+
+	assert ds.set_value("ReferencedStudySequence.0.ReferencedSOPInstanceUID", "1.2.3.4")
+	assert ds.get_value("ReferencedStudySequence.0.ReferencedSOPInstanceUID") == "1.2.3.4"
+
+	reset_leaf = ds.add_dataelement(
+		"ReferencedStudySequence.0.ReferencedSOPInstanceUID", dicom.VR.LO
+	)
+	assert reset_leaf is ensured
+	assert reset_leaf.vr == dicom.VR.LO
+
+	ds.add_dataelement(dicom.Tag("Rows"), dicom.VR.US)
+	with pytest.raises(Exception):
+		ds.ensure_dataelement("Rows.0.Columns", dicom.VR.US)
 
 
 def test_dicomfile_dir_includes_dataset_members():

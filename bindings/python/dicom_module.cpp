@@ -2071,14 +2071,25 @@ bool dataset_contains_py(DataSet& self, nb::handle key, const char* key_error_me
 }
 
 Tag dataset_assignment_key_to_tag(nb::handle key);
+std::optional<std::string> dataset_assignment_key_to_text(nb::handle key);
 
 bool dataset_try_set_value_py(DataSet& self, nb::handle key, nb::handle value) {
+	if (auto text = dataset_assignment_key_to_text(key)) {
+		return dataelement_set_value_py(self.ensure_dataelement(*text), value);
+	}
 	const Tag tag = dataset_assignment_key_to_tag(key);
 	return dataelement_set_value_py(self.ensure_dataelement(tag), value);
 }
 
 bool dataset_try_set_value_with_vr_py(
     DataSet& self, nb::handle key, VR vr, nb::handle value) {
+	if (auto text = dataset_assignment_key_to_text(key)) {
+		DataElement& target = self.ensure_dataelement(*text, vr);
+		if (target.vr().is_sequence() || target.vr().is_pixel_sequence()) {
+			return false;
+		}
+		return dataelement_set_value_py(target, value);
+	}
 	const Tag tag = dataset_assignment_key_to_tag(key);
 	if (vr == VR::None) {
 		return dataset_try_set_value_py(self, key, value);
@@ -2107,13 +2118,28 @@ Tag dataset_assignment_key_to_tag(nb::handle key) {
 	throw nb::type_error("DataSet assignment keys must be Tag, int (0xGGGEEEE), or str");
 }
 
+std::optional<std::string> dataset_assignment_key_to_text(nb::handle key) {
+	if (!nb::isinstance<nb::str>(key)) {
+		return std::nullopt;
+	}
+	return nb::cast<std::string>(key);
+}
+
 void dataset_set_value_py(DataSet& self, nb::handle key, nb::handle value) {
-	const Tag tag = dataset_assignment_key_to_tag(key);
 	if (!dataset_try_set_value_py(self, key, value)) {
-		const DataElement& element = self.get_dataelement(tag);
-		const VR vr = element.is_present() ? element.vr() : VR::None;
+		std::string target_name;
+		const DataElement* element = nullptr;
+		if (auto text = dataset_assignment_key_to_text(key)) {
+			target_name = *text;
+			element = &self.get_dataelement(*text);
+		} else {
+			const Tag tag = dataset_assignment_key_to_tag(key);
+			target_name = tag.to_string();
+			element = &self.get_dataelement(tag);
+		}
+		const VR vr = element->is_present() ? element->vr() : VR::None;
 		throw nb::value_error(
-		    ("Failed to assign value to " + tag.to_string() + " (" + std::string(vr.str()) + ")")
+		    ("Failed to assign value to " + target_name + " (" + std::string(vr.str()) + ")")
 		        .c_str());
 	}
 }
@@ -3145,7 +3171,11 @@ NB_MODULE(_dicomsdl, m) {
 		.def("size", &DataSet::size,
 		    "Number of active DataElements currently available in this DataSet")
 		.def("add_dataelement",
-		    [](DataSet& self, const Tag& tag, std::optional<VR> vr) -> DataElement& {
+		    [](DataSet& self, nb::handle key, std::optional<VR> vr) -> DataElement& {
+		        if (auto text = dataset_assignment_key_to_text(key)) {
+			        return self.add_dataelement(*text, vr.value_or(VR::None));
+		        }
+		        const Tag tag = dataset_assignment_key_to_tag(key);
 		        return self.add_dataelement(tag, vr.value_or(VR::None));
 		    },
 		    nb::arg("tag"), nb::arg("vr") = nb::none(),
@@ -3155,12 +3185,15 @@ NB_MODULE(_dicomsdl, m) {
 		    "implicitly continuing the load.")
 		.def("ensure_dataelement",
 		    [](DataSet& self, nb::handle key, std::optional<VR> vr) -> DataElement& {
+		        if (auto text = dataset_assignment_key_to_text(key)) {
+			        return self.ensure_dataelement(*text, vr.value_or(VR::None));
+		        }
 		        const Tag tag = dataset_assignment_key_to_tag(key);
 		        return self.ensure_dataelement(tag, vr.value_or(VR::None));
 		    },
 		    nb::arg("tag"), nb::arg("vr") = nb::none(),
 		    nb::rv_policy::reference_internal,
-		    "Return the existing DataElement for a Tag, packed int, or keyword/tag string, "
+		    "Return the existing DataElement for a Tag, packed int, or keyword/tag-path string, "
 		    "or add a new zero-length element when missing. When `vr` is omitted/None, an "
 		    "existing element is preserved as-is. When `vr` is explicit and differs from the "
 		    "existing element VR, the existing element is reset in place so the requested VR "
@@ -3227,7 +3260,7 @@ NB_MODULE(_dicomsdl, m) {
 			    return dataset_try_set_value_py(self, key, value);
 		    },
 		    nb::arg("key"), nb::arg("value"),
-		    "Best-effort typed assignment by Tag, packed int, or keyword string. "
+		    "Best-effort typed assignment by Tag, packed int, or keyword/tag-path string. "
 		    "Returns True on success, False when the value cannot be encoded for "
 		    "the target VR, and treats `None` as a zero-length present value. "
 		    "On partially loaded file-backed datasets, unread future tags raise instead of "

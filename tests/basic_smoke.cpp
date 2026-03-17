@@ -308,6 +308,40 @@ int main() {
 			}
 		}
 		{
+			DataSet ds;
+			auto& ensured = ds.ensure_dataelement(
+			    "ReferencedStudySequence.0.ReferencedSOPInstanceUID", dicom::VR::UI);
+			if (!ensured || ensured.vr() != dicom::VR::UI) {
+				fail("DataSet::ensure_dataelement(tag_path, vr) should create nested sequence parents");
+			}
+			if (!ds.set_value(
+			        "ReferencedStudySequence.0.ReferencedSOPInstanceUID",
+			        std::string_view("1.2.3.4"))) {
+				fail("DataSet::set_value(tag_path, value) should assign nested leaf elements");
+			}
+			const auto nested_uid = ds.get_value<std::string>(
+			    "ReferencedStudySequence.0.ReferencedSOPInstanceUID");
+			if (!nested_uid || *nested_uid != "1.2.3.4") {
+				fail("DataSet::get_value(tag_path) should read nested leaf elements after assignment");
+			}
+			auto& reset_leaf = ds.add_dataelement(
+			    "ReferencedStudySequence.0.ReferencedSOPInstanceUID", dicom::VR::LO);
+			if (&reset_leaf != &ensured || reset_leaf.vr() != dicom::VR::LO) {
+				fail("DataSet::add_dataelement(tag_path, vr) should reset the nested leaf in place");
+			}
+
+			ds.add_dataelement("Rows"_tag, dicom::VR::US);
+			bool non_sequence_threw = false;
+			try {
+				(void)ds.ensure_dataelement("Rows.0.Columns", dicom::VR::US);
+			} catch (const std::exception&) {
+				non_sequence_threw = true;
+			}
+			if (!non_sequence_threw) {
+				fail("Nested ensure_dataelement should throw when an intermediate element is not a sequence");
+			}
+		}
+		{
 			const auto fixture_dir = std::filesystem::path(__FILE__).parent_path();
 			const auto fixture_path = fixture_dir / "test_le.dcm";
 			dicom::ReadOptions opts{};
