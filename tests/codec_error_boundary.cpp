@@ -49,6 +49,9 @@ void configure_minimal_integral_pixel_metadata(dicom::DicomFile& df) {
 	set_long_element(df, "BitsStored"_tag, dicom::VR::US, 16, "BitsStored");
 	set_long_element(df, "PixelRepresentation"_tag, dicom::VR::US, 0, "PixelRepresentation");
 	set_long_element(df, "NumberOfFrames"_tag, dicom::VR::IS, 1, "NumberOfFrames");
+	if (!df.set_value("PhotometricInterpretation"_tag, std::string_view("MONOCHROME2"))) {
+		fail("failed to set PhotometricInterpretation");
+	}
 }
 
 void expect_decode_throw(std::string_view label, dicom::DicomFile& df,

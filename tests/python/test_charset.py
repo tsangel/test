@@ -437,9 +437,9 @@ def test_set_value_accepts_explicit_vr_for_private_creation_and_override():
 	assert ds[private_tag].value == 17
 
 	seq = ds.add_dataelement(dicom.Tag("ReferencedStudySequence"), dicom.VR.SQ)
-	assert ds.set_value("ReferencedStudySequence", dicom.VR.US, 1) is False
-	assert ds["ReferencedStudySequence"].vr == dicom.VR.SQ
-	assert ds["ReferencedStudySequence"].sequence is not None
+	assert ds.set_value("ReferencedStudySequence", dicom.VR.US, 1) is True
+	assert ds["ReferencedStudySequence"].vr == dicom.VR.US
+	assert ds["ReferencedStudySequence"].value == 1
 
 
 def test_dataset_assignment_sugar_sets_text_and_person_name_values():
