@@ -495,7 +495,7 @@ std::optional<uid::WellKnown> well_known_uid_from_element_value(const DataElemen
 	if (!normalized) {
 		return std::nullopt;
 	}
-	return uid::from_value(std::string(*normalized));
+	return uid::from_value(*normalized);
 }
 
 }  // namespace

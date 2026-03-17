@@ -131,12 +131,47 @@ private:
 		return false;
 	}
 
-	static constexpr std::uint32_t tag_value_from_text(std::string_view text) {
-		if (const auto* entry = lookup::keyword_to_entry_chd(text)) {
-			return entry->tag_value;
+	static constexpr bool looks_like_numeric_tag_text(std::string_view text) noexcept {
+		bool saw_delimiter = false;
+		int digits = 0;
+		for (char c : text) {
+			if (c == '(' || c == ')' || c == ',' || c == ' ' || c == '\t') {
+				saw_delimiter = true;
+				continue;
+			}
+			if (!is_hex_digit(c)) {
+				return false;
+			}
+			++digits;
+			if (digits > 8) {
+				return false;
+			}
 		}
+		return digits == 8 && (saw_delimiter || text.size() == 8);
+	}
+
+	static constexpr bool looks_like_common_numeric_tag_text(std::string_view text) noexcept {
+		return text.size() == 8 || (text.size() == 9 && text[4] == ',') ||
+		       (text.size() == 11 && text.front() == '(' && text[5] == ',' &&
+		        text.back() == ')');
+	}
+
+	static constexpr std::uint32_t tag_value_from_text(std::string_view text) {
 		std::uint32_t numeric_value = 0;
-		if (try_parse_numeric_tag(text, numeric_value)) {
+		if (looks_like_common_numeric_tag_text(text) && try_parse_numeric_tag(text, numeric_value)) {
+			return numeric_value;
+		}
+		if (std::is_constant_evaluated()) {
+			if (const auto* entry = lookup::keyword_to_entry_chd(text)) {
+				return entry->tag_value;
+			}
+		} else {
+			if (const auto* entry = lookup::keyword_to_entry_runtime(text)) {
+				return entry->tag_value;
+			}
+		}
+		if (looks_like_numeric_tag_text(text) &&
+		    try_parse_numeric_tag(text, numeric_value)) {
 			return numeric_value;
 		}
 		throw std::invalid_argument("Unknown DICOM keyword");
@@ -698,14 +733,18 @@ inline constexpr VR VR::None{uint16_t(VR::None_val)};
 namespace lookup {
 
 constexpr std::pair<Tag, VR> keyword_to_tag_vr(std::string_view keyword) {
-	if (const auto* entry = keyword_to_entry_chd(keyword)) {
+	const auto* entry = std::is_constant_evaluated() ? keyword_to_entry_chd(keyword)
+	                                                 : keyword_to_entry_runtime(keyword);
+	if (entry) {
 		return {Tag::from_value(entry->tag_value), VR(entry->vr_value)};
 	}
 	return {Tag{}, VR{}};
 }
 
 constexpr std::string_view keyword_to_tag_text(std::string_view keyword) {
-	if (const auto* entry = keyword_to_entry_chd(keyword)) {
+	const auto* entry = std::is_constant_evaluated() ? keyword_to_entry_chd(keyword)
+	                                                 : keyword_to_entry_runtime(keyword);
+	if (entry) {
 		return entry->tag;
 	}
 	return {};

@@ -11,7 +11,7 @@ from __future__ import annotations
 import sys
 import time
 from pathlib import Path
-from typing import Callable, List, Tuple
+from typing import Callable, Iterable, List, Tuple
 
 
 def bench(label: str, func: Callable[[], object], iterations: int) -> Tuple[str, float]:
@@ -24,51 +24,127 @@ def bench(label: str, func: Callable[[], object], iterations: int) -> Tuple[str,
     return label, (dt * 1e6) / iterations  # microseconds per call
 
 
+def _bench_group(
+    exprs: Iterable[Tuple[str, Callable[[], object]]], iterations: int
+) -> List[Tuple[str, float]]:
+    return [bench(label, fn, iterations=iterations) for label, fn in exprs]
+
+
+def _default_sample_path() -> Path:
+    root = Path(__file__).resolve().parents[2]
+    legacy_name = (
+        "1.2.840.113619.2.99.1234.1210123180.675655_0000_000034_121066021209fb.dcm"
+    )
+    legacy_candidates = [
+        root.parent / "sample" / legacy_name,
+        root / "sample" / legacy_name,
+    ]
+    for legacy in legacy_candidates:
+        if legacy.exists():
+            return legacy
+    return root / "tests" / "test_le.dcm"
+
+
 def run_dicomsdl(sample_path: Path, which: str = "both") -> List[Tuple[str, float]]:
     import dicomsdl as dicom
 
     ds = dicom.read_file(str(sample_path))
-    rows_exprs = [
+    sequence_ds = dicom.DataSet()
+    sequence_ds.set_value(
+        "RadiopharmaceuticalInformationSequence.0.RadionuclideHalfLife", 123.0
+    )
+    scalar_exprs = [
         ("dicomsdl ds.Rows", lambda: ds.Rows),
+        ("dicomsdl ds.get_value(0x00280010)", lambda: ds.get_value(0x00280010)),
+        ("dicomsdl ds.get_value('Rows')", lambda: ds.get_value("Rows")),
+        ("dicomsdl ds['Rows'].value", lambda: ds["Rows"].value),
+        ("dicomsdl ds[0x00280010].value", lambda: ds[0x00280010].value),
         ("dicomsdl ds[0x00280010]", lambda: ds[0x00280010]),
         ("dicomsdl ds['Rows']", lambda: ds["Rows"]),
         ("dicomsdl getde to_long", lambda: ds.get_dataelement(0x00280010).to_long()),
         ("dicomsdl getde get_value", lambda: ds.get_dataelement(0x00280010).get_value()),
     ]
 
-    seq_exprs = [
-        ("dicomsdl packed path", lambda: ds["00540016.0.00181075"]),
+    sequence_exprs = [
+        ("dicomsdl packed path", lambda: sequence_ds["00540016.0.00181075"]),
         (
             "dicomsdl string path",
-            lambda: ds["RadiopharmaceuticalInformationSequence.0.RadionuclideHalfLife"],
+            lambda: sequence_ds["RadiopharmaceuticalInformationSequence.0.RadionuclideHalfLife"],
+        ),
+        (
+            "dicomsdl string path value",
+            lambda: sequence_ds["RadiopharmaceuticalInformationSequence.0.RadionuclideHalfLife"].value,
+        ),
+        (
+            "dicomsdl get_value(path)",
+            lambda: sequence_ds.get_value(
+                "RadiopharmaceuticalInformationSequence.0.RadionuclideHalfLife"
+            ),
         ),
         (
             "dicomsdl attr chain",
-            lambda: ds.RadiopharmaceuticalInformationSequence[0].RadionuclideHalfLife,
+            lambda: sequence_ds.RadiopharmaceuticalInformationSequence[0].RadionuclideHalfLife,
         ),
         (
             "dicomsdl get_value chain",
-            lambda: ds.get_dataelement(0x00540016)
+            lambda: sequence_ds.get_dataelement(0x00540016)
             .sequence[0]
             .get_dataelement(0x00181075)
             .get_value(),
         ),
         (
             "dicomsdl to_long chain",
-            lambda: ds.get_dataelement(0x00540016)
+            lambda: sequence_ds.get_dataelement(0x00540016)
             .sequence[0]
             .get_dataelement(0x00181075)
             .to_long(),
         ),
     ]
 
+    mutation_ds = dicom.DataSet()
+    rows_elem = mutation_ds.ensure_dataelement("Rows", dicom.VR.US)
+    rows_elem.value = 512
+    path_elem = mutation_ds.ensure_dataelement(
+        "ReferencedStudySequence.0.ReferencedSOPInstanceUID", dicom.VR.UI
+    )
+    path_elem.value = "1.2.3.4"
+
+    mutation_flat_exprs = [
+        ("dicomsdl elem.value = 512", lambda: setattr(rows_elem, "value", 512)),
+        ("dicomsdl ds.set_value('Rows', 512)", lambda: mutation_ds.set_value("Rows", 512)),
+        (
+            "dicomsdl ensure('Rows').value = 512",
+            lambda: setattr(mutation_ds.ensure_dataelement("Rows"), "value", 512),
+        ),
+    ]
+
+    mutation_path_exprs = [
+        (
+            "dicomsdl path set_value",
+            lambda: mutation_ds.set_value(
+                "ReferencedStudySequence.0.ReferencedSOPInstanceUID", "1.2.3.4"
+            ),
+        ),
+        (
+            "dicomsdl path ensure().value",
+            lambda: setattr(
+                mutation_ds.ensure_dataelement(
+                    "ReferencedStudySequence.0.ReferencedSOPInstanceUID", dicom.VR.UI
+                ),
+                "value",
+                "1.2.3.4",
+            ),
+        ),
+    ]
+
     results: List[Tuple[str, float]] = []
-    if which in ("both", "scalars"):
-        for label, fn in rows_exprs:
-            results.append(bench(label, fn, iterations=100_000))
-    if which in ("both", "sequence"):
-        for label, fn in seq_exprs:
-            results.append(bench(label, fn, iterations=5_000))
+    if which in ("both", "all", "scalars"):
+        results.extend(_bench_group(scalar_exprs, iterations=100_000))
+    if which in ("both", "all", "sequence"):
+        results.extend(_bench_group(sequence_exprs, iterations=5_000))
+    if which in ("both", "all", "mutation"):
+        results.extend(_bench_group(mutation_flat_exprs, iterations=50_000))
+        results.extend(_bench_group(mutation_path_exprs, iterations=5_000))
     return results
 
 
@@ -90,9 +166,8 @@ def run_pydicom(sample_path: Path, which: str = "both") -> List[Tuple[str, float
         ("pydicom ds.Rows", lambda: ds.Rows),
     ]
     results: List[Tuple[str, float]] = []
-    if which in ("both", "scalars"):
-        for label, fn in scalar_exprs:
-            results.append(bench(label, fn, iterations=100_000))
+    if which in ("both", "all", "scalars"):
+        results.extend(_bench_group(scalar_exprs, iterations=100_000))
     return results
 
 
@@ -103,9 +178,7 @@ def main() -> int:
         if len(sys.argv) > 2:
             which = sys.argv[2]
     else:
-        sample = Path(__file__).resolve().parents[2] / "sample" / (
-            "1.2.840.113619.2.99.1234.1210123180.675655_0000_000034_121066021209fb.dcm"
-        )
+        sample = _default_sample_path()
         which = "both"
     if not sample.exists():
         print(f"Sample file not found: {sample}", file=sys.stderr)
@@ -119,6 +192,10 @@ def main() -> int:
             print("\n== dicomsdl ==")
             scalar_labels = {
                 "dicomsdl ds.Rows",
+                "dicomsdl ds.get_value(0x00280010)",
+                "dicomsdl ds.get_value('Rows')",
+                "dicomsdl ds['Rows'].value",
+                "dicomsdl ds[0x00280010].value",
                 "dicomsdl ds[0x00280010]",
                 "dicomsdl ds['Rows']",
                 "dicomsdl getde to_long",
@@ -127,12 +204,22 @@ def main() -> int:
             sequence_labels = {
                 "dicomsdl packed path",
                 "dicomsdl string path",
+                "dicomsdl string path value",
+                "dicomsdl get_value(path)",
                 "dicomsdl attr chain",
                 "dicomsdl get_value chain",
                 "dicomsdl to_long chain",
             }
+            mutation_labels = {
+                "dicomsdl elem.value = 512",
+                "dicomsdl ds.set_value('Rows', 512)",
+                "dicomsdl ensure('Rows').value = 512",
+                "dicomsdl path set_value",
+                "dicomsdl path ensure().value",
+            }
             scalar_res = [(l, u) for l, u in dicomsdl_results if l in scalar_labels]
             seq_res = [(l, u) for l, u in dicomsdl_results if l in sequence_labels]
+            mutation_res = [(l, u) for l, u in dicomsdl_results if l in mutation_labels]
             if scalar_res:
                 print("  -- Scalars --")
                 for label, us in sorted(scalar_res, key=lambda x: x[1]):
@@ -140,6 +227,10 @@ def main() -> int:
             if seq_res:
                 print("  -- Sequence --")
                 for label, us in sorted(seq_res, key=lambda x: x[1]):
+                    print(f"{label:40s} {us:6.2f} µs/call")
+            if mutation_res:
+                print("  -- Mutation --")
+                for label, us in sorted(mutation_res, key=lambda x: x[1]):
                     print(f"{label:40s} {us:6.2f} µs/call")
     except Exception as e:
         print(f"dicomsdl benchmark skipped: {e}", file=sys.stderr)

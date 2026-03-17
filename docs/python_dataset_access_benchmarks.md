@@ -113,3 +113,159 @@ Setup:
 | chained `get_value()` | 0.478 | 0.542 | +13.4% |
 
 Takeaway: in this project, `STABLE_ABI` is generally slower in microbenchmarks (roughly +5~10% typical, up to ~+18% on some chained/scalar paths), while improving wheel compatibility across Python minor versions.
+
+## Current branch notes (v0.1.35)
+
+This note now sits on top of a newer API surface than the original
+`0.1.4 vs 0.1.5` comparison above. The tables remain useful for the
+historical pybind11 -> nanobind transition, but they no longer cover the
+full set of current `DataSet` access patterns.
+
+Key updates closely related to Python `DataSet` access:
+
+- `DataSet.__getitem__` still returns `DataElement`, so one-shot scalar access
+  should be read as `ds.get_value("Rows")` or `ds["Rows"].value`.
+- String tag-path writes are now first-class operations:
+  - `ds.ensure_dataelement("Seq.0.Tag", vr)`
+  - `ds.add_dataelement("Seq.0.Tag", vr)`
+  - `ds.set_value("Seq.0.Tag", value)`
+- Path traversal code was refactored so read/write paths share the same parsing
+  model, and flat string paths avoid the heavier dotted-path loop when no `.`
+  is present.
+- Runtime keyword/tag lookup is substantially faster than the versions measured
+  above because the CHD lookup path now has dedicated runtime fast paths and
+  smaller caches tuned for the actual access patterns in this project.
+- Numeric tag text such as `00100010` and `(0010,0010)` now bypasses the
+  keyword miss path on the common fast forms.
+
+Behavioral changes that matter when reading old benchmark tables:
+
+- Partial-load mutation is now stricter. Python `get_value()`, `set_value()`,
+  `add_dataelement()`, and `ensure_dataelement()` do not silently load future
+  tags. Access beyond `last_tag_loaded_` raises instead of mutating unread
+  tail state.
+- DICOM assignment errors raised from Python attribute sugar are no longer
+  swallowed and re-labeled as generic `AttributeError`.
+- Binary `memoryview` results returned from `.value` / `get_value()` now keep
+  the owning object alive, so the Python side does not end up with an
+  owner-less view into released storage.
+
+Practical takeaway for the current version:
+
+- If readability matters, `ds["Rows"].value`, `ds.get_value("Rows")`, and
+  dotted string paths are now a reasonable default.
+- If a call site is extremely hot, direct `Tag` / integer access is still the
+  lowest-overhead form.
+- The historical tables above should be interpreted as transition-era numbers,
+  not as current absolute timings for `0.1.35`.
+
+## v0.1.35 current release-style sample
+
+Runtime:
+- CPython 3.12
+- Apple M3
+- Release `_dicomsdl`
+- Sample: `1.2.840.113619.2.99.1234.1210123180.675655_0000_000034_121066021209fb.dcm`
+
+### Scalars
+
+| Rank | Access pattern | us / call |
+| --- | --- | --- |
+| 1 | `ds.get_value(0x00280010)` | 0.11 |
+| 2 | `ds.Rows` | 0.12 |
+| 3 | `ds.get_value("Rows")` | 0.14 |
+| 4 | `ds[0x00280010]` | 0.14 |
+| 5 | `ds["Rows"]` | 0.16 |
+| 6 | `ds[0x00280010].value` | 0.17 |
+| 7 | `get_dataelement(...).get_value()` | 0.16 |
+| 8 | `get_dataelement(...).to_long()` | 0.18 |
+| 9 | `ds["Rows"].value` | 0.19 |
+
+### Sequence / path
+
+| Rank | Access pattern | us / call |
+| --- | --- | --- |
+| 1 | `ds["00540016.0.00181075"]` | 0.18 |
+| 2 | `ds["RadiopharmaceuticalInformationSequence.0.RadionuclideHalfLife"]` | 0.24 |
+| 3 | `ds.get_value(path)` | 0.32 |
+| 4 | `ds[path].value` | 0.38 |
+| 5 | chained `get_value()` | 0.46 |
+| 6 | attribute chain | 0.48 |
+| 7 | chained `to_long()` | 0.50 |
+
+### Sequence / path, cache-disabled experiment
+
+Setup:
+- Same synthetic `DataSet` as the sequence/path table above
+- 5 runs averaged
+- 5,000 iterations per access pattern
+- Runtime keyword cache temporarily disabled for measurement
+
+| Rank | Access pattern | us / call |
+| --- | --- | --- |
+| 1 | `ds["00540016.0.00181075"]` | 0.27 |
+| 2 | `ds["RadiopharmaceuticalInformationSequence.0.RadionuclideHalfLife"]` | 0.34 |
+| 3 | `ds.RadiopharmaceuticalInformationSequence[0].RadionuclideHalfLife` | 0.52 |
+| 4 | `ds.get_dataelement(0x00540016).sequence[0].get_dataelement(0x00181075).to_long()` | 0.54 |
+| 5 | `ds.get_dataelement(0x00540016).sequence[0].get_dataelement(0x00181075).get_value()` | 0.58 |
+
+### Sequence path historical comparison
+
+This keeps the original `0.1.4` and `0.1.5` sequence-path measurements and
+adds the current branch with the runtime keyword cache disabled for a cleaner
+parser/path comparison.
+
+| Access pattern | v0.1.4 us/call | v0.1.5 us/call | current uncached us/call |
+| --- | --- | --- | --- |
+| `ds["00540016.0.00181075"]` | 0.46 | 0.27 | 0.27 |
+| `ds["RadiopharmaceuticalInformationSequence.0.RadionuclideHalfLife"]` | 0.68 | 0.49 | 0.34 |
+| `ds.RadiopharmaceuticalInformationSequence[0].RadionuclideHalfLife` | 1.28 | 0.63 | 0.52 |
+| `ds.get_dataelement(0x00540016).sequence[0].get_dataelement(0x00181075).to_long()` | 2.16 | 0.51 | 0.54 |
+| `ds.get_dataelement(0x00540016).sequence[0].get_dataelement(0x00181075).get_value()` | 2.16 | 0.49 | 0.58 |
+
+### Mutation
+
+| Rank | Access pattern | us / call |
+| --- | --- | --- |
+| 1 | `elem.value = 512` | 0.08 |
+| 2 | `ds.set_value("Rows", 512)` | 0.12 |
+| 3 | `ensure("Rows").value = 512` | 0.15 |
+| 4 | `path set_value` | 0.23 |
+| 5 | `path ensure().value` | 0.32 |
+
+## dicomsdl change summary (0.1.5 -> 0.1.35, current API)
+
+The table below keeps only directly comparable access patterns. Paths that
+used to rely on `__getitem__` returning a scalar are listed separately in the
+next table using their current best equivalents.
+
+| Access pattern | v0.1.5 us/call | v0.1.35 us/call | Speedup (x) |
+| --- | --- | --- | --- |
+| `ds.Rows` | 0.15 | 0.12 | 1.25 |
+| `get_dataelement(...).to_long()` | 0.20 | 0.18 | 1.11 |
+| `get_dataelement(...).get_value()` | 0.16 | 0.16 | 1.00 |
+| attribute chain | 0.63 | 0.48 | 1.31 |
+| chained `to_long()` | 0.51 | 0.50 | 1.02 |
+| chained `get_value()` | 0.49 | 0.46 | 1.07 |
+
+### Current equivalents for old scalar `__getitem__` patterns
+
+`v0.1.5` measured `ds[tag]` and `ds["keyword"]` as one-shot scalar access.
+In the current API, `__getitem__` returns `DataElement`, so the nearest scalar
+equivalents are `get_value(...)` or `.value`.
+
+| Historical v0.1.5 pattern | v0.1.5 us/call | Current equivalent | v0.1.35 us/call |
+| --- | --- | --- | --- |
+| `ds[0x00280010]` | 0.11 | `ds.get_value(0x00280010)` | 0.11 |
+| `ds["Rows"]` | 0.14 | `ds.get_value("Rows")` | 0.14 |
+| packed sequence path | 0.27 | `ds["00540016.0.00181075"]` element lookup | 0.18 |
+| keyword sequence path | 0.49 | `ds.get_value(path)` | 0.32 |
+
+Takeaway:
+
+- On the current branch, the hot scalar read paths are again in the same range
+  as the old `0.1.5` release measurements once `DicomFile` uses direct Python
+  bindings instead of `__getattr__` forwarding.
+- `ds.Rows` is now slightly faster than the old `0.1.5` sample.
+- `get_dataelement(...).get_value()` is back to roughly the same level as the
+  old `0.1.5` sample, and `get_dataelement(...).to_long()` is slightly faster.

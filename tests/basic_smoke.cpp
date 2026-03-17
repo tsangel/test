@@ -62,6 +62,10 @@ int main() {
 
 	const dicom::Tag literal_tag = "Rows"_tag;
 	if (literal_tag.value() != 0x00280010u) fail("literal tag mismatch");
+	const dicom::Tag numeric_tag("(0010,0010)");
+	if (numeric_tag.value() != 0x00100010u) fail("numeric tag text mismatch");
+	const dicom::Tag packed_numeric_tag("00100010");
+	if (packed_numeric_tag.value() != 0x00100010u) fail("packed numeric tag text mismatch");
 
 	{
 		dicom::InFileStream direct_stream;

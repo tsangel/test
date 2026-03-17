@@ -14,8 +14,8 @@ from _generator_common import write_text_if_changed
 
 SENTINEL = 0xFFFF
 GOLDEN_RATIO32 = 0x9E3779B1
-HASH_OFFSET64 = 0x6A09E667F3BCC909
-HASH_INCR64 = 0x9E3779B97F4A7C15
+FNV64_OFFSET = 0xCBF29CE484222325
+FNV64_PRIME = 0x100000001B3
 HASH_MIX1 = 0xBF58476D1CE4E5B9
 HASH_MIX2 = 0x94D049BB133111EB
 MASK64 = 0xFFFFFFFFFFFFFFFF
@@ -47,10 +47,10 @@ def mix64(value: int) -> int:
 
 
 def base_hash64(text: str) -> int:
-    value = HASH_OFFSET64
+    value = FNV64_OFFSET
     for byte in text.encode("utf-8"):
-        value = (value + byte + HASH_INCR64) & MASK64
-        value = mix64(value)
+        value ^= byte
+        value = (value * FNV64_PRIME) & MASK64
     return value
 
 

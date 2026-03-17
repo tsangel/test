@@ -21,6 +21,8 @@ HASH_INCR64 = 0x9E3779B97F4A7C15
 HASH_MIX1 = 0xBF58476D1CE4E5B9
 HASH_MIX2 = 0x94D049BB133111EB
 MASK64 = 0xFFFFFFFFFFFFFFFF
+FNV64_OFFSET = 0xCBF29CE484222325
+FNV64_PRIME = 0x100000001B3
 
 
 @dataclass(frozen=True)
@@ -73,10 +75,10 @@ def mix64(value: int) -> int:
 
 
 def base_hash64(text: str) -> int:
-    value = HASH_OFFSET64
+    value = FNV64_OFFSET
     for byte in text.encode("utf-8"):
-        value = (value + byte + HASH_INCR64) & MASK64
-        value = mix64(value)
+        value ^= byte
+        value = (value * FNV64_PRIME) & MASK64
     return value
 
 
@@ -200,21 +202,12 @@ def build_keyword_chd(entries: Sequence[KeywordEntry], load_factor: float = 2.0)
     return build_chd_from_hashes(entries, hashed_values, load_factor)
 
 
-def tag_base_hash(value: int) -> int:
-    hashed = HASH_OFFSET64
-    for shift in range(0, 32, 8):
-        byte = (value >> shift) & 0xFF
-        hashed = (hashed + byte + HASH_INCR64) & MASK64
-        hashed = mix64(hashed)
-    return hashed
-
-
 def build_tag_chd(entries: Sequence[KeywordEntry], load_factor: float = 2.0) -> ChdTables:
     hashed_values: List[int] = []
     for entry in entries:
         if entry.tag_value is None:
             raise ValueError("Tag entry missing numeric value")
-        hashed_values.append(tag_base_hash(entry.tag_value))
+        hashed_values.append(entry.tag_value & MASK64)
     return build_chd_from_hashes(entries, hashed_values, load_factor)
 
 

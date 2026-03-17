@@ -1357,17 +1357,17 @@ private:
 };
 
 nb::object dataelement_get_value_py(DataElement& element, nb::handle parent = nb::handle()) {
-	const auto owner = [&]() -> nb::object {
-		if (parent.is_valid() && !parent.is_none()) {
-			return nb::borrow<nb::object>(parent);
-		}
-		return nb::cast(&element, nb::rv_policy::reference);
-	}();
 	const auto raw_bytes = [&element]() -> nb::object {
 		auto span = element.value_span();
 		return nb::bytes(reinterpret_cast<const char*>(span.data()), span.size());
 	};
-	const auto raw_memoryview = [&element, &owner]() -> nb::object {
+	const auto raw_memoryview = [&element, parent]() -> nb::object {
+		nb::object owner;
+		if (parent.is_valid() && !parent.is_none()) {
+			owner = nb::borrow<nb::object>(parent);
+		} else {
+			owner = nb::cast(&element, nb::rv_policy::reference);
+		}
 		auto span = element.value_span();
 		return readonly_memoryview_from_span(span.data(), span.size(), owner);
 	};
@@ -3213,26 +3213,13 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::arg("include_offset") = true,
 		    "Return a human-readable DataSet dump as text")
 		.def("get_dataelement",
-		    [](DataSet& self, const Tag& tag) -> DataElement& {
-		        return self.get_dataelement(tag);
+		    [](DataSet& self, nb::object key) -> DataElement& {
+			    return dataset_lookup_dataelement_py(
+			        self, key, "DataSet lookup keys must be Tag, int (0xGGGEEEE), or str");
 		    },
-		    nb::arg("tag"), nb::rv_policy::reference_internal,
-		    "Return the DataElement for a tag; missing lookups return a falsey DataElement (VR::None)")
-		.def("get_dataelement",
-		    [](DataSet& self, std::uint32_t packed) -> DataElement& {
-			    const Tag tag(packed);
-			    return self.get_dataelement(tag);
-		    },
-		    nb::arg("packed_tag"),
+		    nb::arg("key"),
 		    nb::rv_policy::reference_internal,
-		    "Overload: pass packed 0xGGGEEEE integer; missing lookups return a falsey DataElement")
-		.def("get_dataelement",
-		    [](DataSet& self, const std::string& tag_str) -> DataElement& {
-			    return self.get_dataelement(tag_str);
-		    },
-		    nb::arg("tag_str"),
-		    nb::rv_policy::reference_internal,
-		    "Overload: parse tag path string.\n"
+		    "Return the DataElement for a Tag, packed int, or tag-path string.\n"
 		    "Supported examples:\n"
 		    "  - Hex tag with/without parens: '00100010', '(0010,0010)'\n"
 		    "  - Keyword: 'PatientName'\n"
@@ -3240,7 +3227,7 @@ NB_MODULE(_dicomsdl, m) {
 		    "    e.g., '0009,xx1e,GEMS_GENIE_1'\n"
 		    "  - Nested sequences: '00082112.0.00081190' or\n"
 		    "    'RadiopharmaceuticalInformationSequence.0.RadionuclideTotalDose'\n"
-		    "Returns a DataElement; missing lookups return a falsey DataElement (VR::None); malformed paths raise.")
+		    "Missing lookups return a falsey DataElement (VR::None); malformed keys raise.")
 		.def("get_value",
 		    [](DataSet& self, nb::object key, nb::object default_value) -> nb::object {
 			    DataElement& el = dataset_lookup_dataelement_py(
@@ -3535,6 +3522,95 @@ NB_MODULE(_dicomsdl, m) {
 		    [](DicomFile& self) -> DataSet& { return self.dataset(); },
 		    nb::rv_policy::reference_internal,
 		    "Root DataSet owned by this DicomFile")
+		.def("add_dataelement",
+		    [](DicomFile& self, nb::handle key, std::optional<VR> vr) -> DataElement& {
+		        if (auto text = dataset_assignment_key_to_text(key)) {
+			        return self.add_dataelement(*text, vr.value_or(VR::None));
+		        }
+		        const Tag tag = dataset_assignment_key_to_tag(key);
+		        return self.add_dataelement(tag, vr.value_or(VR::None));
+		    },
+		    nb::arg("tag"), nb::arg("vr") = nb::none(),
+		    nb::rv_policy::reference_internal,
+		    "Add or replace a DataElement in the root DataSet and return a reference to it. "
+		    "On partially loaded file-backed datasets, unread future tags raise instead of "
+		    "implicitly continuing the load.")
+		.def("ensure_dataelement",
+		    [](DicomFile& self, nb::handle key, std::optional<VR> vr) -> DataElement& {
+		        if (auto text = dataset_assignment_key_to_text(key)) {
+			        return self.ensure_dataelement(*text, vr.value_or(VR::None));
+		        }
+		        const Tag tag = dataset_assignment_key_to_tag(key);
+		        return self.ensure_dataelement(tag, vr.value_or(VR::None));
+		    },
+		    nb::arg("tag"), nb::arg("vr") = nb::none(),
+		    nb::rv_policy::reference_internal,
+		    "Return the existing root DataSet element for a Tag, packed int, or keyword/tag-path "
+		    "string, or add a new zero-length element when missing. When `vr` is omitted/None, "
+		    "an existing element is preserved as-is. When `vr` is explicit and differs from the "
+		    "existing element VR, the existing element is reset in place so the requested VR "
+		    "is guaranteed. On partially loaded file-backed datasets, unread future tags raise "
+		    "instead of mutating past the current load frontier.")
+		.def("remove_dataelement",
+		    [](DicomFile& self, nb::handle key) {
+		        self.remove_dataelement(dataset_assignment_key_to_tag(key));
+		    },
+		    nb::arg("tag"),
+		    "Remove a root DataSet DataElement by Tag, packed int, or keyword string if it exists")
+		.def("get_dataelement",
+		    [](DicomFile& self, nb::object key) -> DataElement& {
+			    return dataset_lookup_dataelement_py(
+			        self.dataset(), key,
+			        "DicomFile lookup keys must be Tag, int (0xGGGEEEE), or str");
+		    },
+		    nb::arg("key"),
+		    nb::rv_policy::reference_internal,
+		    "Return the root DataSet DataElement for a Tag, packed int, or tag-path string.\n"
+		    "Supported examples:\n"
+		    "  - Hex tag with/without parens: '00100010', '(0010,0010)'\n"
+		    "  - Keyword: 'PatientName'\n"
+		    "  - Private creator: 'gggg,xxee,CREATOR' (odd group, xx block placeholder ok)\n"
+		    "    e.g., '0009,xx1e,GEMS_GENIE_1'\n"
+		    "  - Nested sequences: '00082112.0.00081190' or\n"
+		    "    'RadiopharmaceuticalInformationSequence.0.RadionuclideTotalDose'\n"
+		    "Missing lookups return a falsey DataElement (VR::None); malformed keys raise.")
+		.def("get_value",
+		    [](DicomFile& self, nb::object key, nb::object default_value) -> nb::object {
+		        DataElement& el = dataset_lookup_dataelement_py(
+		            self.dataset(), key, "DicomFile lookup keys must be Tag, int (0xGGGEEEE), or str");
+		        if (el.is_missing()) {
+			        return default_value;
+		        }
+		        return dataelement_get_value_py(el, nb::cast(&self, nb::rv_policy::reference));
+		    },
+		    nb::arg("key"), nb::arg("default") = nb::none(),
+		    "Best-effort typed lookup by Tag, packed int, or tag-path string against the root "
+		    "DataSet. Returns `default` only when the element is missing; zero-length present "
+		    "elements still return typed empty values such as [], '', or an empty container. "
+		    "This API does not implicitly continue partial loading.")
+		.def("set_value",
+		    [](DicomFile& self, nb::object key, nb::handle value) {
+		        return dataset_try_set_value_py(self.dataset(), key, value);
+		    },
+		    nb::arg("key"), nb::arg("value"),
+		    "Best-effort typed assignment by Tag, packed int, or keyword/tag-path string "
+		    "against the root DataSet. Returns True on success, False when the value cannot "
+		    "be encoded for the target VR, and treats `None` as a zero-length present value. "
+		    "On partially loaded file-backed datasets, unread future tags raise instead of "
+		    "implicitly continuing the load. On assignment failure, the DicomFile/root DataSet "
+		    "remains valid but the destination element state is unspecified.")
+		.def("set_value",
+		    [](DicomFile& self, nb::object key, VR vr, nb::handle value) {
+		        return dataset_try_set_value_with_vr_py(self.dataset(), key, vr, value);
+		    },
+		    nb::arg("key"), nb::arg("vr"), nb::arg("value"),
+		    "Overload: set_value(key, vr, value) against the root DataSet. Uses the explicit VR "
+		    "when creating a missing element and enforces that VR on existing elements before "
+		    "assignment. Returns False when the value cannot be encoded for the resolved VR. "
+		    "`None` writes a zero-length value for that VR. On partially loaded file-backed "
+		    "datasets, unread future tags raise instead of implicitly continuing the load. "
+		    "On assignment failure, the DicomFile/root DataSet remains valid but the destination "
+		    "element state is unspecified.")
 		.def("create_decode_plan",
 		    [](const DicomFile& self) { return self.create_decode_plan(); },
 		    "Compute a reusable DecodePlan using default DecodeOptions.")
@@ -3863,6 +3939,17 @@ NB_MODULE(_dicomsdl, m) {
 		    "Presence probe delegated to the root DataSet.")
 		.def("__getattr__",
 		    [](DicomFile& self, const std::string& name) -> nb::object {
+			    if (!name.empty() && name.size() >= 2 && name[0] != '_') {
+				    try {
+					    Tag tag(name);
+					    DataElement& el = self.get_dataelement(tag);
+					    if (el.is_present()) {
+						    return dataelement_get_value_py(el, nb::cast(&self, nb::rv_policy::reference));
+					    }
+				    } catch (const std::exception&) {
+					    // Fall through to root DataSet attribute forwarding.
+				    }
+			    }
 			    nb::object owner = nb::cast(&self, nb::rv_policy::reference);
 			    nb::object dataset_obj =
 			        nb::cast(&self.dataset(), nb::rv_policy::reference_internal, owner);
