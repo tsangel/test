@@ -52,6 +52,18 @@ std::string_view vr_to_string_view(const VR& vr);
 nb::object readonly_memoryview_from_span(
     const void* data, std::size_t size, nb::handle owner = nb::handle());
 
+PyObject* new_reference_or_null(PyObject* obj) noexcept {
+	if (obj == nullptr) {
+		return nullptr;
+	}
+#if PY_VERSION_HEX >= 0x030A0000
+	return Py_NewRef(obj);
+#else
+	Py_INCREF(obj);
+	return obj;
+#endif
+}
+
 std::string python_path_to_string(nb::handle value, const char* arg_name) {
 	PyObject* fs_path = PyOS_FSPath(value.ptr());
 	if (fs_path == nullptr) {
@@ -2305,7 +2317,8 @@ nb::object readonly_memoryview_from_span(
 	}
 	exporter->data = reinterpret_cast<const char*>(data);
 	exporter->size = static_cast<Py_ssize_t>(size);
-	exporter->owner = (!owner.is_valid() || owner.is_none()) ? nullptr : Py_NewRef(owner.ptr());
+	exporter->owner =
+	    (!owner.is_valid() || owner.is_none()) ? nullptr : new_reference_or_null(owner.ptr());
 	nb::object exporter_obj = nb::steal<nb::object>(reinterpret_cast<PyObject*>(exporter));
 	PyObject* memoryview = PyMemoryView_FromObject(exporter_obj.ptr());
 	if (memoryview == nullptr) {
