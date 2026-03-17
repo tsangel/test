@@ -11,9 +11,11 @@
 
 ## Resolution rules
 1. Tokens are split on `.`; each token except the last must resolve to a sequence element.
-2. Tag tokens accept parentheses/commas and are trimmed; keywords fall back to the CHD lookup.
+2. Tag tokens accept parentheses/commas and are trimmed; runtime keyword text is resolved via the
+   normal runtime dictionary lookup path (`keyword_to_entry_runtime(...)`), which currently uses the
+   runtime keyword cache. Compile-time keyword literals still use the constexpr CHD tables.
 3. Private-creator tokens are parsed via `parse_private_creator_tag`; on failure, lookup stops and returns a falsey `DataElement` (`VR::None`).
-4. Sequence indices are parsed with `std::stoul`; type/VR mismatches raise `diag::error_and_throw`.
+4. Sequence indices are parsed with `std::from_chars`; type/VR mismatches raise `diag::error_and_throw`.
 5. If any required element or nested dataset is missing, a falsey `DataElement` (`VR::None`) is returned.
 
 ## Notes
@@ -22,6 +24,8 @@
 - Use `if (auto& e = dataset[tag]; e)` only when element presence itself matters.
 - No implicit loading: callers must ensure the needed elements are present via `ensure_loaded(tag)` or an earlier `read_attached_stream()`.
 - The function returns `DataElement&`. If you need to distinguish missing from present, use `if (elem)` or `elem.is_missing()`. If you just need a fallback value, `get_dataelement(...).to_xxx().value_or(default)` is fine.
+- For flat keyword paths (no `.`), the parser now avoids the heavier dotted-path loop and falls
+  through the lighter direct token resolution path before lookup.
 - Errors (malformed path, non-sequence traversal, bad index) throw and include the offending tag string.
 
 ## Examples
