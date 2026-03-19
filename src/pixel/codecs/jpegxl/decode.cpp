@@ -11,6 +11,7 @@
 #include <exception>
 #include <limits>
 #include <new>
+#include <stdexcept>
 #include <vector>
 
 #include "../common/decode_fastpath.hpp"
