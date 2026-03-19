@@ -28,66 +28,6 @@ struct SourceFrameLayout {
   uint64_t minimum_frame_bytes{0};
 };
 
-uint32_t bit_mask_u32(int bits) {
-  if (bits <= 0) {
-    return 0;
-  }
-  if (bits >= 32) {
-    return 0xFFFFFFFFu;
-  }
-  return (uint32_t{1} << static_cast<unsigned>(bits)) - 1u;
-}
-
-int32_t sign_extend_u32(uint32_t raw, int bits) {
-  if (bits <= 0) {
-    return 0;
-  }
-  if (bits >= 32) {
-    return static_cast<int32_t>(raw);
-  }
-  const int shift = 32 - bits;
-  return static_cast<int32_t>(raw << static_cast<unsigned>(shift)) >> shift;
-}
-
-bool load_u8_or_u16_sample(
-    const uint8_t* sample_ptr, uint32_t bytes_per_sample, uint32_t* out_raw) {
-  if (sample_ptr == nullptr || out_raw == nullptr) {
-    return false;
-  }
-  switch (bytes_per_sample) {
-  case 1:
-    *out_raw = sample_ptr[0];
-    return true;
-  case 2:
-    *out_raw = static_cast<uint32_t>(sample_ptr[0]) |
-        (static_cast<uint32_t>(sample_ptr[1]) << 8);
-    return true;
-  default:
-    return false;
-  }
-}
-
-bool load_i8_or_i16_sample_from_source(const uint8_t* sample_ptr, uint32_t bytes_per_sample,
-    bool source_signed, int bits_stored, int32_t* out_value) {
-  if (out_value == nullptr) {
-    return false;
-  }
-  uint32_t raw = 0;
-  if (!load_u8_or_u16_sample(sample_ptr, bytes_per_sample, &raw)) {
-    return false;
-  }
-  if (source_signed) {
-    *out_value = sign_extend_u32(raw, bits_stored);
-    return true;
-  }
-  raw &= bit_mask_u32(bits_stored);
-  if (raw > static_cast<uint32_t>(std::numeric_limits<int32_t>::max())) {
-    return false;
-  }
-  *out_value = static_cast<int32_t>(raw);
-  return true;
-}
-
 double resolve_lossy_qstep(const EncoderCtx& ctx,
     const pixel_encoder_request& request) {
   if (ctx.has_explicit_qstep) {
@@ -139,6 +79,11 @@ pixel_error_code validate_encoder_request(
         "rows/cols/samples_per_pixel must be positive");
   }
 
+  const bool lossless =
+      request->frame.codec_profile_code != PIXEL_CODEC_PROFILE_HTJ2K_LOSSY;
+  const bool rpcl_progression =
+      request->frame.codec_profile_code == PIXEL_CODEC_PROFILE_HTJ2K_LOSSLESS_RPCL;
+
   const uint64_t rows = static_cast<uint64_t>(request->frame.rows);
   const uint64_t cols = static_cast<uint64_t>(request->frame.cols);
   const uint64_t samples = static_cast<uint64_t>(request->frame.samples_per_pixel);
@@ -150,9 +95,17 @@ pixel_error_code validate_encoder_request(
 
   DtypeInfo source_dtype{};
   if (!dtype_info_from_code(request->frame.source_dtype, &source_dtype) ||
-      source_dtype.is_float || source_dtype.bytes == 0 || source_dtype.bytes > 2) {
+      source_dtype.is_float || source_dtype.bytes == 0 || source_dtype.bytes > 4) {
     return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
-        "source_dtype must be integral 8/16-bit type");
+        "source_dtype must be integral <=32-bit type");
+  }
+  if (!lossless && source_dtype.bytes > 2) {
+    return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
+        "lossy HTJ2K supports only integral 8/16-bit source types");
+  }
+  if (lossless && source_dtype.bytes == 4 && !source_dtype.is_signed) {
+    return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
+        "lossless HTJ2K 32-bit encode requires signed source_dtype");
   }
 
   if (!is_valid_planar_code(request->frame.source_planar)) {
@@ -160,9 +113,14 @@ pixel_error_code validate_encoder_request(
         "unsupported source_planar code");
   }
 
-  if (request->frame.bits_allocated != 8 && request->frame.bits_allocated != 16) {
+  if (source_dtype.bytes <= 2) {
+    if (request->frame.bits_allocated != 8 && request->frame.bits_allocated != 16) {
+      return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
+          "bits_allocated must be 8 or 16");
+    }
+  } else if (request->frame.bits_allocated != 32) {
     return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
-        "bits_allocated must be 8 or 16");
+        "32-bit HTJ2K encode requires bits_allocated=32");
   }
 
   if (request->frame.bits_stored <= 0 ||
@@ -188,7 +146,6 @@ pixel_error_code validate_encoder_request(
     return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
         "pixel_representation does not match source_dtype signedness");
   }
-
   const bool source_planar = is_planar_code(request->frame.source_planar) && samples > 1;
   if (request->frame.use_multicomponent_transform != 0 && samples != 3) {
     return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
@@ -260,11 +217,6 @@ pixel_error_code validate_encoder_request(
         "source buffer is too small for frame layout");
   }
 
-  const bool lossless =
-      request->frame.codec_profile_code != PIXEL_CODEC_PROFILE_HTJ2K_LOSSY;
-  const bool rpcl_progression =
-      request->frame.codec_profile_code == PIXEL_CODEC_PROFILE_HTJ2K_LOSSLESS_RPCL;
-
   double lossy_qstep = ctx->qstep;
   if (!lossless) {
     lossy_qstep = resolve_lossy_qstep(*ctx, *request);
@@ -327,9 +279,14 @@ pixel_error_code fill_openjph_line_from_source_as(EncoderCtx* ctx, ojph::line_bu
   }
 
   const bool line_is_integer = (line->flags & ojph::line_buf::LFT_INTEGER) != 0;
-  if (line_is_integer && line->i32 == nullptr) {
+  const bool line_uses_i64 = (line->flags & ojph::line_buf::LFT_64BIT) != 0;
+  if (line_is_integer && line_uses_i64 && line->i64 == nullptr) {
     return fail_detail(ctx, PIXEL_CODEC_ERR_FAILED, "encode_frame",
-        "OpenJPH integer line has null data pointer");
+        "OpenJPH int64 line has null data pointer");
+  }
+  if (line_is_integer && !line_uses_i64 && line->i32 == nullptr) {
+    return fail_detail(ctx, PIXEL_CODEC_ERR_FAILED, "encode_frame",
+        "OpenJPH int32 line has null data pointer");
   }
   if (!line_is_integer && line->f32 == nullptr) {
     return fail_detail(ctx, PIXEL_CODEC_ERR_FAILED, "encode_frame",
@@ -346,8 +303,13 @@ pixel_error_code fill_openjph_line_from_source_as(EncoderCtx* ctx, ojph::line_bu
 
   if (layout.source_is_planar) {
     if (line_is_integer) {
-      fill_openjph_line_planar<int32_t, SourceBytes, SourceSigned>(
-          line->i32, source_row, cols, bits_stored);
+      if (line_uses_i64) {
+        fill_openjph_line_planar<std::int64_t, SourceBytes, SourceSigned>(
+            line->i64, source_row, cols, bits_stored);
+      } else {
+        fill_openjph_line_planar<std::int32_t, SourceBytes, SourceSigned>(
+            line->i32, source_row, cols, bits_stored);
+      }
     } else {
       fill_openjph_line_planar<float, SourceBytes, SourceSigned>(
           line->f32, source_row, cols, bits_stored);
@@ -356,8 +318,13 @@ pixel_error_code fill_openjph_line_from_source_as(EncoderCtx* ctx, ojph::line_bu
   }
 
   if (line_is_integer) {
-    fill_openjph_line_interleaved<int32_t, SourceBytes, SourceSigned>(
-        line->i32, source_row, cols, samples_per_pixel, component_index, bits_stored);
+    if (line_uses_i64) {
+      fill_openjph_line_interleaved<std::int64_t, SourceBytes, SourceSigned>(
+          line->i64, source_row, cols, samples_per_pixel, component_index, bits_stored);
+    } else {
+      fill_openjph_line_interleaved<std::int32_t, SourceBytes, SourceSigned>(
+          line->i32, source_row, cols, samples_per_pixel, component_index, bits_stored);
+    }
   } else {
     fill_openjph_line_interleaved<float, SourceBytes, SourceSigned>(
         line->f32, source_row, cols, samples_per_pixel, component_index, bits_stored);
@@ -383,6 +350,13 @@ pixel_error_code fill_openjph_line_from_source(EncoderCtx* ctx, ojph::line_buf* 
           row, component_index, cols, samples_per_pixel, bits_stored);
     }
     return fill_openjph_line_from_source_as<2, false>(ctx, line, source, layout,
+        row, component_index, cols, samples_per_pixel, bits_stored);
+  case 4:
+    if (source_signed) {
+      return fill_openjph_line_from_source_as<4, true>(ctx, line, source, layout,
+          row, component_index, cols, samples_per_pixel, bits_stored);
+    }
+    return fill_openjph_line_from_source_as<4, false>(ctx, line, source, layout,
         row, component_index, cols, samples_per_pixel, bits_stored);
   default:
     return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "encode_frame",

@@ -496,6 +496,33 @@ int main() {
 			if (htj2k_lossy_file["LossyImageCompression"_tag].to_string_view().value_or("") != std::string_view("01")) {
 				fail("HTJ2K lossy set_pixel_data should set LossyImageCompression to 01");
 			}
+
+			std::vector<std::uint8_t> s32_source_bytes;
+			for (const auto value : std::array<std::int32_t, 8>{
+			         (std::numeric_limits<std::int32_t>::min)(),
+			         -123456789,
+			         -1,
+			         0,
+			         1,
+			         123456789,
+			         (std::numeric_limits<std::int32_t>::max)() - 1,
+			         (std::numeric_limits<std::int32_t>::max)(),
+			     }) {
+				append_u32_le(s32_source_bytes, static_cast<std::uint32_t>(value));
+			}
+			const auto s32_layout = make_layout(dicom::pixel::DataType::s32, 1, 2, 4, 1,
+			    dicom::pixel::Photometric::monochrome2);
+			dicom::DicomFile htj2k_s32_file;
+			htj2k_s32_file.set_pixel_data("HTJ2KLossless"_uid,
+			    make_source_span(s32_source_bytes, s32_layout));
+			if (htj2k_s32_file["BitsAllocated"_tag].to_long().value_or(0) != 32 ||
+			    htj2k_s32_file["BitsStored"_tag].to_long().value_or(0) != 32 ||
+			    htj2k_s32_file["PixelRepresentation"_tag].to_long().value_or(0) != 1) {
+				fail("HTJ2K signed 32-bit lossless metadata mismatch");
+			}
+			if (htj2k_s32_file.pixel_data(0) != s32_source_bytes) {
+				fail("HTJ2K signed 32-bit lossless roundtrip mismatch");
+			}
 		}
 	}
 

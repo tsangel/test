@@ -155,7 +155,12 @@ Additional JPEG lossy rule:
 
 - `samples_per_pixel` must be `1`, `3`, or `4`
 - Multicomponent transform (MCT) requires `samples_per_pixel = 3`
-- `bits_allocated` must be `8` or `16`
+- Lossless path:
+  - integral `8/16-bit` inputs are supported
+  - signed `32-bit` inputs are also supported
+  - `uint32` / full-range unsigned `32-bit` is not supported
+- Lossy path:
+  - only integral `8/16-bit` inputs are supported
 - `pixel_representation` must be `0` or `1`
 - `target_psnr` / `target_bpp` must be `>= 0`
 - Lossy qstep is derived from options (or default path)

@@ -1,7 +1,9 @@
+#include <cstdint>
 #include <cstdlib>
 #include <exception>
 #include <iostream>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -52,6 +54,36 @@ void configure_minimal_integral_pixel_metadata(dicom::DicomFile& df) {
 	if (!df.set_value("PhotometricInterpretation"_tag, std::string_view("MONOCHROME2"))) {
 		fail("failed to set PhotometricInterpretation");
 	}
+}
+
+[[nodiscard]] dicom::pixel::PixelLayout make_mono_layout(
+    dicom::pixel::DataType data_type, std::uint16_t bits_stored) {
+	dicom::pixel::PixelLayout layout{
+	    .data_type = data_type,
+	    .photometric = dicom::pixel::Photometric::monochrome2,
+	    .planar = dicom::pixel::Planar::interleaved,
+	    .reserved = 0,
+	    .rows = 1,
+	    .cols = 1,
+	    .frames = 1,
+	    .samples_per_pixel = 1,
+	    .bits_stored = bits_stored,
+	    .row_stride = 0,
+	    .frame_stride = 0,
+	};
+	const auto packed = layout.packed();
+	layout.row_stride = packed.row_stride;
+	layout.frame_stride = packed.frame_stride;
+	return layout;
+}
+
+[[nodiscard]] dicom::pixel::ConstPixelSpan make_source_span(
+    const std::vector<std::uint8_t>& bytes,
+    const dicom::pixel::PixelLayout& layout) {
+	return dicom::pixel::ConstPixelSpan{
+	    .layout = layout,
+	    .bytes = std::span<const std::uint8_t>(bytes.data(), bytes.size()),
+	};
 }
 
 void expect_decode_throw(std::string_view label, dicom::DicomFile& df,
@@ -348,6 +380,120 @@ int main() {
 		}
 		if (df.pixel_data(0) != baseline_frame) {
 			fail("encapsulated transcode failure should preserve source pixel data");
+		}
+	}
+
+	{
+		dicom::DicomFile df{};
+		const auto source_layout =
+		    make_mono_layout(dicom::pixel::DataType::u32, 32);
+		const std::vector<std::uint8_t> source_bytes{
+		    0x34u, 0x12u, 0x00u, 0x00u};
+		try {
+			df.set_pixel_data("JPEG2000Lossless"_uid,
+			    make_source_span(source_bytes, source_layout));
+			fail("jpeg2k set_pixel_data codec capability throw message should throw");
+		} catch (const std::exception& e) {
+			const std::string what = e.what();
+			expect_contains(what, "DicomFile::set_pixel_data",
+			    "jpeg2k set_pixel_data codec capability throw message");
+			expect_contains(
+			    what, std::string("ts=") + std::string("JPEG2000Lossless"_uid.value()),
+			    "jpeg2k set_pixel_data codec capability throw message");
+			expect_contains(what, "status=invalid_argument",
+			    "jpeg2k set_pixel_data codec capability throw message");
+			expect_contains(what, "stage=validate",
+			    "jpeg2k set_pixel_data codec capability throw message");
+			expect_contains(what, "bits_allocated must be in [1,16]",
+			    "jpeg2k set_pixel_data codec capability throw message");
+			expect_not_contains(what,
+			    "selected encoder currently supports bits_allocated <= 16",
+			    "jpeg2k set_pixel_data codec capability throw message");
+		}
+	}
+
+	{
+		dicom::DicomFile df{};
+		const auto source_layout =
+		    make_mono_layout(dicom::pixel::DataType::u32, 32);
+		const std::vector<std::uint8_t> source_bytes{
+		    0x34u, 0x12u, 0x00u, 0x00u};
+		try {
+			df.set_pixel_data("HTJ2KLossless"_uid,
+			    make_source_span(source_bytes, source_layout));
+			fail("htj2k u32 lossless codec capability throw message should throw");
+		} catch (const std::exception& e) {
+			const std::string what = e.what();
+			expect_contains(what, "DicomFile::set_pixel_data",
+			    "htj2k u32 lossless codec capability throw message");
+			expect_contains(
+			    what, std::string("ts=") + std::string("HTJ2KLossless"_uid.value()),
+			    "htj2k u32 lossless codec capability throw message");
+			expect_contains(what, "status=invalid_argument",
+			    "htj2k u32 lossless codec capability throw message");
+			expect_contains(what, "stage=validate",
+			    "htj2k u32 lossless codec capability throw message");
+			expect_contains(what,
+			    "lossless HTJ2K 32-bit encode requires signed source_dtype",
+			    "htj2k u32 lossless codec capability throw message");
+		}
+	}
+
+	{
+		dicom::DicomFile df{};
+		const auto source_layout =
+		    make_mono_layout(dicom::pixel::DataType::u16, 16);
+		const std::vector<std::uint8_t> source_bytes{0x34u, 0x12u};
+		df.set_pixel_data("ExplicitVRLittleEndian"_uid,
+		    make_source_span(source_bytes, source_layout));
+
+		try {
+			std::ostringstream os(std::ios::binary);
+			df.write_with_transfer_syntax(os, "JPEGExtended12Bit"_uid);
+			fail("lossy JPEG write codec capability throw message should throw");
+		} catch (const std::exception& e) {
+			const std::string what = e.what();
+			expect_contains(
+			    what, std::string("ts=") + std::string("JPEGExtended12Bit"_uid.value()),
+			    "lossy JPEG write codec capability throw message");
+			expect_contains(what, "status=invalid_argument",
+			    "lossy JPEG write codec capability throw message");
+			expect_contains(what, "stage=validate",
+			    "lossy JPEG write codec capability throw message");
+			expect_contains(what, "lossy JPEG supports precision up to 12 bits",
+			    "lossy JPEG write codec capability throw message");
+			expect_not_contains(what,
+			    "lossy JPEG transfer syntax requires bits_stored <= 12",
+			    "lossy JPEG write codec capability throw message");
+		}
+	}
+
+	{
+		dicom::DicomFile df{};
+		const auto source_layout =
+		    make_mono_layout(dicom::pixel::DataType::s32, 32);
+		const std::vector<std::uint8_t> source_bytes{
+		    0x34u, 0x12u, 0x00u, 0x00u};
+		const std::array<dicom::pixel::CodecOptionTextKv, 1> lossy_options{{
+		    {"target_psnr", "60"},
+		}};
+		try {
+			df.set_pixel_data("HTJ2K"_uid,
+			    make_source_span(source_bytes, source_layout),
+			    std::span<const dicom::pixel::CodecOptionTextKv>(lossy_options));
+			fail("htj2k s32 lossy codec capability throw message should throw");
+		} catch (const std::exception& e) {
+			const std::string what = e.what();
+			expect_contains(
+			    what, std::string("ts=") + std::string("HTJ2K"_uid.value()),
+			    "htj2k s32 lossy codec capability throw message");
+			expect_contains(what, "status=invalid_argument",
+			    "htj2k s32 lossy codec capability throw message");
+			expect_contains(what, "stage=validate",
+			    "htj2k s32 lossy codec capability throw message");
+			expect_contains(what,
+			    "lossy HTJ2K supports only integral 8/16-bit source types",
+			    "htj2k s32 lossy codec capability throw message");
 		}
 	}
 

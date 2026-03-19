@@ -644,8 +644,6 @@ void run_set_pixel_data_with_computed_codec_options(DicomFile& file,
 	        file_path, transfer_syntax);
 	const auto source_layout =
 	    support_detail::compute_encode_source_layout_or_throw(source, file_path);
-	validate_encode_profile_source_constraints(codec_profile_code,
-	    source_layout.bits_allocated, source_layout.bits_stored, file_path);
 	const bool use_multicomponent_transform =
 	    should_use_multicomponent_transform(transfer_syntax, codec_profile_code,
 	        codec_options, source_layout.samples_per_pixel,
@@ -740,9 +738,6 @@ void run_set_pixel_data_from_frame_provider_with_computed_codec_options_impl(
 	const auto encode_source_layout =
 	    support_detail::compute_encode_source_layout_without_source_bytes_or_throw(
 	        source_layout, file_path);
-	validate_encode_profile_source_constraints(codec_profile_code,
-	    encode_source_layout.bits_allocated, encode_source_layout.bits_stored,
-	    file_path);
 	const bool use_multicomponent_transform =
 	    should_use_multicomponent_transform(transfer_syntax, codec_profile_code,
 	        codec_options, encode_source_layout.samples_per_pixel,

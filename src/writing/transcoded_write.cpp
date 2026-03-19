@@ -250,9 +250,6 @@ void prepare_streaming_encode_policy_or_throw(
 	state.encode_source_layout =
 	    pixel::support_detail::compute_encode_source_layout_without_source_bytes_or_throw(
 	        state.source_layout, file.path());
-	pixel::detail::validate_encode_profile_source_constraints(state.codec_profile_code,
-	    state.encode_source_layout.bits_allocated,
-	    state.encode_source_layout.bits_stored, file.path());
 
 	state.output_photometric = state.source_layout.photometric;
 	state.backpatch_lossy_ratio =
