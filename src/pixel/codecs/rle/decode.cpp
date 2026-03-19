@@ -3,10 +3,12 @@
 #include <cstdint>
 #include <cmath>
 #include <cstring>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
 #include "../common/decode_fastpath.hpp"
+#include "../common/integral_hotpath.hpp"
 #include "internal.hpp"
 
 namespace pixel::rle_codec {
@@ -203,6 +205,417 @@ bool write_integer_sample(uint8_t dst_dtype, int32_t sample, uint8_t* dst) {
     std::memcpy(dst, &value, sizeof(value));
     return true;
   }
+  default:
+    return false;
+  }
+}
+
+[[nodiscard]] bool integral_storage_is_already_normalized(
+    std::size_t sample_bytes, int bits_stored) noexcept {
+  return bits_stored == static_cast<int>(sample_bytes * 8u);
+}
+
+template <uint32_t SampleBytes, bool SourceSigned>
+using MatchingStorageValueT = std::conditional_t<
+    SourceSigned,
+    std::conditional_t<SampleBytes == 1, std::int8_t,
+        std::conditional_t<SampleBytes == 2, std::int16_t, std::int32_t>>,
+    std::conditional_t<SampleBytes == 1, std::uint8_t,
+        std::conditional_t<SampleBytes == 2, std::uint16_t, std::uint32_t>>>;
+
+template <uint32_t SampleBytes, bool SourceSigned>
+inline MatchingStorageValueT<SampleBytes, SourceSigned>
+load_normalized_matching_storage_value(const uint8_t* src, int bits_stored) noexcept {
+  return static_cast<MatchingStorageValueT<SampleBytes, SourceSigned>>(
+      ::pixel::codec_common::normalize_loaded_integral<SourceSigned>(
+          ::pixel::codec_common::load_raw_native_integral<SampleBytes>(src),
+          bits_stored));
+}
+
+template <uint32_t SampleBytes, bool SourceSigned>
+void write_normalized_single_channel_rows(
+    const uint8_t* decoded_planar,
+    uint8_t* dst,
+    std::size_t rows,
+    std::size_t cols,
+    std::size_t row_payload,
+    std::size_t row_stride,
+    int bits_stored) {
+  using DstT = MatchingStorageValueT<SampleBytes, SourceSigned>;
+
+  for (std::size_t r = 0; r < rows; ++r) {
+    const uint8_t* src_row = decoded_planar + r * row_payload;
+    uint8_t* dst_row_bytes = dst + r * row_stride;
+    const bool typed_aligned =
+        (reinterpret_cast<std::uintptr_t>(dst_row_bytes) % alignof(DstT)) == 0;
+    if (typed_aligned) {
+      auto* dst_row = reinterpret_cast<DstT*>(dst_row_bytes);
+      for (std::size_t c = 0; c < cols; ++c) {
+        dst_row[c] = load_normalized_matching_storage_value<SampleBytes, SourceSigned>(
+            src_row + c * SampleBytes, bits_stored);
+      }
+      continue;
+    }
+
+    for (std::size_t c = 0; c < cols; ++c) {
+      ::pixel::codec_common::store_scalar_unaligned(
+          dst_row_bytes + c * sizeof(DstT),
+          load_normalized_matching_storage_value<SampleBytes, SourceSigned>(
+              src_row + c * SampleBytes, bits_stored));
+    }
+  }
+}
+
+template <uint32_t SampleBytes, bool SourceSigned>
+void write_normalized_planar_rows(
+    const uint8_t* decoded_planar,
+    uint8_t* dst,
+    std::size_t rows,
+    std::size_t cols,
+    std::size_t samples,
+    std::size_t row_payload,
+    std::size_t plane_bytes,
+    std::size_t row_stride,
+    int bits_stored) {
+  using DstT = MatchingStorageValueT<SampleBytes, SourceSigned>;
+  const std::size_t dst_plane_bytes = row_stride * rows;
+
+  for (std::size_t comp = 0; comp < samples; ++comp) {
+    const uint8_t* src_plane = decoded_planar + comp * plane_bytes;
+    uint8_t* dst_plane = dst + comp * dst_plane_bytes;
+    for (std::size_t r = 0; r < rows; ++r) {
+      const uint8_t* src_row = src_plane + r * row_payload;
+      uint8_t* dst_row_bytes = dst_plane + r * row_stride;
+      const bool typed_aligned =
+          (reinterpret_cast<std::uintptr_t>(dst_row_bytes) % alignof(DstT)) == 0;
+      if (typed_aligned) {
+        auto* dst_row = reinterpret_cast<DstT*>(dst_row_bytes);
+        for (std::size_t c = 0; c < cols; ++c) {
+          dst_row[c] = load_normalized_matching_storage_value<SampleBytes, SourceSigned>(
+              src_row + c * SampleBytes, bits_stored);
+        }
+        continue;
+      }
+
+      for (std::size_t c = 0; c < cols; ++c) {
+        ::pixel::codec_common::store_scalar_unaligned(
+            dst_row_bytes + c * sizeof(DstT),
+            load_normalized_matching_storage_value<SampleBytes, SourceSigned>(
+                src_row + c * SampleBytes, bits_stored));
+      }
+    }
+  }
+}
+
+template <uint32_t SampleBytes, std::size_t SamplesPerPixel, bool SourceSigned>
+void copy_planar_to_interleaved_normalized_fast(const uint8_t* src_frame,
+    uint8_t* dst_base, std::size_t rows, std::size_t cols,
+    std::size_t src_row_bytes, std::size_t dst_row_bytes,
+    int bits_stored) noexcept {
+  using DstT = MatchingStorageValueT<SampleBytes, SourceSigned>;
+  static_assert((SampleBytes == 1 || SampleBytes == 2),
+      "normalized fast path supports SampleBytes=1/2");
+  static_assert((SamplesPerPixel == 3 || SamplesPerPixel == 4),
+      "normalized fast path supports SPP=3/4");
+
+  const std::size_t src_plane_bytes = src_row_bytes * rows;
+  for (std::size_t r = 0; r < rows; ++r) {
+    uint8_t* dst_row_bytes_ptr = dst_base + r * dst_row_bytes;
+    const std::uint8_t* s0 = src_frame + r * src_row_bytes;
+    const std::uint8_t* s1 = s0 + src_plane_bytes;
+    const std::uint8_t* s2 = s1 + src_plane_bytes;
+    const bool typed_aligned =
+        (reinterpret_cast<std::uintptr_t>(dst_row_bytes_ptr) % alignof(DstT)) == 0;
+
+    if (typed_aligned) {
+      auto* dst_row = reinterpret_cast<DstT*>(dst_row_bytes_ptr);
+      if constexpr (SamplesPerPixel == 3) {
+        for (std::size_t c = 0; c < cols; ++c) {
+          const std::size_t pixel_base = c * 3u;
+          dst_row[pixel_base] =
+              load_normalized_matching_storage_value<SampleBytes, SourceSigned>(s0, bits_stored);
+          dst_row[pixel_base + 1u] =
+              load_normalized_matching_storage_value<SampleBytes, SourceSigned>(s1, bits_stored);
+          dst_row[pixel_base + 2u] =
+              load_normalized_matching_storage_value<SampleBytes, SourceSigned>(s2, bits_stored);
+          s0 += SampleBytes;
+          s1 += SampleBytes;
+          s2 += SampleBytes;
+        }
+      } else {
+        const std::uint8_t* s3 = s2 + src_plane_bytes;
+        for (std::size_t c = 0; c < cols; ++c) {
+          const std::size_t pixel_base = c * 4u;
+          dst_row[pixel_base] =
+              load_normalized_matching_storage_value<SampleBytes, SourceSigned>(s0, bits_stored);
+          dst_row[pixel_base + 1u] =
+              load_normalized_matching_storage_value<SampleBytes, SourceSigned>(s1, bits_stored);
+          dst_row[pixel_base + 2u] =
+              load_normalized_matching_storage_value<SampleBytes, SourceSigned>(s2, bits_stored);
+          dst_row[pixel_base + 3u] =
+              load_normalized_matching_storage_value<SampleBytes, SourceSigned>(s3, bits_stored);
+          s0 += SampleBytes;
+          s1 += SampleBytes;
+          s2 += SampleBytes;
+          s3 += SampleBytes;
+        }
+      }
+      continue;
+    }
+
+    if constexpr (SamplesPerPixel == 3) {
+      for (std::size_t c = 0; c < cols; ++c) {
+        const std::size_t pixel_base = (c * 3u) * sizeof(DstT);
+        ::pixel::codec_common::store_scalar_unaligned(
+            dst_row_bytes_ptr + pixel_base,
+            load_normalized_matching_storage_value<SampleBytes, SourceSigned>(s0, bits_stored));
+        ::pixel::codec_common::store_scalar_unaligned(
+            dst_row_bytes_ptr + pixel_base + sizeof(DstT),
+            load_normalized_matching_storage_value<SampleBytes, SourceSigned>(s1, bits_stored));
+        ::pixel::codec_common::store_scalar_unaligned(
+            dst_row_bytes_ptr + pixel_base + sizeof(DstT) * 2u,
+            load_normalized_matching_storage_value<SampleBytes, SourceSigned>(s2, bits_stored));
+        s0 += SampleBytes;
+        s1 += SampleBytes;
+        s2 += SampleBytes;
+      }
+    } else {
+      const std::uint8_t* s3 = s2 + src_plane_bytes;
+      for (std::size_t c = 0; c < cols; ++c) {
+        const std::size_t pixel_base = (c * 4u) * sizeof(DstT);
+        ::pixel::codec_common::store_scalar_unaligned(
+            dst_row_bytes_ptr + pixel_base,
+            load_normalized_matching_storage_value<SampleBytes, SourceSigned>(s0, bits_stored));
+        ::pixel::codec_common::store_scalar_unaligned(
+            dst_row_bytes_ptr + pixel_base + sizeof(DstT),
+            load_normalized_matching_storage_value<SampleBytes, SourceSigned>(s1, bits_stored));
+        ::pixel::codec_common::store_scalar_unaligned(
+            dst_row_bytes_ptr + pixel_base + sizeof(DstT) * 2u,
+            load_normalized_matching_storage_value<SampleBytes, SourceSigned>(s2, bits_stored));
+        ::pixel::codec_common::store_scalar_unaligned(
+            dst_row_bytes_ptr + pixel_base + sizeof(DstT) * 3u,
+            load_normalized_matching_storage_value<SampleBytes, SourceSigned>(s3, bits_stored));
+        s0 += SampleBytes;
+        s1 += SampleBytes;
+        s2 += SampleBytes;
+        s3 += SampleBytes;
+      }
+    }
+  }
+}
+
+template <uint32_t SampleBytes, bool SourceSigned>
+void write_normalized_interleaved_rows(
+    const uint8_t* decoded_planar,
+    uint8_t* dst,
+    std::size_t rows,
+    std::size_t cols,
+    std::size_t samples,
+    std::size_t row_payload,
+    std::size_t plane_bytes,
+    std::size_t row_stride,
+    int bits_stored) {
+  using DstT = MatchingStorageValueT<SampleBytes, SourceSigned>;
+
+  for (std::size_t r = 0; r < rows; ++r) {
+    uint8_t* dst_row_bytes = dst + r * row_stride;
+    const bool typed_aligned =
+        (reinterpret_cast<std::uintptr_t>(dst_row_bytes) % alignof(DstT)) == 0;
+    if (typed_aligned) {
+      auto* dst_row = reinterpret_cast<DstT*>(dst_row_bytes);
+      for (std::size_t c = 0; c < cols; ++c) {
+        const std::size_t pixel_base = c * samples;
+        for (std::size_t comp = 0; comp < samples; ++comp) {
+          const uint8_t* src_row =
+              decoded_planar + comp * plane_bytes + r * row_payload;
+          dst_row[pixel_base + comp] =
+              load_normalized_matching_storage_value<SampleBytes, SourceSigned>(
+                  src_row + c * SampleBytes, bits_stored);
+        }
+      }
+      continue;
+    }
+
+    for (std::size_t c = 0; c < cols; ++c) {
+      const std::size_t pixel_base = (c * samples) * sizeof(DstT);
+      for (std::size_t comp = 0; comp < samples; ++comp) {
+        const uint8_t* src_row =
+            decoded_planar + comp * plane_bytes + r * row_payload;
+        ::pixel::codec_common::store_scalar_unaligned(
+            dst_row_bytes + pixel_base + comp * sizeof(DstT),
+            load_normalized_matching_storage_value<SampleBytes, SourceSigned>(
+                src_row + c * SampleBytes, bits_stored));
+      }
+    }
+  }
+}
+
+[[nodiscard]] bool write_normalized_single_channel_matching_storage_to_dst(
+    const uint8_t* decoded_planar,
+    uint8_t* dst,
+    std::size_t rows,
+    std::size_t cols,
+    std::size_t row_payload,
+    std::size_t row_stride,
+    std::size_t sample_bytes,
+    bool source_signed,
+    int bits_stored) {
+  switch (sample_bytes) {
+  case 1:
+    if (source_signed) {
+      write_normalized_single_channel_rows<1, true>(
+          decoded_planar, dst, rows, cols, row_payload, row_stride, bits_stored);
+    } else {
+      write_normalized_single_channel_rows<1, false>(
+          decoded_planar, dst, rows, cols, row_payload, row_stride, bits_stored);
+    }
+    return true;
+  case 2:
+    if (source_signed) {
+      write_normalized_single_channel_rows<2, true>(
+          decoded_planar, dst, rows, cols, row_payload, row_stride, bits_stored);
+    } else {
+      write_normalized_single_channel_rows<2, false>(
+          decoded_planar, dst, rows, cols, row_payload, row_stride, bits_stored);
+    }
+    return true;
+  case 4:
+    if (source_signed) {
+      write_normalized_single_channel_rows<4, true>(
+          decoded_planar, dst, rows, cols, row_payload, row_stride, bits_stored);
+    } else {
+      write_normalized_single_channel_rows<4, false>(
+          decoded_planar, dst, rows, cols, row_payload, row_stride, bits_stored);
+    }
+    return true;
+  default:
+    return false;
+  }
+}
+
+[[nodiscard]] bool write_normalized_matching_storage_to_dst(
+    const uint8_t* decoded_planar,
+    uint8_t* dst,
+    std::size_t rows,
+    std::size_t cols,
+    std::size_t samples,
+    std::size_t row_payload,
+    std::size_t plane_bytes,
+    std::size_t row_stride,
+    bool output_planar,
+    std::size_t sample_bytes,
+    bool source_signed,
+    int bits_stored) {
+  switch (sample_bytes) {
+  case 1:
+    if (output_planar) {
+      if (source_signed) {
+        write_normalized_planar_rows<1, true>(
+            decoded_planar, dst, rows, cols, samples, row_payload, plane_bytes,
+            row_stride, bits_stored);
+      } else {
+        write_normalized_planar_rows<1, false>(
+            decoded_planar, dst, rows, cols, samples, row_payload, plane_bytes,
+            row_stride, bits_stored);
+      }
+      return true;
+    }
+    if (samples == 3u) {
+      if (source_signed) {
+        copy_planar_to_interleaved_normalized_fast<1, 3, true>(
+            decoded_planar, dst, rows, cols, row_payload, row_stride, bits_stored);
+      } else {
+        copy_planar_to_interleaved_normalized_fast<1, 3, false>(
+            decoded_planar, dst, rows, cols, row_payload, row_stride, bits_stored);
+      }
+      return true;
+    }
+    if (samples == 4u) {
+      if (source_signed) {
+        copy_planar_to_interleaved_normalized_fast<1, 4, true>(
+            decoded_planar, dst, rows, cols, row_payload, row_stride, bits_stored);
+      } else {
+        copy_planar_to_interleaved_normalized_fast<1, 4, false>(
+            decoded_planar, dst, rows, cols, row_payload, row_stride, bits_stored);
+      }
+      return true;
+    }
+    if (source_signed) {
+      write_normalized_interleaved_rows<1, true>(
+          decoded_planar, dst, rows, cols, samples, row_payload, plane_bytes,
+          row_stride, bits_stored);
+    } else {
+      write_normalized_interleaved_rows<1, false>(
+          decoded_planar, dst, rows, cols, samples, row_payload, plane_bytes,
+          row_stride, bits_stored);
+    }
+    return true;
+  case 2:
+    if (output_planar) {
+      if (source_signed) {
+        write_normalized_planar_rows<2, true>(
+            decoded_planar, dst, rows, cols, samples, row_payload, plane_bytes,
+            row_stride, bits_stored);
+      } else {
+        write_normalized_planar_rows<2, false>(
+            decoded_planar, dst, rows, cols, samples, row_payload, plane_bytes,
+            row_stride, bits_stored);
+      }
+      return true;
+    }
+    if (samples == 3u) {
+      if (source_signed) {
+        copy_planar_to_interleaved_normalized_fast<2, 3, true>(
+            decoded_planar, dst, rows, cols, row_payload, row_stride, bits_stored);
+      } else {
+        copy_planar_to_interleaved_normalized_fast<2, 3, false>(
+            decoded_planar, dst, rows, cols, row_payload, row_stride, bits_stored);
+      }
+      return true;
+    }
+    if (samples == 4u) {
+      if (source_signed) {
+        copy_planar_to_interleaved_normalized_fast<2, 4, true>(
+            decoded_planar, dst, rows, cols, row_payload, row_stride, bits_stored);
+      } else {
+        copy_planar_to_interleaved_normalized_fast<2, 4, false>(
+            decoded_planar, dst, rows, cols, row_payload, row_stride, bits_stored);
+      }
+      return true;
+    }
+    if (source_signed) {
+      write_normalized_interleaved_rows<2, true>(
+          decoded_planar, dst, rows, cols, samples, row_payload, plane_bytes,
+          row_stride, bits_stored);
+    } else {
+      write_normalized_interleaved_rows<2, false>(
+          decoded_planar, dst, rows, cols, samples, row_payload, plane_bytes,
+          row_stride, bits_stored);
+    }
+    return true;
+  case 4:
+    if (output_planar) {
+      if (source_signed) {
+        write_normalized_planar_rows<4, true>(
+            decoded_planar, dst, rows, cols, samples, row_payload, plane_bytes,
+            row_stride, bits_stored);
+      } else {
+        write_normalized_planar_rows<4, false>(
+            decoded_planar, dst, rows, cols, samples, row_payload, plane_bytes,
+            row_stride, bits_stored);
+      }
+      return true;
+    }
+    if (source_signed) {
+      write_normalized_interleaved_rows<4, true>(
+          decoded_planar, dst, rows, cols, samples, row_payload, plane_bytes,
+          row_stride, bits_stored);
+    } else {
+      write_normalized_interleaved_rows<4, false>(
+          decoded_planar, dst, rows, cols, samples, row_payload, plane_bytes,
+          row_stride, bits_stored);
+    }
+    return true;
   default:
     return false;
   }
@@ -557,7 +970,8 @@ pixel_error_code decode_single_channel_frame_fast(DecoderCtx* ctx,
   const bool matching_integral_storage =
       ::pixel::codec_common::integral_storage_matches_dst_dtype(
           static_cast<uint32_t>(sample_bytes), source_dtype.is_signed, dst_dtype);
-  if (matching_integral_storage) {
+  if (matching_integral_storage &&
+      integral_storage_is_already_normalized(sample_bytes, request->frame.bits_stored)) {
     if (row_stride == row_payload) {
       std::memcpy(dst, decoded_planar.data(), plane_bytes);
     } else {
@@ -566,6 +980,17 @@ pixel_error_code decode_single_channel_frame_fast(DecoderCtx* ctx,
         uint8_t* dst_row = dst + r * row_stride;
         std::memcpy(dst_row, src_row, row_payload);
       }
+    }
+    clear_detail(ctx);
+    return PIXEL_CODEC_ERR_OK;
+  }
+
+  if (matching_integral_storage) {
+    if (!write_normalized_single_channel_matching_storage_to_dst(
+            decoded_planar.data(), dst, rows, cols, row_payload, row_stride,
+            sample_bytes, source_dtype.is_signed, request->frame.bits_stored)) {
+      return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "decode_frame",
+          "unsupported destination dtype");
     }
     clear_detail(ctx);
     return PIXEL_CODEC_ERR_OK;
@@ -697,7 +1122,8 @@ pixel_error_code decoder_decode_frame(
   const bool matching_integral_storage =
       ::pixel::codec_common::integral_storage_matches_dst_dtype(
           static_cast<uint32_t>(sample_bytes), source_dtype.is_signed, dst_dtype);
-  if (matching_integral_storage) {
+  if (matching_integral_storage &&
+      integral_storage_is_already_normalized(sample_bytes, request->frame.bits_stored)) {
     if (output_planar) {
       uint64_t dst_plane_bytes_u64 = 0;
       if (!mul_u64(static_cast<uint64_t>(row_stride), static_cast<uint64_t>(rows),
@@ -757,6 +1183,18 @@ pixel_error_code decoder_decode_frame(
       }
     }
 
+    clear_detail(c);
+    return PIXEL_CODEC_ERR_OK;
+  }
+
+  if (matching_integral_storage) {
+    if (!write_normalized_matching_storage_to_dst(
+            decoded_planar.data(), dst, rows, cols, samples, row_payload,
+            plane_bytes, row_stride, output_planar, sample_bytes, source_dtype.is_signed,
+            request->frame.bits_stored)) {
+      return fail_detail(c, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "decode_frame",
+          "unsupported destination dtype");
+    }
     clear_detail(c);
     return PIXEL_CODEC_ERR_OK;
   }
