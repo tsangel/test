@@ -10,6 +10,8 @@
 
 namespace dicom::pixel::support_detail {
 
+[[nodiscard]] pixel::PixelLayout compute_decode_source_layout(const DicomFile& df);
+
 struct PreparedDecodeFrameSource {
 	std::span<const std::uint8_t> bytes{};
 	std::vector<std::uint8_t> owned_bytes{};
@@ -29,18 +31,18 @@ struct NativeDecodeSourceView {
 };
 
 [[nodiscard]] PreparedDecodeFrameSource prepare_decode_frame_source_or_throw(
-    const DicomFile& df, const PixelDataInfo& info, std::size_t frame_index);
+    const DicomFile& df, const pixel::PixelLayout& source_layout, std::size_t frame_index);
 [[nodiscard]] PreparedDecodeFrameSource prepare_decode_frame_source_or_throw(
     const PixelSequence& pixel_sequence, std::size_t frame_index);
 [[nodiscard]] PreparedDecodeFrameSource
 prepare_decode_frame_source_without_cache_or_throw(
-    const DicomFile& df, const PixelDataInfo& info, std::size_t frame_index);
+    const DicomFile& df, const pixel::PixelLayout& source_layout, std::size_t frame_index);
 [[nodiscard]] PreparedDecodeFrameSource
 prepare_decode_frame_source_without_cache_or_throw(
     const PixelSequence& pixel_sequence, std::size_t frame_index);
 
 [[nodiscard]] NativeDecodeSourceView compute_native_decode_source_view_or_throw(
-    const DicomFile& df, const PixelDataInfo& info);
+    const DicomFile& df, const pixel::PixelLayout& source_layout);
 
 [[nodiscard]] std::span<const std::uint8_t> native_decode_frame_bytes_or_throw(
     const NativeDecodeSourceView& source_view, std::size_t frame_index);
@@ -66,10 +68,10 @@ struct ComputedEncodeSourceLayout {
 };
 
 [[nodiscard]] ComputedEncodeSourceLayout compute_encode_source_layout_or_throw(
-    const pixel::PixelSource& source, std::string_view file_path);
+    pixel::ConstPixelSpan source, std::string_view file_path);
 [[nodiscard]] ComputedEncodeSourceLayout
 compute_encode_source_layout_without_source_bytes_or_throw(
-    const pixel::PixelSource& source, std::string_view file_path);
+    const pixel::PixelLayout& source_layout, std::string_view file_path);
 
 struct NativePixelCopyInput {
 	std::span<const std::uint8_t> source_bytes{};

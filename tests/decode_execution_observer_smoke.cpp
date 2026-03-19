@@ -49,16 +49,26 @@ bool should_cancel(void* user_data) noexcept {
 
 void configure_native_multiframe_file(dicom::DicomFile& df,
     const std::vector<std::uint16_t>& pixels, int frames, int rows, int cols) {
-	dicom::pixel::PixelSource source{};
-	source.bytes = std::span<const std::uint8_t>(
-	    reinterpret_cast<const std::uint8_t*>(pixels.data()),
-	    pixels.size() * sizeof(std::uint16_t));
-	source.data_type = dicom::pixel::DataType::u16;
-	source.frames = frames;
-	source.rows = rows;
-	source.cols = cols;
-	source.samples_per_pixel = 1;
-	source.photometric = dicom::pixel::Photometric::monochrome2;
+	// Describe the source volume with the normalized layout/span pair used by
+	// the production encode path.
+	const dicom::pixel::ConstPixelSpan source{
+	    .layout = dicom::pixel::PixelLayout{
+	        .data_type = dicom::pixel::DataType::u16,
+	        .photometric = dicom::pixel::Photometric::monochrome2,
+	        .planar = dicom::pixel::Planar::interleaved,
+	        .reserved = 0,
+	        .rows = static_cast<std::uint32_t>(rows),
+	        .cols = static_cast<std::uint32_t>(cols),
+	        .frames = static_cast<std::uint32_t>(frames),
+	        .samples_per_pixel = 1,
+	        .bits_stored = 16,
+	        .row_stride = static_cast<std::size_t>(cols) * sizeof(std::uint16_t),
+	        .frame_stride = static_cast<std::size_t>(rows * cols) * sizeof(std::uint16_t),
+	    },
+	    .bytes = std::span<const std::uint8_t>(
+	        reinterpret_cast<const std::uint8_t*>(pixels.data()),
+	        pixels.size() * sizeof(std::uint16_t)),
+	};
 	df.set_pixel_data("ExplicitVRLittleEndian"_uid, source);
 }
 
@@ -86,7 +96,7 @@ int main() {
 		dicom::pixel::DecodeOptions options{};
 		options.worker_threads = 2;
 		const auto plan = df.create_decode_plan(options);
-		std::vector<std::uint8_t> out(plan.strides.frame * kFrames, 0);
+		std::vector<std::uint8_t> out(plan.output_layout.frame_stride * kFrames, 0);
 		ProgressState progress{};
 		const dicom::pixel::ExecutionObserver observer{
 		    .on_progress = &on_progress,
@@ -118,7 +128,7 @@ int main() {
 		dicom::pixel::DecodeOptions options{};
 		options.worker_threads = 1;
 		const auto plan = df.create_decode_plan(options);
-		std::vector<std::uint8_t> out(plan.strides.frame * kFrames, 0);
+		std::vector<std::uint8_t> out(plan.output_layout.frame_stride * kFrames, 0);
 		ProgressState progress{};
 		progress.cancel_after = 2;
 		const dicom::pixel::ExecutionObserver observer{

@@ -140,6 +140,13 @@ if(BUILD_TESTING)
     add_test(NAME decode_execution_observer_smoke COMMAND dicomsdl_decode_execution_observer_smoke)
     set_tests_properties(decode_execution_observer_smoke PROPERTIES LABELS "dicomsdl")
 
+    add_executable(dicomsdl_pixel_transform_smoke
+        tests/pixel_transform_smoke.cpp
+    )
+    target_link_libraries(dicomsdl_pixel_transform_smoke PRIVATE dicomsdl)
+    add_test(NAME pixel_transform_smoke COMMAND dicomsdl_pixel_transform_smoke)
+    set_tests_properties(pixel_transform_smoke PROPERTIES LABELS "dicomsdl")
+
     add_executable(dicomsdl_codec_cycle_realdata
         tests/codec_cycle_realdata.cpp
     )
@@ -152,7 +159,7 @@ if(BUILD_TESTING)
         target_include_directories(dicomsdl_pixel_core_uncompressed_smoke
             PRIVATE
                 ${CMAKE_CURRENT_SOURCE_DIR}/src/pixel/abi
-                ${CMAKE_CURRENT_SOURCE_DIR}/src/pixel/codecs/uncompressed_v2
+                ${CMAKE_CURRENT_SOURCE_DIR}/src/pixel/codecs/uncompressed
         )
         target_link_libraries(dicomsdl_pixel_core_uncompressed_smoke PRIVATE
             dicomsdl_pixel_core
@@ -170,7 +177,7 @@ if(BUILD_TESTING)
         target_include_directories(dicomsdl_pixel_rle_static_plugin_smoke
             PRIVATE
                 ${CMAKE_CURRENT_SOURCE_DIR}/src/pixel/abi
-                ${CMAKE_CURRENT_SOURCE_DIR}/src/pixel/codecs/rle_v2
+                ${CMAKE_CURRENT_SOURCE_DIR}/src/pixel/codecs/rle
         )
         target_link_libraries(dicomsdl_pixel_rle_static_plugin_smoke PRIVATE
             dicomsdl_pixel_rle_plugin_static

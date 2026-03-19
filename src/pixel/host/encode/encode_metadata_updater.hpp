@@ -10,7 +10,7 @@
 namespace dicom::pixel::detail {
 
 void update_pixel_metadata_for_set_pixel_data(DataSet& dataset, std::string_view file_path,
-    uid::WellKnown transfer_syntax, const pixel::PixelSource& source,
+    uid::WellKnown transfer_syntax, const pixel::PixelLayout& source_layout,
     bool target_is_rle, pixel::Photometric output_photometric, int bits_allocated,
     int bits_stored, int high_bit, int pixel_representation,
     std::size_t source_row_stride, std::size_t source_frame_stride);

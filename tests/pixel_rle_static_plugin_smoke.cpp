@@ -1,7 +1,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <cmath>
 #include <iostream>
 #include <string>
 #include <string_view>
@@ -29,13 +28,7 @@ void expect_eq(const T& actual, const T& expected, std::string_view label) {
   }
 }
 
-void expect_near(double actual, double expected, double tolerance, std::string_view label) {
-  if (std::fabs(actual - expected) > tolerance) {
-    fail(std::string(label) + " mismatch");
-  }
-}
-
-std::string encoder_error_detail(const pixel_encoder_plugin_api_v2& api, const void* ctx) {
+std::string encoder_error_detail(const pixel_encoder_plugin_api& api, const void* ctx) {
   if (api.copy_last_error_detail == nullptr) {
     return {};
   }
@@ -48,7 +41,7 @@ std::string encoder_error_detail(const pixel_encoder_plugin_api_v2& api, const v
   return std::string(buffer);
 }
 
-std::string decoder_error_detail(const pixel_decoder_plugin_api_v2& api, const void* ctx) {
+std::string decoder_error_detail(const pixel_decoder_plugin_api& api, const void* ctx) {
   if (api.copy_last_error_detail == nullptr) {
     return {};
   }
@@ -62,7 +55,7 @@ std::string decoder_error_detail(const pixel_decoder_plugin_api_v2& api, const v
 }
 
 struct EncoderContextGuard {
-  const pixel_encoder_plugin_api_v2* api{nullptr};
+  const pixel_encoder_plugin_api* api{nullptr};
   void* context{nullptr};
 
   ~EncoderContextGuard() {
@@ -73,7 +66,7 @@ struct EncoderContextGuard {
 };
 
 struct DecoderContextGuard {
-  const pixel_decoder_plugin_api_v2* api{nullptr};
+  const pixel_decoder_plugin_api* api{nullptr};
   void* context{nullptr};
 
   ~DecoderContextGuard() {
@@ -83,22 +76,22 @@ struct DecoderContextGuard {
   }
 };
 
-pixel_encoder_request_v2 make_encoder_request(
-    std::vector<uint8_t>& source, pixel_output_buffer_v2 encoded_buffer, uint64_t encoded_size) {
-  pixel_encoder_request_v2 request{};
-  request.struct_size = sizeof(pixel_encoder_request_v2);
-  request.abi_version = PIXEL_ENCODER_PLUGIN_ABI_V2;
+pixel_encoder_request make_encoder_request(
+    std::vector<uint8_t>& source, pixel_output_buffer encoded_buffer, uint64_t encoded_size) {
+  pixel_encoder_request request{};
+  request.struct_size = sizeof(pixel_encoder_request);
+  request.abi_version = PIXEL_ENCODER_PLUGIN_ABI;
 
-  request.source.struct_size = sizeof(pixel_encoder_source_v2);
-  request.source.abi_version = PIXEL_ENCODER_PLUGIN_ABI_V2;
+  request.source.struct_size = sizeof(pixel_encoder_source);
+  request.source.abi_version = PIXEL_ENCODER_PLUGIN_ABI;
   request.source.source_buffer.data = source.data();
   request.source.source_buffer.size = source.size();
 
-  request.frame.struct_size = sizeof(pixel_encoder_frame_info_v2);
-  request.frame.abi_version = PIXEL_ENCODER_PLUGIN_ABI_V2;
-  request.frame.codec_profile_code = PIXEL_CODEC_PROFILE_RLE_LOSSLESS_V2;
-  request.frame.source_dtype = PIXEL_DTYPE_U16_V2;
-  request.frame.source_planar = PIXEL_PLANAR_INTERLEAVED_V2;
+  request.frame.struct_size = sizeof(pixel_encoder_frame_info);
+  request.frame.abi_version = PIXEL_ENCODER_PLUGIN_ABI;
+  request.frame.codec_profile_code = PIXEL_CODEC_PROFILE_RLE_LOSSLESS;
+  request.frame.source_dtype = PIXEL_DTYPE_U16;
+  request.frame.source_planar = PIXEL_PLANAR_INTERLEAVED;
   request.frame.rows = 16;
   request.frame.cols = 16;
   request.frame.samples_per_pixel = 1;
@@ -110,68 +103,64 @@ pixel_encoder_request_v2 make_encoder_request(
   request.frame.source_frame_size_bytes = 0;
   request.frame.use_multicomponent_transform = 0;
 
-  request.output.struct_size = sizeof(pixel_encoder_output_v2);
-  request.output.abi_version = PIXEL_ENCODER_PLUGIN_ABI_V2;
+  request.output.struct_size = sizeof(pixel_encoder_output);
+  request.output.abi_version = PIXEL_ENCODER_PLUGIN_ABI;
   request.output.encoded_buffer = encoded_buffer;
   request.output.encoded_size = encoded_size;
 
   return request;
 }
 
-pixel_decoder_request_v2 make_decoder_request(
+pixel_decoder_request make_decoder_request(
     std::vector<uint8_t>& encoded, std::vector<uint8_t>& decoded) {
-  pixel_decoder_request_v2 request{};
-  request.struct_size = sizeof(pixel_decoder_request_v2);
-  request.abi_version = PIXEL_DECODER_PLUGIN_ABI_V2;
+  pixel_decoder_request request{};
+  request.struct_size = sizeof(pixel_decoder_request);
+  request.abi_version = PIXEL_DECODER_PLUGIN_ABI;
 
-  request.source.struct_size = sizeof(pixel_decoder_source_v2);
-  request.source.abi_version = PIXEL_DECODER_PLUGIN_ABI_V2;
+  request.source.struct_size = sizeof(pixel_decoder_source);
+  request.source.abi_version = PIXEL_DECODER_PLUGIN_ABI;
   request.source.source_buffer.data = encoded.data();
   request.source.source_buffer.size = encoded.size();
 
-  request.frame.struct_size = sizeof(pixel_decoder_frame_info_v2);
-  request.frame.abi_version = PIXEL_DECODER_PLUGIN_ABI_V2;
-  request.frame.codec_profile_code = PIXEL_CODEC_PROFILE_RLE_LOSSLESS_V2;
-  request.frame.source_dtype = PIXEL_DTYPE_U16_V2;
-  request.frame.source_planar = PIXEL_PLANAR_INTERLEAVED_V2;
+  request.frame.struct_size = sizeof(pixel_decoder_frame_info);
+  request.frame.abi_version = PIXEL_DECODER_PLUGIN_ABI;
+  request.frame.codec_profile_code = PIXEL_CODEC_PROFILE_RLE_LOSSLESS;
+  request.frame.source_dtype = PIXEL_DTYPE_U16;
+  request.frame.source_planar = PIXEL_PLANAR_INTERLEAVED;
   request.frame.rows = 16;
   request.frame.cols = 16;
   request.frame.samples_per_pixel = 1;
   request.frame.bits_stored = 16;
   request.frame.decode_mct = 0;
 
-  request.output.struct_size = sizeof(pixel_decoder_output_v2);
-  request.output.abi_version = PIXEL_DECODER_PLUGIN_ABI_V2;
+  request.output.struct_size = sizeof(pixel_decoder_output);
+  request.output.abi_version = PIXEL_DECODER_PLUGIN_ABI;
   request.output.dst = decoded.data();
   request.output.dst_size = decoded.size();
   request.output.row_stride = 0;
   request.output.frame_stride = 0;
-  request.output.dst_dtype = PIXEL_DTYPE_U16_V2;
-  request.output.dst_planar = PIXEL_PLANAR_INTERLEAVED_V2;
-
-  request.value_transform.struct_size = sizeof(pixel_decoder_value_transform_v2);
-  request.value_transform.abi_version = PIXEL_DECODER_PLUGIN_ABI_V2;
-  request.value_transform.transform_kind = PIXEL_DECODER_VALUE_TRANSFORM_NONE_V2;
+  request.output.dst_dtype = PIXEL_DTYPE_U16;
+  request.output.dst_planar = PIXEL_PLANAR_INTERLEAVED;
 
   return request;
 }
 
-pixel_encoder_request_v2 make_rgb8_encoder_request(
-    std::vector<uint8_t>& source, pixel_output_buffer_v2 encoded_buffer, uint64_t encoded_size) {
-  pixel_encoder_request_v2 request{};
-  request.struct_size = sizeof(pixel_encoder_request_v2);
-  request.abi_version = PIXEL_ENCODER_PLUGIN_ABI_V2;
+pixel_encoder_request make_rgb8_encoder_request(
+    std::vector<uint8_t>& source, pixel_output_buffer encoded_buffer, uint64_t encoded_size) {
+  pixel_encoder_request request{};
+  request.struct_size = sizeof(pixel_encoder_request);
+  request.abi_version = PIXEL_ENCODER_PLUGIN_ABI;
 
-  request.source.struct_size = sizeof(pixel_encoder_source_v2);
-  request.source.abi_version = PIXEL_ENCODER_PLUGIN_ABI_V2;
+  request.source.struct_size = sizeof(pixel_encoder_source);
+  request.source.abi_version = PIXEL_ENCODER_PLUGIN_ABI;
   request.source.source_buffer.data = source.data();
   request.source.source_buffer.size = source.size();
 
-  request.frame.struct_size = sizeof(pixel_encoder_frame_info_v2);
-  request.frame.abi_version = PIXEL_ENCODER_PLUGIN_ABI_V2;
-  request.frame.codec_profile_code = PIXEL_CODEC_PROFILE_RLE_LOSSLESS_V2;
-  request.frame.source_dtype = PIXEL_DTYPE_U8_V2;
-  request.frame.source_planar = PIXEL_PLANAR_INTERLEAVED_V2;
+  request.frame.struct_size = sizeof(pixel_encoder_frame_info);
+  request.frame.abi_version = PIXEL_ENCODER_PLUGIN_ABI;
+  request.frame.codec_profile_code = PIXEL_CODEC_PROFILE_RLE_LOSSLESS;
+  request.frame.source_dtype = PIXEL_DTYPE_U8;
+  request.frame.source_planar = PIXEL_PLANAR_INTERLEAVED;
   request.frame.rows = 8;
   request.frame.cols = 8;
   request.frame.samples_per_pixel = 3;
@@ -183,48 +172,44 @@ pixel_encoder_request_v2 make_rgb8_encoder_request(
   request.frame.source_frame_size_bytes = 0;
   request.frame.use_multicomponent_transform = 0;
 
-  request.output.struct_size = sizeof(pixel_encoder_output_v2);
-  request.output.abi_version = PIXEL_ENCODER_PLUGIN_ABI_V2;
+  request.output.struct_size = sizeof(pixel_encoder_output);
+  request.output.abi_version = PIXEL_ENCODER_PLUGIN_ABI;
   request.output.encoded_buffer = encoded_buffer;
   request.output.encoded_size = encoded_size;
 
   return request;
 }
 
-pixel_decoder_request_v2 make_rgb8_decoder_request(
+pixel_decoder_request make_rgb8_decoder_request(
     std::vector<uint8_t>& encoded, std::vector<uint8_t>& decoded) {
-  pixel_decoder_request_v2 request{};
-  request.struct_size = sizeof(pixel_decoder_request_v2);
-  request.abi_version = PIXEL_DECODER_PLUGIN_ABI_V2;
+  pixel_decoder_request request{};
+  request.struct_size = sizeof(pixel_decoder_request);
+  request.abi_version = PIXEL_DECODER_PLUGIN_ABI;
 
-  request.source.struct_size = sizeof(pixel_decoder_source_v2);
-  request.source.abi_version = PIXEL_DECODER_PLUGIN_ABI_V2;
+  request.source.struct_size = sizeof(pixel_decoder_source);
+  request.source.abi_version = PIXEL_DECODER_PLUGIN_ABI;
   request.source.source_buffer.data = encoded.data();
   request.source.source_buffer.size = encoded.size();
 
-  request.frame.struct_size = sizeof(pixel_decoder_frame_info_v2);
-  request.frame.abi_version = PIXEL_DECODER_PLUGIN_ABI_V2;
-  request.frame.codec_profile_code = PIXEL_CODEC_PROFILE_RLE_LOSSLESS_V2;
-  request.frame.source_dtype = PIXEL_DTYPE_U8_V2;
-  request.frame.source_planar = PIXEL_PLANAR_INTERLEAVED_V2;
+  request.frame.struct_size = sizeof(pixel_decoder_frame_info);
+  request.frame.abi_version = PIXEL_DECODER_PLUGIN_ABI;
+  request.frame.codec_profile_code = PIXEL_CODEC_PROFILE_RLE_LOSSLESS;
+  request.frame.source_dtype = PIXEL_DTYPE_U8;
+  request.frame.source_planar = PIXEL_PLANAR_INTERLEAVED;
   request.frame.rows = 8;
   request.frame.cols = 8;
   request.frame.samples_per_pixel = 3;
   request.frame.bits_stored = 8;
   request.frame.decode_mct = 0;
 
-  request.output.struct_size = sizeof(pixel_decoder_output_v2);
-  request.output.abi_version = PIXEL_DECODER_PLUGIN_ABI_V2;
+  request.output.struct_size = sizeof(pixel_decoder_output);
+  request.output.abi_version = PIXEL_DECODER_PLUGIN_ABI;
   request.output.dst = decoded.data();
   request.output.dst_size = decoded.size();
   request.output.row_stride = 0;
   request.output.frame_stride = 0;
-  request.output.dst_dtype = PIXEL_DTYPE_U8_V2;
-  request.output.dst_planar = PIXEL_PLANAR_INTERLEAVED_V2;
-
-  request.value_transform.struct_size = sizeof(pixel_decoder_value_transform_v2);
-  request.value_transform.abi_version = PIXEL_DECODER_PLUGIN_ABI_V2;
-  request.value_transform.transform_kind = PIXEL_DECODER_VALUE_TRANSFORM_NONE_V2;
+  request.output.dst_dtype = PIXEL_DTYPE_U8;
+  request.output.dst_planar = PIXEL_PLANAR_INTERLEAVED;
 
   return request;
 }
@@ -232,8 +217,8 @@ pixel_decoder_request_v2 make_rgb8_decoder_request(
 }  // namespace
 
 int main() {
-  const auto& encoder_api = pixel::rle_codec_v2::encoder_builtin_api();
-  const auto& decoder_api = pixel::rle_codec_v2::decoder_builtin_api();
+  const auto& encoder_api = pixel::rle_codec::encoder_builtin_api();
+  const auto& decoder_api = pixel::rle_codec::decoder_builtin_api();
 
   EncoderContextGuard encoder_ctx{};
   encoder_ctx.api = &encoder_api;
@@ -241,7 +226,7 @@ int main() {
   expect_true(encoder_ctx.context != nullptr, "encoder create");
 
   const auto encoder_configure_ec =
-      encoder_api.configure(encoder_ctx.context, PIXEL_CODEC_PROFILE_RLE_LOSSLESS_V2, nullptr);
+      encoder_api.configure(encoder_ctx.context, PIXEL_CODEC_PROFILE_RLE_LOSSLESS, nullptr);
   if (encoder_configure_ec != PIXEL_CODEC_ERR_OK) {
     fail("encoder configure failed: " +
         encoder_error_detail(encoder_api, encoder_ctx.context));
@@ -253,7 +238,7 @@ int main() {
     std::memcpy(source.data() + i * sizeof(uint16_t), &value, sizeof(value));
   }
 
-  pixel_output_buffer_v2 tiny_output{};
+  pixel_output_buffer tiny_output{};
   auto first_encode_request = make_encoder_request(source, tiny_output, 0);
   const auto first_encode_ec =
       encoder_api.encode_frame(encoder_ctx.context, &first_encode_request);
@@ -263,7 +248,7 @@ int main() {
       "first encode returns required encoded size");
 
   std::vector<uint8_t> encoded(first_encode_request.output.encoded_size);
-  pixel_output_buffer_v2 encoded_output{};
+  pixel_output_buffer encoded_output{};
   encoded_output.data = encoded.data();
   encoded_output.size = encoded.size();
 
@@ -285,7 +270,7 @@ int main() {
   expect_true(decoder_ctx.context != nullptr, "decoder create");
 
   const auto decoder_configure_ec =
-      decoder_api.configure(decoder_ctx.context, PIXEL_CODEC_PROFILE_RLE_LOSSLESS_V2, nullptr);
+      decoder_api.configure(decoder_ctx.context, PIXEL_CODEC_PROFILE_RLE_LOSSLESS, nullptr);
   if (decoder_configure_ec != PIXEL_CODEC_ERR_OK) {
     fail("decoder configure failed: " + decoder_error_detail(decoder_api, decoder_ctx.context));
   }
@@ -301,34 +286,12 @@ int main() {
   expect_true(std::memcmp(decoded.data(), source.data(), source.size()) == 0,
       "RLE lossless round-trip data equality");
 
-  std::vector<uint8_t> decoded_rescale(16u * 16u * sizeof(float), uint8_t{0});
-  auto decode_rescale_request = make_decoder_request(encoded, decoded_rescale);
-  decode_rescale_request.output.dst_dtype = PIXEL_DTYPE_F32_V2;
-  decode_rescale_request.value_transform.transform_kind =
-      PIXEL_DECODER_VALUE_TRANSFORM_RESCALE_V2;
-  decode_rescale_request.value_transform.rescale_slope = 0.5;
-  decode_rescale_request.value_transform.rescale_intercept = -1.0;
-  const auto decode_rescale_ec =
-      decoder_api.decode_frame(decoder_ctx.context, &decode_rescale_request);
-  if (decode_rescale_ec != PIXEL_CODEC_ERR_OK) {
-    fail("decode rescale failed: " + decoder_error_detail(decoder_api, decoder_ctx.context));
-  }
-  const float* decoded_rescale_values =
-      reinterpret_cast<const float*>(decoded_rescale.data());
-  for (std::size_t i = 0; i < 16u * 16u; ++i) {
-    uint16_t source_value = 0;
-    std::memcpy(&source_value, source.data() + i * sizeof(uint16_t), sizeof(source_value));
-    const double expected_value = static_cast<double>(source_value) * 0.5 - 1.0;
-    expect_near(decoded_rescale_values[i], expected_value, 1e-5,
-        "RLE rescale decoded sample");
-  }
-
   std::vector<uint8_t> rgb_source(8u * 8u * 3u, uint8_t{0});
   for (std::size_t i = 0; i < rgb_source.size(); ++i) {
     rgb_source[i] = static_cast<uint8_t>((i * 29u + 7u) & 0xFFu);
   }
 
-  pixel_output_buffer_v2 rgb_tiny_output{};
+  pixel_output_buffer rgb_tiny_output{};
   auto first_rgb_encode_request =
       make_rgb8_encoder_request(rgb_source, rgb_tiny_output, 0);
   const auto first_rgb_encode_ec =
@@ -339,7 +302,7 @@ int main() {
       "RGB encode returns required encoded size");
 
   std::vector<uint8_t> rgb_encoded(first_rgb_encode_request.output.encoded_size);
-  pixel_output_buffer_v2 rgb_output{};
+  pixel_output_buffer rgb_output{};
   rgb_output.data = rgb_encoded.data();
   rgb_output.size = rgb_encoded.size();
 

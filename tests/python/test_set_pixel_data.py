@@ -20,7 +20,7 @@ def test_set_pixel_data_native_single_frame_roundtrip():
 
     dicom_file.set_pixel_data("ExplicitVRLittleEndian", source)
 
-    decoded = dicom_file.to_array(frame=0, to_modality_value=False)
+    decoded = dicom_file.to_array(frame=0)
     assert np.array_equal(decoded, source)
     assert dicom_file.transfer_syntax_uid.keyword == "ExplicitVRLittleEndian"
     assert not dicom_file.get_dataelement("PixelData").is_pixel_sequence
@@ -34,11 +34,11 @@ def test_set_pixel_data_native_multi_frame_roundtrip():
 
     dicom_file.set_pixel_data("ExplicitVRLittleEndian", source)
 
-    decoded = dicom_file.to_array(frame=-1, to_modality_value=False)
+    decoded = dicom_file.to_array(frame=-1)
     assert decoded.shape == (2, 4, 4)
     assert np.array_equal(decoded, source)
-    assert np.array_equal(dicom_file.to_array(frame=0, to_modality_value=False), frame0)
-    assert np.array_equal(dicom_file.to_array(frame=1, to_modality_value=False), frame1)
+    assert np.array_equal(dicom_file.to_array(frame=0), frame0)
+    assert np.array_equal(dicom_file.to_array(frame=1), frame1)
 
 
 def test_set_pixel_data_rejects_non_contiguous_source():
@@ -90,7 +90,7 @@ def test_set_pixel_data_supports_encoder_context():
         "ExplicitVRLittleEndian", source, encoder_context=ctx
     )
 
-    decoded = dicom_file.to_array(frame=0, to_modality_value=False)
+    decoded = dicom_file.to_array(frame=0)
     assert np.array_equal(decoded, source)
 
 
@@ -103,4 +103,3 @@ def test_set_pixel_data_rejects_encoder_context_transfer_syntax_mismatch():
         dicom_file.set_pixel_data(
             "ExplicitVRLittleEndian", source, encoder_context=ctx
         )
-

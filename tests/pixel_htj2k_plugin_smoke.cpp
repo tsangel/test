@@ -13,8 +13,8 @@
 #include <dlfcn.h>
 #endif
 
-#include "pixel_decoder_plugin_abi_v2.h"
-#include "pixel_encoder_plugin_abi_v2.h"
+#include "pixel_decoder_plugin_abi.h"
+#include "pixel_encoder_plugin_abi.h"
 
 namespace {
 
@@ -36,7 +36,7 @@ void expect_eq(const T& actual, const T& expected, std::string_view label) {
   }
 }
 
-std::string encoder_error_detail(const pixel_encoder_plugin_api_v2& api, const void* ctx) {
+std::string encoder_error_detail(const pixel_encoder_plugin_api& api, const void* ctx) {
   if (api.copy_last_error_detail == nullptr) {
     return {};
   }
@@ -49,7 +49,7 @@ std::string encoder_error_detail(const pixel_encoder_plugin_api_v2& api, const v
   return std::string(buffer);
 }
 
-std::string decoder_error_detail(const pixel_decoder_plugin_api_v2& api, const void* ctx) {
+std::string decoder_error_detail(const pixel_decoder_plugin_api& api, const void* ctx) {
   if (api.copy_last_error_detail == nullptr) {
     return {};
   }
@@ -107,7 +107,7 @@ struct LibraryGuard {
 };
 
 struct EncoderContextGuard {
-  const pixel_encoder_plugin_api_v2* api{nullptr};
+  const pixel_encoder_plugin_api* api{nullptr};
   void* context{nullptr};
 
   ~EncoderContextGuard() {
@@ -118,7 +118,7 @@ struct EncoderContextGuard {
 };
 
 struct DecoderContextGuard {
-  const pixel_decoder_plugin_api_v2* api{nullptr};
+  const pixel_decoder_plugin_api* api{nullptr};
   void* context{nullptr};
 
   ~DecoderContextGuard() {
@@ -128,22 +128,22 @@ struct DecoderContextGuard {
   }
 };
 
-pixel_encoder_request_v2 make_encoder_request(std::vector<uint8_t>& source,
-    pixel_output_buffer_v2 encoded_buffer, uint64_t encoded_size) {
-  pixel_encoder_request_v2 request{};
-  request.struct_size = sizeof(pixel_encoder_request_v2);
-  request.abi_version = PIXEL_ENCODER_PLUGIN_ABI_V2;
+pixel_encoder_request make_encoder_request(std::vector<uint8_t>& source,
+    pixel_output_buffer encoded_buffer, uint64_t encoded_size) {
+  pixel_encoder_request request{};
+  request.struct_size = sizeof(pixel_encoder_request);
+  request.abi_version = PIXEL_ENCODER_PLUGIN_ABI;
 
-  request.source.struct_size = sizeof(pixel_encoder_source_v2);
-  request.source.abi_version = PIXEL_ENCODER_PLUGIN_ABI_V2;
+  request.source.struct_size = sizeof(pixel_encoder_source);
+  request.source.abi_version = PIXEL_ENCODER_PLUGIN_ABI;
   request.source.source_buffer.data = source.data();
   request.source.source_buffer.size = source.size();
 
-  request.frame.struct_size = sizeof(pixel_encoder_frame_info_v2);
-  request.frame.abi_version = PIXEL_ENCODER_PLUGIN_ABI_V2;
-  request.frame.codec_profile_code = PIXEL_CODEC_PROFILE_HTJ2K_LOSSLESS_V2;
-  request.frame.source_dtype = PIXEL_DTYPE_U8_V2;
-  request.frame.source_planar = PIXEL_PLANAR_INTERLEAVED_V2;
+  request.frame.struct_size = sizeof(pixel_encoder_frame_info);
+  request.frame.abi_version = PIXEL_ENCODER_PLUGIN_ABI;
+  request.frame.codec_profile_code = PIXEL_CODEC_PROFILE_HTJ2K_LOSSLESS;
+  request.frame.source_dtype = PIXEL_DTYPE_U8;
+  request.frame.source_planar = PIXEL_PLANAR_INTERLEAVED;
   request.frame.rows = 16;
   request.frame.cols = 16;
   request.frame.samples_per_pixel = 1;
@@ -155,48 +155,44 @@ pixel_encoder_request_v2 make_encoder_request(std::vector<uint8_t>& source,
   request.frame.source_frame_size_bytes = 0;
   request.frame.use_multicomponent_transform = 0;
 
-  request.output.struct_size = sizeof(pixel_encoder_output_v2);
-  request.output.abi_version = PIXEL_ENCODER_PLUGIN_ABI_V2;
+  request.output.struct_size = sizeof(pixel_encoder_output);
+  request.output.abi_version = PIXEL_ENCODER_PLUGIN_ABI;
   request.output.encoded_buffer = encoded_buffer;
   request.output.encoded_size = encoded_size;
 
   return request;
 }
 
-pixel_decoder_request_v2 make_decoder_request(
+pixel_decoder_request make_decoder_request(
     std::vector<uint8_t>& encoded, std::vector<uint8_t>& decoded) {
-  pixel_decoder_request_v2 request{};
-  request.struct_size = sizeof(pixel_decoder_request_v2);
-  request.abi_version = PIXEL_DECODER_PLUGIN_ABI_V2;
+  pixel_decoder_request request{};
+  request.struct_size = sizeof(pixel_decoder_request);
+  request.abi_version = PIXEL_DECODER_PLUGIN_ABI;
 
-  request.source.struct_size = sizeof(pixel_decoder_source_v2);
-  request.source.abi_version = PIXEL_DECODER_PLUGIN_ABI_V2;
+  request.source.struct_size = sizeof(pixel_decoder_source);
+  request.source.abi_version = PIXEL_DECODER_PLUGIN_ABI;
   request.source.source_buffer.data = encoded.data();
   request.source.source_buffer.size = encoded.size();
 
-  request.frame.struct_size = sizeof(pixel_decoder_frame_info_v2);
-  request.frame.abi_version = PIXEL_DECODER_PLUGIN_ABI_V2;
-  request.frame.codec_profile_code = PIXEL_CODEC_PROFILE_HTJ2K_LOSSLESS_V2;
-  request.frame.source_dtype = PIXEL_DTYPE_U8_V2;
-  request.frame.source_planar = PIXEL_PLANAR_INTERLEAVED_V2;
+  request.frame.struct_size = sizeof(pixel_decoder_frame_info);
+  request.frame.abi_version = PIXEL_DECODER_PLUGIN_ABI;
+  request.frame.codec_profile_code = PIXEL_CODEC_PROFILE_HTJ2K_LOSSLESS;
+  request.frame.source_dtype = PIXEL_DTYPE_U8;
+  request.frame.source_planar = PIXEL_PLANAR_INTERLEAVED;
   request.frame.rows = 16;
   request.frame.cols = 16;
   request.frame.samples_per_pixel = 1;
   request.frame.bits_stored = 8;
   request.frame.decode_mct = 0;
 
-  request.output.struct_size = sizeof(pixel_decoder_output_v2);
-  request.output.abi_version = PIXEL_DECODER_PLUGIN_ABI_V2;
+  request.output.struct_size = sizeof(pixel_decoder_output);
+  request.output.abi_version = PIXEL_DECODER_PLUGIN_ABI;
   request.output.dst = decoded.data();
   request.output.dst_size = decoded.size();
   request.output.row_stride = 0;
   request.output.frame_stride = 0;
-  request.output.dst_dtype = PIXEL_DTYPE_U8_V2;
-  request.output.dst_planar = PIXEL_PLANAR_INTERLEAVED_V2;
-
-  request.value_transform.struct_size = sizeof(pixel_decoder_value_transform_v2);
-  request.value_transform.abi_version = PIXEL_DECODER_PLUGIN_ABI_V2;
-  request.value_transform.transform_kind = PIXEL_DECODER_VALUE_TRANSFORM_NONE_V2;
+  request.output.dst_dtype = PIXEL_DTYPE_U8;
+  request.output.dst_planar = PIXEL_PLANAR_INTERLEAVED;
 
   return request;
 }
@@ -212,24 +208,24 @@ int main(int argc, char** argv) {
   library.handle = open_library(argv[1]);
   expect_true(library.handle != nullptr, "load HTJ2K plugin library");
 
-  using get_decoder_api_fn = int (*)(pixel_decoder_plugin_api_v2* out_api);
-  using get_encoder_api_fn = int (*)(pixel_encoder_plugin_api_v2* out_api);
+  using get_decoder_api_fn = int (*)(pixel_decoder_plugin_api* out_api);
+  using get_encoder_api_fn = int (*)(pixel_encoder_plugin_api* out_api);
 
   auto* get_decoder_api = reinterpret_cast<get_decoder_api_fn>(
-      load_symbol(library.handle, "pixel_get_decoder_plugin_api_v2"));
+      load_symbol(library.handle, "pixel_get_decoder_plugin_api"));
   auto* get_encoder_api = reinterpret_cast<get_encoder_api_fn>(
-      load_symbol(library.handle, "pixel_get_encoder_plugin_api_v2"));
+      load_symbol(library.handle, "pixel_get_encoder_plugin_api"));
   expect_true(get_decoder_api != nullptr, "resolve decoder entrypoint");
   expect_true(get_encoder_api != nullptr, "resolve encoder entrypoint");
 
-  pixel_decoder_plugin_api_v2 decoder_api{};
-  decoder_api.struct_size = sizeof(pixel_decoder_plugin_api_v2);
-  decoder_api.abi_version = PIXEL_DECODER_PLUGIN_ABI_V2;
+  pixel_decoder_plugin_api decoder_api{};
+  decoder_api.struct_size = sizeof(pixel_decoder_plugin_api);
+  decoder_api.abi_version = PIXEL_DECODER_PLUGIN_ABI;
   expect_true(get_decoder_api(&decoder_api) != 0, "get decoder api");
 
-  pixel_encoder_plugin_api_v2 encoder_api{};
-  encoder_api.struct_size = sizeof(pixel_encoder_plugin_api_v2);
-  encoder_api.abi_version = PIXEL_ENCODER_PLUGIN_ABI_V2;
+  pixel_encoder_plugin_api encoder_api{};
+  encoder_api.struct_size = sizeof(pixel_encoder_plugin_api);
+  encoder_api.abi_version = PIXEL_ENCODER_PLUGIN_ABI;
   expect_true(get_encoder_api(&encoder_api) != 0, "get encoder api");
 
   EncoderContextGuard encoder_ctx{};
@@ -238,7 +234,7 @@ int main(int argc, char** argv) {
   expect_true(encoder_ctx.context != nullptr, "encoder create");
 
   const auto encoder_configure_ec = encoder_api.configure(
-      encoder_ctx.context, PIXEL_CODEC_PROFILE_HTJ2K_LOSSLESS_V2, nullptr);
+      encoder_ctx.context, PIXEL_CODEC_PROFILE_HTJ2K_LOSSLESS, nullptr);
   if (encoder_configure_ec != PIXEL_CODEC_ERR_OK) {
     fail("encoder configure failed: " + encoder_error_detail(encoder_api, encoder_ctx.context));
   }
@@ -248,7 +244,7 @@ int main(int argc, char** argv) {
     source[i] = static_cast<uint8_t>((i * 17u + 9u) & 0xFFu);
   }
 
-  pixel_output_buffer_v2 tiny_output{};
+  pixel_output_buffer tiny_output{};
   auto first_encode_request = make_encoder_request(source, tiny_output, 0);
   const auto first_encode_ec =
       encoder_api.encode_frame(encoder_ctx.context, &first_encode_request);
@@ -258,7 +254,7 @@ int main(int argc, char** argv) {
       "first encode returns required encoded size");
 
   std::vector<uint8_t> encoded(first_encode_request.output.encoded_size);
-  pixel_output_buffer_v2 encoded_output{};
+  pixel_output_buffer encoded_output{};
   encoded_output.data = encoded.data();
   encoded_output.size = encoded.size();
 
@@ -280,7 +276,7 @@ int main(int argc, char** argv) {
   expect_true(decoder_ctx.context != nullptr, "decoder create");
 
   const auto decoder_configure_ec = decoder_api.configure(
-      decoder_ctx.context, PIXEL_CODEC_PROFILE_HTJ2K_LOSSLESS_V2, nullptr);
+      decoder_ctx.context, PIXEL_CODEC_PROFILE_HTJ2K_LOSSLESS, nullptr);
   if (decoder_configure_ec != PIXEL_CODEC_ERR_OK) {
     fail("decoder configure failed: " + decoder_error_detail(decoder_api, decoder_ctx.context));
   }

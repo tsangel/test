@@ -1,6 +1,6 @@
 #include "pixel/host/encode/encode_options_policy.hpp"
 
-#include "pixel/host/adapter/host_adapter_v2.hpp"
+#include "pixel/host/adapter/host_adapter.hpp"
 #include "diagnostics.h"
 
 #include <cstdint>
@@ -27,8 +27,8 @@ void validate_transfer_syntax_for_encode_or_throw(
 std::vector<CodecOptionKv> default_codec_options_for_transfer_syntax_or_throw(
     std::string_view function_name, uid::WellKnown transfer_syntax) {
 	std::vector<CodecOptionKv> options{};
-	uint32_t codec_profile_code = PIXEL_CODEC_PROFILE_UNKNOWN_V2;
-	if (!::pixel::runtime_v2::codec_profile_code_from_transfer_syntax(
+	uint32_t codec_profile_code = PIXEL_CODEC_PROFILE_UNKNOWN;
+	if (!::pixel::runtime::codec_profile_code_from_transfer_syntax(
 	        transfer_syntax, &codec_profile_code)) {
 		diag::error_and_throw(
 		    "{} ts={} reason=transfer syntax is not supported for encoding",
@@ -36,21 +36,21 @@ std::vector<CodecOptionKv> default_codec_options_for_transfer_syntax_or_throw(
 	}
 
 	switch (codec_profile_code) {
-	case PIXEL_CODEC_PROFILE_NATIVE_UNCOMPRESSED_V2:
-	case PIXEL_CODEC_PROFILE_ENCAPSULATED_UNCOMPRESSED_V2:
-	case PIXEL_CODEC_PROFILE_RLE_LOSSLESS_V2:
+	case PIXEL_CODEC_PROFILE_NATIVE_UNCOMPRESSED:
+	case PIXEL_CODEC_PROFILE_ENCAPSULATED_UNCOMPRESSED:
+	case PIXEL_CODEC_PROFILE_RLE_LOSSLESS:
 		return options;
-	case PIXEL_CODEC_PROFILE_JPEG_LOSSLESS_V2:
-	case PIXEL_CODEC_PROFILE_JPEG_LOSSY_V2:
+	case PIXEL_CODEC_PROFILE_JPEG_LOSSLESS:
+	case PIXEL_CODEC_PROFILE_JPEG_LOSSY:
 		options.push_back(CodecOptionKv{
 		    .key = "quality",
 		    .value = CodecOptionValue{std::int64_t{90}},
 		});
 		return options;
-	case PIXEL_CODEC_PROFILE_JPEGLS_LOSSLESS_V2:
-	case PIXEL_CODEC_PROFILE_JPEGLS_NEAR_LOSSLESS_V2: {
+	case PIXEL_CODEC_PROFILE_JPEGLS_LOSSLESS:
+	case PIXEL_CODEC_PROFILE_JPEGLS_NEAR_LOSSLESS: {
 		const auto near_lossless_error =
-		    codec_profile_code == PIXEL_CODEC_PROFILE_JPEGLS_NEAR_LOSSLESS_V2
+		    codec_profile_code == PIXEL_CODEC_PROFILE_JPEGLS_NEAR_LOSSLESS
 		    ? kDefaultNearLosslessJpegLsError
 		    : std::int64_t{0};
 		options.push_back(CodecOptionKv{
@@ -59,11 +59,11 @@ std::vector<CodecOptionKv> default_codec_options_for_transfer_syntax_or_throw(
 		});
 		return options;
 	}
-	case PIXEL_CODEC_PROFILE_JPEG2000_LOSSLESS_V2:
-	case PIXEL_CODEC_PROFILE_JPEG2000_LOSSY_V2:
-	case PIXEL_CODEC_PROFILE_HTJ2K_LOSSLESS_V2:
-	case PIXEL_CODEC_PROFILE_HTJ2K_LOSSLESS_RPCL_V2:
-	case PIXEL_CODEC_PROFILE_HTJ2K_LOSSY_V2:
+	case PIXEL_CODEC_PROFILE_JPEG2000_LOSSLESS:
+	case PIXEL_CODEC_PROFILE_JPEG2000_LOSSY:
+	case PIXEL_CODEC_PROFILE_HTJ2K_LOSSLESS:
+	case PIXEL_CODEC_PROFILE_HTJ2K_LOSSLESS_RPCL:
+	case PIXEL_CODEC_PROFILE_HTJ2K_LOSSY:
 		options.push_back(CodecOptionKv{
 		    .key = "target_bpp",
 		    .value = CodecOptionValue{0.0},
@@ -71,8 +71,8 @@ std::vector<CodecOptionKv> default_codec_options_for_transfer_syntax_or_throw(
 		options.push_back(CodecOptionKv{
 		    .key = "target_psnr",
 		    .value = CodecOptionValue{codec_profile_code ==
-		            PIXEL_CODEC_PROFILE_JPEG2000_LOSSY_V2 ||
-		        codec_profile_code == PIXEL_CODEC_PROFILE_HTJ2K_LOSSY_V2
+		            PIXEL_CODEC_PROFILE_JPEG2000_LOSSY ||
+		        codec_profile_code == PIXEL_CODEC_PROFILE_HTJ2K_LOSSY
 		            ? kDefaultLossyJ2kTargetPsnr
 		            : 0.0},
 		});
@@ -85,12 +85,12 @@ std::vector<CodecOptionKv> default_codec_options_for_transfer_syntax_or_throw(
 		    .value = CodecOptionValue{true},
 		});
 		return options;
-	case PIXEL_CODEC_PROFILE_JPEGXL_LOSSLESS_V2:
-	case PIXEL_CODEC_PROFILE_JPEGXL_LOSSY_V2:
+	case PIXEL_CODEC_PROFILE_JPEGXL_LOSSLESS:
+	case PIXEL_CODEC_PROFILE_JPEGXL_LOSSY:
 		options.push_back(CodecOptionKv{
 		    .key = "distance",
 		    .value = CodecOptionValue{codec_profile_code ==
-		            PIXEL_CODEC_PROFILE_JPEGXL_LOSSLESS_V2
+		            PIXEL_CODEC_PROFILE_JPEGXL_LOSSLESS
 		            ? 0.0
 		            : kDefaultLossyJpegXlDistance},
 		});
@@ -103,7 +103,7 @@ std::vector<CodecOptionKv> default_codec_options_for_transfer_syntax_or_throw(
 		    .value = CodecOptionValue{std::int64_t{-1}},
 		});
 		return options;
-	case PIXEL_CODEC_PROFILE_JPEGXL_JPEG_RECOMPRESSION_V2:
+	case PIXEL_CODEC_PROFILE_JPEGXL_JPEG_RECOMPRESSION:
 		diag::error_and_throw(
 		    "{} ts={} reason=JPEGXLJPEGRecompression transfer syntax is decode-only",
 		    function_name, transfer_syntax.value());
@@ -146,3 +146,4 @@ std::vector<CodecOptionKv> build_codec_option_pairs_from_text_or_throw(
 }
 
 } // namespace dicom::pixel::detail
+

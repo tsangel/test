@@ -1165,6 +1165,7 @@ enum class DataType : std::uint8_t {
 enum class Photometric : std::uint8_t {
 	monochrome1 = 0,
 	monochrome2,
+	palette_color,
 	rgb,
 	ybr_full,
 	ybr_full_422,
@@ -1172,34 +1173,329 @@ enum class Photometric : std::uint8_t {
 	ybr_ict,
 };
 
-struct PixelSource {
-	std::span<const std::uint8_t> bytes{};
-	DataType data_type{DataType::unknown};
-	int rows{0};
-	int cols{0};
-	std::size_t row_stride{0};
-	int frames{1};
-	std::size_t frame_stride{0};
-	int samples_per_pixel{1};
-	Planar planar{Planar::interleaved};
-	Photometric photometric{Photometric::monochrome2};
-	// Effective precision in bits. 0 means "use full storage width of data_type".
-	int bits_stored{0};
+[[nodiscard]] inline constexpr bool is_signed_integer_dtype(DataType dtype) noexcept {
+	switch (dtype) {
+	case DataType::s8:
+	case DataType::s16:
+	case DataType::s32:
+		return true;
+	default:
+		return false;
+	}
+}
+
+[[nodiscard]] inline constexpr std::uint16_t normalized_bits_stored_of(
+    DataType dtype) noexcept {
+	return static_cast<std::uint16_t>(bytes_per_sample_of(dtype) * std::size_t{8});
+}
+
+namespace detail {
+
+[[nodiscard]] inline constexpr bool checked_mul_size_t(
+    std::size_t lhs, std::size_t rhs, std::size_t& out) noexcept {
+	if (lhs == 0 || rhs == 0) {
+		out = 0;
+		return true;
+	}
+	if (lhs > std::numeric_limits<std::size_t>::max() / rhs) {
+		return false;
+	}
+	out = lhs * rhs;
+	return true;
+}
+
+[[nodiscard]] inline constexpr std::size_t align_up_size_t_or_zero(
+    std::size_t value, std::size_t alignment) noexcept {
+	if (alignment <= std::size_t{1}) {
+		return value;
+	}
+	const auto remainder = value % alignment;
+	if (remainder == 0) {
+		return value;
+	}
+	const auto increment = alignment - remainder;
+	if (value > std::numeric_limits<std::size_t>::max() - increment) {
+		return 0;
+	}
+	return value + increment;
+}
+
+} // namespace detail
+
+struct PixelLayout {
+	DataType data_type;
+	Photometric photometric;
+	Planar planar;
+	std::uint8_t reserved;
+
+	std::uint32_t rows;
+	std::uint32_t cols;
+	std::uint32_t frames;
+	std::uint16_t samples_per_pixel;
+	std::uint16_t bits_stored;
+
+	std::size_t row_stride;
+	std::size_t frame_stride;
+
+	[[nodiscard]] constexpr bool empty() const noexcept {
+		return data_type == DataType::unknown || rows == 0 || cols == 0 || frames == 0 ||
+		    samples_per_pixel == 0 || row_stride == 0 || frame_stride == 0;
+	}
+
+	[[nodiscard]] constexpr std::size_t bytes_per_sample() const noexcept {
+		return bytes_per_sample_of(data_type);
+	}
+
+	[[nodiscard]] constexpr int bits_allocated() const noexcept {
+		return static_cast<int>(bytes_per_sample() * std::size_t{8});
+	}
+
+	[[nodiscard]] constexpr int high_bit() const noexcept {
+		return bits_stored > 0 ? static_cast<int>(bits_stored - 1) : bits_allocated() - 1;
+	}
+
+	[[nodiscard]] constexpr int pixel_representation() const noexcept {
+		return is_signed_integer_dtype(data_type) ? 1 : 0;
+	}
+
+	[[nodiscard]] constexpr PixelLayout single_frame() const noexcept {
+		auto copy = *this;
+		copy.frames = 1;
+		return copy;
+	}
+
+	[[nodiscard]] constexpr PixelLayout with_frames(std::uint32_t value) const noexcept {
+		auto copy = *this;
+		copy.frames = value;
+		return copy;
+	}
+
+	[[nodiscard]] constexpr PixelLayout with_data_type(
+	    DataType dt, std::uint16_t normalized_bits_stored = 0) const noexcept {
+		auto copy = *this;
+		copy.data_type = dt;
+		copy.bits_stored = normalized_bits_stored != 0
+		                       ? normalized_bits_stored
+		                       : normalized_bits_stored_of(dt);
+		copy.row_stride = 0;
+		copy.frame_stride = 0;
+		return copy;
+	}
+
+	[[nodiscard]] constexpr PixelLayout with_samples(
+	    std::uint16_t spp, Photometric pm, Planar pl) const noexcept {
+		auto copy = *this;
+		copy.samples_per_pixel = spp;
+		copy.photometric = pm;
+		copy.planar = pl;
+		copy.row_stride = 0;
+		copy.frame_stride = 0;
+		return copy;
+	}
+
+	[[nodiscard]] PixelLayout packed(std::size_t alignment = 1) const {
+		// Packed/aligned layout computation only makes sense for a fully described image.
+		if (data_type == DataType::unknown || rows == 0 || cols == 0 || frames == 0 ||
+		    samples_per_pixel == 0) {
+			throw std::invalid_argument("PixelLayout::packed requires non-empty geometry");
+		}
+
+		// Sample width drives every downstream row/frame stride calculation.
+		const auto sample_bytes = bytes_per_sample();
+		if (sample_bytes == 0) {
+			throw std::invalid_argument("PixelLayout::packed requires a known data_type");
+		}
+
+		// In planar mode each row covers one plane, otherwise it covers all samples.
+		const auto layout_planar =
+		    planar == Planar::planar && samples_per_pixel > std::uint16_t{1};
+		const std::size_t row_components = layout_planar
+		                                       ? static_cast<std::size_t>(cols)
+		                                       : static_cast<std::size_t>(cols) *
+		                                             static_cast<std::size_t>(samples_per_pixel);
+
+		// First compute the payload size of one row before any alignment padding.
+		std::size_t row_packed_bytes = 0;
+		if (!detail::checked_mul_size_t(row_components, sample_bytes, row_packed_bytes)) {
+			throw std::overflow_error("PixelLayout::packed row bytes overflow");
+		}
+
+		// Alignment affects row starts only; 0/1 both mean "packed with no extra padding".
+		const auto normalized_alignment =
+		    alignment <= std::size_t{1} ? std::size_t{1} : alignment;
+		const auto aligned_row_stride =
+		    detail::align_up_size_t_or_zero(row_packed_bytes, normalized_alignment);
+		if (aligned_row_stride == 0) {
+			throw std::overflow_error("PixelLayout::packed aligned row stride overflow");
+		}
+
+		// A frame is rows worth of storage, multiplied by plane count when planar.
+		std::size_t frame_stride_bytes = 0;
+		if (!detail::checked_mul_size_t(
+		        aligned_row_stride, static_cast<std::size_t>(rows), frame_stride_bytes)) {
+			throw std::overflow_error("PixelLayout::packed frame stride overflow");
+		}
+		if (layout_planar &&
+		    !detail::checked_mul_size_t(frame_stride_bytes,
+		        static_cast<std::size_t>(samples_per_pixel), frame_stride_bytes)) {
+			throw std::overflow_error("PixelLayout::packed planar frame stride overflow");
+		}
+
+		// Normalize bits_stored so the layout always carries an explicit effective precision.
+		auto copy = *this;
+		copy.row_stride = aligned_row_stride;
+		copy.frame_stride = frame_stride_bytes;
+		if (copy.bits_stored == 0) {
+			copy.bits_stored = normalized_bits_stored_of(copy.data_type);
+		}
+		return copy;
+	}
 };
 
-struct PixelDataInfo {
-	uid::WellKnown ts{};
-	DataType sv_dtype{DataType::unknown};
-	int rows{0};
-	int cols{0};
-	int frames{1};
-	int samples_per_pixel{1};
-	Planar planar_configuration{Planar::interleaved};
-	std::optional<Photometric> photometric{};
-	// Normalized effective precision in bits.
-	// For FloatPixelData/DoubleFloatPixelData, this is 32/64.
-	int bits_stored{0};
-	bool has_pixel_data{false};
+static_assert(std::is_trivially_copyable_v<PixelLayout>);
+static_assert(std::is_standard_layout_v<PixelLayout>);
+static_assert(std::is_trivial_v<PixelLayout>);
+
+[[nodiscard]] inline constexpr bool try_pixel_storage_size(
+    const PixelLayout& layout, std::size_t& out_total_bytes) noexcept {
+	if (layout.empty()) {
+		out_total_bytes = 0;
+		return false;
+	}
+	return detail::checked_mul_size_t(
+	    static_cast<std::size_t>(layout.frames), layout.frame_stride, out_total_bytes);
+}
+
+namespace detail {
+
+template <typename T>
+[[nodiscard]] inline bool is_typed_row_access_aligned(
+    const PixelLayout& layout, const std::uint8_t* bytes) noexcept {
+	// Typed row kernels need the base pointer and each row/frame step to stay aligned.
+	if ((reinterpret_cast<std::uintptr_t>(bytes) % alignof(T)) != 0) {
+		return false;
+	}
+	if ((layout.row_stride % sizeof(T)) != 0 || (layout.frame_stride % sizeof(T)) != 0) {
+		return false;
+	}
+	return true;
+}
+
+} // namespace detail
+
+struct ConstPixelSpan {
+	PixelLayout layout{};
+	std::span<const std::uint8_t> bytes{};
+
+	[[nodiscard]] bool has_required_bytes() const noexcept {
+		std::size_t required_bytes = 0;
+		return try_pixel_storage_size(layout, required_bytes) && bytes.size() >= required_bytes;
+	}
+
+	template <typename T>
+	[[nodiscard]] bool is_typed_row_access_aligned() const noexcept {
+		return detail::is_typed_row_access_aligned<T>(layout, bytes.data());
+	}
+
+	[[nodiscard]] ConstPixelSpan frame(std::size_t frame_index) const {
+		// Frame views are valid only within the layout's declared frame count.
+		if (frame_index >= static_cast<std::size_t>(layout.frames)) {
+			throw std::out_of_range("ConstPixelSpan::frame frame index out of range");
+		}
+
+		// Reject any request that would step outside the backing byte span.
+		std::size_t offset = 0;
+		if (!detail::checked_mul_size_t(frame_index, layout.frame_stride, offset) ||
+		    bytes.size() < offset || bytes.size() - offset < layout.frame_stride) {
+			throw std::out_of_range("ConstPixelSpan::frame frame byte range out of range");
+		}
+		// The returned view preserves row/frame stride semantics but narrows frames to one.
+		return ConstPixelSpan{
+		    .layout = layout.single_frame(),
+		    .bytes = bytes.subspan(offset, layout.frame_stride),
+		};
+	}
+};
+
+struct PixelSpan {
+	PixelLayout layout{};
+	std::span<std::uint8_t> bytes{};
+
+	[[nodiscard]] bool has_required_bytes() const noexcept {
+		std::size_t required_bytes = 0;
+		return try_pixel_storage_size(layout, required_bytes) && bytes.size() >= required_bytes;
+	}
+
+	template <typename T>
+	[[nodiscard]] bool is_typed_row_access_aligned() const noexcept {
+		return detail::is_typed_row_access_aligned<T>(layout, bytes.data());
+	}
+
+	[[nodiscard]] PixelSpan frame(std::size_t frame_index) const {
+		// Frame views are valid only within the layout's declared frame count.
+		if (frame_index >= static_cast<std::size_t>(layout.frames)) {
+			throw std::out_of_range("PixelSpan::frame frame index out of range");
+		}
+
+		// Reject any request that would step outside the mutable backing byte span.
+		std::size_t offset = 0;
+		if (!detail::checked_mul_size_t(frame_index, layout.frame_stride, offset) ||
+		    bytes.size() < offset || bytes.size() - offset < layout.frame_stride) {
+			throw std::out_of_range("PixelSpan::frame frame byte range out of range");
+		}
+		// The returned view preserves row/frame stride semantics but narrows frames to one.
+		return PixelSpan{
+		    .layout = layout.single_frame(),
+		    .bytes = bytes.subspan(offset, layout.frame_stride),
+		};
+	}
+
+	[[nodiscard]] operator ConstPixelSpan() const noexcept {
+		return ConstPixelSpan{.layout = layout, .bytes = bytes};
+	}
+};
+
+struct PixelBuffer {
+	PixelLayout layout{};
+	std::vector<std::uint8_t> bytes{};
+
+	[[nodiscard]] static PixelBuffer allocate(PixelLayout new_layout) {
+		// Allocate exactly the storage span implied by the owning layout.
+		std::size_t total_bytes = 0;
+		if (!try_pixel_storage_size(new_layout, total_bytes)) {
+			throw std::overflow_error("PixelBuffer::allocate layout storage overflow");
+		}
+		return PixelBuffer{
+		    .layout = new_layout,
+		    .bytes = std::vector<std::uint8_t>(total_bytes),
+		};
+	}
+
+	void reset(PixelLayout new_layout) {
+		// Reset swaps both the logical layout and the owned storage in one place.
+		std::size_t total_bytes = 0;
+		if (!try_pixel_storage_size(new_layout, total_bytes)) {
+			throw std::overflow_error("PixelBuffer::reset layout storage overflow");
+		}
+		layout = new_layout;
+		bytes.assign(total_bytes, std::uint8_t{0});
+	}
+
+	[[nodiscard]] ConstPixelSpan cspan() const noexcept {
+		return ConstPixelSpan{.layout = layout, .bytes = bytes};
+	}
+
+	[[nodiscard]] PixelSpan span() noexcept {
+		return PixelSpan{.layout = layout, .bytes = bytes};
+	}
+
+	[[nodiscard]] ConstPixelSpan frame(std::size_t frame_index) const {
+		return cspan().frame(frame_index);
+	}
+
+	[[nodiscard]] PixelSpan frame(std::size_t frame_index) noexcept {
+		return span().frame(frame_index);
+	}
 };
 
 using CodecOptionValue = std::variant<std::int64_t, double, bool, std::string>;
@@ -1218,7 +1514,7 @@ class EncoderContext;
 
 /// Replace PixelData using the transfer syntax and codec options captured in `encoder_ctx`.
 void set_pixel_data(
-    DicomFile& file, const PixelSource& source, const EncoderContext& encoder_ctx);
+    DicomFile& file, ConstPixelSpan source, const EncoderContext& encoder_ctx);
 
 class EncoderContext {
 public:
@@ -1237,7 +1533,7 @@ public:
 
 private:
 	friend void set_pixel_data(
-	    DicomFile& file, const PixelSource& source, const EncoderContext& encoder_ctx);
+	    DicomFile& file, ConstPixelSpan source, const EncoderContext& encoder_ctx);
 	friend class ::dicom::DicomFile;
 	void set_configured_state(uid::WellKnown transfer_syntax,
 	    std::vector<std::string> option_keys,
@@ -1254,11 +1550,8 @@ private:
     std::span<const CodecOptionTextKv> codec_opt);
 
 struct DecodeOptions {
-	Planar planar_out{Planar::interleaved};
 	std::uint16_t alignment{1};  // 0/1: packed, power-of-two aligned (<= 4096)
-	// true: output float32 modality values after Modality LUT (if present) or Rescale.
-	// Applies only when SamplesPerPixel=1 and modality transform metadata exists.
-	bool to_modality_value{false};
+	Planar planar_out{Planar::interleaved};
 	// true: apply codestream-level MCT/color transform inverse when decoder supports it.
 	// false: keep codestream component domain (for example, YBR_* domain for JPEG2000 MCT streams).
 	// Note: currently honored by OpenJPEG-based decode paths; other backends may ignore it.
@@ -1275,35 +1568,106 @@ struct DecodeOptions {
 	int codec_threads{-1};
 };
 
-struct DecodeStrides {
-	std::size_t row{0};
-	std::size_t frame{0};
-};
-
 struct ModalityLut {
 	std::int64_t first_mapped{0};
 	std::vector<float> values;
 };
 
-struct ModalityValueTransform {
-	bool enabled{false};
-	std::optional<ModalityLut> modality_lut{};
-	double rescale_slope{1.0};
-	double rescale_intercept{0.0};
+struct PaletteLut {
+	std::int64_t first_mapped{0};
+	std::uint16_t bits_per_entry{0};
+	std::vector<std::uint16_t> red_values;
+	std::vector<std::uint16_t> green_values;
+	std::vector<std::uint16_t> blue_values;
+	std::vector<std::uint16_t> alpha_values;
+};
+
+enum class PixelPresentation : std::uint8_t {
+	monochrome = 0,
+	color = 1,
+	mixed = 2,
+	true_color = 3,
+	color_range = 4,
+	color_ref = 5,
+};
+
+struct SupplementalPaletteInfo {
+	PixelPresentation pixel_presentation{PixelPresentation::color};
+	PaletteLut palette{};
+	bool has_stored_value_range{false};
+	double minimum_stored_value_mapped{0.0};
+	double maximum_stored_value_mapped{0.0};
+};
+
+struct EnhancedPaletteDataPathAssignmentInfo {
+	std::string data_type{};
+	std::string data_path_assignment{};
+	bool has_bits_mapped_to_color_lookup_table{false};
+	std::uint16_t bits_mapped_to_color_lookup_table{0};
+};
+
+struct EnhancedBlendingLutInfo {
+	std::string transfer_function{};
+	bool has_weight_constant{false};
+	double weight_constant{0.0};
+	std::uint16_t bits_per_entry{0};
+	std::vector<std::uint16_t> values;
+};
+
+struct EnhancedPaletteItemInfo {
+	std::string data_path_id{};
+	std::string rgb_lut_transfer_function{};
+	std::string alpha_lut_transfer_function{};
+	PaletteLut palette{};
+};
+
+struct EnhancedPaletteInfo {
+	PixelPresentation pixel_presentation{PixelPresentation::color};
+	std::vector<EnhancedPaletteDataPathAssignmentInfo> data_frame_assignments;
+	bool has_blending_lut_1{false};
+	EnhancedBlendingLutInfo blending_lut_1{};
+	bool has_blending_lut_2{false};
+	EnhancedBlendingLutInfo blending_lut_2{};
+	std::vector<EnhancedPaletteItemInfo> palette_items;
+	bool has_icc_profile{false};
+	std::string color_space{};
+};
+
+struct VoiLut {
+	std::int64_t first_mapped{0};
+	std::uint16_t bits_per_entry{0};
+	std::vector<std::uint16_t> values;
+};
+
+enum class VoiLutFunction : std::uint8_t {
+	linear = 0,
+	linear_exact = 1,
+	sigmoid = 2,
+};
+
+struct RescaleTransform {
+	float slope{1.0f};
+	float intercept{0.0f};
+};
+
+struct WindowTransform {
+	float center{0.0f};
+	float width{0.0f};
+	VoiLutFunction function{VoiLutFunction::linear};
 };
 
 /// Decode plan snapshot computed from the current file metadata and requested options.
 /// Recommended usage is:
 /// 1. create a plan
-/// 2. allocate `plan.strides.frame` bytes
+/// 2. allocate `plan.output_layout.frame_stride` bytes
 /// 3. call `decode_frame_into()` / `DicomFile::decode_into()`
 /// Recreate the plan after transfer syntax or pixel-affecting metadata changes.
 /// A default-constructed plan is not valid input to `decode_frame_into()`.
 struct DecodePlan {
-	PixelDataInfo info{};
+	// Keep only caller policy and destination layout; source metadata is
+	// resolved from the current file state when decode actually runs.
 	DecodeOptions options{};
-	DecodeStrides strides{};
-	ModalityValueTransform modality_value_transform{};
+	PixelLayout output_layout{};
 };
 
 using ExecutionProgressCallback =
@@ -1335,20 +1699,29 @@ struct ExecutionObserver {
 /// - JPEG: integral up to 16-bit (subject to upstream libjpeg-turbo codestream support)
 /// - JPEG-LS: integral up to 16-bit
 /// - JPEG 2000: integral up to 32-bit
-/// When modality-value output is effectively enabled, output sample type is float32.
 /// `dst` is expected to match the layout implied by `plan`.
 /// `plan` must come from `create_decode_plan()` for the current file state.
 /// @throws diag::DicomException on invalid decode plan, invalid frame index,
 /// mismatched destination layout/size, unsupported decoder binding, or backend decode failure.
 void decode_frame_into(const DicomFile& df, std::size_t frame_index,
     std::span<std::uint8_t> dst, const DecodePlan& plan);
+/// Decode a single frame and return an owning PixelBuffer.
+/// The returned buffer always uses the single-frame variant of `plan.output_layout`.
+/// @throws diag::DicomException under the same conditions as decode_frame_into().
+[[nodiscard]] PixelBuffer decode_frame(
+    const DicomFile& df, std::size_t frame_index, const DecodePlan& plan);
 /// Decode every frame into one caller-provided contiguous output buffer.
-/// `dst.size()` must be at least `plan.strides.frame * plan.info.frames`.
-/// Frames are written in index order, each occupying one `plan.strides.frame` span.
+/// `dst.size()` must be at least `plan.output_layout.frames * plan.output_layout.frame_stride`.
+/// Frames are written in index order, each occupying one `plan.output_layout.frame_stride` span.
 /// @throws diag::DicomException on invalid decode plan, invalid frame metadata,
 /// mismatched destination layout/size, unsupported decoder binding, or backend decode failure.
 void decode_all_frames_into(
     const DicomFile& df, std::span<std::uint8_t> dst, const DecodePlan& plan);
+/// Decode every frame and return one owning PixelBuffer for the full volume.
+/// The returned buffer uses `plan.output_layout` unchanged.
+/// @throws diag::DicomException under the same conditions as decode_all_frames_into().
+[[nodiscard]] PixelBuffer decode_all_frames(
+    const DicomFile& df, const DecodePlan& plan);
 /// Decode every frame into one caller-provided contiguous output buffer.
 /// When `observer` is provided, progress is reported in frames and cancellation
 /// is polled cooperatively while scheduling work.
@@ -1357,6 +1730,86 @@ void decode_all_frames_into(
 /// or observer-requested cancellation.
 void decode_all_frames_into(const DicomFile& df, std::span<std::uint8_t> dst,
     const DecodePlan& plan, const ExecutionObserver* observer);
+/// Decode every frame and return one owning PixelBuffer for the full volume.
+/// When `observer` is provided, progress and cancellation behave like
+/// decode_all_frames_into(..., observer).
+/// @throws diag::DicomException under the same conditions as decode_all_frames_into(..., observer).
+[[nodiscard]] PixelBuffer decode_all_frames(
+    const DicomFile& df, const DecodePlan& plan, const ExecutionObserver* observer);
+
+/// Build the default packed output layout for a rescale transform.
+/// Geometry, sample count, and planar arrangement are preserved from `src`.
+/// The default destination dtype is float32 because rescale commonly widens
+/// stored integer samples into floating-point values.
+[[nodiscard]] PixelLayout make_rescale_output_layout(
+    PixelLayout src, DataType dst_type = DataType::f32);
+
+/// Apply one slope/intercept pair to every sample in `src` and return a packed owner.
+[[nodiscard]] PixelBuffer apply_rescale(
+    ConstPixelSpan src, float slope, float intercept);
+
+/// Apply one slope/intercept pair to every sample in `src` and write into `dst`.
+/// `dst` may use a different stride/alignment policy, but its geometry and sample
+/// arrangement must match `src`, and its dtype must be float32 or float64.
+void apply_rescale_into(
+    ConstPixelSpan src, PixelSpan dst, float slope, float intercept);
+
+/// Apply frame-specific slope/intercept pairs to every sample in `src`.
+/// `slopes.size()` and `intercepts.size()` must both match `src.layout.frames`.
+void apply_rescale_frames_into(ConstPixelSpan src, PixelSpan dst,
+    std::span<const float> slopes, std::span<const float> intercepts);
+
+/// Build the default packed output layout for a Modality LUT transform.
+/// Geometry is preserved and the destination dtype defaults to float32.
+[[nodiscard]] PixelLayout make_modality_lut_output_layout(PixelLayout src);
+
+/// Apply one Modality LUT to `src` and return a packed owner.
+[[nodiscard]] PixelBuffer apply_modality_lut(ConstPixelSpan src, const ModalityLut& lut);
+
+/// Apply one Modality LUT to `src` and write into `dst`.
+/// `src` must carry one sample per pixel, and `dst` must match its geometry while
+/// using float32 or float64 sample storage.
+void apply_modality_lut_into(ConstPixelSpan src, PixelSpan dst, const ModalityLut& lut);
+
+/// Build the default packed RGB output layout for a Palette LUT transform.
+/// Geometry is preserved, samples-per-pixel becomes 3, and dtype defaults to
+/// uint8 or uint16 depending on LUT entry bit depth.
+[[nodiscard]] PixelLayout make_palette_output_layout(PixelLayout src, const PaletteLut& lut);
+
+/// Apply one Palette LUT to indexed source samples and return a packed RGB owner.
+[[nodiscard]] PixelBuffer apply_palette_lut(ConstPixelSpan src, const PaletteLut& lut);
+
+/// Apply one Palette LUT to indexed source samples and write RGB values into `dst`.
+/// `src` must carry one stored-value sample per pixel. `dst` must match source
+/// geometry, carry three samples per pixel, and use uint8/uint16 storage that
+/// matches the LUT bit depth.
+void apply_palette_lut_into(ConstPixelSpan src, PixelSpan dst, const PaletteLut& lut);
+
+/// Build the default packed monochrome output layout for a VOI LUT transform.
+/// Geometry is preserved and dtype defaults to uint8 or uint16 depending on LUT bit depth.
+[[nodiscard]] PixelLayout make_voi_lut_output_layout(PixelLayout src, const VoiLut& lut);
+
+/// Apply one VOI LUT to monochrome source pixels and return a packed owner.
+[[nodiscard]] PixelBuffer apply_voi_lut(ConstPixelSpan src, const VoiLut& lut);
+
+/// Apply one VOI LUT to monochrome source pixels and write into `dst`.
+/// `src` and `dst` must share geometry, carry one sample per pixel, and `dst`
+/// must use uint8/uint16 storage that matches the LUT bit depth.
+void apply_voi_lut_into(ConstPixelSpan src, PixelSpan dst, const VoiLut& lut);
+
+/// Build the default packed monochrome output layout for a VOI window transform.
+/// Geometry is preserved and the destination dtype defaults to uint8 display samples.
+[[nodiscard]] PixelLayout make_window_output_layout(
+    PixelLayout src, DataType dst_type = DataType::u8);
+
+/// Apply one VOI window transform to monochrome source pixels and return a packed owner.
+[[nodiscard]] PixelBuffer apply_window(ConstPixelSpan src, const WindowTransform& window);
+
+/// Apply one VOI window transform to monochrome source pixels and write into `dst`.
+/// `src` and `dst` must share geometry, carry one sample per pixel, and `dst`
+/// must use uint8 or uint16 storage.
+void apply_window_into(
+    ConstPixelSpan src, PixelSpan dst, const WindowTransform& window);
 
 enum class Htj2kDecoderBackend : std::uint8_t {
 	auto_select = 0,
@@ -2341,17 +2794,40 @@ public:
 		    errors, out_replaced);
 	}
 	[[nodiscard]] uid::WellKnown transfer_syntax_uid() const { return transfer_syntax_uid_; }
-	[[nodiscard]] pixel::PixelDataInfo pixeldata_info() const;
+	/// Return true when the dataset carries any pixel payload element.
+	[[nodiscard]] bool has_pixel_data() const;
+	/// Return the normalized native stored-pixel layout when metadata is complete enough.
+	[[nodiscard]] std::optional<pixel::PixelLayout> native_pixel_layout() const;
 	[[nodiscard]] pixel::DecodePlan create_decode_plan(
 	    const pixel::DecodeOptions& opt = {}) const {
 		return pixel::create_decode_plan(*this, opt);
 	}
+	[[nodiscard]] std::optional<pixel::VoiLut> voi_lut() const;
+	[[nodiscard]] std::optional<pixel::VoiLut> voi_lut(std::size_t frame_index) const;
+	[[nodiscard]] std::optional<pixel::WindowTransform> window_transform() const;
+	[[nodiscard]] std::optional<pixel::WindowTransform> window_transform(
+	    std::size_t frame_index) const;
+	[[nodiscard]] std::optional<pixel::RescaleTransform> rescale_transform() const;
+	[[nodiscard]] std::optional<pixel::RescaleTransform> rescale_transform(
+	    std::size_t frame_index) const;
 	[[nodiscard]] std::optional<pixel::ModalityLut> modality_lut() const;
+	[[nodiscard]] std::optional<pixel::ModalityLut> modality_lut(
+	    std::size_t frame_index) const;
+	/// Reads the root-level Pixel Presentation attribute when present.
+	[[nodiscard]] std::optional<pixel::PixelPresentation> pixel_presentation() const;
+	/// Reads the classic root-level PALETTE COLOR LUT module.
+	/// This does not interpret Supplemental Palette or Enhanced Palette display-pipeline metadata.
+	[[nodiscard]] std::optional<pixel::PaletteLut> palette_lut() const;
+	/// Reads the root-level Supplemental Palette Color Lookup Table metadata model.
+	[[nodiscard]] std::optional<pixel::SupplementalPaletteInfo> supplemental_palette() const;
+	/// Reads the root-level Enhanced Palette Color Lookup Table metadata model.
+	[[nodiscard]] std::optional<pixel::EnhancedPaletteInfo> enhanced_palette() const;
+	/// Preferred encode entry point for native pixel bytes plus normalized layout metadata.
 	void set_pixel_data(uid::WellKnown transfer_syntax,
-	    const pixel::PixelSource& source);
+	    pixel::ConstPixelSpan source);
 	void set_pixel_data(uid::WellKnown transfer_syntax,
-	    const pixel::PixelSource& source, const pixel::EncoderContext& encoder_ctx);
-	void set_pixel_data(uid::WellKnown transfer_syntax, const pixel::PixelSource& source,
+	    pixel::ConstPixelSpan source, const pixel::EncoderContext& encoder_ctx);
+	void set_pixel_data(uid::WellKnown transfer_syntax, pixel::ConstPixelSpan source,
 	    std::span<const pixel::CodecOptionTextKv> codec_opt);
 	/// Replace PixelData with native bytes (OB/OW) by moving ownership from `native_pixel_data`.
 	/// If `vr` is None, OB/OW is inferred from BitsAllocated (<=8 -> OB, otherwise OW).
@@ -2372,6 +2848,16 @@ public:
 	    const pixel::DecodePlan& plan) const {
 		pixel::decode_frame_into(*this, frame_index, dst, plan);
 	}
+	/// @throws diag::DicomException under the same conditions as pixel::decode_frame().
+	[[nodiscard]] pixel::PixelBuffer pixel_buffer(
+	    std::size_t frame_index, const pixel::DecodePlan& plan) const {
+		return pixel::decode_frame(*this, frame_index, plan);
+	}
+	/// @throws diag::DicomException under the same conditions as pixel::decode_frame().
+	[[nodiscard]] pixel::PixelBuffer pixel_buffer(std::size_t frame_index = 0,
+	    const pixel::DecodeOptions& opt = {}) const {
+		return pixel_buffer(frame_index, create_decode_plan(opt));
+	}
 	/// @throws diag::DicomException under the same conditions as pixel::decode_frame_into().
 	void decode_into(std::span<std::uint8_t> dst, const pixel::DecodePlan& plan) const {
 		pixel::decode_frame_into(*this, 0, dst, plan);
@@ -2388,9 +2874,8 @@ public:
 	}
 	[[nodiscard]] std::vector<std::uint8_t> pixel_data(
 	    std::size_t frame_index, const pixel::DecodePlan& plan) const {
-		std::vector<std::uint8_t> out(plan.strides.frame);
-		pixel::decode_frame_into(*this, frame_index, std::span<std::uint8_t>(out), plan);
-		return out;
+		auto decoded = pixel_buffer(frame_index, plan);
+		return std::move(decoded.bytes);
 	}
 	[[nodiscard]] std::vector<std::uint8_t> pixel_data(std::size_t frame_index = 0,
 	    const pixel::DecodeOptions& opt = {}) const {
@@ -2400,7 +2885,7 @@ public:
 private:
 	friend class DataSet;
 	friend void pixel::set_pixel_data(
-	    DicomFile& file, const pixel::PixelSource& source,
+	    DicomFile& file, pixel::ConstPixelSpan source,
 	    const pixel::EncoderContext& encoder_ctx);
 	void set_transfer_syntax_state_only(uid::WellKnown transfer_syntax);
 	void apply_transfer_syntax(uid::WellKnown transfer_syntax);

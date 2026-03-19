@@ -6,8 +6,8 @@
 #include <string_view>
 #include <vector>
 
-#include "pixel_codec_plugin_abi_v2.h"
-#include "registry_bootstrap_v2.hpp"
+#include "pixel_codec_plugin_abi.h"
+#include "registry_bootstrap.hpp"
 
 namespace {
 
@@ -45,46 +45,46 @@ int main(int argc, char** argv) {
   plugin_paths.emplace_back(plugin_path.string());
   plugin_paths.emplace_back(plugin_alias_path.string());
 
-  pixel::runtime_v2::BindingRegistryRuntimeV2 state{};
-  pixel::runtime_v2::RegistryBootstrapResultV2 result{};
+  pixel::runtime::BindingRegistryRuntime state{};
+  pixel::runtime::RegistryBootstrapResult result{};
   expect_true(
-      pixel::runtime_v2::initialize_registry_v2(plugin_paths, &state, &result),
+      pixel::runtime::initialize_registry(plugin_paths, &state, &result),
       "initialize registry");
 
   expect_eq(result.requested_plugin_count, 2u, "requested plugin count");
   expect_eq(result.loaded_plugin_count, 1u, "loaded plugin count");
   expect_eq(result.registered_plugin_count, 1u, "registered plugin count");
 
-  pixel::runtime_v2::RegistryBootstrapResultV2 second_result{};
+  pixel::runtime::RegistryBootstrapResult second_result{};
   expect_true(
-      pixel::runtime_v2::initialize_registry_v2(plugin_paths, &state, &second_result),
+      pixel::runtime::initialize_registry(plugin_paths, &state, &second_result),
       "second initialize registry");
   expect_eq(second_result.requested_plugin_count, 2u, "second requested plugin count");
   expect_eq(second_result.loaded_plugin_count, 1u, "second loaded plugin count");
   expect_eq(second_result.registered_plugin_count, 1u, "second registered plugin count");
 
   const auto* decoder_binding =
-      state.registry.find_decoder_binding(PIXEL_CODEC_PROFILE_JPEG_LOSSLESS_V2);
+      state.registry.find_decoder_binding(PIXEL_CODEC_PROFILE_JPEG_LOSSLESS);
   const auto* encoder_binding =
-      state.registry.find_encoder_binding(PIXEL_CODEC_PROFILE_JPEG_LOSSLESS_V2);
+      state.registry.find_encoder_binding(PIXEL_CODEC_PROFILE_JPEG_LOSSLESS);
   expect_true(decoder_binding != nullptr, "decoder binding exists");
   expect_true(encoder_binding != nullptr, "encoder binding exists");
   expect_eq(decoder_binding->binding_kind,
-      pixel::runtime_v2::DecoderBindingKind::kPluginApi,
+      pixel::runtime::DecoderBindingKind::kPluginApi,
       "decoder binding kind");
   expect_eq(encoder_binding->binding_kind,
-      pixel::runtime_v2::EncoderBindingKind::kPluginApi,
+      pixel::runtime::EncoderBindingKind::kPluginApi,
       "encoder binding kind");
 
-  pixel::runtime_v2::shutdown_registry_v2(&state);
-  expect_true(state.registry.find_decoder_binding(PIXEL_CODEC_PROFILE_JPEG_LOSSLESS_V2) == nullptr,
+  pixel::runtime::shutdown_registry(&state);
+  expect_true(state.registry.find_decoder_binding(PIXEL_CODEC_PROFILE_JPEG_LOSSLESS) == nullptr,
       "decoder binding removed after shutdown");
-  expect_true(state.registry.find_encoder_binding(PIXEL_CODEC_PROFILE_JPEG_LOSSLESS_V2) == nullptr,
+  expect_true(state.registry.find_encoder_binding(PIXEL_CODEC_PROFILE_JPEG_LOSSLESS) == nullptr,
       "encoder binding removed after shutdown");
 
-  pixel::runtime_v2::RegistryBootstrapResultV2 after_shutdown_result{};
+  pixel::runtime::RegistryBootstrapResult after_shutdown_result{};
   expect_true(
-      !pixel::runtime_v2::initialize_registry_v2(plugin_paths, &state, &after_shutdown_result),
+      !pixel::runtime::initialize_registry(plugin_paths, &state, &after_shutdown_result),
       "initialize should fail after shutdown");
   expect_eq(after_shutdown_result.requested_plugin_count, 0u,
       "after-shutdown requested plugin count");
@@ -95,3 +95,4 @@ int main(int argc, char** argv) {
 
   return 0;
 }
+

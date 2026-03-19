@@ -4,10 +4,10 @@
 #include "diagnostics.h"
 #include "pixel/host/decode/decode_frame_dispatch.hpp"
 #include "pixel/host/decode/decode_plan_compute.hpp"
-#include "pixel/host/decode/decode_modality_value_transform.hpp"
 #include "pixel/host/encode/encode_set_pixel_data_runner.hpp"
 #include "pixel/host/support/dicom_pixel_support.hpp"
 
+#include <cmath>
 #include <exception>
 #include <cstddef>
 #include <limits>
@@ -70,6 +70,15 @@ private:
 	return bits_allocated > 8 ? VR::OW : VR::OB;
 }
 
+[[nodiscard]] bool file_uses_little_endian(const DicomFile& file) noexcept {
+	return file.transfer_syntax_uid() != "ExplicitVRBigEndian"_uid;
+}
+
+template <typename T>
+[[nodiscard]] T load_dataset_endian_value(const std::uint8_t* ptr, bool little_endian) noexcept {
+	return little_endian ? endian::load_le<T>(ptr) : endian::load_be<T>(ptr);
+}
+
 [[nodiscard]] char ascii_upper(char value) noexcept {
 	return (value >= 'a' && value <= 'z')
 	           ? static_cast<char>(value - ('a' - 'A'))
@@ -96,6 +105,9 @@ private:
 	if (ascii_iequals(text, "MONOCHROME2")) {
 		return pixel::Photometric::monochrome2;
 	}
+	if (ascii_iequals(text, "PALETTE COLOR")) {
+		return pixel::Photometric::palette_color;
+	}
 	if (ascii_iequals(text, "RGB")) {
 		return pixel::Photometric::rgb;
 	}
@@ -114,60 +126,217 @@ private:
 	return std::nullopt;
 }
 
-struct DecodedNativePixelBuffer {
-	std::vector<std::uint8_t> bytes;
-	pixel::DecodeStrides strides{};
-	std::size_t frame_count{0};
-};
+[[nodiscard]] std::optional<pixel::PixelPresentation> parse_pixel_presentation_from_text(
+    std::string_view text) noexcept {
+	if (ascii_iequals(text, "MONOCHROME")) {
+		return pixel::PixelPresentation::monochrome;
+	}
+	if (ascii_iequals(text, "COLOR")) {
+		return pixel::PixelPresentation::color;
+	}
+	if (ascii_iequals(text, "MIXED")) {
+		return pixel::PixelPresentation::mixed;
+	}
+	if (ascii_iequals(text, "TRUE_COLOR")) {
+		return pixel::PixelPresentation::true_color;
+	}
+	if (ascii_iequals(text, "COLOR_RANGE")) {
+		return pixel::PixelPresentation::color_range;
+	}
+	if (ascii_iequals(text, "COLOR_REF")) {
+		return pixel::PixelPresentation::color_ref;
+	}
+	return std::nullopt;
+}
 
-[[nodiscard]] DecodedNativePixelBuffer decode_all_frames_to_native(DicomFile& file,
-    const pixel::PixelDataInfo& info, std::string_view context) {
-	if (!info.has_pixel_data) {
+[[nodiscard]] std::optional<pixel::VoiLutFunction> parse_voi_lut_function_from_text(
+    std::string_view text) noexcept {
+	if (ascii_iequals(text, "LINEAR")) {
+		return pixel::VoiLutFunction::linear;
+	}
+	if (ascii_iequals(text, "LINEAR_EXACT")) {
+		return pixel::VoiLutFunction::linear_exact;
+	}
+	if (ascii_iequals(text, "SIGMOID")) {
+		return pixel::VoiLutFunction::sigmoid;
+	}
+	return std::nullopt;
+}
+
+[[nodiscard]] std::size_t resolve_metadata_frame_count_or_throw(
+    const DicomFile& file, std::string_view context) {
+	const auto parsed_frames = file.dataset()["NumberOfFrames"_tag].to_long();
+	if (!parsed_frames.has_value()) {
+		return std::size_t{1};
+	}
+	if (*parsed_frames <= 0) {
+		diag::error_and_throw(
+		    "{} file={} reason=NumberOfFrames must be >= 1 when present",
+		    context, file.path());
+	}
+	return static_cast<std::size_t>(*parsed_frames);
+}
+
+void validate_transform_metadata_frame_index_or_throw(const DicomFile& file,
+    std::size_t frame_index, std::string_view context) {
+	const auto frame_count = resolve_metadata_frame_count_or_throw(file, context);
+	if (frame_index >= frame_count) {
+		diag::error_and_throw(
+		    "{} file={} frame_index={} frame_count={} reason=frame index out of range",
+		    context, file.path(), frame_index, frame_count);
+	}
+}
+
+[[nodiscard]] const Sequence* lookup_sequence_or_throw(const DicomFile& file,
+    const DataSet& dataset, Tag sequence_tag, std::string_view context,
+    std::string_view sequence_name) {
+	const auto& sequence_elem = dataset[sequence_tag];
+	if (!sequence_elem) {
+		return nullptr;
+	}
+
+	const auto* sequence = sequence_elem.as_sequence();
+	if (!sequence) {
+		diag::error_and_throw(
+		    "{} file={} reason={} is not a valid sequence",
+		    context, file.path(), sequence_name);
+	}
+	if (sequence->size() <= 0) {
+		diag::error_and_throw(
+		    "{} file={} reason={} is empty",
+		    context, file.path(), sequence_name);
+	}
+	return sequence;
+}
+
+[[nodiscard]] const DataSet* lookup_shared_functional_groups_item_or_throw(
+    const DicomFile& file, std::string_view context) {
+	const auto* shared_seq = lookup_sequence_or_throw(
+	    file, file.dataset(), "SharedFunctionalGroupsSequence"_tag,
+	    context, "SharedFunctionalGroupsSequence");
+	if (!shared_seq) {
+		return nullptr;
+	}
+
+	const auto* shared_item = shared_seq->get_dataset(0);
+	if (!shared_item) {
+		diag::error_and_throw(
+		    "{} file={} reason=SharedFunctionalGroupsSequence item #0 is missing",
+		    context, file.path());
+	}
+	return shared_item;
+}
+
+[[nodiscard]] const DataSet* lookup_per_frame_functional_groups_item_or_throw(
+    const DicomFile& file, std::size_t frame_index, std::string_view context) {
+	const auto* per_frame_seq = lookup_sequence_or_throw(
+	    file, file.dataset(), "PerFrameFunctionalGroupsSequence"_tag,
+	    context, "PerFrameFunctionalGroupsSequence");
+	if (!per_frame_seq) {
+		return nullptr;
+	}
+	if (frame_index >= static_cast<std::size_t>(per_frame_seq->size())) {
+		diag::error_and_throw(
+		    "{} file={} frame_index={} reason=PerFrameFunctionalGroupsSequence item is missing",
+		    context, file.path(), frame_index);
+	}
+
+	const auto* per_frame_item = per_frame_seq->get_dataset(frame_index);
+	if (!per_frame_item) {
+		diag::error_and_throw(
+		    "{} file={} frame_index={} reason=PerFrameFunctionalGroupsSequence item is missing",
+		    context, file.path(), frame_index);
+	}
+	return per_frame_item;
+}
+
+[[nodiscard]] const DataSet* lookup_first_nested_sequence_item_or_throw(
+    const DicomFile& file, const DataSet& dataset, Tag sequence_tag,
+    std::string_view context, std::string_view sequence_name) {
+	const auto* sequence = lookup_sequence_or_throw(
+	    file, dataset, sequence_tag, context, sequence_name);
+	if (!sequence) {
+		return nullptr;
+	}
+
+	const auto* item = sequence->get_dataset(0);
+	if (!item) {
+		diag::error_and_throw(
+		    "{} file={} reason={} item #0 is missing",
+		    context, file.path(), sequence_name);
+	}
+	return item;
+}
+
+[[nodiscard]] const DataSet* resolve_frame_functional_group_macro_item_or_throw(
+    const DicomFile& file, Tag macro_sequence_tag, std::size_t frame_index,
+    std::string_view context, std::string_view macro_sequence_name) {
+	// Frame-specific Functional Group items override shared entries when both
+	// are available for the requested frame.
+	if (const auto* per_frame_item =
+	        lookup_per_frame_functional_groups_item_or_throw(file, frame_index, context)) {
+		if (const auto* per_frame_macro = lookup_first_nested_sequence_item_or_throw(
+		        file, *per_frame_item, macro_sequence_tag, context,
+		        macro_sequence_name)) {
+			return per_frame_macro;
+		}
+	}
+
+	// Shared Functional Groups provide the fallback for every frame in the SOP
+	// Instance when no per-frame override is present.
+	if (const auto* shared_item =
+	        lookup_shared_functional_groups_item_or_throw(file, context)) {
+		if (const auto* shared_macro = lookup_first_nested_sequence_item_or_throw(
+		        file, *shared_item, macro_sequence_tag, context,
+		        macro_sequence_name)) {
+			return shared_macro;
+		}
+	}
+
+	return nullptr;
+}
+
+[[nodiscard]] pixel::PixelBuffer decode_all_frames_to_native(DicomFile& file,
+    const pixel::PixelLayout& source_layout, std::string_view context) {
+	// This helper materializes the full native pixel payload so transfer-syntax
+	// mutations can reuse the normal encode path afterwards.
+	if (source_layout.empty()) {
 		diag::error_and_throw(
 		    "{} file={} reason=PixelData exists but pixel metadata is not decodable",
 		    context, file.path());
 	}
-	if (info.frames <= 0) {
-		diag::error_and_throw(
-		    "{} file={} reason=invalid NumberOfFrames for pixel conversion",
-		    context, file.path());
-	}
 
 	pixel::DecodeOptions decode_options{};
-	decode_options.planar_out = info.planar_configuration;
 	decode_options.alignment = 1;
-	decode_options.to_modality_value = false;
+	decode_options.planar_out = source_layout.planar;
 	// Keep codestream component domain during transfer-syntax transcoding.
 	decode_options.decode_mct = false;
 	const auto decode_plan = file.create_decode_plan(decode_options);
-	if (decode_plan.strides.frame == 0) {
+	if (decode_plan.output_layout.empty()) {
 		diag::error_and_throw(
 		    "{} file={} reason=calculated native frame size is zero",
 		    context, file.path());
 	}
 
-	DecodedNativePixelBuffer decoded{};
-	decoded.frame_count = static_cast<std::size_t>(info.frames);
-	decoded.strides = decode_plan.strides;
-	if (decoded.frame_count != 0 &&
-	    decode_plan.strides.frame > std::numeric_limits<std::size_t>::max() / decoded.frame_count) {
-		diag::error_and_throw(
-		    "{} file={} reason=decoded native buffer size overflows size_t",
-		    context, file.path());
-	}
-	decoded.bytes.resize(decode_plan.strides.frame * decoded.frame_count);
+	// Reuse the shared owning pixel container so decode helpers and transforms
+	// can move the same type through the pipeline.
+	auto decoded = pixel::PixelBuffer::allocate(decode_plan.output_layout);
+	const auto frame_count = static_cast<std::size_t>(source_layout.frames);
 
-	for (std::size_t frame_index = 0; frame_index < decoded.frame_count; ++frame_index) {
-		auto frame_span = std::span<std::uint8_t>(
-		    decoded.bytes.data() + frame_index * decode_plan.strides.frame,
-		    decode_plan.strides.frame);
-		file.decode_into(frame_index, frame_span, decode_plan);
+	// Decode into one contiguous native buffer so downstream callers can treat it
+	// exactly like ordinary native PixelData storage.
+	auto decoded_view = decoded.span();
+	for (std::size_t frame_index = 0; frame_index < frame_count; ++frame_index) {
+		// Frame subviews preserve the planned single-frame layout automatically.
+		auto frame_view = decoded_view.frame(frame_index);
+		file.decode_into(frame_index, frame_view.bytes, decode_plan);
 	}
 	return decoded;
 }
 
-[[nodiscard]] pixel::PixelSource build_set_pixel_source_from_native_pixel_data(
+[[nodiscard]] pixel::ConstPixelSpan build_native_source_span_from_native_pixel_data(
     DicomFile& file, uid::WellKnown target_ts) {
+	// Reconstruct a normalized native pixel span directly from on-disk PixelData.
 	DataSet& dataset = file.dataset();
 	const auto& pixel_data = dataset["PixelData"_tag];
 	if (!pixel_data || pixel_data.vr().is_pixel_sequence() || !pixel_data.vr().is_binary()) {
@@ -176,183 +345,42 @@ struct DecodedNativePixelBuffer {
 		    file.path(), target_ts.value());
 	}
 
-	const auto info = file.pixeldata_info();
-	if (!info.has_pixel_data || info.rows <= 0 || info.cols <= 0 ||
-	    info.frames <= 0 || info.samples_per_pixel <= 0) {
+	const auto layout = file.native_pixel_layout();
+	if (!layout.has_value()) {
 		diag::error_and_throw(
-		    "DicomFile::apply_transfer_syntax file={} target_ts={} reason=invalid native pixel metadata rows={} cols={} frames={} samples_per_pixel={}",
-		    file.path(), target_ts.value(), info.rows, info.cols,
-		    info.frames, info.samples_per_pixel);
-	}
-
-	const auto bytes_per_sample = bytes_per_sample_of(info.sv_dtype);
-	if (bytes_per_sample == 0) {
-		diag::error_and_throw(
-		    "DicomFile::apply_transfer_syntax file={} target_ts={} reason=failed to resolve bytes per sample for dtype={}",
-		    file.path(), target_ts.value(), static_cast<int>(info.sv_dtype));
-	}
-
-	const auto rows = static_cast<std::size_t>(info.rows);
-	const auto cols = static_cast<std::size_t>(info.cols);
-	const auto frames = static_cast<std::size_t>(info.frames);
-	const auto samples_per_pixel = static_cast<std::size_t>(info.samples_per_pixel);
-	const bool source_is_planar =
-	    info.planar_configuration == pixel::Planar::planar &&
-	    samples_per_pixel > std::size_t{1};
-	constexpr std::size_t kMaxRowsOrColumns = 65535;
-	constexpr std::size_t kMaxSamplesPerPixel = 4;
-	if (rows > kMaxRowsOrColumns || cols > kMaxRowsOrColumns) {
-		diag::error_and_throw(
-		    "DicomFile::apply_transfer_syntax file={} target_ts={} reason=Rows/Columns must be <= 65535 for native source path",
-		    file.path(), target_ts.value());
-	}
-	if (samples_per_pixel > kMaxSamplesPerPixel) {
-		diag::error_and_throw(
-		    "DicomFile::apply_transfer_syntax file={} target_ts={} reason=SamplesPerPixel must be <= 4 for native source path",
+		    "DicomFile::apply_transfer_syntax file={} target_ts={} reason=invalid native pixel metadata for normalized layout reconstruction",
 		    file.path(), target_ts.value());
 	}
 
-	const std::uint64_t row_components_u64 =
-	    source_is_planar ? static_cast<std::uint64_t>(cols)
-	                     : static_cast<std::uint64_t>(cols) *
-	                           static_cast<std::uint64_t>(samples_per_pixel);
-	const std::uint64_t row_stride_u64 =
-	    row_components_u64 * static_cast<std::uint64_t>(bytes_per_sample);
-	const std::uint64_t plane_stride_u64 =
-	    row_stride_u64 * static_cast<std::uint64_t>(rows);
-	const std::uint64_t frame_stride_u64 = source_is_planar
-	                                           ? plane_stride_u64 *
-	                                                 static_cast<std::uint64_t>(samples_per_pixel)
-	                                           : plane_stride_u64;
-
-	const auto to_size_checked = [&](std::uint64_t value, std::string_view label) -> std::size_t {
-		if (value > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) {
-			diag::error_and_throw(
-			    "DicomFile::apply_transfer_syntax file={} target_ts={} reason={} overflows size_t",
-			    file.path(), target_ts.value(), label);
-		}
-		return static_cast<std::size_t>(value);
-	};
-	const auto row_stride = to_size_checked(row_stride_u64, "native source row stride");
-	const auto plane_stride = to_size_checked(plane_stride_u64, "native source plane stride");
-	const auto frame_stride = to_size_checked(frame_stride_u64, "native source frame stride");
-	if (frame_stride == 0) {
-		diag::error_and_throw(
-		    "DicomFile::apply_transfer_syntax file={} target_ts={} reason=native source frame stride is zero",
-		    file.path(), target_ts.value());
-	}
-	if (frames > std::numeric_limits<std::size_t>::max() / frame_stride) {
-		diag::error_and_throw(
-		    "DicomFile::apply_transfer_syntax file={} target_ts={} reason=native source total bytes overflow (frames={}, frame_stride={})",
-		    file.path(), target_ts.value(), frames, frame_stride);
-	}
-	const auto required_bytes = frame_stride * frames;
-
+	// Clamp the source span to the exact native payload size implied by the metadata.
 	const auto source_bytes = pixel_data.value_span();
-	if (source_bytes.size() < required_bytes) {
+
+	std::size_t required_bytes = 0;
+	if (!pixel::try_pixel_storage_size(*layout, required_bytes) ||
+	    source_bytes.size() < required_bytes) {
 		diag::error_and_throw(
 		    "DicomFile::apply_transfer_syntax file={} target_ts={} reason=PixelData bytes({}) are shorter than required native frame payload({})",
 		    file.path(), target_ts.value(), source_bytes.size(), required_bytes);
 	}
 
-	const auto photometric_text = dataset["PhotometricInterpretation"_tag].to_string_view();
-	if (!photometric_text) {
-		diag::error_and_throw(
-		    "DicomFile::apply_transfer_syntax file={} target_ts={} reason=missing or invalid PhotometricInterpretation",
-		    file.path(), target_ts.value());
-	}
-	const auto photometric = parse_photometric_from_text(*photometric_text);
-	if (!photometric) {
-		diag::error_and_throw(
-		    "DicomFile::apply_transfer_syntax file={} target_ts={} reason=unsupported PhotometricInterpretation='{}' for set_pixel_data path",
-		    file.path(), target_ts.value(), *photometric_text);
-	}
-
-	const auto parse_optional_int_tag = [&](Tag tag, std::string_view name) -> std::optional<int> {
-		const auto value = dataset[tag].to_long();
-		if (!value) {
-			return std::nullopt;
-		}
-		if (*value < static_cast<long>(std::numeric_limits<int>::min()) ||
-		    *value > static_cast<long>(std::numeric_limits<int>::max())) {
-			diag::error_and_throw(
-			    "DicomFile::apply_transfer_syntax file={} target_ts={} reason={} value({}) is outside int range",
-			    file.path(), target_ts.value(), name, *value);
-		}
-		return static_cast<int>(*value);
+	return pixel::ConstPixelSpan{
+	    .layout = *layout,
+	    .bytes = source_bytes.first(required_bytes),
 	};
-
-	pixel::PixelSource source{};
-	source.bytes = source_bytes.subspan(0, required_bytes);
-	source.data_type = info.sv_dtype;
-	source.rows = info.rows;
-	source.cols = info.cols;
-	source.frames = info.frames;
-	source.samples_per_pixel = info.samples_per_pixel;
-	source.planar = info.planar_configuration;
-	source.row_stride = row_stride;
-	source.frame_stride = frame_stride;
-	source.photometric = *photometric;
-	source.bits_stored = parse_optional_int_tag("BitsStored"_tag, "BitsStored").value_or(info.bits_stored);
-	return source;
 }
 
-[[nodiscard]] pixel::PixelSource build_set_pixel_source_from_decoded_native_frames(
-    DicomFile& file, uid::WellKnown target_ts, const pixel::PixelDataInfo& info,
-    const pixel::DecodePlan& decode_plan) {
-	if (!info.has_pixel_data || info.rows <= 0 || info.cols <= 0 ||
-	    info.frames <= 0 || info.samples_per_pixel <= 0) {
-		diag::error_and_throw(
-		    "DicomFile::apply_transfer_syntax file={} target_ts={} reason=invalid decoded pixel metadata rows={} cols={} frames={} samples_per_pixel={}",
-		    file.path(), target_ts.value(), info.rows, info.cols,
-		    info.frames, info.samples_per_pixel);
-	}
-	if (decode_plan.strides.row == 0 || decode_plan.strides.frame == 0) {
+[[nodiscard]] pixel::PixelLayout resolve_decoded_source_layout_or_throw(
+    DicomFile& file, uid::WellKnown target_ts, const pixel::DecodePlan& decode_plan) {
+	// This path describes a decode-on-demand source for re-encode without first
+	// materializing a monolithic native PixelData element on the file.
+	if (decode_plan.output_layout.empty()) {
 		diag::error_and_throw(
 		    "DicomFile::apply_transfer_syntax file={} target_ts={} reason=decoded frame layout is empty",
 		    file.path(), target_ts.value());
 	}
 
-	const auto photometric_text = file.dataset()["PhotometricInterpretation"_tag].to_string_view();
-	if (!photometric_text) {
-		diag::error_and_throw(
-		    "DicomFile::apply_transfer_syntax file={} target_ts={} reason=missing or invalid PhotometricInterpretation",
-		    file.path(), target_ts.value());
-	}
-	const auto photometric = parse_photometric_from_text(*photometric_text);
-	if (!photometric) {
-		diag::error_and_throw(
-		    "DicomFile::apply_transfer_syntax file={} target_ts={} reason=unsupported PhotometricInterpretation='{}' for streaming transcode path",
-		    file.path(), target_ts.value(), *photometric_text);
-	}
-
-	const auto parse_optional_int_tag = [&](Tag tag, std::string_view name) -> std::optional<int> {
-		const auto value = file.dataset()[tag].to_long();
-		if (!value) {
-			return std::nullopt;
-		}
-		if (*value < static_cast<long>(std::numeric_limits<int>::min()) ||
-		    *value > static_cast<long>(std::numeric_limits<int>::max())) {
-			diag::error_and_throw(
-			    "DicomFile::apply_transfer_syntax file={} target_ts={} reason={} value({}) is outside int range",
-			    file.path(), target_ts.value(), name, *value);
-		}
-		return static_cast<int>(*value);
-	};
-
-	pixel::PixelSource source{};
-	source.data_type = info.sv_dtype;
-	source.rows = info.rows;
-	source.cols = info.cols;
-	source.frames = info.frames;
-	source.samples_per_pixel = info.samples_per_pixel;
-	source.planar = info.planar_configuration;
-	source.row_stride = decode_plan.strides.row;
-	source.frame_stride = decode_plan.strides.frame;
-	source.photometric = *photometric;
-	source.bits_stored =
-	    parse_optional_int_tag("BitsStored"_tag, "BitsStored").value_or(info.bits_stored);
-	return source;
+	// The decode plan already carries the fully normalized native frame layout.
+	return decode_plan.output_layout;
 }
 
 void convert_encapsulated_pixel_data_to_native(DicomFile& file) {
@@ -362,15 +390,15 @@ void convert_encapsulated_pixel_data_to_native(DicomFile& file) {
 		return;
 	}
 
-	const auto info = file.pixeldata_info();
+	const auto source_layout = pixel::support_detail::compute_decode_source_layout(file);
+	// Decode every encapsulated frame and replace PixelData with one native binary blob.
 	auto decoded =
-	    decode_all_frames_to_native(file, info, "DicomFile::apply_transfer_syntax");
-	const auto storage_bits =
-	    static_cast<int>(bytes_per_sample_of(info.sv_dtype) * std::size_t{8});
+	    decode_all_frames_to_native(file, source_layout, "DicomFile::apply_transfer_syntax");
+	const auto storage_bits = source_layout.bits_allocated();
 	if (storage_bits <= 0) {
 		diag::error_and_throw(
-		    "DicomFile::apply_transfer_syntax file={} reason=failed to resolve storage bits from sv_dtype={}",
-		    file.path(), static_cast<int>(info.sv_dtype));
+		    "DicomFile::apply_transfer_syntax file={} reason=failed to resolve storage bits from source layout dtype={}",
+		    file.path(), static_cast<int>(source_layout.data_type));
 	}
 	file.set_native_pixel_data(
 	    std::move(decoded.bytes),
@@ -417,14 +445,16 @@ void transcode_encapsulated_pixel_data_to_encapsulated(DicomFile& file,
     ApplyTransferSyntaxEncodeMode encode_mode,
     std::span<const pixel::CodecOptionTextKv> codec_opt_override,
     const pixel::EncoderContext* encoder_ctx) {
-	const auto info = file.pixeldata_info();
+	// Stream each source frame through decode -> encode so large encapsulated inputs
+	// do not need an intermediate full-volume native allocation.
+	const auto source_decode_layout =
+	    pixel::support_detail::compute_decode_source_layout(file);
 	pixel::DecodeOptions decode_options{};
-	decode_options.planar_out = info.planar_configuration;
 	decode_options.alignment = 1;
-	decode_options.to_modality_value = false;
+	decode_options.planar_out = source_decode_layout.planar;
 	decode_options.decode_mct = false;
 	const auto decode_plan = file.create_decode_plan(decode_options);
-	if (decode_plan.strides.frame == 0) {
+	if (decode_plan.output_layout.empty()) {
 		diag::error_and_throw(
 		    "DicomFile::apply_transfer_syntax file={} target_ts={} reason=calculated native frame size is zero for streaming transcode",
 		    file.path(), target_transfer_syntax.value());
@@ -444,9 +474,9 @@ void transcode_encapsulated_pixel_data_to_encapsulated(DicomFile& file,
 	const auto original_number_of_frames =
 	    file.dataset()["NumberOfFrames"_tag].to_long();
 
-	auto source_descriptor = build_set_pixel_source_from_decoded_native_frames(
-	    file, target_transfer_syntax, info, decode_plan);
-	std::vector<std::uint8_t> decoded_frame(decode_plan.strides.frame);
+	auto source_layout = resolve_decoded_source_layout_or_throw(
+	    file, target_transfer_syntax, decode_plan);
+	std::vector<std::uint8_t> decoded_frame(decode_plan.output_layout.frame_stride);
 
 	pixel::EncoderContext staged_encoder_ctx{};
 	const pixel::EncoderContext* active_encoder_ctx = encoder_ctx;
@@ -466,8 +496,9 @@ void transcode_encapsulated_pixel_data_to_encapsulated(DicomFile& file,
 	auto source_pixel_sequence_snapshot =
 	    std::make_unique<PixelSequence>(std::move(*source_pixel_sequence));
 	try {
+		// The frame provider decodes one source frame on demand into a reusable buffer.
 		pixel::detail::run_set_pixel_data_from_frame_provider_streaming_with_computed_codec_options(
-		    file, target_transfer_syntax, source_descriptor,
+		    file, target_transfer_syntax, source_layout,
 		    active_encoder_ctx->codec_options(),
 		    [&](std::size_t frame_index) -> std::span<const std::uint8_t> {
 			    auto frame_span = std::span<std::uint8_t>(
@@ -476,8 +507,8 @@ void transcode_encapsulated_pixel_data_to_encapsulated(DicomFile& file,
 			        pixel::support_detail::prepare_decode_frame_source_or_throw(
 			            *source_pixel_sequence_snapshot, frame_index);
 			    pixel::detail::dispatch_decode_prepared_frame(
-			        file.path(), frame_index, prepared_source.bytes, frame_span,
-			        decode_plan);
+			        file.path(), file.transfer_syntax_uid(), source_layout, frame_index,
+			        prepared_source.bytes, frame_span, decode_plan);
 			    source_pixel_sequence_snapshot->clear_frame_encoded_data(frame_index);
 			    return std::span<const std::uint8_t>(
 			        frame_span.data(), frame_span.size());
@@ -518,7 +549,8 @@ void transcode_encapsulated_pixel_data_to_encapsulated(DicomFile& file,
 				    file.path(), source_transfer_syntax.value(), transfer_syntax.value());
 			}
 				auto source =
-				    build_set_pixel_source_from_native_pixel_data(file, transfer_syntax);
+				    build_native_source_span_from_native_pixel_data(
+				        file, transfer_syntax);
 				if (encode_mode == ApplyTransferSyntaxEncodeMode::use_plugin_defaults) {
 					file.set_pixel_data(transfer_syntax, source);
 				} else if (encode_mode == ApplyTransferSyntaxEncodeMode::use_encoder_context) {
@@ -555,7 +587,7 @@ struct LutDescriptorValues {
 	std::uint32_t bits_per_entry{0};
 };
 
-bool try_parse_lut_descriptor(const DataElement& descriptor_elem,
+bool try_parse_lut_descriptor(const DataElement& descriptor_elem, bool little_endian,
     LutDescriptorValues& out) noexcept {
 	const auto span = descriptor_elem.value_span();
 	if (span.size() < 6) {
@@ -567,13 +599,19 @@ bool try_parse_lut_descriptor(const DataElement& descriptor_elem,
 	long raw_bits = 0;
 	const auto descriptor_vr = descriptor_elem.vr();
 	if (descriptor_vr == VR::US) {
-		raw_entries = static_cast<long>(endian::load_le<std::uint16_t>(span.data()));
-		raw_first_mapped = static_cast<long>(endian::load_le<std::uint16_t>(span.data() + 2));
-		raw_bits = static_cast<long>(endian::load_le<std::uint16_t>(span.data() + 4));
+		raw_entries = static_cast<long>(
+		    load_dataset_endian_value<std::uint16_t>(span.data(), little_endian));
+		raw_first_mapped = static_cast<long>(
+		    load_dataset_endian_value<std::uint16_t>(span.data() + 2, little_endian));
+		raw_bits = static_cast<long>(
+		    load_dataset_endian_value<std::uint16_t>(span.data() + 4, little_endian));
 	} else if (descriptor_vr == VR::SS) {
-		raw_entries = static_cast<long>(endian::load_le<std::int16_t>(span.data()));
-		raw_first_mapped = static_cast<long>(endian::load_le<std::int16_t>(span.data() + 2));
-		raw_bits = static_cast<long>(endian::load_le<std::int16_t>(span.data() + 4));
+		raw_entries = static_cast<long>(
+		    load_dataset_endian_value<std::int16_t>(span.data(), little_endian));
+		raw_first_mapped = static_cast<long>(
+		    load_dataset_endian_value<std::int16_t>(span.data() + 2, little_endian));
+		raw_bits = static_cast<long>(
+		    load_dataset_endian_value<std::int16_t>(span.data() + 4, little_endian));
 	} else {
 		const auto descriptor = descriptor_elem.to_long_vector();
 		if (!descriptor || descriptor->size() < 3) {
@@ -592,6 +630,767 @@ bool try_parse_lut_descriptor(const DataElement& descriptor_elem,
 	out.first_mapped = static_cast<std::int64_t>(raw_first_mapped);
 	out.bits_per_entry = static_cast<std::uint32_t>(raw_bits);
 	return out.entry_count > 0;
+}
+
+[[nodiscard]] std::vector<std::uint16_t> load_discrete_lut_data_or_throw(
+    const DicomFile& file, std::string_view context, const LutDescriptorValues& descriptor,
+    const DataElement& lut_data_elem) {
+	const bool little_endian = file_uses_little_endian(file);
+	const auto lut_data = lut_data_elem.value_span();
+	if (lut_data.empty()) {
+		diag::error_and_throw(
+		    "{} file={} reason=empty LUT data", context, file.path());
+	}
+
+	std::vector<std::uint16_t> values(descriptor.entry_count, std::uint16_t{0});
+	const std::uint32_t value_mask =
+	    descriptor.bits_per_entry == 16
+	        ? 0xFFFFu
+	        : ((1u << descriptor.bits_per_entry) - 1u);
+	const auto entry_count = descriptor.entry_count;
+
+	// Accept both byte-packed and 16-bit container forms for <=8-bit LUT payloads.
+	if (descriptor.bits_per_entry <= 8 &&
+	    lut_data.size() >= entry_count * sizeof(std::uint16_t)) {
+		for (std::size_t index = 0; index < entry_count; ++index) {
+			const auto value = load_dataset_endian_value<std::uint16_t>(
+			    lut_data.data() + index * sizeof(std::uint16_t), little_endian);
+			values[index] = static_cast<std::uint16_t>(value & value_mask);
+		}
+		return values;
+	}
+	if (descriptor.bits_per_entry <= 8 && lut_data.size() >= entry_count) {
+		for (std::size_t index = 0; index < entry_count; ++index) {
+			values[index] = static_cast<std::uint16_t>(
+			    static_cast<std::uint32_t>(lut_data[index]) & value_mask);
+		}
+		return values;
+	}
+
+	const auto required_u16_bytes = entry_count * sizeof(std::uint16_t);
+	if (lut_data.size() < required_u16_bytes) {
+		diag::error_and_throw(
+		    "{} file={} reason=LUTData is shorter than LUTDescriptor entry count",
+		    context, file.path());
+	}
+	for (std::size_t index = 0; index < entry_count; ++index) {
+		const auto value = load_dataset_endian_value<std::uint16_t>(
+		    lut_data.data() + index * sizeof(std::uint16_t), little_endian);
+		values[index] = static_cast<std::uint16_t>(value & value_mask);
+	}
+	return values;
+}
+
+[[nodiscard]] std::vector<std::uint16_t> expand_segmented_lut_data_or_throw(
+    const DicomFile& file, std::string_view context, std::span<const std::uint32_t> data,
+    const LutDescriptorValues& descriptor, bool little_endian,
+    std::optional<std::size_t> segment_limit = std::nullopt,
+    std::optional<std::uint16_t> previous_value = std::nullopt) {
+	std::vector<std::uint16_t> values;
+	std::size_t offset = 0;
+	std::size_t segments_read = 0;
+	const auto value_mask = descriptor.bits_per_entry == 16
+	                            ? std::uint32_t{0xFFFFu}
+	                            : ((std::uint32_t{1u} << descriptor.bits_per_entry) - 1u);
+	const bool byte_entries = descriptor.bits_per_entry <= 8;
+
+	// Segments are at least two entries long (opcode + length), so offset+1 is
+	// enough to tolerate a trailing pad byte in 8-bit payloads.
+	while ((offset + 1) < data.size()) {
+		const auto opcode = data[offset];
+		const auto length = static_cast<std::size_t>(data[offset + 1]);
+		offset += 2;
+
+		if (opcode == 0u) {
+			// Discrete segment: copy `length` explicit values.
+			if ((offset + length) > data.size()) {
+				diag::error_and_throw(
+				    "{} file={} reason=segmented palette discrete segment is truncated",
+				    context, file.path());
+			}
+			for (std::size_t index = 0; index < length; ++index) {
+				values.push_back(static_cast<std::uint16_t>(data[offset + index] & value_mask));
+			}
+			offset += length;
+		} else if (opcode == 1u) {
+			// Linear segment: interpolate `length` values from the previous sample.
+			const std::uint32_t y0 = !values.empty()
+			                             ? values.back()
+			                             : (previous_value.has_value()
+			                                    ? static_cast<std::uint32_t>(*previous_value)
+			                                    : std::numeric_limits<std::uint32_t>::max());
+			if (y0 == std::numeric_limits<std::uint32_t>::max()) {
+				diag::error_and_throw(
+				    "{} file={} reason=segmented palette linear segment has no previous sample",
+				    context, file.path());
+			}
+			if (offset >= data.size()) {
+				diag::error_and_throw(
+				    "{} file={} reason=segmented palette linear segment is truncated",
+				    context, file.path());
+			}
+			const auto y1 = data[offset] & value_mask;
+			++offset;
+			if (length == 0) {
+				// Zero-length segments are a no-op but still count as one segment.
+			} else if (y0 == y1) {
+				values.insert(values.end(), length, static_cast<std::uint16_t>(y1));
+			} else {
+				const double step =
+				    (static_cast<double>(y1) - static_cast<double>(y0)) /
+				    static_cast<double>(length);
+				for (std::size_t index = 1; index <= length; ++index) {
+					const auto interpolated = static_cast<std::uint32_t>(
+					    std::lround(static_cast<double>(y0) + (step * static_cast<double>(index))));
+					values.push_back(static_cast<std::uint16_t>(interpolated & value_mask));
+				}
+			}
+		} else if (opcode == 2u) {
+			// Indirect segment: jump to another segment stream and expand `length`
+			// segments from there, using the current tail sample as the prior value.
+			if (values.empty()) {
+				diag::error_and_throw(
+				    "{} file={} reason=segmented palette indirect segment has no previous sample",
+				    context, file.path());
+			}
+
+			std::size_t segment_offset = 0;
+			if (byte_entries) {
+				if ((offset + 4) > data.size()) {
+					diag::error_and_throw(
+					    "{} file={} reason=segmented palette indirect segment is truncated",
+					    context, file.path());
+				}
+				const auto b0 = data[offset + 0];
+				const auto b1 = data[offset + 1];
+				const auto b2 = data[offset + 2];
+				const auto b3 = data[offset + 3];
+				segment_offset = little_endian
+				                     ? static_cast<std::size_t>(
+				                           b0 | (b1 << 8) | (b2 << 16) | (b3 << 24))
+				                     : static_cast<std::size_t>(
+				                           (b0 << 24) | (b1 << 16) | (b2 << 8) | b3);
+				offset += 4;
+			} else {
+				if ((offset + 2) > data.size()) {
+					diag::error_and_throw(
+					    "{} file={} reason=segmented palette indirect segment is truncated",
+					    context, file.path());
+				}
+				segment_offset = static_cast<std::size_t>(
+				    data[offset] | (data[offset + 1] << 16));
+				offset += 2;
+			}
+			if (segment_offset >= data.size()) {
+				diag::error_and_throw(
+				    "{} file={} reason=segmented palette indirect segment offset is out of range",
+				    context, file.path());
+			}
+			auto nested = expand_segmented_lut_data_or_throw(
+			    file, context, data.subspan(segment_offset), descriptor, little_endian,
+			    length, values.back());
+			values.insert(values.end(), nested.begin(), nested.end());
+		} else {
+			diag::error_and_throw(
+			    "{} file={} reason=segmented palette opcode {} is not supported",
+			    context, file.path(), opcode);
+		}
+
+		++segments_read;
+		if (segment_limit.has_value() && segments_read == *segment_limit) {
+			return values;
+		}
+	}
+
+	return values;
+}
+
+[[nodiscard]] std::vector<std::uint16_t> load_segmented_lut_data_or_throw(
+    const DicomFile& file, std::string_view context, const LutDescriptorValues& descriptor,
+    const DataElement& lut_data_elem) {
+	const auto lut_data = lut_data_elem.value_span();
+	if (lut_data.empty()) {
+		diag::error_and_throw(
+		    "{} file={} reason=empty segmented LUT data", context, file.path());
+	}
+
+	const bool little_endian = file_uses_little_endian(file);
+	std::vector<std::uint32_t> packed_values{};
+	if (descriptor.bits_per_entry <= 8) {
+		packed_values.reserve(lut_data.size());
+		for (std::uint8_t value : lut_data) {
+			packed_values.push_back(static_cast<std::uint32_t>(value));
+		}
+	} else if (descriptor.bits_per_entry == 16) {
+		if ((lut_data.size() % sizeof(std::uint16_t)) != 0) {
+			diag::error_and_throw(
+			    "{} file={} reason=16-bit segmented LUT data has odd byte count",
+			    context, file.path());
+		}
+		packed_values.reserve(lut_data.size() / sizeof(std::uint16_t));
+		for (std::size_t index = 0; index < lut_data.size(); index += sizeof(std::uint16_t)) {
+			packed_values.push_back(static_cast<std::uint32_t>(
+			    load_dataset_endian_value<std::uint16_t>(lut_data.data() + index, little_endian)));
+		}
+	} else {
+		diag::error_and_throw(
+		    "{} file={} reason=segmented LUT supports only 8-bit or 16-bit entries",
+		    context, file.path());
+	}
+
+	auto values = expand_segmented_lut_data_or_throw(
+	    file, context, packed_values, descriptor, little_endian);
+	if (values.size() != descriptor.entry_count) {
+		diag::error_and_throw(
+		    "{} file={} reason=segmented LUT expanded {} entries but LUTDescriptor requires {}",
+		    context, file.path(), values.size(), descriptor.entry_count);
+	}
+	return values;
+}
+
+struct ParsedPaletteChannels {
+	pixel::PaletteLut palette{};
+};
+
+struct StoredValueColorRangeValues {
+	double minimum_stored_value_mapped{0.0};
+	double maximum_stored_value_mapped{0.0};
+};
+
+[[nodiscard]] std::optional<pixel::Photometric> parse_photometric_from_dataset_or_throw(
+    const DicomFile& file, const DataSet& dataset, std::string_view context) {
+	const auto& photometric_elem = dataset["PhotometricInterpretation"_tag];
+	if (!photometric_elem) {
+		return std::nullopt;
+	}
+
+	const auto photometric_text = photometric_elem.to_string_view();
+	if (!photometric_text || photometric_text->empty()) {
+		diag::error_and_throw(
+		    "{} file={} reason=invalid PhotometricInterpretation",
+		    context, file.path());
+	}
+	const auto parsed = parse_photometric_from_text(*photometric_text);
+	if (!parsed) {
+		diag::error_and_throw(
+		    "{} file={} reason=unsupported PhotometricInterpretation",
+		    context, file.path());
+	}
+	return parsed;
+}
+
+[[nodiscard]] std::optional<pixel::PixelPresentation> parse_pixel_presentation_from_dataset_or_throw(
+    const DicomFile& file, const DataSet& dataset, std::string_view context) {
+	const auto& presentation_elem = dataset["PixelPresentation"_tag];
+	if (!presentation_elem) {
+		return std::nullopt;
+	}
+
+	const auto presentation_text = presentation_elem.to_string_view();
+	if (!presentation_text || presentation_text->empty()) {
+		diag::error_and_throw(
+		    "{} file={} reason=invalid PixelPresentation",
+		    context, file.path());
+	}
+	const auto parsed = parse_pixel_presentation_from_text(*presentation_text);
+	if (!parsed) {
+		diag::error_and_throw(
+		    "{} file={} reason=unsupported PixelPresentation",
+		    context, file.path());
+	}
+	return parsed;
+}
+
+[[nodiscard]] std::optional<StoredValueColorRangeValues>
+parse_stored_value_color_range_from_dataset_or_throw(
+    const DicomFile& file, const DataSet& dataset, std::string_view context) {
+	const auto* item = lookup_first_nested_sequence_item_or_throw(
+	    file, dataset, "StoredValueColorRangeSequence"_tag,
+	    context, "StoredValueColorRangeSequence");
+	if (!item) {
+		return std::nullopt;
+	}
+
+	const auto& minimum_elem = (*item)["MinimumStoredValueMapped"_tag];
+	const auto& maximum_elem = (*item)["MaximumStoredValueMapped"_tag];
+	if (!minimum_elem || !maximum_elem) {
+		diag::error_and_throw(
+		    "{} file={} reason=StoredValueColorRangeSequence item #0 is incomplete",
+		    context, file.path());
+	}
+
+	const auto minimum_value = minimum_elem.to_double();
+	const auto maximum_value = maximum_elem.to_double();
+	if (!minimum_value || !maximum_value ||
+	    !std::isfinite(*minimum_value) || !std::isfinite(*maximum_value)) {
+		diag::error_and_throw(
+		    "{} file={} reason=invalid StoredValueColorRangeSequence values",
+		    context, file.path());
+	}
+
+	return StoredValueColorRangeValues{
+	    .minimum_stored_value_mapped = *minimum_value,
+	    .maximum_stored_value_mapped = *maximum_value,
+	};
+}
+
+[[nodiscard]] bool dataset_has_enhanced_palette_metadata(const DataSet& dataset) noexcept {
+	return dataset["DataFrameAssignmentSequence"_tag] ||
+	    dataset["BlendingLUT1Sequence"_tag] ||
+	    dataset["BlendingLUT2Sequence"_tag] ||
+	    dataset["EnhancedPaletteColorLookupTableSequence"_tag];
+}
+
+[[nodiscard]] std::optional<ParsedPaletteChannels> parse_palette_channels_from_dataset_or_throw(
+    const DicomFile& file, const DataSet& dataset, std::string_view context) {
+	const auto& red_descriptor_elem = dataset["RedPaletteColorLookupTableDescriptor"_tag];
+	const auto& green_descriptor_elem = dataset["GreenPaletteColorLookupTableDescriptor"_tag];
+	const auto& blue_descriptor_elem = dataset["BluePaletteColorLookupTableDescriptor"_tag];
+	const auto& alpha_descriptor_elem = dataset["AlphaPaletteColorLookupTableDescriptor"_tag];
+	const auto& red_data_elem = dataset["RedPaletteColorLookupTableData"_tag];
+	const auto& green_data_elem = dataset["GreenPaletteColorLookupTableData"_tag];
+	const auto& blue_data_elem = dataset["BluePaletteColorLookupTableData"_tag];
+	const auto& alpha_data_elem = dataset["AlphaPaletteColorLookupTableData"_tag];
+	const auto& segmented_red_data_elem =
+	    dataset["SegmentedRedPaletteColorLookupTableData"_tag];
+	const auto& segmented_green_data_elem =
+	    dataset["SegmentedGreenPaletteColorLookupTableData"_tag];
+	const auto& segmented_blue_data_elem =
+	    dataset["SegmentedBluePaletteColorLookupTableData"_tag];
+	const auto& segmented_alpha_data_elem =
+	    dataset["SegmentedAlphaPaletteColorLookupTableData"_tag];
+
+	const bool has_rgb_descriptors =
+	    red_descriptor_elem && green_descriptor_elem && blue_descriptor_elem;
+	const bool has_discrete_palette = has_rgb_descriptors &&
+	    red_data_elem && green_data_elem && blue_data_elem;
+	const bool has_segmented_palette = has_rgb_descriptors &&
+	    segmented_red_data_elem && segmented_green_data_elem && segmented_blue_data_elem;
+	const bool has_any_rgb_tag = red_descriptor_elem || green_descriptor_elem || blue_descriptor_elem ||
+	    red_data_elem || green_data_elem || blue_data_elem ||
+	    segmented_red_data_elem || segmented_green_data_elem || segmented_blue_data_elem;
+	const bool has_discrete_alpha = alpha_descriptor_elem && alpha_data_elem;
+	const bool has_segmented_alpha = alpha_descriptor_elem && segmented_alpha_data_elem;
+	const bool has_any_alpha_tag =
+	    alpha_descriptor_elem || alpha_data_elem || segmented_alpha_data_elem;
+	if (!has_any_rgb_tag && !has_any_alpha_tag) {
+		return std::nullopt;
+	}
+	if (!has_discrete_palette && !has_segmented_palette) {
+		diag::error_and_throw(
+		    "{} file={} reason=palette LUT metadata is incomplete",
+		    context, file.path());
+	}
+	if (has_discrete_palette &&
+	    (segmented_red_data_elem || segmented_green_data_elem || segmented_blue_data_elem)) {
+		diag::error_and_throw(
+		    "{} file={} reason=discrete and segmented palette data must not both be present",
+		    context, file.path());
+	}
+	if (has_any_alpha_tag && !has_discrete_alpha && !has_segmented_alpha) {
+		diag::error_and_throw(
+		    "{} file={} reason=alpha palette metadata is incomplete",
+		    context, file.path());
+	}
+	if (has_discrete_alpha && segmented_alpha_data_elem) {
+		diag::error_and_throw(
+		    "{} file={} reason=discrete and segmented alpha palette data must not both be present",
+		    context, file.path());
+	}
+
+	LutDescriptorValues red_descriptor{};
+	LutDescriptorValues green_descriptor{};
+	LutDescriptorValues blue_descriptor{};
+	const bool little_endian = file_uses_little_endian(file);
+	if (!try_parse_lut_descriptor(red_descriptor_elem, little_endian, red_descriptor) ||
+	    !try_parse_lut_descriptor(green_descriptor_elem, little_endian, green_descriptor) ||
+	    !try_parse_lut_descriptor(blue_descriptor_elem, little_endian, blue_descriptor)) {
+		diag::error_and_throw(
+		    "{} file={} reason=invalid palette LUT descriptor",
+		    context, file.path());
+	}
+	if (red_descriptor.entry_count != green_descriptor.entry_count ||
+	    red_descriptor.entry_count != blue_descriptor.entry_count ||
+	    red_descriptor.first_mapped != green_descriptor.first_mapped ||
+	    red_descriptor.first_mapped != blue_descriptor.first_mapped ||
+	    red_descriptor.bits_per_entry != green_descriptor.bits_per_entry ||
+	    red_descriptor.bits_per_entry != blue_descriptor.bits_per_entry) {
+		diag::error_and_throw(
+		    "{} file={} reason=palette LUT descriptors are inconsistent",
+		    context, file.path());
+	}
+
+	ParsedPaletteChannels parsed{};
+	parsed.palette.first_mapped = red_descriptor.first_mapped;
+	parsed.palette.bits_per_entry = static_cast<std::uint16_t>(red_descriptor.bits_per_entry);
+	if (has_discrete_palette) {
+		parsed.palette.red_values = load_discrete_lut_data_or_throw(
+		    file, context, red_descriptor, red_data_elem);
+		parsed.palette.green_values = load_discrete_lut_data_or_throw(
+		    file, context, green_descriptor, green_data_elem);
+		parsed.palette.blue_values = load_discrete_lut_data_or_throw(
+		    file, context, blue_descriptor, blue_data_elem);
+	} else {
+		parsed.palette.red_values = load_segmented_lut_data_or_throw(
+		    file, context, red_descriptor, segmented_red_data_elem);
+		parsed.palette.green_values = load_segmented_lut_data_or_throw(
+		    file, context, green_descriptor, segmented_green_data_elem);
+		parsed.palette.blue_values = load_segmented_lut_data_or_throw(
+		    file, context, blue_descriptor, segmented_blue_data_elem);
+	}
+
+	if (has_discrete_alpha || has_segmented_alpha) {
+		LutDescriptorValues alpha_descriptor{};
+		if (!try_parse_lut_descriptor(alpha_descriptor_elem, little_endian, alpha_descriptor)) {
+			diag::error_and_throw(
+			    "{} file={} reason=invalid alpha palette LUT descriptor",
+			    context, file.path());
+		}
+		if (alpha_descriptor.entry_count != red_descriptor.entry_count ||
+		    alpha_descriptor.first_mapped != red_descriptor.first_mapped ||
+		    alpha_descriptor.bits_per_entry != red_descriptor.bits_per_entry) {
+			diag::error_and_throw(
+			    "{} file={} reason=alpha palette LUT descriptor is inconsistent with RGB descriptors",
+			    context, file.path());
+		}
+		if (has_discrete_alpha) {
+			parsed.palette.alpha_values = load_discrete_lut_data_or_throw(
+			    file, context, alpha_descriptor, alpha_data_elem);
+		} else {
+			parsed.palette.alpha_values = load_segmented_lut_data_or_throw(
+			    file, context, alpha_descriptor, segmented_alpha_data_elem);
+		}
+	}
+
+	return parsed;
+}
+
+[[nodiscard]] std::vector<pixel::EnhancedPaletteDataPathAssignmentInfo>
+parse_enhanced_data_frame_assignments_or_throw(
+    const DicomFile& file, const DataSet& dataset, std::string_view context) {
+	const auto* sequence = lookup_sequence_or_throw(
+	    file, dataset, "DataFrameAssignmentSequence"_tag,
+	    context, "DataFrameAssignmentSequence");
+	if (!sequence) {
+		return {};
+	}
+
+	std::vector<pixel::EnhancedPaletteDataPathAssignmentInfo> assignments{};
+	assignments.reserve(static_cast<std::size_t>(sequence->size()));
+	for (int item_index = 0; item_index < sequence->size(); ++item_index) {
+		const auto* item = sequence->get_dataset(static_cast<std::size_t>(item_index));
+		if (!item) {
+			diag::error_and_throw(
+			    "{} file={} reason=DataFrameAssignmentSequence item #{} is missing",
+			    context, file.path(), item_index);
+		}
+
+		pixel::EnhancedPaletteDataPathAssignmentInfo assignment{};
+		if (const auto& data_type_elem = (*item)["DataType"_tag]; data_type_elem) {
+			const auto data_type_text = data_type_elem.to_string_view();
+			if (!data_type_text || data_type_text->empty()) {
+				diag::error_and_throw(
+				    "{} file={} reason=DataFrameAssignmentSequence item #{} has invalid DataType",
+				    context, file.path(), item_index);
+			}
+			assignment.data_type.assign(data_type_text->data(), data_type_text->size());
+		}
+
+		const auto& data_path_assignment_elem = (*item)["DataPathAssignment"_tag];
+		if (!data_path_assignment_elem) {
+			diag::error_and_throw(
+			    "{} file={} reason=DataFrameAssignmentSequence item #{} missing DataPathAssignment",
+			    context, file.path(), item_index);
+		}
+		const auto data_path_assignment_text = data_path_assignment_elem.to_string_view();
+		if (!data_path_assignment_text || data_path_assignment_text->empty()) {
+			diag::error_and_throw(
+			    "{} file={} reason=DataFrameAssignmentSequence item #{} has invalid DataPathAssignment",
+			    context, file.path(), item_index);
+		}
+		assignment.data_path_assignment.assign(
+		    data_path_assignment_text->data(), data_path_assignment_text->size());
+
+		if (const auto& bits_elem = (*item)["BitsMappedToColorLookupTable"_tag]; bits_elem) {
+			const auto bits_value = bits_elem.to_int();
+			if (!bits_value || *bits_value < 0 || *bits_value > 65535) {
+				diag::error_and_throw(
+				    "{} file={} reason=DataFrameAssignmentSequence item #{} has invalid BitsMappedToColorLookupTable",
+				    context, file.path(), item_index);
+			}
+			assignment.has_bits_mapped_to_color_lookup_table = true;
+			assignment.bits_mapped_to_color_lookup_table =
+			    static_cast<std::uint16_t>(*bits_value);
+		}
+
+		assignments.push_back(std::move(assignment));
+	}
+	return assignments;
+}
+
+[[nodiscard]] std::optional<pixel::EnhancedBlendingLutInfo>
+parse_enhanced_blending_lut_or_throw(const DicomFile& file, const DataSet& dataset,
+    Tag sequence_tag, Tag transfer_function_tag, std::string_view context,
+    std::string_view sequence_name) {
+	const auto* item = lookup_first_nested_sequence_item_or_throw(
+	    file, dataset, sequence_tag, context, sequence_name);
+	if (!item) {
+		return std::nullopt;
+	}
+
+	pixel::EnhancedBlendingLutInfo info{};
+	const auto& transfer_elem = (*item)[transfer_function_tag];
+	if (!transfer_elem) {
+		diag::error_and_throw(
+		    "{} file={} reason={} item #0 missing transfer function",
+		    context, file.path(), sequence_name);
+	}
+	const auto transfer_text = transfer_elem.to_string_view();
+	if (!transfer_text || transfer_text->empty()) {
+		diag::error_and_throw(
+		    "{} file={} reason={} item #0 has invalid transfer function",
+		    context, file.path(), sequence_name);
+	}
+	info.transfer_function.assign(transfer_text->data(), transfer_text->size());
+
+	if (const auto& weight_elem = (*item)["BlendingWeightConstant"_tag]; weight_elem) {
+		const auto weight_value = weight_elem.to_double();
+		if (!weight_value || !std::isfinite(*weight_value)) {
+			diag::error_and_throw(
+			    "{} file={} reason={} item #0 has invalid BlendingWeightConstant",
+			    context, file.path(), sequence_name);
+		}
+		info.has_weight_constant = true;
+		info.weight_constant = *weight_value;
+	}
+
+	if (ascii_iequals(info.transfer_function, "TABLE")) {
+		const auto& descriptor_elem = (*item)["BlendingLookupTableDescriptor"_tag];
+		const auto& data_elem = (*item)["BlendingLookupTableData"_tag];
+		if (!descriptor_elem || !data_elem) {
+			diag::error_and_throw(
+			    "{} file={} reason={} item #0 missing blending LUT table metadata",
+			    context, file.path(), sequence_name);
+		}
+
+		LutDescriptorValues descriptor{};
+		if (!try_parse_lut_descriptor(descriptor_elem, file_uses_little_endian(file), descriptor)) {
+			diag::error_and_throw(
+			    "{} file={} reason={} item #0 has invalid blending LUT descriptor",
+			    context, file.path(), sequence_name);
+		}
+		info.bits_per_entry = static_cast<std::uint16_t>(descriptor.bits_per_entry);
+		info.values = load_discrete_lut_data_or_throw(file, context, descriptor, data_elem);
+	}
+
+	return info;
+}
+
+[[nodiscard]] std::vector<pixel::EnhancedPaletteItemInfo>
+parse_enhanced_palette_items_or_throw(
+    const DicomFile& file, const DataSet& dataset, std::string_view context) {
+	const auto* sequence = lookup_sequence_or_throw(
+	    file, dataset, "EnhancedPaletteColorLookupTableSequence"_tag,
+	    context, "EnhancedPaletteColorLookupTableSequence");
+	if (!sequence) {
+		return {};
+	}
+
+	std::vector<pixel::EnhancedPaletteItemInfo> items{};
+	items.reserve(static_cast<std::size_t>(sequence->size()));
+	for (int item_index = 0; item_index < sequence->size(); ++item_index) {
+		const auto* item = sequence->get_dataset(static_cast<std::size_t>(item_index));
+		if (!item) {
+			diag::error_and_throw(
+			    "{} file={} reason=EnhancedPaletteColorLookupTableSequence item #{} is missing",
+			    context, file.path(), item_index);
+		}
+
+		const auto parsed_channels = parse_palette_channels_from_dataset_or_throw(
+		    file, *item, context);
+		if (!parsed_channels) {
+			diag::error_and_throw(
+			    "{} file={} reason=EnhancedPaletteColorLookupTableSequence item #{} missing palette LUT data",
+			    context, file.path(), item_index);
+		}
+
+		pixel::EnhancedPaletteItemInfo info{};
+		const auto& data_path_id_elem = (*item)["DataPathID"_tag];
+		if (!data_path_id_elem) {
+			diag::error_and_throw(
+			    "{} file={} reason=EnhancedPaletteColorLookupTableSequence item #{} missing DataPathID",
+			    context, file.path(), item_index);
+		}
+		const auto data_path_id_text = data_path_id_elem.to_string_view();
+		if (!data_path_id_text || data_path_id_text->empty()) {
+			diag::error_and_throw(
+			    "{} file={} reason=EnhancedPaletteColorLookupTableSequence item #{} has invalid DataPathID",
+			    context, file.path(), item_index);
+		}
+		info.data_path_id.assign(data_path_id_text->data(), data_path_id_text->size());
+
+		if (const auto& rgb_tf_elem = (*item)["RGBLUTTransferFunction"_tag]; rgb_tf_elem) {
+			const auto rgb_tf_text = rgb_tf_elem.to_string_view();
+			if (!rgb_tf_text || rgb_tf_text->empty()) {
+				diag::error_and_throw(
+				    "{} file={} reason=EnhancedPaletteColorLookupTableSequence item #{} has invalid RGBLUTTransferFunction",
+				    context, file.path(), item_index);
+			}
+			info.rgb_lut_transfer_function.assign(rgb_tf_text->data(), rgb_tf_text->size());
+		}
+		if (const auto& alpha_tf_elem = (*item)["AlphaLUTTransferFunction"_tag]; alpha_tf_elem) {
+			const auto alpha_tf_text = alpha_tf_elem.to_string_view();
+			if (!alpha_tf_text || alpha_tf_text->empty()) {
+				diag::error_and_throw(
+				    "{} file={} reason=EnhancedPaletteColorLookupTableSequence item #{} has invalid AlphaLUTTransferFunction",
+				    context, file.path(), item_index);
+			}
+			info.alpha_lut_transfer_function.assign(
+			    alpha_tf_text->data(), alpha_tf_text->size());
+		}
+
+		info.palette = parsed_channels->palette;
+		items.push_back(std::move(info));
+	}
+	return items;
+}
+
+[[nodiscard]] std::optional<pixel::VoiLut> parse_voi_lut_from_dataset_or_throw(
+    const DicomFile& file, const DataSet& dataset, std::string_view context) {
+	if (!dataset["VOILUTSequence"_tag]) {
+		return std::nullopt;
+	}
+
+	const auto* item = lookup_first_nested_sequence_item_or_throw(
+	    file, dataset, "VOILUTSequence"_tag, context, "VOILUTSequence");
+	if (!item) {
+		return std::nullopt;
+	}
+
+	const auto& descriptor_elem = (*item)["LUTDescriptor"_tag];
+	if (!descriptor_elem) {
+		diag::error_and_throw(
+		    "{} file={} reason=VOILUTSequence item #0 missing LUTDescriptor",
+		    context, file.path());
+	}
+
+	LutDescriptorValues descriptor{};
+	if (!try_parse_lut_descriptor(descriptor_elem, file_uses_little_endian(file), descriptor)) {
+		diag::error_and_throw(
+		    "{} file={} reason=invalid LUTDescriptor",
+		    context, file.path());
+	}
+
+	const auto& lut_data_elem = (*item)["LUTData"_tag];
+	if (!lut_data_elem) {
+		diag::error_and_throw(
+		    "{} file={} reason=VOILUTSequence item #0 missing LUTData",
+		    context, file.path());
+	}
+
+	pixel::VoiLut lut{};
+	lut.first_mapped = descriptor.first_mapped;
+	lut.bits_per_entry = static_cast<std::uint16_t>(descriptor.bits_per_entry);
+	lut.values = load_discrete_lut_data_or_throw(file, context, descriptor, lut_data_elem);
+	return lut;
+}
+
+[[nodiscard]] std::optional<pixel::WindowTransform> parse_window_transform_from_dataset_or_throw(
+    const DicomFile& file, const DataSet& dataset, std::string_view context) {
+	const auto& center_elem = dataset["WindowCenter"_tag];
+	const auto& width_elem = dataset["WindowWidth"_tag];
+	if (!center_elem && !width_elem) {
+		return std::nullopt;
+	}
+	if (!center_elem || !width_elem) {
+		diag::error_and_throw(
+		    "{} file={} reason=WindowCenter/WindowWidth metadata is incomplete",
+		    context, file.path());
+	}
+
+	// DICOM allows multiple alternative windows; expose the first pair for now.
+	const auto parsed_centers = center_elem.to_double_vector();
+	if (!parsed_centers || parsed_centers->empty()) {
+		diag::error_and_throw(
+		    "{} file={} reason=invalid WindowCenter",
+		    context, file.path());
+	}
+	const auto parsed_widths = width_elem.to_double_vector();
+	if (!parsed_widths || parsed_widths->empty()) {
+		diag::error_and_throw(
+		    "{} file={} reason=invalid WindowWidth",
+		    context, file.path());
+	}
+
+	const float center = static_cast<float>((*parsed_centers)[0]);
+	const float width = static_cast<float>((*parsed_widths)[0]);
+	if (!std::isfinite(center) || !std::isfinite(width) || width <= 0.0f) {
+		diag::error_and_throw(
+		    "{} file={} reason=WindowCenter/WindowWidth must be finite and width > 0",
+		    context, file.path());
+	}
+
+	pixel::VoiLutFunction function = pixel::VoiLutFunction::linear;
+	const auto& function_elem = dataset["VOILUTFunction"_tag];
+	if (function_elem) {
+		const auto function_text = function_elem.to_string_view();
+		if (!function_text || function_text->empty()) {
+			diag::error_and_throw(
+			    "{} file={} reason=invalid VOILUTFunction",
+			    context, file.path());
+		}
+		const auto parsed_function = parse_voi_lut_function_from_text(*function_text);
+		if (!parsed_function) {
+			diag::error_and_throw(
+			    "{} file={} reason=unsupported VOILUTFunction",
+			    context, file.path());
+		}
+		function = *parsed_function;
+	}
+
+	return pixel::WindowTransform{
+	    .center = center,
+	    .width = width,
+	    .function = function,
+	};
+}
+
+[[nodiscard]] std::optional<pixel::RescaleTransform> parse_rescale_transform_from_dataset_or_throw(
+    const DicomFile& file, const DataSet& dataset, std::string_view context) {
+	const auto& slope_elem = dataset["RescaleSlope"_tag];
+	const auto& intercept_elem = dataset["RescaleIntercept"_tag];
+	if (!slope_elem && !intercept_elem) {
+		return std::nullopt;
+	}
+
+	// Parse slope/intercept independently so missing tags still fall back to
+	// the DICOM identity defaults.
+	float slope = 1.0f;
+	if (slope_elem) {
+		const auto parsed_slope = slope_elem.to_double();
+		if (!parsed_slope) {
+			diag::error_and_throw(
+			    "{} file={} reason=invalid RescaleSlope",
+			    context, file.path());
+		}
+		slope = static_cast<float>(*parsed_slope);
+	}
+
+	float intercept = 0.0f;
+	if (intercept_elem) {
+		const auto parsed_intercept = intercept_elem.to_double();
+		if (!parsed_intercept) {
+			diag::error_and_throw(
+			    "{} file={} reason=invalid RescaleIntercept",
+			    context, file.path());
+		}
+		intercept = static_cast<float>(*parsed_intercept);
+	}
+
+	return pixel::RescaleTransform{
+	    .slope = slope,
+	    .intercept = intercept,
+	};
 }
 
 }  // namespace
@@ -763,67 +1562,40 @@ void DicomFile::read_attached_stream(const ReadOptions& options) {
 	}
 }
 
-pixel::PixelDataInfo DicomFile::pixeldata_info() const {
+bool DicomFile::has_pixel_data() const {
+	// Pixel payload may live in one of the three standard pixel value elements.
 	root_dataset_.ensure_loaded("PixelData"_tag);
+	return root_dataset_["PixelData"_tag].is_present() ||
+	    root_dataset_["FloatPixelData"_tag].is_present() ||
+	    root_dataset_["DoubleFloatPixelData"_tag].is_present();
+}
 
-	pixel::PixelDataInfo info{};
-	info.ts = transfer_syntax_uid();
-	info.rows = static_cast<int>(root_dataset_["Rows"_tag].to_long().value_or(0));
-	info.cols = static_cast<int>(root_dataset_["Columns"_tag].to_long().value_or(0));
-	info.samples_per_pixel =
-	    static_cast<int>(root_dataset_["SamplesPerPixel"_tag].to_long().value_or(1));
-	const auto bits_allocated =
-	    static_cast<int>(root_dataset_["BitsAllocated"_tag].to_long().value_or(0));
-	const auto bits_stored =
-	    static_cast<int>(root_dataset_["BitsStored"_tag].to_long().value_or(0));
-	const auto pixel_representation =
-	    root_dataset_["PixelRepresentation"_tag].to_long().value_or(0);
-	info.frames = static_cast<int>(root_dataset_["NumberOfFrames"_tag].to_long().value_or(1));
-	info.planar_configuration =
-	    (root_dataset_["PlanarConfiguration"_tag].to_long().value_or(0) == 1)
-	        ? pixel::Planar::planar
-	        : pixel::Planar::interleaved;
-	if (const auto photometric_text =
-	        root_dataset_["PhotometricInterpretation"_tag].to_string_view();
-	    photometric_text.has_value()) {
-		info.photometric = parse_photometric_from_text(*photometric_text);
+std::optional<pixel::PixelLayout> DicomFile::native_pixel_layout() const {
+	// Reuse the internal source-layout helper so native PixelData and decode share
+	// the same normalized packed layout interpretation.
+	if (!has_pixel_data()) {
+		return std::nullopt;
 	}
-	if (const auto& double_float_pixel = root_dataset_["DoubleFloatPixelData"_tag];
-	    double_float_pixel) {
-		info.sv_dtype = pixel::DataType::f64;
-		info.bits_stored = 64;
-	} else if (const auto& float_pixel = root_dataset_["FloatPixelData"_tag]; float_pixel) {
-		info.sv_dtype = pixel::DataType::f32;
-		info.bits_stored = 32;
-	} else {
-		switch (bits_allocated) {
-		case 8:
-			info.sv_dtype =
-			    (pixel_representation == 0) ? pixel::DataType::u8 : pixel::DataType::s8;
-			break;
-		case 16:
-			info.sv_dtype =
-			    (pixel_representation == 0) ? pixel::DataType::u16 : pixel::DataType::s16;
-			break;
-		case 32:
-			info.sv_dtype =
-			    (pixel_representation == 0) ? pixel::DataType::u32 : pixel::DataType::s32;
-			break;
-		default:
-			info.sv_dtype = pixel::DataType::unknown;
-			break;
-		}
-		const auto storage_bits =
-		    static_cast<int>(bytes_per_sample_of(info.sv_dtype) * std::size_t{8});
-		info.bits_stored = bits_stored > 0
-		                       ? bits_stored
-		                       : (bits_allocated > 0 ? bits_allocated : storage_bits);
+
+	const auto source_layout = pixel::support_detail::compute_decode_source_layout(*this);
+	if (source_layout.empty()) {
+		return std::nullopt;
 	}
-	info.has_pixel_data = (info.sv_dtype != pixel::DataType::unknown);
-	return info;
+	return source_layout;
 }
 
 std::optional<pixel::ModalityLut> DicomFile::modality_lut() const {
+	return modality_lut(std::size_t{0});
+}
+
+std::optional<pixel::ModalityLut> DicomFile::modality_lut(
+    std::size_t frame_index) const {
+	validate_transform_metadata_frame_index_or_throw(
+	    *this, frame_index, "DicomFile::modality_lut");
+
+	// Enhanced multi-frame instances describe frame-specific modality-equivalent
+	// transforms through Pixel Value Transformation Sequence. Root-level
+	// ModalityLUTSequence remains a shared legacy fallback for every frame.
 	const auto& modality_lut_seq_elem = root_dataset_["ModalityLUTSequence"_tag];
 	if (!modality_lut_seq_elem) {
 		return std::nullopt;
@@ -851,7 +1623,7 @@ std::optional<pixel::ModalityLut> DicomFile::modality_lut() const {
 	}
 
 	LutDescriptorValues descriptor{};
-	if (!try_parse_lut_descriptor(descriptor_elem, descriptor)) {
+	if (!try_parse_lut_descriptor(descriptor_elem, file_uses_little_endian(*this), descriptor)) {
 		diag::error_and_throw(
 		    "DicomFile::modality_lut file={} reason=invalid LUTDescriptor",
 		    path());
@@ -873,44 +1645,190 @@ std::optional<pixel::ModalityLut> DicomFile::modality_lut() const {
 
 	pixel::ModalityLut lut{};
 	lut.first_mapped = descriptor.first_mapped;
-	lut.values.resize(descriptor.entry_count);
-
-	const std::uint32_t value_mask =
-	    (descriptor.bits_per_entry == 16)
-	        ? 0xFFFFu
-	        : ((1u << descriptor.bits_per_entry) - 1u);
-	const std::size_t entry_count = descriptor.entry_count;
-
-	if (descriptor.bits_per_entry <= 8 && lut_data.size() >= entry_count * sizeof(std::uint16_t)) {
-		// Some datasets store 8-bit LUT values in 16-bit containers.
-			for (std::size_t i = 0; i < entry_count; ++i) {
-				const auto v = endian::load_le<std::uint16_t>(
-				    lut_data.data() + i * sizeof(std::uint16_t));
-				lut.values[i] = static_cast<float>(v & value_mask);
-			}
-		return lut;
-	}
-
-	if (descriptor.bits_per_entry <= 8 && lut_data.size() >= entry_count) {
-		for (std::size_t i = 0; i < entry_count; ++i) {
-			const auto v = static_cast<std::uint32_t>(lut_data[i]);
-			lut.values[i] = static_cast<float>(v & value_mask);
-		}
-		return lut;
-	}
-
-	const auto required_u16_bytes = entry_count * sizeof(std::uint16_t);
-	if (lut_data.size() < required_u16_bytes) {
-		diag::error_and_throw(
-		    "DicomFile::modality_lut file={} reason=LUTData is shorter than LUTDescriptor entry count",
-		    path());
-	}
-	for (std::size_t i = 0; i < entry_count; ++i) {
-		const auto v = endian::load_le<std::uint16_t>(
-		    lut_data.data() + i * sizeof(std::uint16_t));
-		lut.values[i] = static_cast<float>(v & value_mask);
+	const auto discrete_values = load_discrete_lut_data_or_throw(
+	    *this, "DicomFile::modality_lut", descriptor, lut_data_elem);
+	lut.values.resize(discrete_values.size());
+	for (std::size_t index = 0; index < discrete_values.size(); ++index) {
+		lut.values[index] = static_cast<float>(discrete_values[index]);
 	}
 	return lut;
+}
+
+std::optional<pixel::PixelPresentation> DicomFile::pixel_presentation() const {
+	return parse_pixel_presentation_from_dataset_or_throw(
+	    *this, root_dataset_, "DicomFile::pixel_presentation");
+}
+
+std::optional<pixel::PaletteLut> DicomFile::palette_lut() const {
+	// This accessor intentionally models only the classic root-level PALETTE COLOR LUT.
+	// Supplemental Palette and Enhanced Palette metadata describe different display
+	// pipelines and are intentionally exposed through separate metadata accessors.
+	if (dataset_has_enhanced_palette_metadata(root_dataset_)) {
+		return std::nullopt;
+	}
+
+	const auto presentation = parse_pixel_presentation_from_dataset_or_throw(
+	    *this, root_dataset_, "DicomFile::palette_lut");
+	const auto photometric = parse_photometric_from_dataset_or_throw(
+	    *this, root_dataset_, "DicomFile::palette_lut");
+	if (presentation && *presentation == pixel::PixelPresentation::color &&
+	    photometric && *photometric != pixel::Photometric::palette_color) {
+		return std::nullopt;
+	}
+
+	const auto parsed = parse_palette_channels_from_dataset_or_throw(
+	    *this, root_dataset_, "DicomFile::palette_lut");
+	if (!parsed) {
+		return std::nullopt;
+	}
+	return parsed->palette;
+}
+
+std::optional<pixel::SupplementalPaletteInfo> DicomFile::supplemental_palette() const {
+	if (dataset_has_enhanced_palette_metadata(root_dataset_)) {
+		return std::nullopt;
+	}
+
+	const auto presentation = parse_pixel_presentation_from_dataset_or_throw(
+	    *this, root_dataset_, "DicomFile::supplemental_palette");
+	if (!presentation || *presentation != pixel::PixelPresentation::color) {
+		return std::nullopt;
+	}
+
+	const auto parsed = parse_palette_channels_from_dataset_or_throw(
+	    *this, root_dataset_, "DicomFile::supplemental_palette");
+	if (!parsed) {
+		return std::nullopt;
+	}
+
+	const auto photometric = parse_photometric_from_dataset_or_throw(
+	    *this, root_dataset_, "DicomFile::supplemental_palette");
+	if (photometric && *photometric == pixel::Photometric::palette_color) {
+		return std::nullopt;
+	}
+
+	pixel::SupplementalPaletteInfo info{};
+	info.pixel_presentation = *presentation;
+	info.palette = parsed->palette;
+	if (const auto stored_value_range = parse_stored_value_color_range_from_dataset_or_throw(
+	        *this, root_dataset_, "DicomFile::supplemental_palette")) {
+		info.has_stored_value_range = true;
+		info.minimum_stored_value_mapped =
+		    stored_value_range->minimum_stored_value_mapped;
+		info.maximum_stored_value_mapped =
+		    stored_value_range->maximum_stored_value_mapped;
+	}
+	return info;
+}
+
+std::optional<pixel::EnhancedPaletteInfo> DicomFile::enhanced_palette() const {
+	if (!dataset_has_enhanced_palette_metadata(root_dataset_)) {
+		return std::nullopt;
+	}
+
+	pixel::EnhancedPaletteInfo info{};
+	if (const auto presentation = parse_pixel_presentation_from_dataset_or_throw(
+	        *this, root_dataset_, "DicomFile::enhanced_palette")) {
+		info.pixel_presentation = *presentation;
+	}
+	info.data_frame_assignments = parse_enhanced_data_frame_assignments_or_throw(
+	    *this, root_dataset_, "DicomFile::enhanced_palette");
+	if (const auto blending_lut_1 = parse_enhanced_blending_lut_or_throw(
+	        *this, root_dataset_, "BlendingLUT1Sequence"_tag,
+	        "BlendingLUT1TransferFunction"_tag,
+	        "DicomFile::enhanced_palette", "BlendingLUT1Sequence")) {
+		info.has_blending_lut_1 = true;
+		info.blending_lut_1 = *blending_lut_1;
+	}
+	if (const auto blending_lut_2 = parse_enhanced_blending_lut_or_throw(
+	        *this, root_dataset_, "BlendingLUT2Sequence"_tag,
+	        "BlendingLUT2TransferFunction"_tag,
+	        "DicomFile::enhanced_palette", "BlendingLUT2Sequence")) {
+		info.has_blending_lut_2 = true;
+		info.blending_lut_2 = *blending_lut_2;
+	}
+	info.palette_items = parse_enhanced_palette_items_or_throw(
+	    *this, root_dataset_, "DicomFile::enhanced_palette");
+	info.has_icc_profile = root_dataset_["ICCProfile"_tag].is_present();
+	if (const auto& color_space_elem = root_dataset_["ColorSpace"_tag]; color_space_elem) {
+		const auto color_space_text = color_space_elem.to_string_view();
+		if (!color_space_text || color_space_text->empty()) {
+			diag::error_and_throw(
+			    "DicomFile::enhanced_palette file={} reason=invalid ColorSpace",
+			    path());
+		}
+		info.color_space.assign(color_space_text->data(), color_space_text->size());
+	}
+	return info;
+}
+
+std::optional<pixel::VoiLut> DicomFile::voi_lut() const {
+	return voi_lut(std::size_t{0});
+}
+
+std::optional<pixel::VoiLut> DicomFile::voi_lut(std::size_t frame_index) const {
+	validate_transform_metadata_frame_index_or_throw(*this, frame_index, "DicomFile::voi_lut");
+
+	// Frame VOI LUT metadata overrides shared entries, which in turn override
+	// root-level legacy VOILUTSequence fallback.
+	if (const auto* frame_voi_item = resolve_frame_functional_group_macro_item_or_throw(
+	        *this, "FrameVOILUTSequence"_tag, frame_index,
+	        "DicomFile::voi_lut", "FrameVOILUTSequence")) {
+		if (const auto lut =
+		        parse_voi_lut_from_dataset_or_throw(*this, *frame_voi_item, "DicomFile::voi_lut")) {
+			return lut;
+		}
+	}
+
+	return parse_voi_lut_from_dataset_or_throw(*this, root_dataset_, "DicomFile::voi_lut");
+}
+
+std::optional<pixel::WindowTransform> DicomFile::window_transform() const {
+	return window_transform(std::size_t{0});
+}
+
+std::optional<pixel::WindowTransform> DicomFile::window_transform(
+    std::size_t frame_index) const {
+	validate_transform_metadata_frame_index_or_throw(
+	    *this, frame_index, "DicomFile::window_transform");
+
+	// Frame VOI LUT window metadata overrides shared entries, which in turn
+	// override root-level WindowCenter/WindowWidth fallback.
+	if (const auto* frame_voi_item = resolve_frame_functional_group_macro_item_or_throw(
+	        *this, "FrameVOILUTSequence"_tag, frame_index,
+	        "DicomFile::window_transform", "FrameVOILUTSequence")) {
+		if (const auto window = parse_window_transform_from_dataset_or_throw(
+		        *this, *frame_voi_item, "DicomFile::window_transform")) {
+			return window;
+		}
+	}
+
+	return parse_window_transform_from_dataset_or_throw(
+	    *this, root_dataset_, "DicomFile::window_transform");
+}
+
+std::optional<pixel::RescaleTransform> DicomFile::rescale_transform() const {
+	return rescale_transform(std::size_t{0});
+}
+
+std::optional<pixel::RescaleTransform> DicomFile::rescale_transform(
+    std::size_t frame_index) const {
+	validate_transform_metadata_frame_index_or_throw(
+	    *this, frame_index, "DicomFile::rescale_transform");
+
+	// Per-frame Pixel Value Transformation metadata overrides shared entries,
+	// which in turn override root-level legacy RescaleSlope/RescaleIntercept.
+	if (const auto* pixel_value_tx_item = resolve_frame_functional_group_macro_item_or_throw(
+	        *this, "PixelValueTransformationSequence"_tag, frame_index,
+	        "DicomFile::rescale_transform", "PixelValueTransformationSequence")) {
+		if (const auto rescale = parse_rescale_transform_from_dataset_or_throw(
+		        *this, *pixel_value_tx_item, "DicomFile::rescale_transform")) {
+			return rescale;
+		}
+	}
+
+	return parse_rescale_transform_from_dataset_or_throw(
+	    *this, root_dataset_, "DicomFile::rescale_transform");
 }
 
 void DicomFile::set_native_pixel_data(std::vector<std::uint8_t>&& native_pixel_data, VR vr) {

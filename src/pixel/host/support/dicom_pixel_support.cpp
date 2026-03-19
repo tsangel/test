@@ -16,6 +16,53 @@ using namespace dicom::literals;
 
 namespace {
 
+[[nodiscard]] char ascii_upper(char value) noexcept {
+	return (value >= 'a' && value <= 'z')
+	           ? static_cast<char>(value - ('a' - 'A'))
+	           : value;
+}
+
+[[nodiscard]] bool ascii_iequals(std::string_view lhs, std::string_view rhs) noexcept {
+	if (lhs.size() != rhs.size()) {
+		return false;
+	}
+	for (std::size_t index = 0; index < lhs.size(); ++index) {
+		if (ascii_upper(lhs[index]) != ascii_upper(rhs[index])) {
+			return false;
+		}
+	}
+	return true;
+}
+
+[[nodiscard]] std::optional<pixel::Photometric> parse_photometric_from_text(
+    std::string_view text) noexcept {
+	if (ascii_iequals(text, "MONOCHROME1")) {
+		return pixel::Photometric::monochrome1;
+	}
+	if (ascii_iequals(text, "MONOCHROME2")) {
+		return pixel::Photometric::monochrome2;
+	}
+	if (ascii_iequals(text, "PALETTE COLOR")) {
+		return pixel::Photometric::palette_color;
+	}
+	if (ascii_iequals(text, "RGB")) {
+		return pixel::Photometric::rgb;
+	}
+	if (ascii_iequals(text, "YBR_FULL")) {
+		return pixel::Photometric::ybr_full;
+	}
+	if (ascii_iequals(text, "YBR_FULL_422")) {
+		return pixel::Photometric::ybr_full_422;
+	}
+	if (ascii_iequals(text, "YBR_RCT")) {
+		return pixel::Photometric::ybr_rct;
+	}
+	if (ascii_iequals(text, "YBR_ICT")) {
+		return pixel::Photometric::ybr_ict;
+	}
+	return std::nullopt;
+}
+
 struct EncapsulatedFrameSource {
 	const PixelFrame* frame{nullptr};
 	const InStream* stream{nullptr};
@@ -182,8 +229,8 @@ EncapsulatedFrameSource load_encapsulated_frame_source_without_cache_or_throw(
 }
 
 NativeDecodeSourceView build_native_decode_source_view_or_throw(
-    const DataSet& ds, const pixel::PixelDataInfo& info) {
-	const auto source = select_native_source_element(ds, info.sv_dtype);
+    const DataSet& ds, const pixel::PixelLayout& source_layout) {
+	const auto source = select_native_source_element(ds, source_layout.data_type);
 	if (!source.element || !(*source.element)) {
 		throw_decode_frame_source_error("missing " + std::string(source.name));
 	}
@@ -192,22 +239,21 @@ NativeDecodeSourceView build_native_decode_source_view_or_throw(
 		    std::string(source.name) + " is encapsulated, not raw");
 	}
 
-	if (info.rows <= 0 || info.cols <= 0 || info.samples_per_pixel <= 0 ||
-	    info.frames <= 0) {
+	if (source_layout.empty()) {
 		throw_decode_frame_source_error("invalid raw pixel metadata");
 	}
 
-	const auto bytes_per_sample = bytes_per_sample_of(info.sv_dtype);
+	const auto bytes_per_sample = source_layout.bytes_per_sample();
 	if (bytes_per_sample == 0) {
 		throw_decode_frame_source_error("unsupported source dtype for raw decode");
 	}
 
-	const auto rows = static_cast<std::size_t>(info.rows);
-	const auto cols = static_cast<std::size_t>(info.cols);
-	const auto samples_per_pixel = static_cast<std::size_t>(info.samples_per_pixel);
-	const auto frames = static_cast<std::size_t>(info.frames);
+	const auto rows = static_cast<std::size_t>(source_layout.rows);
+	const auto cols = static_cast<std::size_t>(source_layout.cols);
+	const auto samples_per_pixel = static_cast<std::size_t>(source_layout.samples_per_pixel);
+	const auto frames = static_cast<std::size_t>(source_layout.frames);
 	const bool planar_source =
-	    info.planar_configuration == Planar::planar && samples_per_pixel > std::size_t{1};
+	    source_layout.planar == Planar::planar && samples_per_pixel > std::size_t{1};
 	const std::size_t row_components =
 	    planar_source ? cols : cols * samples_per_pixel;
 	std::size_t row_payload_bytes = 0;
@@ -292,13 +338,103 @@ std::span<const std::uint8_t> materialize_encapsulated_frame_source_or_throw(
 
 } // namespace
 
+pixel::PixelLayout compute_decode_source_layout(const DicomFile& df) {
+	// Collect the pixel metadata snapshot from root-level DICOM elements once so
+	// decode, transcode, and direct raw access share one normalized source layout.
+	const auto& dataset = df.dataset();
+
+	PixelLayout source_layout{};
+	const auto rows = static_cast<int>(dataset["Rows"_tag].to_long().value_or(0));
+	const auto cols = static_cast<int>(dataset["Columns"_tag].to_long().value_or(0));
+	const auto samples_per_pixel =
+	    static_cast<int>(dataset["SamplesPerPixel"_tag].to_long().value_or(1));
+	const auto bits_allocated =
+	    static_cast<int>(dataset["BitsAllocated"_tag].to_long().value_or(0));
+	const auto bits_stored =
+	    static_cast<int>(dataset["BitsStored"_tag].to_long().value_or(0));
+	const auto pixel_representation =
+	    dataset["PixelRepresentation"_tag].to_long().value_or(0);
+	const auto frames =
+	    static_cast<int>(dataset["NumberOfFrames"_tag].to_long().value_or(1));
+	const auto stored_planar =
+	    (dataset["PlanarConfiguration"_tag].to_long().value_or(0) == 1)
+	        ? pixel::Planar::planar
+	        : pixel::Planar::interleaved;
+	const auto photometric = [&]() -> pixel::Photometric {
+		if (const auto photometric_text =
+		        dataset["PhotometricInterpretation"_tag].to_string_view();
+		    photometric_text.has_value()) {
+			if (const auto parsed = parse_photometric_from_text(*photometric_text);
+			    parsed.has_value()) {
+				return *parsed;
+			}
+		}
+		return samples_per_pixel > 1 ? pixel::Photometric::rgb
+		                             : pixel::Photometric::monochrome2;
+	}();
+
+	if (rows <= 0 || cols <= 0 || samples_per_pixel <= 0 || frames <= 0) {
+		return source_layout;
+	}
+
+	source_layout.photometric = photometric;
+	source_layout.planar = stored_planar;
+	source_layout.reserved = 0;
+	source_layout.rows = static_cast<std::uint32_t>(rows);
+	source_layout.cols = static_cast<std::uint32_t>(cols);
+	source_layout.frames = static_cast<std::uint32_t>(frames);
+	source_layout.samples_per_pixel = static_cast<std::uint16_t>(samples_per_pixel);
+
+	// Resolve the stored sample dtype from the pixel value element family first.
+	if (const auto& double_float_pixel = dataset["DoubleFloatPixelData"_tag];
+	    double_float_pixel) {
+		source_layout.data_type = pixel::DataType::f64;
+		source_layout.bits_stored = 64;
+	} else if (const auto& float_pixel = dataset["FloatPixelData"_tag]; float_pixel) {
+		source_layout.data_type = pixel::DataType::f32;
+		source_layout.bits_stored = 32;
+	} else {
+		switch (bits_allocated) {
+		case 8:
+			source_layout.data_type =
+			    (pixel_representation == 0) ? pixel::DataType::u8 : pixel::DataType::s8;
+			break;
+		case 16:
+			source_layout.data_type =
+			    (pixel_representation == 0) ? pixel::DataType::u16 : pixel::DataType::s16;
+			break;
+		case 32:
+			source_layout.data_type =
+			    (pixel_representation == 0) ? pixel::DataType::u32 : pixel::DataType::s32;
+			break;
+		default:
+			source_layout.data_type = pixel::DataType::unknown;
+			break;
+		}
+		const auto storage_bits =
+		    static_cast<int>(bytes_per_sample_of(source_layout.data_type) * std::size_t{8});
+		source_layout.bits_stored = static_cast<std::uint16_t>(bits_stored > 0
+		                       ? bits_stored
+		                       : (bits_allocated > 0 ? bits_allocated : storage_bits));
+	}
+	if (source_layout.data_type == pixel::DataType::unknown) {
+		return PixelLayout{};
+	}
+	try {
+		return source_layout.packed(1);
+	} catch (...) {
+		return PixelLayout{};
+	}
+}
+
 PreparedDecodeFrameSource prepare_decode_frame_source_or_throw(
-    const DicomFile& df, const PixelDataInfo& info, std::size_t frame_index) {
+    const DicomFile& df, const PixelLayout& source_layout, std::size_t frame_index) {
 	const auto& ds = df.dataset();
 
 	PreparedDecodeFrameSource prepared_source{};
-	if (info.ts.is_uncompressed() && !info.ts.is_encapsulated()) {
-		const auto source = build_native_decode_source_view_or_throw(ds, info);
+	if (const auto transfer_syntax = df.transfer_syntax_uid();
+	    transfer_syntax.is_uncompressed() && !transfer_syntax.is_encapsulated()) {
+		const auto source = build_native_decode_source_view_or_throw(ds, source_layout);
 		prepared_source.bytes = native_decode_frame_bytes_or_throw(source, frame_index);
 		return prepared_source;
 	}
@@ -320,12 +456,13 @@ PreparedDecodeFrameSource prepare_decode_frame_source_or_throw(
 }
 
 PreparedDecodeFrameSource prepare_decode_frame_source_without_cache_or_throw(
-    const DicomFile& df, const PixelDataInfo& info, std::size_t frame_index) {
+    const DicomFile& df, const PixelLayout& source_layout, std::size_t frame_index) {
 	const auto& ds = df.dataset();
 
 	PreparedDecodeFrameSource prepared_source{};
-	if (info.ts.is_uncompressed() && !info.ts.is_encapsulated()) {
-		const auto source = build_native_decode_source_view_or_throw(ds, info);
+	if (const auto transfer_syntax = df.transfer_syntax_uid();
+	    transfer_syntax.is_uncompressed() && !transfer_syntax.is_encapsulated()) {
+		const auto source = build_native_decode_source_view_or_throw(ds, source_layout);
 		prepared_source.bytes = native_decode_frame_bytes_or_throw(source, frame_index);
 		return prepared_source;
 	}
@@ -348,8 +485,8 @@ PreparedDecodeFrameSource prepare_decode_frame_source_without_cache_or_throw(
 }
 
 NativeDecodeSourceView compute_native_decode_source_view_or_throw(
-    const DicomFile& df, const PixelDataInfo& info) {
-	return build_native_decode_source_view_or_throw(df.dataset(), info);
+    const DicomFile& df, const PixelLayout& source_layout) {
+	return build_native_decode_source_view_or_throw(df.dataset(), source_layout);
 }
 
 std::span<const std::uint8_t> native_decode_frame_bytes_or_throw(
@@ -374,39 +511,41 @@ std::span<const std::uint8_t> native_decode_frame_bytes_or_throw(
 namespace {
 
 [[nodiscard]] ComputedEncodeSourceLayout compute_encode_source_layout_impl(
-    const pixel::PixelSource& source, std::string_view file_path,
+    const pixel::PixelLayout& layout, std::span<const std::uint8_t> source_bytes,
+    std::string_view file_path,
     bool validate_source_bytes) {
-	const auto native_layout = native_source_layout_of(source.data_type);
+	const auto native_layout = native_source_layout_of(layout.data_type);
 	if (!native_layout) {
 		diag::error_and_throw(
-		    "DicomFile::set_pixel_data file={} reason=source.data_type must be one of u8/s8/u16/s16/u32/s32 for current implementation",
+		    "DicomFile::set_pixel_data file={} reason=source layout dtype must be one of u8/s8/u16/s16/u32/s32 for current implementation",
 		    file_path);
 	}
-	const auto bytes_per_sample = bytes_per_sample_of(source.data_type);
+	const auto bytes_per_sample = bytes_per_sample_of(layout.data_type);
 	if (bytes_per_sample == 0) {
 		diag::error_and_throw(
-		    "DicomFile::set_pixel_data file={} reason=invalid source.data_type",
+		    "DicomFile::set_pixel_data file={} reason=invalid source layout dtype",
 		    file_path);
 	}
 
-	if (source.rows <= 0 || source.cols <= 0 || source.frames <= 0 ||
-	    source.samples_per_pixel <= 0) {
+	// Encode always expects a normalized non-empty layout with concrete geometry.
+	if (layout.empty()) {
 		diag::error_and_throw(
-		    "DicomFile::set_pixel_data file={} reason=rows/cols/frames/samples_per_pixel must be positive",
+		    "DicomFile::set_pixel_data file={} reason=source layout must be non-empty",
 		    file_path);
 	}
-	if (source.rows > 65535 || source.cols > 65535) {
+	if (layout.rows > 65535u || layout.cols > 65535u) {
 		diag::error_and_throw(
 		    "DicomFile::set_pixel_data file={} reason=rows/cols must be <= 65535",
 		    file_path);
 	}
 
-	const auto rows = static_cast<std::size_t>(source.rows);
-	const auto cols = static_cast<std::size_t>(source.cols);
-	const auto frames = static_cast<std::size_t>(source.frames);
-	const auto samples_per_pixel = static_cast<std::size_t>(source.samples_per_pixel);
+	const auto rows = static_cast<std::size_t>(layout.rows);
+	const auto cols = static_cast<std::size_t>(layout.cols);
+	const auto frames = static_cast<std::size_t>(layout.frames);
+	const auto samples_per_pixel = static_cast<std::size_t>(layout.samples_per_pixel);
 	const bool planar_source =
-	    source.planar == pixel::Planar::planar && samples_per_pixel > std::size_t{1};
+	    layout.planar == pixel::Planar::planar &&
+	    samples_per_pixel > std::size_t{1};
 	constexpr std::size_t kSizeMax = std::numeric_limits<std::size_t>::max();
 
 	if (!planar_source && samples_per_pixel > kSizeMax / cols) {
@@ -422,8 +561,8 @@ namespace {
 	}
 	const std::size_t row_payload_bytes = row_samples * bytes_per_sample;
 
-	const std::size_t source_row_stride =
-	    source.row_stride == 0 ? row_payload_bytes : source.row_stride;
+	// Preserve any explicit caller stride instead of silently repacking it here.
+	const std::size_t source_row_stride = layout.row_stride;
 	if (source_row_stride < row_payload_bytes) {
 		diag::error_and_throw(
 		    "DicomFile::set_pixel_data file={} reason=row_stride({}) is smaller than row payload({})",
@@ -441,12 +580,11 @@ namespace {
 		if (samples_per_pixel > kSizeMax / source_plane_stride) {
 			diag::error_and_throw(
 			    "DicomFile::set_pixel_data file={} reason=source frame size bytes overflows size_t",
-			    file_path);
+			file_path);
 		}
 		source_frame_size_bytes = source_plane_stride * samples_per_pixel;
 	}
-	const std::size_t source_frame_stride =
-	    source.frame_stride == 0 ? source_frame_size_bytes : source.frame_stride;
+	const std::size_t source_frame_stride = layout.frame_stride;
 	if (source_frame_stride < source_frame_size_bytes) {
 		diag::error_and_throw(
 		    "DicomFile::set_pixel_data file={} reason=frame_stride({}) is smaller than frame size({})",
@@ -493,14 +631,15 @@ namespace {
 		    file_path);
 	}
 	const std::size_t source_required_bytes = source_last_frame_begin + source_last_frame_used;
-	if (validate_source_bytes && source.bytes.size() < source_required_bytes) {
+	if (validate_source_bytes && source_bytes.size() < source_required_bytes) {
 		diag::error_and_throw(
 		    "DicomFile::set_pixel_data file={} reason=source bytes({}) are shorter than required({})",
-		    file_path, source.bytes.size(), source_required_bytes);
+		    file_path, source_bytes.size(), source_required_bytes);
 	}
 
 	const int bits_allocated = native_layout->bits_allocated;
-	const int bits_stored = source.bits_stored > 0 ? source.bits_stored : bits_allocated;
+	const int bits_stored =
+	    layout.bits_stored > 0 ? static_cast<int>(layout.bits_stored) : bits_allocated;
 	const int pixel_representation = native_layout->pixel_representation;
 	if (bits_stored <= 0 || bits_stored > bits_allocated) {
 		diag::error_and_throw(
@@ -532,13 +671,15 @@ namespace {
 } // namespace
 
 ComputedEncodeSourceLayout compute_encode_source_layout_or_throw(
-    const pixel::PixelSource& source, std::string_view file_path) {
-	return compute_encode_source_layout_impl(source, file_path, true);
+    pixel::ConstPixelSpan source, std::string_view file_path) {
+	return compute_encode_source_layout_impl(
+	    source.layout, source.bytes, file_path, true);
 }
 
 ComputedEncodeSourceLayout compute_encode_source_layout_without_source_bytes_or_throw(
-    const pixel::PixelSource& source, std::string_view file_path) {
-	return compute_encode_source_layout_impl(source, file_path, false);
+    const pixel::PixelLayout& source_layout, std::string_view file_path) {
+	return compute_encode_source_layout_impl(
+	    source_layout, {}, file_path, false);
 }
 
 bool source_aliases_native_pixel_data(

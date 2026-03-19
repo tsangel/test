@@ -29,9 +29,9 @@
 #include <dicom.h>
 #include <dicom_endian.h>
 #include <diagnostics.h>
-#include "pixel/host/adapter/host_adapter_v2.hpp"
+#include "pixel/host/adapter/host_adapter.hpp"
 #include "pixel/host/support/dicom_pixel_support.hpp"
-#include "pixel/runtime/runtime_registry_v2.hpp"
+#include "pixel/runtime/runtime_registry.hpp"
 
 namespace nb = nanobind;
 
@@ -94,22 +94,22 @@ bool transfer_syntax_has_runtime_encode_support(Uid uid) noexcept {
 		return false;
 	}
 
-	uint32_t codec_profile_code = PIXEL_CODEC_PROFILE_UNKNOWN_V2;
-	if (!::pixel::runtime_v2::codec_profile_code_from_transfer_syntax(
+	uint32_t codec_profile_code = PIXEL_CODEC_PROFILE_UNKNOWN;
+	if (!::pixel::runtime::codec_profile_code_from_transfer_syntax(
 	        uid, &codec_profile_code)) {
 		return false;
 	}
 
 #if defined(DICOMSDL_PIXEL_RUNTIME_ENABLED)
-	const auto* registry = ::pixel::runtime_v2::current_registry();
+	const auto* registry = ::pixel::runtime::current_registry();
 	if (registry == nullptr) {
 		return false;
 	}
 	const auto* binding = registry->find_encoder_binding(codec_profile_code);
 	return binding != nullptr &&
-	       binding->binding_kind != ::pixel::runtime_v2::EncoderBindingKind::kNone;
+	       binding->binding_kind != ::pixel::runtime::EncoderBindingKind::kNone;
 #else
-	return codec_profile_code == PIXEL_CODEC_PROFILE_NATIVE_UNCOMPRESSED_V2;
+	return codec_profile_code == PIXEL_CODEC_PROFILE_NATIVE_UNCOMPRESSED;
 #endif
 }
 
@@ -142,8 +142,6 @@ struct DecodedArrayOutput {
 struct DecodedArrayLayout {
 	DecodedArraySpec spec{};
 	dicom::pixel::DecodePlan plan{};
-	dicom::pixel::DecodeOptions opt{};
-	dicom::pixel::DecodeStrides dst_strides{};
 	std::array<std::size_t, 4> shape{};
 	std::array<std::int64_t, 4> strides{};
 	std::size_t ndim{0};
@@ -154,19 +152,22 @@ struct DecodedArrayLayout {
 	bool decode_all_frames{false};
 };
 
+struct PixelArrayLayout {
+	DecodedArraySpec spec{};
+	std::array<std::size_t, 4> shape{};
+	std::array<std::int64_t, 4> strides{};
+	std::size_t ndim{0};
+	std::size_t required_bytes{0};
+};
+
 struct DirectRawArrayAccess {
 	DecodedArrayLayout layout{};
 	std::span<const std::uint8_t> source_bytes{};
 	std::size_t byte_offset{0};
 };
 
-DecodedArraySpec decoded_array_spec(
-    const dicom::pixel::PixelDataInfo& info, bool to_modality_value) {
-	if (to_modality_value) {
-		return DecodedArraySpec{nb::dtype<float>(), sizeof(float)};
-	}
-
-	switch (info.sv_dtype) {
+DecodedArraySpec decoded_array_spec(dicom::pixel::DataType data_type) {
+	switch (data_type) {
 	case dicom::pixel::DataType::u8:
 		return DecodedArraySpec{nb::dtype<std::uint8_t>(), sizeof(std::uint8_t)};
 	case dicom::pixel::DataType::s8:
@@ -190,17 +191,18 @@ DecodedArraySpec decoded_array_spec(
 	throw nb::value_error("to_array requires a known pixel sample dtype");
 }
 
-DecodedArraySpec decoded_array_spec(const dicom::pixel::DecodePlan& plan) {
-	return decoded_array_spec(plan.info, plan.options.to_modality_value);
+DecodedArraySpec decoded_array_spec(const dicom::pixel::PixelLayout& layout) {
+	return decoded_array_spec(layout.data_type);
 }
 
-nb::object numpy_dtype_object(const dicom::pixel::DecodePlan& plan) {
-	const auto numpy = nb::module_::import_("numpy");
-	if (plan.options.to_modality_value) {
-		return numpy.attr("dtype")("float32");
-	}
+DecodedArraySpec decoded_array_spec(const dicom::pixel::DecodePlan& plan) {
+	return decoded_array_spec(plan.output_layout);
+}
 
-	switch (plan.info.sv_dtype) {
+nb::object numpy_dtype_object(dicom::pixel::DataType data_type) {
+	const auto numpy = nb::module_::import_("numpy");
+
+	switch (data_type) {
 	case dicom::pixel::DataType::u8:
 		return numpy.attr("dtype")("uint8");
 	case dicom::pixel::DataType::s8:
@@ -224,6 +226,10 @@ nb::object numpy_dtype_object(const dicom::pixel::DecodePlan& plan) {
 	throw nb::value_error("decode plan does not describe a supported NumPy dtype");
 }
 
+nb::object numpy_dtype_object(const dicom::pixel::DecodePlan& plan) {
+	return numpy_dtype_object(plan.output_layout.data_type);
+}
+
 nb::object uid_to_object(Uid uid) {
 	if (!uid.valid()) {
 		return nb::none();
@@ -238,6 +244,131 @@ nb::tuple shape_tuple_from_layout(const DecodedArrayLayout& layout) {
 		    PyLong_FromSize_t(layout.shape[i]));
 	}
 	return shape;
+}
+
+struct NormalizedArrayGeometry {
+	std::array<std::size_t, 4> shape{};
+	std::array<std::int64_t, 4> strides{};
+	std::size_t ndim{0};
+};
+
+NormalizedArrayGeometry build_normalized_array_geometry_or_throw(
+    const dicom::pixel::PixelLayout& pixel_layout, std::size_t bytes_per_sample,
+    bool decode_all_frames) {
+	NormalizedArrayGeometry geometry{};
+	const auto rows = static_cast<std::size_t>(pixel_layout.rows);
+	const auto cols = static_cast<std::size_t>(pixel_layout.cols);
+	const auto frames = static_cast<std::size_t>(pixel_layout.frames);
+	const auto samples_per_pixel =
+	    static_cast<std::size_t>(pixel_layout.samples_per_pixel);
+	const auto row_stride_elems = pixel_layout.row_stride / bytes_per_sample;
+	const auto frame_stride_elems = pixel_layout.frame_stride / bytes_per_sample;
+	const auto planar_multisample =
+	    pixel_layout.planar == dicom::pixel::Planar::planar && samples_per_pixel > 1;
+
+	std::size_t plane_stride_elems = 0;
+	if (planar_multisample) {
+		if ((frame_stride_elems % samples_per_pixel) != 0) {
+			throw nb::value_error(
+			    "pixel layout planar frame stride is not divisible by samples_per_pixel");
+		}
+		plane_stride_elems = frame_stride_elems / samples_per_pixel;
+	}
+
+	if (!decode_all_frames) {
+		if (samples_per_pixel == 1) {
+			geometry.ndim = 2;
+			geometry.shape[0] = rows;
+			geometry.shape[1] = cols;
+			geometry.strides[0] = static_cast<std::int64_t>(row_stride_elems);
+			geometry.strides[1] = 1;
+		} else if (planar_multisample) {
+			// Expose planar decode output as plane-first so Python callers can
+			// use a standard C-contiguous array for decode_into(plan=...).
+			geometry.ndim = 3;
+			geometry.shape[0] = samples_per_pixel;
+			geometry.shape[1] = rows;
+			geometry.shape[2] = cols;
+			geometry.strides[0] = static_cast<std::int64_t>(plane_stride_elems);
+			geometry.strides[1] = static_cast<std::int64_t>(row_stride_elems);
+			geometry.strides[2] = 1;
+		} else {
+			geometry.ndim = 3;
+			geometry.shape[0] = rows;
+			geometry.shape[1] = cols;
+			geometry.shape[2] = samples_per_pixel;
+			geometry.strides[0] = static_cast<std::int64_t>(row_stride_elems);
+			geometry.strides[1] = static_cast<std::int64_t>(samples_per_pixel);
+			geometry.strides[2] = 1;
+		}
+		return geometry;
+	}
+
+	if (samples_per_pixel == 1) {
+		geometry.ndim = 3;
+		geometry.shape[0] = frames;
+		geometry.shape[1] = rows;
+		geometry.shape[2] = cols;
+		geometry.strides[0] = static_cast<std::int64_t>(frame_stride_elems);
+		geometry.strides[1] = static_cast<std::int64_t>(row_stride_elems);
+		geometry.strides[2] = 1;
+	} else if (planar_multisample) {
+		geometry.ndim = 4;
+		geometry.shape[0] = frames;
+		geometry.shape[1] = samples_per_pixel;
+		geometry.shape[2] = rows;
+		geometry.shape[3] = cols;
+		geometry.strides[0] = static_cast<std::int64_t>(frame_stride_elems);
+		geometry.strides[1] = static_cast<std::int64_t>(plane_stride_elems);
+		geometry.strides[2] = static_cast<std::int64_t>(row_stride_elems);
+		geometry.strides[3] = 1;
+	} else {
+		geometry.ndim = 4;
+		geometry.shape[0] = frames;
+		geometry.shape[1] = rows;
+		geometry.shape[2] = cols;
+		geometry.shape[3] = samples_per_pixel;
+		geometry.strides[0] = static_cast<std::int64_t>(frame_stride_elems);
+		geometry.strides[1] = static_cast<std::int64_t>(row_stride_elems);
+		geometry.strides[2] = static_cast<std::int64_t>(samples_per_pixel);
+		geometry.strides[3] = 1;
+	}
+	return geometry;
+}
+
+PixelArrayLayout build_array_layout_from_pixel_layout(
+    const dicom::pixel::PixelLayout& pixel_layout) {
+	PixelArrayLayout layout{};
+	if (pixel_layout.empty()) {
+		throw nb::value_error("pixel transform output layout is empty");
+	}
+	if (pixel_layout.rows == 0 || pixel_layout.cols == 0 ||
+	    pixel_layout.samples_per_pixel == 0 || pixel_layout.frames == 0) {
+		throw nb::value_error("pixel transform output layout has invalid geometry");
+	}
+
+	layout.spec = decoded_array_spec(pixel_layout);
+	const auto bytes_per_sample = layout.spec.bytes_per_sample;
+	if (bytes_per_sample == 0) {
+		throw nb::value_error("pixel transform output layout has invalid sample size");
+	}
+	if ((pixel_layout.row_stride % bytes_per_sample) != 0 ||
+	    (pixel_layout.frame_stride % bytes_per_sample) != 0) {
+		throw nb::value_error("pixel transform output strides are not aligned to sample size");
+	}
+
+	const auto frames = static_cast<std::size_t>(pixel_layout.frames);
+	if (frames != 0 &&
+	    pixel_layout.frame_stride > (std::numeric_limits<std::size_t>::max() / frames)) {
+		throw std::overflow_error("pixel transform output size overflow");
+	}
+	layout.required_bytes = pixel_layout.frame_stride * frames;
+	const auto geometry =
+	    build_normalized_array_geometry_or_throw(pixel_layout, bytes_per_sample, frames > 1);
+	layout.ndim = geometry.ndim;
+	layout.shape = geometry.shape;
+	layout.strides = geometry.strides;
+	return layout;
 }
 
 DecodedArrayOutput make_writable_numpy_array(
@@ -256,6 +387,18 @@ DecodedArrayOutput make_writable_numpy_array(
 	    static_cast<std::uint8_t*>(data_ptr), required_bytes);
 	(void)storage.release();
 	return DecodedArrayOutput{std::move(array), bytes};
+}
+
+nb::object numpy_array_from_owned_pixel_buffer(dicom::pixel::PixelBuffer&& buffer) {
+	auto* owner = new dicom::pixel::PixelBuffer(std::move(buffer));
+	const auto layout = build_array_layout_from_pixel_layout(owner->layout);
+	void* data_ptr = owner->bytes.empty() ? nullptr : static_cast<void*>(owner->bytes.data());
+	nb::capsule owner_capsule(owner, [](void* ptr) noexcept {
+		delete static_cast<dicom::pixel::PixelBuffer*>(ptr);
+	});
+	return nb::cast(nb::ndarray<nb::numpy>(
+	    data_ptr, layout.ndim, layout.shape.data(), owner_capsule,
+	    layout.strides.data(), layout.spec.dtype, nb::device::cpu::value, 0, 'C'));
 }
 
 std::string normalize_encoder_option_name(std::string option) {
@@ -423,30 +566,34 @@ private:
 	throw nb::value_error("set_pixel_data unsupported source dtype format");
 }
 
-[[nodiscard]] dicom::pixel::PixelSource build_pixel_source_or_throw(
+[[nodiscard]] dicom::pixel::ConstPixelSpan build_pixel_span_or_throw(
     const Py_buffer& view) {
+	const auto throw_source_error = [](std::string_view detail) -> void {
+		throw nb::value_error((std::string("set_pixel_data ") + std::string(detail)).c_str());
+	};
+
 	if (view.ndim < 2 || view.ndim > 4) {
-		throw nb::value_error("set_pixel_data source must have ndim 2, 3, or 4");
+		throw_source_error("source must have ndim 2, 3, or 4");
 	}
 	if (view.itemsize <= 0) {
-		throw nb::value_error("set_pixel_data source must have a positive itemsize");
+		throw_source_error("source must have a positive itemsize");
 	}
 	if (view.len < 0) {
-		throw nb::value_error("set_pixel_data source buffer length is invalid");
+		throw_source_error("source buffer length is invalid");
 	}
 	if (view.len > 0 && view.buf == nullptr) {
-		throw nb::value_error("set_pixel_data source buffer is null");
+		throw_source_error("source buffer is null");
 	}
 	if (view.shape == nullptr) {
-		throw nb::value_error("set_pixel_data source must expose shape metadata");
+		throw_source_error("source must expose shape metadata");
 	}
 	if (view.format == nullptr || view.format[0] == '\0') {
-		throw nb::value_error("set_pixel_data source must expose dtype format metadata");
+		throw_source_error("source must expose dtype format metadata");
 	}
 
 	const auto format = std::string_view(view.format);
 	if (!format.empty() && format.front() == '>') {
-		throw nb::value_error("set_pixel_data does not support big-endian source dtype");
+		throw_source_error("does not support big-endian source dtype");
 	}
 
 	const auto bytes_per_sample = static_cast<std::size_t>(view.itemsize);
@@ -456,7 +603,7 @@ private:
 	const auto read_dim = [&](int axis) -> std::size_t {
 		const auto value = view.shape[axis];
 		if (value <= 0) {
-			throw nb::value_error("set_pixel_data source shape values must be positive");
+			throw_source_error("source shape values must be positive");
 		}
 		return static_cast<std::size_t>(value);
 	};
@@ -490,57 +637,237 @@ private:
 	}
 
 	if (samples_per_pixel != 1 && samples_per_pixel != 3) {
-		throw nb::value_error(
-		    "set_pixel_data currently supports samples_per_pixel 1 or 3");
+		throw_source_error("currently supports samples_per_pixel 1 or 3");
 	}
 
 	if (rows > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
 	    cols > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
 	    frames > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
 	    samples_per_pixel > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
-		throw nb::value_error("set_pixel_data source dimensions exceed int range");
+		throw_source_error("source dimensions exceed int range");
 	}
 
 	const auto max_size = std::numeric_limits<std::size_t>::max();
 	if (samples_per_pixel != 0 &&
 	    cols > (max_size / samples_per_pixel)) {
-		throw nb::value_error("set_pixel_data row size overflow");
+		throw_source_error("row size overflow");
 	}
 	const auto row_components = cols * samples_per_pixel;
 	if (bytes_per_sample != 0 &&
 	    row_components > (max_size / bytes_per_sample)) {
-		throw nb::value_error("set_pixel_data row stride overflow");
+		throw_source_error("row stride overflow");
 	}
 	const auto row_stride = row_components * bytes_per_sample;
 	if (rows != 0 && row_stride > (max_size / rows)) {
-		throw nb::value_error("set_pixel_data frame stride overflow");
+		throw_source_error("frame stride overflow");
 	}
 	const auto frame_stride = row_stride * rows;
 	if (frames != 0 && frame_stride > (max_size / frames)) {
-		throw nb::value_error("set_pixel_data total byte size overflow");
+		throw_source_error("total byte size overflow");
 	}
 	const auto required_bytes = frame_stride * frames;
 	const auto actual_bytes = static_cast<std::size_t>(view.len);
 	if (actual_bytes != required_bytes) {
-		throw nb::value_error(
-		    "set_pixel_data source buffer size does not match inferred shape and dtype");
+		throw_source_error("source buffer size does not match inferred shape and dtype");
 	}
 
-	dicom::pixel::PixelSource source{};
-	source.bytes = std::span<const std::uint8_t>(
-	    reinterpret_cast<const std::uint8_t*>(view.buf), actual_bytes);
-	source.data_type = data_type;
-	source.rows = static_cast<int>(rows);
-	source.cols = static_cast<int>(cols);
-	source.row_stride = row_stride;
-	source.frames = static_cast<int>(frames);
-	source.frame_stride = frame_stride;
-	source.samples_per_pixel = static_cast<int>(samples_per_pixel);
-	source.planar = dicom::pixel::Planar::interleaved;
-	source.photometric = samples_per_pixel == 1
-	                         ? dicom::pixel::Photometric::monochrome2
-	                         : dicom::pixel::Photometric::rgb;
-	return source;
+	// Build the normalized layout once so Python callers share the same encode path
+	// as native C++ callers.
+	dicom::pixel::PixelLayout layout{
+	    .data_type = data_type,
+	    .photometric = samples_per_pixel == 1
+	                       ? dicom::pixel::Photometric::monochrome2
+	                       : dicom::pixel::Photometric::rgb,
+	    .planar = dicom::pixel::Planar::interleaved,
+	    .reserved = 0,
+	    .rows = static_cast<std::uint32_t>(rows),
+	    .cols = static_cast<std::uint32_t>(cols),
+	    .frames = static_cast<std::uint32_t>(frames),
+	    .samples_per_pixel = static_cast<std::uint16_t>(samples_per_pixel),
+	    .bits_stored = dicom::pixel::normalized_bits_stored_of(data_type),
+	    .row_stride = row_stride,
+	    .frame_stride = frame_stride,
+	};
+	return dicom::pixel::ConstPixelSpan{
+	    .layout = layout,
+	    .bytes = std::span<const std::uint8_t>(
+	        reinterpret_cast<const std::uint8_t*>(view.buf), actual_bytes),
+	};
+}
+
+[[nodiscard]] dicom::pixel::ConstPixelSpan build_transform_pixel_span_or_throw(
+    const Py_buffer& view) {
+	const auto throw_source_error = [](std::string_view detail) -> void {
+		throw nb::value_error((std::string("pixel transform ") + std::string(detail)).c_str());
+	};
+
+	if (view.ndim < 2 || view.ndim > 4) {
+		throw_source_error("source must have ndim 2, 3, or 4");
+	}
+	if (view.itemsize <= 0) {
+		throw_source_error("source must have a positive itemsize");
+	}
+	if (view.len < 0) {
+		throw_source_error("source buffer length is invalid");
+	}
+	if (view.len > 0 && view.buf == nullptr) {
+		throw_source_error("source buffer is null");
+	}
+	if (view.shape == nullptr) {
+		throw_source_error("source must expose shape metadata");
+	}
+	if (view.format == nullptr || view.format[0] == '\0') {
+		throw_source_error("source must expose dtype format metadata");
+	}
+
+	const auto format = std::string_view(view.format);
+	if (!format.empty() && format.front() == '>') {
+		throw_source_error("does not support big-endian source dtype");
+	}
+
+	const auto bytes_per_sample = static_cast<std::size_t>(view.itemsize);
+	const auto data_type =
+	    parse_pixel_source_data_type_or_throw(format, bytes_per_sample);
+
+	const auto read_dim = [&](int axis) -> std::size_t {
+		const auto value = view.shape[axis];
+		if (value <= 0) {
+			throw_source_error("source shape values must be positive");
+		}
+		return static_cast<std::size_t>(value);
+	};
+
+	std::size_t frames = 1;
+	std::size_t rows = 0;
+	std::size_t cols = 0;
+	std::size_t samples_per_pixel = 1;
+
+	if (view.ndim == 2) {
+		rows = read_dim(0);
+		cols = read_dim(1);
+	} else if (view.ndim == 3) {
+		const auto d0 = read_dim(0);
+		const auto d1 = read_dim(1);
+		const auto d2 = read_dim(2);
+		if (d2 == 1 || d2 == 3) {
+			throw_source_error(
+			    "source shape is ambiguous when ndim == 3 and the trailing dimension is 1 or 3; "
+			    "reshape to (rows, cols), (frames, rows, cols), or (frames, rows, cols, 1) explicitly");
+		}
+		frames = d0;
+		rows = d1;
+		cols = d2;
+	} else {
+		frames = read_dim(0);
+		rows = read_dim(1);
+		cols = read_dim(2);
+		samples_per_pixel = read_dim(3);
+	}
+
+	if (samples_per_pixel != 1) {
+		throw_source_error("currently supports only monochrome/indexed samples_per_pixel 1");
+	}
+
+	if (rows > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
+	    cols > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
+	    frames > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+		throw_source_error("source dimensions exceed int range");
+	}
+
+	const auto max_size = std::numeric_limits<std::size_t>::max();
+	if (samples_per_pixel != 0 &&
+	    cols > (max_size / samples_per_pixel)) {
+		throw_source_error("row size overflow");
+	}
+	const auto row_components = cols * samples_per_pixel;
+	if (bytes_per_sample != 0 &&
+	    row_components > (max_size / bytes_per_sample)) {
+		throw_source_error("row stride overflow");
+	}
+	const auto row_stride = row_components * bytes_per_sample;
+	if (rows != 0 && row_stride > (max_size / rows)) {
+		throw_source_error("frame stride overflow");
+	}
+	const auto frame_stride = row_stride * rows;
+	if (frames != 0 && frame_stride > (max_size / frames)) {
+		throw_source_error("total byte size overflow");
+	}
+	const auto required_bytes = frame_stride * frames;
+	const auto actual_bytes = static_cast<std::size_t>(view.len);
+	if (actual_bytes != required_bytes) {
+		throw_source_error("source buffer size does not match inferred shape and dtype");
+	}
+
+	dicom::pixel::PixelLayout layout{
+	    .data_type = data_type,
+	    .photometric = dicom::pixel::Photometric::monochrome2,
+	    .planar = dicom::pixel::Planar::interleaved,
+	    .reserved = 0,
+	    .rows = static_cast<std::uint32_t>(rows),
+	    .cols = static_cast<std::uint32_t>(cols),
+	    .frames = static_cast<std::uint32_t>(frames),
+	    .samples_per_pixel = static_cast<std::uint16_t>(samples_per_pixel),
+	    .bits_stored = dicom::pixel::normalized_bits_stored_of(data_type),
+	    .row_stride = row_stride,
+	    .frame_stride = frame_stride,
+	};
+	return dicom::pixel::ConstPixelSpan{
+	    .layout = layout,
+	    .bytes = std::span<const std::uint8_t>(
+	        reinterpret_cast<const std::uint8_t*>(view.buf), actual_bytes),
+	};
+}
+
+nb::object apply_rescale_to_numpy_array(
+    nb::handle source, float slope, float intercept) {
+	PyReadOnlyBufferView source_view(source);
+	const auto pixel_span = build_transform_pixel_span_or_throw(source_view.view());
+	return numpy_array_from_owned_pixel_buffer(
+	    dicom::pixel::apply_rescale(pixel_span, slope, intercept));
+}
+
+nb::object apply_rescale_frames_to_numpy_array(
+    nb::handle source, const std::vector<float>& slopes,
+    const std::vector<float>& intercepts) {
+	PyReadOnlyBufferView source_view(source);
+	const auto pixel_span = build_transform_pixel_span_or_throw(source_view.view());
+	auto output = dicom::pixel::PixelBuffer::allocate(
+	    dicom::pixel::make_rescale_output_layout(pixel_span.layout));
+	dicom::pixel::apply_rescale_frames_into(
+	    pixel_span, output.span(), slopes, intercepts);
+	return numpy_array_from_owned_pixel_buffer(std::move(output));
+}
+
+nb::object apply_modality_lut_to_numpy_array(
+    nb::handle source, const dicom::pixel::ModalityLut& lut) {
+	PyReadOnlyBufferView source_view(source);
+	const auto pixel_span = build_transform_pixel_span_or_throw(source_view.view());
+	return numpy_array_from_owned_pixel_buffer(
+	    dicom::pixel::apply_modality_lut(pixel_span, lut));
+}
+
+nb::object apply_palette_lut_to_numpy_array(
+    nb::handle source, const dicom::pixel::PaletteLut& lut) {
+	PyReadOnlyBufferView source_view(source);
+	const auto pixel_span = build_transform_pixel_span_or_throw(source_view.view());
+	return numpy_array_from_owned_pixel_buffer(
+	    dicom::pixel::apply_palette_lut(pixel_span, lut));
+}
+
+nb::object apply_voi_lut_to_numpy_array(
+    nb::handle source, const dicom::pixel::VoiLut& lut) {
+	PyReadOnlyBufferView source_view(source);
+	const auto pixel_span = build_transform_pixel_span_or_throw(source_view.view());
+	return numpy_array_from_owned_pixel_buffer(
+	    dicom::pixel::apply_voi_lut(pixel_span, lut));
+}
+
+nb::object apply_window_to_numpy_array(
+    nb::handle source, const dicom::pixel::WindowTransform& window) {
+	PyReadOnlyBufferView source_view(source);
+	const auto pixel_span = build_transform_pixel_span_or_throw(source_view.view());
+	return numpy_array_from_owned_pixel_buffer(
+	    dicom::pixel::apply_window(pixel_span, window));
 }
 
 [[nodiscard]] std::string format_encoder_option_double(double value) {
@@ -903,7 +1230,7 @@ void set_transfer_syntax_with_options(
 void set_pixel_data_with_options(DicomFile& self, Uid transfer_syntax,
     nb::handle source_obj, nb::handle options) {
 	PyReadOnlyBufferView source_view(source_obj);
-	const auto source = build_pixel_source_or_throw(source_view.view());
+	const auto source = build_pixel_span_or_throw(source_view.view());
 	const auto text_options =
 	    parse_encoder_options_to_text_storage(options, transfer_syntax);
 	if (text_options.auto_mode) {
@@ -916,7 +1243,7 @@ void set_pixel_data_with_options(DicomFile& self, Uid transfer_syntax,
 void set_pixel_data_with_encoder_context(DicomFile& self, Uid transfer_syntax,
     nb::handle source_obj, const EncoderContext& encoder_context) {
 	PyReadOnlyBufferView source_view(source_obj);
-	const auto source = build_pixel_source_or_throw(source_view.view());
+	const auto source = build_pixel_span_or_throw(source_view.view());
 	self.set_pixel_data(transfer_syntax, source, encoder_context);
 }
 
@@ -950,43 +1277,36 @@ DecodedArrayLayout build_decode_layout_from_plan(
 
 	DecodedArrayLayout layout{};
 	layout.plan = plan;
-	layout.opt = layout.plan.options;
-	layout.dst_strides = layout.plan.strides;
 
-	const auto& info = layout.plan.info;
-	if (!info.has_pixel_data) {
+	// The Python array contract follows the normalized decode output layout directly.
+	const auto& output_layout = layout.plan.output_layout;
+	if (output_layout.empty()) {
 		throw nb::value_error(
 		    "to_array/decode_into requires PixelData, FloatPixelData, or DoubleFloatPixelData");
 	}
-	if (info.rows <= 0 || info.cols <= 0 || info.samples_per_pixel <= 0) {
+	if (output_layout.rows == 0 || output_layout.cols == 0 ||
+	    output_layout.samples_per_pixel == 0) {
 		throw nb::value_error(
 		    "to_array/decode_into requires positive Rows/Columns/SamplesPerPixel");
 	}
-	if (info.frames <= 0) {
+	if (output_layout.frames == 0) {
 		throw nb::value_error("to_array/decode_into requires NumberOfFrames >= 1");
 	}
 
-	const auto rows = static_cast<std::size_t>(info.rows);
-	const auto cols = static_cast<std::size_t>(info.cols);
-	const auto samples_per_pixel = static_cast<std::size_t>(info.samples_per_pixel);
-	layout.frames = static_cast<std::size_t>(info.frames);
+	layout.frames = static_cast<std::size_t>(output_layout.frames);
+	layout.spec = decoded_array_spec(output_layout);
 
-	const bool effective_to_modality_value = layout.plan.options.to_modality_value;
-	layout.spec = decoded_array_spec(info, effective_to_modality_value);
-
+	// NumPy strides are expressed in element counts, so validate byte strides first.
 	const auto bytes_per_sample = layout.spec.bytes_per_sample;
 	if (bytes_per_sample == 0) {
 		throw nb::value_error("to_array/decode_into could not determine output sample size");
 	}
-	const auto row_stride = layout.dst_strides.row;
-	layout.frame_stride = layout.dst_strides.frame;
+	const auto row_stride = output_layout.row_stride;
+	layout.frame_stride = output_layout.frame_stride;
 	if ((row_stride % bytes_per_sample) != 0 || (layout.frame_stride % bytes_per_sample) != 0) {
 		throw std::runtime_error(
 		    "to_array/decode_into stride is not aligned to output sample size");
 	}
-	const auto row_stride_elems = row_stride / bytes_per_sample;
-	const auto frame_stride_elems = layout.frame_stride / bytes_per_sample;
-	const auto col_stride_elems = samples_per_pixel;
 
 	if (layout.frames != 0 &&
 	    layout.frame_stride > (std::numeric_limits<std::size_t>::max() / layout.frames)) {
@@ -1000,51 +1320,25 @@ DecodedArrayLayout build_decode_layout_from_plan(
 			throw nb::index_error("to_array/decode_into frame index out of range");
 		}
 		layout.required_bytes = layout.frame_stride;
-
-		if (samples_per_pixel == 1) {
-			layout.ndim = 2;
-			layout.shape[0] = rows;
-			layout.shape[1] = cols;
-			layout.strides[0] = static_cast<std::int64_t>(row_stride_elems);
-			layout.strides[1] = 1;
-		} else {
-			layout.ndim = 3;
-			layout.shape[0] = rows;
-			layout.shape[1] = cols;
-			layout.shape[2] = samples_per_pixel;
-			layout.strides[0] = static_cast<std::int64_t>(row_stride_elems);
-			layout.strides[1] = static_cast<std::int64_t>(col_stride_elems);
-			layout.strides[2] = 1;
-		}
+		const auto geometry =
+		    build_normalized_array_geometry_or_throw(output_layout, bytes_per_sample, false);
+		layout.ndim = geometry.ndim;
+		layout.shape = geometry.shape;
+		layout.strides = geometry.strides;
 		return layout;
 	}
 
 	layout.required_bytes = layout.frame_stride * layout.frames;
-	if (samples_per_pixel == 1) {
-		layout.ndim = 3;
-		layout.shape[0] = layout.frames;
-		layout.shape[1] = rows;
-		layout.shape[2] = cols;
-		layout.strides[0] = static_cast<std::int64_t>(frame_stride_elems);
-		layout.strides[1] = static_cast<std::int64_t>(row_stride_elems);
-		layout.strides[2] = 1;
-	} else {
-		layout.ndim = 4;
-		layout.shape[0] = layout.frames;
-		layout.shape[1] = rows;
-		layout.shape[2] = cols;
-		layout.shape[3] = samples_per_pixel;
-		layout.strides[0] = static_cast<std::int64_t>(frame_stride_elems);
-		layout.strides[1] = static_cast<std::int64_t>(row_stride_elems);
-		layout.strides[2] = static_cast<std::int64_t>(col_stride_elems);
-		layout.strides[3] = 1;
-	}
+	const auto geometry =
+	    build_normalized_array_geometry_or_throw(output_layout, bytes_per_sample, true);
+	layout.ndim = geometry.ndim;
+	layout.shape = geometry.shape;
+	layout.strides = geometry.strides;
 	return layout;
 }
 
-DecodedArrayLayout build_decode_layout(
-    const DicomFile& self, long frame, bool to_modality_value, int worker_threads = -1,
-    int codec_threads = -1, bool decode_mct = true) {
+DecodedArrayLayout build_decode_layout(const DicomFile& self, long frame,
+    int worker_threads = -1, int codec_threads = -1, bool decode_mct = true) {
 	if (worker_threads < -1) {
 		throw nb::value_error("worker_threads must be -1, 0, or positive");
 	}
@@ -1052,10 +1346,10 @@ DecodedArrayLayout build_decode_layout(
 		throw nb::value_error("codec_threads must be -1, 0, or positive");
 	}
 
+	// The convenience array helpers always request tightly packed interleaved output.
 	dicom::pixel::DecodeOptions opt{};
-	opt.planar_out = dicom::pixel::Planar::interleaved;
 	opt.alignment = 1;
-	opt.to_modality_value = to_modality_value;
+	opt.planar_out = dicom::pixel::Planar::interleaved;
 	opt.decode_mct = decode_mct;
 	opt.worker_threads = worker_threads;
 	opt.codec_threads = codec_threads;
@@ -1069,14 +1363,6 @@ void validate_decode_thread_options_or_throw(int worker_threads, int codec_threa
 	if (codec_threads < -1) {
 		throw nb::value_error("codec_threads must be -1, 0, or positive");
 	}
-}
-
-[[nodiscard]] bool resolve_to_modality_value_option(
-    bool to_modality_value, nb::handle scaled_alias) {
-	if (!scaled_alias.is_none()) {
-		return nb::cast<bool>(scaled_alias);
-	}
-	return to_modality_value;
 }
 
 void decode_layout_into(const DicomFile& self, const DecodedArrayLayout& layout,
@@ -1115,24 +1401,21 @@ DirectRawArrayAccess build_direct_raw_array_access_or_throw(
 		throw nb::value_error("frame must be >= -1");
 	}
 
-	const auto& info = self.pixeldata_info();
-	if (!info.has_pixel_data) {
+	const auto source_layout =
+	    dicom::pixel::support_detail::compute_decode_source_layout(self);
+	if (source_layout.empty()) {
 		throw nb::value_error(
 		    "to_array/decode_into requires PixelData, FloatPixelData, or DoubleFloatPixelData");
 	}
-	if (!info.ts.is_uncompressed()) {
+	if (!self.transfer_syntax_uid().is_uncompressed()) {
 		throw nb::value_error("to_array_view requires an uncompressed transfer syntax");
 	}
-	if (info.rows <= 0 || info.cols <= 0 || info.samples_per_pixel <= 0) {
-		throw nb::value_error(
-		    "to_array/decode_into requires positive Rows/Columns/SamplesPerPixel");
-	}
-	if (info.frames <= 0) {
-		throw nb::value_error("to_array/decode_into requires NumberOfFrames >= 1");
-	}
 
+	// Direct views are only possible when native uncompressed storage already matches
+	// the exported NumPy layout.
 	const auto source_view =
-	    dicom::pixel::support_detail::compute_native_decode_source_view_or_throw(self, info);
+	    dicom::pixel::support_detail::compute_native_decode_source_view_or_throw(
+	        self, source_layout);
 	if (source_view.planar_source && source_view.samples_per_pixel > std::size_t{1}) {
 		throw nb::value_error(
 		    "to_array_view requires PlanarConfiguration=interleaved when SamplesPerPixel > 1");
@@ -1140,7 +1423,7 @@ DirectRawArrayAccess build_direct_raw_array_access_or_throw(
 
 	DirectRawArrayAccess access{};
 	auto& layout = access.layout;
-	layout.spec = decoded_array_spec(info, false);
+	layout.spec = decoded_array_spec(source_layout);
 	layout.frames = source_view.frames;
 	layout.decode_all_frames = (frame == -1) && (layout.frames > 1);
 	layout.frame_index =
@@ -1204,10 +1487,7 @@ DirectRawArrayAccess build_direct_raw_array_access_or_throw(
 }
 
 std::optional<DirectRawArrayAccess> try_build_direct_raw_array_access(
-    const DicomFile& self, long frame, bool to_modality_value) {
-	if (to_modality_value) {
-		return std::nullopt;
-	}
+    const DicomFile& self, long frame) {
 	try {
 		return build_direct_raw_array_access_or_throw(self, frame);
 	} catch (...) {
@@ -1236,9 +1516,10 @@ nb::object dicomfile_to_array_view(const DicomFile& self, long frame) {
 }
 
 nb::object dicomfile_to_array(
-    const DicomFile& self, long frame, bool to_modality_value, bool decode_mct,
-    nb::handle scaled, int worker_threads, int codec_threads, nb::handle plan_obj) {
+    const DicomFile& self, long frame, bool decode_mct, int worker_threads,
+    int codec_threads, nb::handle plan_obj) {
 	if (!plan_obj.is_none()) {
+		// A reusable plan already fixes dtype, strides, and required byte counts.
 		const auto plan = nb::cast<dicom::pixel::DecodePlan>(plan_obj);
 		const auto layout = build_decode_layout_from_plan(plan, frame);
 		auto out = make_writable_numpy_array(
@@ -1250,11 +1531,9 @@ nb::object dicomfile_to_array(
 		return nb::cast(std::move(out.array));
 	}
 
-	const auto effective_to_modality_value =
-	    resolve_to_modality_value_option(to_modality_value, scaled);
 	validate_decode_thread_options_or_throw(worker_threads, codec_threads);
-	if (auto direct = try_build_direct_raw_array_access(
-	        self, frame, effective_to_modality_value)) {
+	if (auto direct = try_build_direct_raw_array_access(self, frame)) {
+		// Prefer a raw copy path when the source bytes already match the target array layout.
 		auto out = make_writable_numpy_array(direct->layout.ndim, direct->layout.shape,
 		    direct->layout.strides, direct->layout.spec.dtype,
 		    direct->layout.required_bytes);
@@ -1264,9 +1543,8 @@ nb::object dicomfile_to_array(
 		}
 		return nb::cast(std::move(out.array));
 	}
-	const auto layout = build_decode_layout(
-	    self, frame, effective_to_modality_value, worker_threads, codec_threads,
-	    decode_mct);
+	const auto layout =
+	    build_decode_layout(self, frame, worker_threads, codec_threads, decode_mct);
 	auto out = make_writable_numpy_array(
 	    layout.ndim, layout.shape, layout.strides, layout.spec.dtype, layout.required_bytes);
 	{
@@ -1298,22 +1576,20 @@ private:
 };
 
 nb::object dicomfile_decode_into_array(const DicomFile& self, nb::handle out,
-    long frame, bool to_modality_value, bool decode_mct, nb::handle scaled,
-    int worker_threads, int codec_threads, nb::handle plan_obj) {
+    long frame, bool decode_mct, int worker_threads, int codec_threads,
+    nb::handle plan_obj) {
 	std::optional<DirectRawArrayAccess> direct{};
 	DecodedArrayLayout layout{};
 	if (!plan_obj.is_none()) {
+		// Reuse the caller-supplied plan instead of recomputing layout metadata.
 		layout = build_decode_layout_from_plan(
 		    nb::cast<dicom::pixel::DecodePlan>(plan_obj), frame);
 	} else {
-		const auto effective_to_modality_value =
-		    resolve_to_modality_value_option(to_modality_value, scaled);
 		validate_decode_thread_options_or_throw(worker_threads, codec_threads);
-		direct = try_build_direct_raw_array_access(self, frame, effective_to_modality_value);
+		direct = try_build_direct_raw_array_access(self, frame);
 		layout = direct ? direct->layout
 		                : build_decode_layout(
-		                      self, frame, effective_to_modality_value, worker_threads,
-		                      codec_threads, decode_mct);
+		                      self, frame, worker_threads, codec_threads, decode_mct);
 	}
 
 	PyWritableBufferView writable(out);
@@ -3358,30 +3634,26 @@ NB_MODULE(_dicomsdl, m) {
 	nb::class_<dicom::pixel::DecodeOptions>(m, "DecodeOptions",
 	    "Decode option set used to build a reusable DecodePlan.")
 		.def("__init__",
-		    [](dicom::pixel::DecodeOptions* self, dicom::pixel::Planar planar_out,
-		        std::uint16_t alignment, bool to_modality_value, bool decode_mct,
+		    [](dicom::pixel::DecodeOptions* self, std::uint16_t alignment,
+		        dicom::pixel::Planar planar_out, bool decode_mct,
 		        int worker_threads, int codec_threads) {
 			    new (self) dicom::pixel::DecodeOptions{};
-			    self->planar_out = planar_out;
 			    self->alignment = alignment;
-			    self->to_modality_value = to_modality_value;
+			    self->planar_out = planar_out;
 			    self->decode_mct = decode_mct;
 			    self->worker_threads = worker_threads;
 			    self->codec_threads = codec_threads;
 		    },
 		    nb::kw_only(),
-		    nb::arg("planar_out") = dicom::pixel::Planar::interleaved,
 		    nb::arg("alignment") = static_cast<std::uint16_t>(1),
-		    nb::arg("to_modality_value") = false,
+		    nb::arg("planar_out") = dicom::pixel::Planar::interleaved,
 		    nb::arg("decode_mct") = true,
 		    nb::arg("worker_threads") = -1,
 		    nb::arg("codec_threads") = -1)
-		.def_rw("planar_out", &dicom::pixel::DecodeOptions::planar_out,
-		    "Requested output sample layout.")
 		.def_rw("alignment", &dicom::pixel::DecodeOptions::alignment,
 		    "Requested output row/frame alignment in bytes.")
-		.def_rw("to_modality_value", &dicom::pixel::DecodeOptions::to_modality_value,
-		    "Convert stored values to modality values when applicable.")
+		.def_rw("planar_out", &dicom::pixel::DecodeOptions::planar_out,
+		    "Requested output sample layout.")
 		.def_rw("decode_mct", &dicom::pixel::DecodeOptions::decode_mct,
 		    "Apply codestream-level inverse MCT/color transform when supported.")
 		.def_rw("worker_threads", &dicom::pixel::DecodeOptions::worker_threads,
@@ -3391,11 +3663,10 @@ NB_MODULE(_dicomsdl, m) {
 		.def("__repr__",
 		    [](const dicom::pixel::DecodeOptions& self) {
 			    std::ostringstream oss;
-			    oss << "DecodeOptions(planar_out="
+			    oss << "DecodeOptions(alignment=" << self.alignment
+			        << ", planar_out="
 			        << (self.planar_out == dicom::pixel::Planar::planar ? "Planar.planar"
 			                                                            : "Planar.interleaved")
-			        << ", alignment=" << self.alignment
-			        << ", to_modality_value=" << (self.to_modality_value ? "True" : "False")
 			        << ", decode_mct=" << (self.decode_mct ? "True" : "False")
 			        << ", worker_threads=" << self.worker_threads
 			        << ", codec_threads=" << self.codec_threads << ")";
@@ -3407,28 +3678,35 @@ NB_MODULE(_dicomsdl, m) {
 		.def_prop_ro("options",
 		    [](const dicom::pixel::DecodePlan& self) { return self.options; },
 		    "Decode options captured in this plan.")
-		.def_prop_ro("transfer_syntax_uid",
-		    [](const dicom::pixel::DecodePlan& self) {
-			    return uid_to_object(self.info.ts);
-		    },
-		    "Transfer syntax captured in this plan, or None if unavailable.")
 		.def_prop_ro("has_pixel_data",
-		    [](const dicom::pixel::DecodePlan& self) { return self.info.has_pixel_data; })
+		    [](const dicom::pixel::DecodePlan& self) {
+			    return !self.output_layout.empty();
+		    })
 		.def_prop_ro("rows",
-		    [](const dicom::pixel::DecodePlan& self) { return self.info.rows; })
+		    [](const dicom::pixel::DecodePlan& self) {
+			    return static_cast<int>(self.output_layout.rows);
+		    })
 		.def_prop_ro("cols",
-		    [](const dicom::pixel::DecodePlan& self) { return self.info.cols; })
+		    [](const dicom::pixel::DecodePlan& self) {
+			    return static_cast<int>(self.output_layout.cols);
+		    })
 		.def_prop_ro("frames",
-		    [](const dicom::pixel::DecodePlan& self) { return self.info.frames; })
+		    [](const dicom::pixel::DecodePlan& self) {
+			    return static_cast<int>(self.output_layout.frames);
+		    })
 		.def_prop_ro("samples_per_pixel",
-		    [](const dicom::pixel::DecodePlan& self) { return self.info.samples_per_pixel; })
+		    [](const dicom::pixel::DecodePlan& self) {
+			    return static_cast<int>(self.output_layout.samples_per_pixel);
+		    })
 		.def_prop_ro("bits_stored",
-		    [](const dicom::pixel::DecodePlan& self) { return self.info.bits_stored; })
+		    [](const dicom::pixel::DecodePlan& self) {
+			    return static_cast<int>(self.output_layout.bits_stored);
+		    })
 		.def_prop_ro("row_stride",
-		    [](const dicom::pixel::DecodePlan& self) { return self.strides.row; },
+		    [](const dicom::pixel::DecodePlan& self) { return self.output_layout.row_stride; },
 		    "Decoded output row stride in bytes.")
 		.def_prop_ro("frame_stride",
-		    [](const dicom::pixel::DecodePlan& self) { return self.strides.frame; },
+		    [](const dicom::pixel::DecodePlan& self) { return self.output_layout.frame_stride; },
 		    "Decoded output frame stride in bytes.")
 		.def_prop_ro("dtype",
 		    [](const dicom::pixel::DecodePlan& self) { return numpy_dtype_object(self); },
@@ -3453,11 +3731,247 @@ NB_MODULE(_dicomsdl, m) {
 		.def("__repr__",
 		    [](const dicom::pixel::DecodePlan& self) {
 			    std::ostringstream oss;
-			    oss << "DecodePlan(rows=" << self.info.rows
-			        << ", cols=" << self.info.cols
-			        << ", frames=" << self.info.frames
-			        << ", samples_per_pixel=" << self.info.samples_per_pixel
-			        << ", frame_stride=" << self.strides.frame << ")";
+			    oss << "DecodePlan(rows=" << self.output_layout.rows
+			        << ", cols=" << self.output_layout.cols
+			        << ", frames=" << self.output_layout.frames
+			        << ", samples_per_pixel=" << self.output_layout.samples_per_pixel
+			        << ", frame_stride=" << self.output_layout.frame_stride << ")";
+			    return oss.str();
+		    });
+
+	nb::class_<dicom::pixel::RescaleTransform>(m, "RescaleTransform",
+	    "Linear rescale transform applied after decode.")
+		.def(nb::init<>())
+		.def_rw("slope", &dicom::pixel::RescaleTransform::slope,
+		    "Multiplicative rescale slope.")
+		.def_rw("intercept", &dicom::pixel::RescaleTransform::intercept,
+		    "Additive rescale intercept.")
+		.def("__repr__",
+		    [](const dicom::pixel::RescaleTransform& self) {
+			    std::ostringstream oss;
+			    oss << "RescaleTransform(slope=" << self.slope
+			        << ", intercept=" << self.intercept << ")";
+			    return oss.str();
+		    });
+
+	nb::class_<dicom::pixel::ModalityLut>(m, "ModalityLut",
+	    "Modality LUT values applied after decode.")
+		.def(nb::init<>())
+		.def_rw("first_mapped", &dicom::pixel::ModalityLut::first_mapped,
+		    "First stored-value input mapped by this LUT.")
+		.def_rw("values", &dicom::pixel::ModalityLut::values,
+		    "LUT output values as float32-compatible samples.")
+		.def("__repr__",
+		    [](const dicom::pixel::ModalityLut& self) {
+			    std::ostringstream oss;
+			    oss << "ModalityLut(first_mapped=" << self.first_mapped
+			        << ", values=" << self.values.size() << " entries)";
+			    return oss.str();
+		    });
+
+	nb::class_<dicom::pixel::PaletteLut>(m, "PaletteLut",
+	    "Palette color LUT values applied after decode.")
+		.def(nb::init<>())
+		.def_rw("first_mapped", &dicom::pixel::PaletteLut::first_mapped,
+		    "First stored-value input mapped by this LUT.")
+		.def_rw("bits_per_entry", &dicom::pixel::PaletteLut::bits_per_entry,
+		    "Bit depth of each LUT entry. Zero lets the implementation infer 8/16-bit output.")
+		.def_rw("red_values", &dicom::pixel::PaletteLut::red_values,
+		    "Red channel LUT values.")
+		.def_rw("green_values", &dicom::pixel::PaletteLut::green_values,
+		    "Green channel LUT values.")
+		.def_rw("blue_values", &dicom::pixel::PaletteLut::blue_values,
+		    "Blue channel LUT values.")
+		.def_rw("alpha_values", &dicom::pixel::PaletteLut::alpha_values,
+		    "Optional alpha channel LUT values.")
+		.def("__repr__",
+		    [](const dicom::pixel::PaletteLut& self) {
+			    std::ostringstream oss;
+			    oss << "PaletteLut(first_mapped=" << self.first_mapped
+			        << ", bits_per_entry=" << self.bits_per_entry
+			        << ", values=" << self.red_values.size()
+			        << ", alpha=" << self.alpha_values.size() << ")";
+			    return oss.str();
+		    });
+
+	nb::enum_<dicom::pixel::PixelPresentation>(m, "PixelPresentation",
+	    "Root-level pixel presentation model used by display-pipeline palette metadata.")
+		.value("monochrome", dicom::pixel::PixelPresentation::monochrome)
+		.value("color", dicom::pixel::PixelPresentation::color)
+		.value("mixed", dicom::pixel::PixelPresentation::mixed)
+		.value("true_color", dicom::pixel::PixelPresentation::true_color)
+		.value("color_range", dicom::pixel::PixelPresentation::color_range)
+		.value("color_ref", dicom::pixel::PixelPresentation::color_ref);
+
+	nb::class_<dicom::pixel::SupplementalPaletteInfo>(m, "SupplementalPaletteInfo",
+	    "Root-level Supplemental Palette metadata kept separate from classic PALETTE COLOR LUTs.")
+		.def(nb::init<>())
+		.def_rw("pixel_presentation",
+		    &dicom::pixel::SupplementalPaletteInfo::pixel_presentation,
+		    "Pixel Presentation value associated with this supplemental palette.")
+		.def_rw("palette", &dicom::pixel::SupplementalPaletteInfo::palette,
+		    "Palette lookup table payload, including optional alpha values.")
+		.def_rw("has_stored_value_range",
+		    &dicom::pixel::SupplementalPaletteInfo::has_stored_value_range,
+		    "True when Stored Value Color Range Sequence is present.")
+		.def_rw("minimum_stored_value_mapped",
+		    &dicom::pixel::SupplementalPaletteInfo::minimum_stored_value_mapped,
+		    "Minimum stored value covered by the supplemental color range.")
+		.def_rw("maximum_stored_value_mapped",
+		    &dicom::pixel::SupplementalPaletteInfo::maximum_stored_value_mapped,
+		    "Maximum stored value covered by the supplemental color range.")
+		.def("__repr__",
+		    [](const dicom::pixel::SupplementalPaletteInfo& self) {
+			    std::ostringstream oss;
+			    oss << "SupplementalPaletteInfo(values="
+			        << self.palette.red_values.size()
+			        << ", alpha=" << self.palette.alpha_values.size() << ")";
+			    return oss.str();
+		    });
+
+	nb::class_<dicom::pixel::EnhancedPaletteDataPathAssignmentInfo>(
+	    m, "EnhancedPaletteDataPathAssignmentInfo",
+	    "One Data Frame Assignment item from the Enhanced Palette display pipeline.")
+		.def(nb::init<>())
+		.def_rw("data_type", &dicom::pixel::EnhancedPaletteDataPathAssignmentInfo::data_type,
+		    "Data Type string from the assignment item.")
+		.def_rw("data_path_assignment",
+		    &dicom::pixel::EnhancedPaletteDataPathAssignmentInfo::data_path_assignment,
+		    "Data Path Assignment string such as PRIMARY_PVALUES or PRIMARY_SINGLE.")
+		.def_rw("has_bits_mapped_to_color_lookup_table",
+		    &dicom::pixel::EnhancedPaletteDataPathAssignmentInfo::has_bits_mapped_to_color_lookup_table,
+		    "True when Bits Mapped to Color Lookup Table is present.")
+		.def_rw("bits_mapped_to_color_lookup_table",
+		    &dicom::pixel::EnhancedPaletteDataPathAssignmentInfo::bits_mapped_to_color_lookup_table,
+		    "Bits Mapped to Color Lookup Table value.");
+
+	nb::class_<dicom::pixel::EnhancedBlendingLutInfo>(m, "EnhancedBlendingLutInfo",
+	    "One Enhanced Palette blending LUT specification.")
+		.def(nb::init<>())
+		.def_rw("transfer_function",
+		    &dicom::pixel::EnhancedBlendingLutInfo::transfer_function,
+		    "Transfer function string for this blending LUT.")
+		.def_rw("has_weight_constant",
+		    &dicom::pixel::EnhancedBlendingLutInfo::has_weight_constant,
+		    "True when Blending Weight Constant is present.")
+		.def_rw("weight_constant",
+		    &dicom::pixel::EnhancedBlendingLutInfo::weight_constant,
+		    "Blending Weight Constant value.")
+		.def_rw("bits_per_entry",
+		    &dicom::pixel::EnhancedBlendingLutInfo::bits_per_entry,
+		    "Bit depth of TABLE-based blending LUT values.")
+		.def_rw("values", &dicom::pixel::EnhancedBlendingLutInfo::values,
+		    "Expanded TABLE-based blending LUT values.")
+		.def("__repr__",
+		    [](const dicom::pixel::EnhancedBlendingLutInfo& self) {
+			    std::ostringstream oss;
+			    oss << "EnhancedBlendingLutInfo(transfer_function="
+			        << self.transfer_function
+			        << ", values=" << self.values.size() << ")";
+			    return oss.str();
+		    });
+
+	nb::class_<dicom::pixel::EnhancedPaletteItemInfo>(m, "EnhancedPaletteItemInfo",
+	    "One Enhanced Palette Color Lookup Table Sequence item.")
+		.def(nb::init<>())
+		.def_rw("data_path_id", &dicom::pixel::EnhancedPaletteItemInfo::data_path_id,
+		    "PRIMARY or SECONDARY path identifier.")
+		.def_rw("rgb_lut_transfer_function",
+		    &dicom::pixel::EnhancedPaletteItemInfo::rgb_lut_transfer_function,
+		    "RGB LUT Transfer Function string.")
+		.def_rw("alpha_lut_transfer_function",
+		    &dicom::pixel::EnhancedPaletteItemInfo::alpha_lut_transfer_function,
+		    "Alpha LUT Transfer Function string.")
+		.def_rw("palette", &dicom::pixel::EnhancedPaletteItemInfo::palette,
+		    "Palette lookup table payload, including optional alpha values.");
+
+	nb::class_<dicom::pixel::EnhancedPaletteInfo>(m, "EnhancedPaletteInfo",
+	    "Root-level Enhanced Palette metadata kept separate from classic PALETTE COLOR LUTs.")
+		.def(nb::init<>())
+		.def_rw("pixel_presentation", &dicom::pixel::EnhancedPaletteInfo::pixel_presentation,
+		    "Pixel Presentation value associated with this enhanced palette pipeline.")
+		.def_rw("data_frame_assignments",
+		    &dicom::pixel::EnhancedPaletteInfo::data_frame_assignments,
+		    "Data Frame Assignment Sequence items.")
+		.def_rw("has_blending_lut_1",
+		    &dicom::pixel::EnhancedPaletteInfo::has_blending_lut_1,
+		    "True when Blending LUT 1 Sequence is present.")
+		.def_rw("blending_lut_1", &dicom::pixel::EnhancedPaletteInfo::blending_lut_1,
+		    "Blending LUT 1 metadata.")
+		.def_rw("has_blending_lut_2",
+		    &dicom::pixel::EnhancedPaletteInfo::has_blending_lut_2,
+		    "True when Blending LUT 2 Sequence is present.")
+		.def_rw("blending_lut_2", &dicom::pixel::EnhancedPaletteInfo::blending_lut_2,
+		    "Blending LUT 2 metadata.")
+		.def_rw("palette_items", &dicom::pixel::EnhancedPaletteInfo::palette_items,
+		    "Enhanced Palette Color Lookup Table Sequence items.")
+		.def_rw("has_icc_profile", &dicom::pixel::EnhancedPaletteInfo::has_icc_profile,
+		    "True when ICC Profile is present.")
+		.def_rw("color_space", &dicom::pixel::EnhancedPaletteInfo::color_space,
+		    "Color Space value when present.")
+		.def("__repr__",
+		    [](const dicom::pixel::EnhancedPaletteInfo& self) {
+			    std::ostringstream oss;
+			    oss << "EnhancedPaletteInfo(assignments="
+			        << self.data_frame_assignments.size()
+			        << ", palette_items=" << self.palette_items.size() << ")";
+			    return oss.str();
+		    });
+
+	nb::class_<dicom::pixel::VoiLut>(m, "VoiLut",
+	    "VOI LUT metadata extracted from VOILUTSequence or constructed manually.")
+		.def(nb::init<>())
+		.def_rw("first_mapped", &dicom::pixel::VoiLut::first_mapped,
+		    "First stored or modality value covered by this VOI LUT.")
+		.def_rw("bits_per_entry", &dicom::pixel::VoiLut::bits_per_entry,
+		    "Declared VOI LUT output bit depth. 0 lets the implementation infer 8 or 16 bits.")
+		.def_rw("values", &dicom::pixel::VoiLut::values,
+		    "VOI LUT output values.")
+		.def("__repr__",
+		    [](const dicom::pixel::VoiLut& self) {
+			    std::ostringstream oss;
+			    oss << "VoiLut(first_mapped=" << self.first_mapped
+			        << ", bits_per_entry=" << self.bits_per_entry
+			        << ", values=" << self.values.size() << " entries)";
+			    return oss.str();
+		    });
+
+	nb::enum_<dicom::pixel::VoiLutFunction>(m, "VoiLutFunction",
+	    "VOI LUT function used by window center/width transforms.")
+		.value("linear", dicom::pixel::VoiLutFunction::linear)
+		.value("linear_exact", dicom::pixel::VoiLutFunction::linear_exact)
+		.value("sigmoid", dicom::pixel::VoiLutFunction::sigmoid);
+
+	nb::class_<dicom::pixel::WindowTransform>(m, "WindowTransform",
+	    "VOI window center/width transform applied after decode.")
+		.def(nb::init<>())
+		.def_rw("center", &dicom::pixel::WindowTransform::center,
+		    "VOI window center.")
+		.def_rw("width", &dicom::pixel::WindowTransform::width,
+		    "VOI window width.")
+		.def_rw("function", &dicom::pixel::WindowTransform::function,
+		    "VOI LUT function used by this window.")
+		.def("__repr__",
+		    [](const dicom::pixel::WindowTransform& self) {
+			    std::ostringstream oss;
+			    oss << "WindowTransform(center=" << self.center
+			        << ", width=" << self.width
+			        << ", function=";
+			    switch (self.function) {
+			    case dicom::pixel::VoiLutFunction::linear:
+				    oss << "linear";
+				    break;
+			    case dicom::pixel::VoiLutFunction::linear_exact:
+				    oss << "linear_exact";
+				    break;
+			    case dicom::pixel::VoiLutFunction::sigmoid:
+				    oss << "sigmoid";
+				    break;
+			    default:
+				    oss << "unknown";
+				    break;
+			    }
+			    oss << ")";
 			    return oss.str();
 		    });
 
@@ -3521,6 +4035,118 @@ NB_MODULE(_dicomsdl, m) {
 			    return nb::cast(uid);
 		    },
 		    "Current transfer syntax UID as a Uid object, or None if unavailable.")
+		.def_prop_ro("window_transform",
+		    [](const DicomFile& self) -> nb::object {
+			    const auto transform = self.window_transform();
+			    if (!transform) {
+				    return nb::none();
+			    }
+			    return nb::cast(*transform);
+		    },
+		    "Window center/width metadata for frame 0 as a WindowTransform, or None when absent.")
+		.def("window_transform_for_frame",
+		    [](const DicomFile& self, std::size_t frame_index) -> nb::object {
+			    const auto transform = self.window_transform(frame_index);
+			    if (!transform) {
+				    return nb::none();
+			    }
+			    return nb::cast(*transform);
+		    },
+		    nb::arg("frame_index"),
+		    "Window center/width metadata for the requested frame, resolved from Per-Frame Functional Groups, Shared Functional Groups, then the root dataset.")
+		.def_prop_ro("rescale_transform",
+		    [](const DicomFile& self) -> nb::object {
+			    const auto transform = self.rescale_transform();
+			    if (!transform) {
+				    return nb::none();
+			    }
+			    return nb::cast(*transform);
+		    },
+		    "Rescale slope/intercept metadata for frame 0 as a RescaleTransform, or None when absent.")
+		.def("rescale_transform_for_frame",
+		    [](const DicomFile& self, std::size_t frame_index) -> nb::object {
+			    const auto transform = self.rescale_transform(frame_index);
+			    if (!transform) {
+				    return nb::none();
+			    }
+			    return nb::cast(*transform);
+		    },
+		    nb::arg("frame_index"),
+		    "Rescale slope/intercept metadata for the requested frame, resolved from Per-Frame Functional Groups, Shared Functional Groups, then the root dataset.")
+		.def_prop_ro("modality_lut",
+		    [](const DicomFile& self) -> nb::object {
+			    const auto lut = self.modality_lut();
+			    if (!lut) {
+				    return nb::none();
+			    }
+			    return nb::cast(*lut);
+		    },
+		    "Modality LUT metadata for frame 0 as a ModalityLut, or None when absent.")
+		.def("modality_lut_for_frame",
+		    [](const DicomFile& self, std::size_t frame_index) -> nb::object {
+			    const auto lut = self.modality_lut(frame_index);
+			    if (!lut) {
+				    return nb::none();
+			    }
+			    return nb::cast(*lut);
+		    },
+		    nb::arg("frame_index"),
+		    "Modality LUT metadata for the requested frame. Root-level ModalityLUTSequence is shared across frames; frame-specific modality transforms are exposed through rescale_transform_for_frame().")
+		.def_prop_ro("pixel_presentation",
+		    [](const DicomFile& self) -> nb::object {
+			    const auto presentation = self.pixel_presentation();
+			    if (!presentation) {
+				    return nb::none();
+			    }
+			    return nb::cast(*presentation);
+		    },
+		    "Root-level Pixel Presentation value, or None when absent.")
+		.def_prop_ro("voi_lut",
+		    [](const DicomFile& self) -> nb::object {
+			    const auto lut = self.voi_lut();
+			    if (!lut) {
+				    return nb::none();
+			    }
+			    return nb::cast(*lut);
+		    },
+		    "VOI LUT metadata for frame 0 as a VoiLut, or None when absent.")
+		.def("voi_lut_for_frame",
+		    [](const DicomFile& self, std::size_t frame_index) -> nb::object {
+			    const auto lut = self.voi_lut(frame_index);
+			    if (!lut) {
+				    return nb::none();
+			    }
+			    return nb::cast(*lut);
+		    },
+		    nb::arg("frame_index"),
+		    "VOI LUT metadata for the requested frame, resolved from Per-Frame Functional Groups, Shared Functional Groups, then the root dataset.")
+		.def_prop_ro("palette_lut",
+		    [](const DicomFile& self) -> nb::object {
+			    const auto lut = self.palette_lut();
+			    if (!lut) {
+				    return nb::none();
+			    }
+			    return nb::cast(*lut);
+		    },
+		    "Palette color LUT metadata as a PaletteLut, or None when absent.")
+		.def_prop_ro("supplemental_palette",
+		    [](const DicomFile& self) -> nb::object {
+			    const auto info = self.supplemental_palette();
+			    if (!info) {
+				    return nb::none();
+			    }
+			    return nb::cast(*info);
+		    },
+		    "Supplemental Palette metadata as a SupplementalPaletteInfo, or None when absent.")
+		.def_prop_ro("enhanced_palette",
+		    [](const DicomFile& self) -> nb::object {
+			    const auto info = self.enhanced_palette();
+			    if (!info) {
+				    return nb::none();
+			    }
+			    return nb::cast(*info);
+		    },
+		    "Enhanced Palette metadata as an EnhancedPaletteInfo, or None when absent.")
 		.def_prop_ro("has_error", &DicomFile::has_error,
 		    "True if parsing recorded any error diagnostics or threw while reading.")
 		.def_prop_ro("error_message",
@@ -3823,9 +4449,7 @@ NB_MODULE(_dicomsdl, m) {
 		.def("to_array",
 		    &dicomfile_to_array,
 		    nb::arg("frame") = -1,
-		    nb::arg("to_modality_value") = false,
 		    nb::arg("decode_mct") = true,
-		    nb::arg("scaled") = nb::none(),
 		    nb::kw_only(),
 		    nb::arg("worker_threads") = -1,
 		    nb::arg("codec_threads") = -1,
@@ -3836,12 +4460,6 @@ NB_MODULE(_dicomsdl, m) {
 		    "----------\n"
 		    "frame : int, optional\n"
 		    "    -1 decodes all frames (multi-frame only), otherwise decode the selected frame index.\n"
-		    "to_modality_value : bool, optional\n"
-		    "    If True, convert stored values to modality values via Modality LUT/Rescale when available.\n"
-		    "    Modality-value output is ignored when SamplesPerPixel != 1, or when both\n"
-		    "    Modality LUT Sequence and Rescale Slope/Intercept are absent.\n"
-		    "scaled : bool, optional\n"
-		    "    Deprecated alias of to_modality_value.\n"
 		    "decode_mct : bool, optional\n"
 		    "    Whether to apply codestream-level MCT/color inverse transform when supported.\n"
 		    "    True by default. Currently honored by OpenJPEG-based decode paths.\n"
@@ -3876,9 +4494,7 @@ NB_MODULE(_dicomsdl, m) {
 		    &dicomfile_decode_into_array,
 		    nb::arg("out"),
 		    nb::arg("frame") = 0,
-		    nb::arg("to_modality_value") = false,
 		    nb::arg("decode_mct") = true,
-		    nb::arg("scaled") = nb::none(),
 		    nb::kw_only(),
 		    nb::arg("worker_threads") = -1,
 		    nb::arg("codec_threads") = -1,
@@ -3892,10 +4508,6 @@ NB_MODULE(_dicomsdl, m) {
 		    "    exactly match the decoded output for the requested frame selection.\n"
 		    "frame : int, optional\n"
 		    "    -1 decodes all frames (multi-frame only), otherwise decode the selected frame index.\n"
-		    "to_modality_value : bool, optional\n"
-		    "    If True, convert stored values to modality values via Modality LUT/Rescale when available.\n"
-		    "scaled : bool, optional\n"
-		    "    Deprecated alias of to_modality_value.\n"
 		    "decode_mct : bool, optional\n"
 		    "    Whether to apply codestream-level MCT/color inverse transform when supported.\n"
 		    "    True by default. Currently honored by OpenJPEG-based decode paths.\n"
@@ -3926,14 +4538,12 @@ NB_MODULE(_dicomsdl, m) {
 		.def("pixel_array",
 		    &dicomfile_to_array,
 		    nb::arg("frame") = -1,
-		    nb::arg("to_modality_value") = false,
 		    nb::arg("decode_mct") = true,
-		    nb::arg("scaled") = nb::none(),
 		    nb::kw_only(),
 		    nb::arg("worker_threads") = -1,
 		    nb::arg("codec_threads") = -1,
 		    nb::arg("plan") = nb::none(),
-		    "Alias of to_array(frame=-1, to_modality_value=False, decode_mct=True).")
+		    "Alias of to_array(frame=-1, decode_mct=True).")
 		.def("__getitem__",
 		    [](DicomFile& self, nb::object key) -> DataElement& {
 			    return dataset_lookup_dataelement_py(
@@ -4019,6 +4629,67 @@ NB_MODULE(_dicomsdl, m) {
 	    nb::kw_only(),
 	    nb::arg("options") = nb::none(),
 	    "Create an EncoderContext from transfer syntax text and optional codec options.");
+
+	m.def("apply_rescale",
+	    [](nb::handle source, float slope, float intercept) {
+		    return apply_rescale_to_numpy_array(source, slope, intercept);
+	    },
+	    nb::arg("source"),
+	    nb::arg("slope"),
+	    nb::arg("intercept"),
+	    "Apply a linear rescale and return a NumPy array backed by owned output storage.");
+
+	m.def("apply_rescale",
+	    [](nb::handle source, const dicom::pixel::RescaleTransform& transform) {
+		    return apply_rescale_to_numpy_array(
+		        source, transform.slope, transform.intercept);
+	    },
+	    nb::arg("source"),
+	    nb::arg("transform"),
+	    "Apply a RescaleTransform and return a NumPy array backed by owned output storage.");
+
+	m.def("apply_rescale_frames",
+	    &apply_rescale_frames_to_numpy_array,
+	    nb::arg("source"),
+	    nb::arg("slopes"),
+	    nb::arg("intercepts"),
+	    "Apply per-frame linear rescale values and return a NumPy array backed by owned output storage.");
+
+	m.def("apply_modality_lut",
+	    &apply_modality_lut_to_numpy_array,
+	    nb::arg("source"),
+	    nb::arg("lut"),
+	    "Apply a modality LUT and return a NumPy array backed by owned output storage.");
+	m.def("apply_palette_lut",
+	    &apply_palette_lut_to_numpy_array,
+	    nb::arg("source"),
+	    nb::arg("lut"),
+	    "Apply a palette LUT and return a NumPy array backed by owned output storage.");
+	m.def("apply_voi_lut",
+	    &apply_voi_lut_to_numpy_array,
+	    nb::arg("source"),
+	    nb::arg("lut"),
+	    "Apply a VOI LUT and return a NumPy array backed by owned output storage.");
+	m.def("apply_window",
+	    [](nb::handle source, float center, float width,
+	        dicom::pixel::VoiLutFunction function) {
+		    return apply_window_to_numpy_array(
+		        source, dicom::pixel::WindowTransform{
+		                    .center = center,
+		                    .width = width,
+		                    .function = function,
+		                });
+	    },
+	    nb::arg("source"),
+	    nb::arg("center"),
+	    nb::arg("width"),
+	    nb::arg("function") = dicom::pixel::VoiLutFunction::linear,
+	    "Apply a VOI window transform and return a NumPy array backed by owned output storage.");
+	m.def("apply_window",
+	    &apply_window_to_numpy_array,
+	    nb::arg("source"),
+	    nb::arg("window"),
+	    "Apply a WindowTransform and return a NumPy array backed by owned output storage.");
 
 	m.def("read_file",
     [](nb::handle path, std::optional<Tag> load_until, std::optional<bool> keep_on_error) {
@@ -4623,12 +5294,30 @@ m.def("generate_study_instance_uid",
 	    "Planar",
 	    "DecodeOptions",
 	    "DecodePlan",
+	    "VoiLutFunction",
+	    "PixelPresentation",
+	    "WindowTransform",
+	    "RescaleTransform",
+	    "ModalityLut",
+	    "VoiLut",
+	    "PaletteLut",
+	    "SupplementalPaletteInfo",
+	    "EnhancedPaletteDataPathAssignmentInfo",
+	    "EnhancedBlendingLutInfo",
+	    "EnhancedPaletteItemInfo",
+	    "EnhancedPaletteInfo",
 	    "EncoderContext",
-		    "create_encoder_context",
-		    "DicomFile",
-		    "DataElement",
-		    "DataSet",
-		    "PersonName",
+	    "create_encoder_context",
+	    "apply_rescale",
+	    "apply_rescale_frames",
+	    "apply_window",
+	    "apply_modality_lut",
+	    "apply_voi_lut",
+	    "apply_palette_lut",
+	    "DicomFile",
+	    "DataElement",
+	    "DataSet",
+	    "PersonName",
 	    "PersonNameGroup",
 	    "Tag",
 	    "VR",
@@ -4664,3 +5353,4 @@ m.def("generate_study_instance_uid",
 	    "generate_series_instance_uid",
 	    "generate_study_instance_uid");
 }
+

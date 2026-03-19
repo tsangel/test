@@ -28,34 +28,98 @@ def test_create_decode_plan_exposes_shape_dtype_and_strides():
     assert plan.frame_stride == 32
     assert plan.required_bytes(frame=0) == 32
     assert plan.options.planar_out == dicom.Planar.interleaved
-    assert plan.options.to_modality_value is False
     assert plan.options.worker_threads == -1
     assert plan.options.codec_threads == -1
 
 
 def test_to_array_accepts_reusable_decode_plan():
     dicom_file = dicom.read_file(_test_file())
-    options = dicom.DecodeOptions(to_modality_value=True)
+    options = dicom.DecodeOptions()
     plan = dicom_file.create_decode_plan(options)
 
     arr = dicom_file.to_array(frame=0, plan=plan)
-    expected = dicom_file.to_array(frame=0, to_modality_value=True)
+    expected = dicom_file.to_array(frame=0)
 
     assert isinstance(arr, np.ndarray)
-    assert arr.dtype == np.float32
+    assert arr.dtype == np.int16
     assert np.array_equal(arr, expected)
 
 
 def test_decode_into_accepts_reusable_decode_plan():
     dicom_file = dicom.read_file(_test_file())
-    options = dicom.DecodeOptions(to_modality_value=True)
+    options = dicom.DecodeOptions()
     plan = dicom_file.create_decode_plan(options)
 
     out = np.empty(plan.shape(frame=0), dtype=plan.dtype)
     returned = dicom_file.decode_into(out, frame=0, plan=plan)
 
-    expected = dicom_file.to_array(frame=0, to_modality_value=True)
+    expected = dicom_file.to_array(frame=0)
 
     assert returned is out
-    assert out.dtype == np.float32
+    assert out.dtype == np.int16
+    assert np.array_equal(out, expected)
+
+
+def test_planar_decode_plan_exposes_plane_first_single_frame_array():
+    dicom_file = dicom.read_file(_test_file())
+    source = np.array(
+        [
+            [[1, 2, 3], [4, 5, 6]],
+            [[7, 8, 9], [10, 11, 12]],
+        ],
+        dtype=np.uint8,
+    )
+    dicom_file.set_pixel_data("ExplicitVRLittleEndian", source)
+
+    options = dicom.DecodeOptions(planar_out=dicom.Planar.planar)
+    plan = dicom_file.create_decode_plan(options)
+
+    assert plan.shape(frame=0) == (3, 2, 2)
+
+    arr = dicom_file.to_array(frame=0, plan=plan)
+    expected = np.transpose(source, (2, 0, 1))
+
+    assert arr.shape == (3, 2, 2)
+    assert arr.flags.c_contiguous
+    assert np.array_equal(arr, expected)
+
+    out = np.empty(plan.shape(frame=0), dtype=plan.dtype)
+    returned = dicom_file.decode_into(out, frame=0, plan=plan)
+
+    assert returned is out
+    assert out.flags.c_contiguous
+    assert np.array_equal(out, expected)
+
+
+def test_planar_decode_plan_exposes_plane_first_multi_frame_array():
+    dicom_file = dicom.read_file(_test_file())
+    frame0 = np.array(
+        [
+            [[1, 2, 3], [4, 5, 6]],
+            [[7, 8, 9], [10, 11, 12]],
+        ],
+        dtype=np.uint8,
+    )
+    frame1 = frame0 + np.uint8(20)
+    source = np.stack([frame0, frame1], axis=0)
+    dicom_file.set_pixel_data("ExplicitVRLittleEndian", source)
+
+    options = dicom.DecodeOptions(planar_out=dicom.Planar.planar)
+    plan = dicom_file.create_decode_plan(options)
+
+    assert plan.shape(frame=0) == (3, 2, 2)
+    assert plan.shape(frame=-1) == (2, 3, 2, 2)
+
+    arr = dicom_file.to_array(frame=-1, plan=plan)
+    expected = np.transpose(source, (0, 3, 1, 2))
+
+    assert arr.shape == (2, 3, 2, 2)
+    assert arr.flags.c_contiguous
+    assert np.array_equal(arr, expected)
+
+    out = np.empty(plan.shape(frame=-1), dtype=plan.dtype)
+    returned = dicom_file.decode_into(out, frame=-1, plan=plan)
+
+    assert returned is out
+    assert out.flags.c_contiguous
     assert np.array_equal(out, expected)
