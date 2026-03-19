@@ -1,4 +1,5 @@
 #include "pixel/host/decode/decode_frame_dispatch.hpp"
+#include "pixel/host/decode/decode_thread_policy.hpp"
 
 #include "pixel/host/error/codec_error.hpp"
 #include "pixel/host/support/dicom_pixel_support.hpp"
@@ -22,7 +23,6 @@
 #include <new>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <vector>
 
 namespace dicom::pixel::detail {
@@ -33,11 +33,6 @@ namespace {
 [[nodiscard]] const ::pixel::runtime::BindingRegistry* get_runtime_registry();
 #endif
 
-struct EffectiveExecutionThreadSettings {
-	std::size_t worker_count{1};
-	int codec_threads{1};
-};
-
 struct DecodeDispatchRequestView {
 	std::string_view api_name{};
 	std::string_view file_path{};
@@ -46,12 +41,6 @@ struct DecodeDispatchRequestView {
 	DecodeOptions options{};
 	PixelLayout output_layout{};
 };
-
-[[nodiscard]] std::size_t resolve_hardware_thread_count() noexcept {
-	const unsigned int hw_threads = std::thread::hardware_concurrency();
-	return hw_threads == 0u ? std::size_t{1}
-	                        : static_cast<std::size_t>(hw_threads);
-}
 
 [[nodiscard]] DecodeDispatchRequestView build_decode_dispatch_request_view(
     std::string_view api_name, const DicomFile& df, const DecodePlan& plan) {
@@ -185,51 +174,10 @@ void validate_decode_all_frames_request_or_throw(
 	    });
 }
 
-[[nodiscard]] int resolve_auto_codec_thread_cap(
-    uid::WellKnown transfer_syntax) noexcept {
-	if (transfer_syntax.is_jpeg2000()) {
-		return 8;
-	}
-	if (transfer_syntax.is_jpegxl()) {
-		return 4;
-	}
-	if (!transfer_syntax.is_htj2k()) {
-		return 1;
-	}
-
-#if defined(DICOMSDL_PIXEL_RUNTIME_ENABLED)
-	const auto* registry = get_runtime_registry();
-	if (registry != nullptr) {
-		uint32_t codec_profile_code = PIXEL_CODEC_PROFILE_UNKNOWN;
-		if (::pixel::runtime::codec_profile_code_from_transfer_syntax(
-		        transfer_syntax, &codec_profile_code)) {
-			const auto* binding = registry->find_decoder_binding(codec_profile_code);
-			if (binding != nullptr && binding->display_name != nullptr) {
-				const std::string_view display_name{binding->display_name};
-				if (display_name.find("OpenJPEG") != std::string_view::npos) {
-					return 8;
-				}
-				if (display_name.find("HTJ2K") != std::string_view::npos) {
-					return 1;
-				}
-			}
-		}
-	}
-#endif
-
-	return get_htj2k_decoder_backend() == Htj2kDecoderBackend::openjpeg ? 8 : 1;
-}
-
 [[nodiscard]] EffectiveExecutionThreadSettings resolve_decode_frame_thread_settings(
     const DecodeDispatchRequestView& request) noexcept {
-	const int codec_cap = resolve_auto_codec_thread_cap(request.transfer_syntax);
-	const int codec_threads =
-	    request.options.codec_threads == -1 ? codec_cap
-	                                        : request.options.codec_threads;
-	return EffectiveExecutionThreadSettings{
-	    .worker_count = std::size_t{1},
-	    .codec_threads = codec_threads,
-	};
+	return ::dicom::pixel::detail::resolve_decode_frame_thread_settings(
+	    request.transfer_syntax, request.options, resolve_hardware_thread_count());
 }
 
 [[nodiscard]] EffectiveExecutionThreadSettings resolve_decode_all_frames_thread_settings(
@@ -237,48 +185,9 @@ void validate_decode_all_frames_request_or_throw(
 	const auto frames = request.output_layout.frames > 0
 	                        ? static_cast<std::size_t>(request.output_layout.frames)
 	                        : std::size_t{1};
-	const auto hardware_threads = resolve_hardware_thread_count();
-
-	std::size_t worker_count = std::size_t{1};
-	// Outer workers parallelize across frames and stay capped by available work.
-	if (frames > std::size_t{1}) {
-		if (request.options.worker_threads == -1) {
-			worker_count = (frames < hardware_threads) ? frames : hardware_threads;
-		} else if (request.options.worker_threads > 1) {
-			worker_count = static_cast<std::size_t>(request.options.worker_threads);
-			if (worker_count > frames) {
-				worker_count = frames;
-			}
-		}
-	}
-
-	const int codec_cap = resolve_auto_codec_thread_cap(request.transfer_syntax);
-	int codec_threads = request.options.codec_threads;
-	if (codec_threads == -1) {
-		// When many outer workers are active, bias toward one codec thread each to
-		// avoid oversubscribing the machine.
-		if (worker_count >= std::size_t{4}) {
-			codec_threads = 1;
-		} else {
-			std::size_t budget = hardware_threads;
-			if (worker_count > std::size_t{1}) {
-				budget /= worker_count;
-			}
-			if (budget == std::size_t{0}) {
-				budget = std::size_t{1};
-			}
-			const auto capped_budget = static_cast<std::size_t>(codec_cap);
-			if (budget > capped_budget) {
-				budget = capped_budget;
-			}
-			codec_threads = static_cast<int>(budget);
-		}
-	}
-
-	return EffectiveExecutionThreadSettings{
-	    .worker_count = worker_count,
-	    .codec_threads = codec_threads,
-	};
+	return ::dicom::pixel::detail::resolve_decode_all_frames_thread_settings(
+	    request.transfer_syntax, request.options, frames,
+	    resolve_hardware_thread_count());
 }
 
 } // namespace

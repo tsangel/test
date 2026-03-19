@@ -140,6 +140,17 @@ if(BUILD_TESTING)
     add_test(NAME decode_execution_observer_smoke COMMAND dicomsdl_decode_execution_observer_smoke)
     set_tests_properties(decode_execution_observer_smoke PROPERTIES LABELS "dicomsdl")
 
+    add_executable(dicomsdl_decode_thread_policy_smoke
+        tests/decode_thread_policy_smoke.cpp
+    )
+    target_include_directories(dicomsdl_decode_thread_policy_smoke
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    target_link_libraries(dicomsdl_decode_thread_policy_smoke PRIVATE dicomsdl)
+    add_test(NAME decode_thread_policy_smoke COMMAND dicomsdl_decode_thread_policy_smoke)
+    set_tests_properties(decode_thread_policy_smoke PROPERTIES LABELS "dicomsdl")
+
     add_executable(dicomsdl_pixel_transform_smoke
         tests/pixel_transform_smoke.cpp
     )
@@ -276,6 +287,7 @@ if(BUILD_TESTING)
         dicomsdl_codec_cycle_roundtrip
         dicomsdl_codec_error_boundary
         dicomsdl_decode_execution_observer_smoke
+        dicomsdl_decode_thread_policy_smoke
         dicomsdl_codec_cycle_realdata
         dicomsdl_pixel_core_uncompressed_smoke
         dicomsdl_pixel_rle_static_plugin_smoke
@@ -306,6 +318,7 @@ if(BUILD_TESTING)
             dicomsdl_codec_cycle_roundtrip
             dicomsdl_codec_error_boundary
             dicomsdl_decode_execution_observer_smoke
+            dicomsdl_decode_thread_policy_smoke
             dicomsdl_pixel_core_uncompressed_smoke
             dicomsdl_pixel_rle_static_plugin_smoke
             dicomsdl_pixel_jpeg_plugin_smoke
