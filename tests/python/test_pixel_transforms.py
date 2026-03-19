@@ -87,6 +87,40 @@ def test_apply_rescale_frames_applies_per_frame_coefficients():
     assert np.allclose(transformed, expected)
 
 
+def test_apply_rescale_frames_rejects_ambiguous_3d_shape_with_trailing_3():
+    source = np.zeros((2, 512, 3), dtype=np.int16)
+
+    with pytest.raises(ValueError, match="ambiguous"):
+        dicom.apply_rescale_frames(source, [1.0, 2.0], [0.0, 0.0])
+
+
+def test_apply_rescale_frames_accepts_explicit_4d_singleton_channel_shape():
+    source = np.array(
+        [
+            [[[1], [2]], [[3], [4]]],
+            [[[5], [6]], [[7], [8]]],
+        ],
+        dtype=np.int16,
+    )
+
+    transformed = dicom.apply_rescale_frames(
+        source,
+        [1.0, 10.0],
+        [0.0, -5.0],
+    )
+
+    expected = np.array(
+        [
+            [[1.0, 2.0], [3.0, 4.0]],
+            [[45.0, 55.0], [65.0, 75.0]],
+        ],
+        dtype=np.float32,
+    )
+
+    assert transformed.dtype == np.float32
+    assert np.allclose(transformed, expected)
+
+
 def test_apply_modality_lut_maps_and_clamps_values():
     source = np.array([[9, 10], [11, 15]], dtype=np.int16)
     lut = dicom.ModalityLut()

@@ -135,9 +135,17 @@ def _convert_ybr_to_rgb(array, photometric: str | None):
     cr = work[..., 2] - 128.0
 
     rgb = np.empty_like(work, dtype=np.float32)
-    rgb[..., 0] = y + 1.402 * cr
-    rgb[..., 1] = y - 0.344136 * cb - 0.714136 * cr
-    rgb[..., 2] = y + 1.772 * cb
+    if photometric in {"YBR_PARTIAL_420", "YBR_PARTIAL_422"}:
+        # YBR_PARTIAL uses studio-range luma/chroma, so expand Y from [16, 235]
+        # before converting to RGB.
+        y = 1.16438356 * (y - 16.0)
+        rgb[..., 0] = y + 1.59602678 * cr
+        rgb[..., 1] = y - 0.39176229 * cb - 0.81296764 * cr
+        rgb[..., 2] = y + 2.01723214 * cb
+    else:
+        rgb[..., 0] = y + 1.402 * cr
+        rgb[..., 1] = y - 0.344136 * cb - 0.714136 * cr
+        rgb[..., 2] = y + 1.772 * cb
     rgb = np.nan_to_num(rgb, nan=0.0, posinf=255.0, neginf=0.0)
     return np.clip(rgb, 0.0, 255.0).astype(np.uint8)
 

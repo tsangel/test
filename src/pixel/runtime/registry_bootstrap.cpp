@@ -2,11 +2,31 @@
 
 #include <unordered_set>
 
+#include "diagnostics.h"
 #include "shared_library_path.hpp"
 
 namespace pixel::runtime {
 
 namespace {
+
+const char* describe_shared_plugin_load_status(
+    SharedPluginLoadStatus status) noexcept {
+  switch (status) {
+    case SharedPluginLoadStatus::kOk:
+      return "ok";
+    case SharedPluginLoadStatus::kInvalidArgument:
+      return "invalid_argument";
+    case SharedPluginLoadStatus::kOpenFailed:
+      return "open_failed";
+    case SharedPluginLoadStatus::kNoApiEntrypoint:
+      return "no_api_entrypoint";
+    case SharedPluginLoadStatus::kDecoderHandshakeFailed:
+      return "decoder_handshake_failed";
+    case SharedPluginLoadStatus::kEncoderHandshakeFailed:
+      return "encoder_handshake_failed";
+  }
+  return "unknown";
+}
 
 RegistryBootstrapResult initialize_once_impl(
     const std::vector<std::string>& plugin_paths, BindingRegistryRuntime* state) {
@@ -20,8 +40,14 @@ RegistryBootstrapResult initialize_once_impl(
 
   for (const std::string& plugin_path : plugin_paths) {
     std::string resolved_plugin_path{};
+    std::string resolve_error{};
     if (!detail::resolve_shared_library_path(
-            plugin_path, &resolved_plugin_path, nullptr)) {
+            plugin_path, &resolved_plugin_path, &resolve_error)) {
+      dicom::diag::warn(
+          "pixel runtime bootstrap skipped plugin path={} reason={}",
+          plugin_path,
+          resolve_error.empty() ? "failed to resolve shared library path"
+                                : resolve_error);
       continue;
     }
     if (!loaded_library_paths.insert(resolved_plugin_path).second) {
@@ -29,8 +55,12 @@ RegistryBootstrapResult initialize_once_impl(
     }
 
     LoadedSharedPlugin loaded{};
-    if (load_shared_plugin(resolved_plugin_path.c_str(), &loaded) !=
-        SharedPluginLoadStatus::kOk) {
+    const SharedPluginLoadStatus load_status =
+        load_shared_plugin(resolved_plugin_path.c_str(), &loaded);
+    if (load_status != SharedPluginLoadStatus::kOk) {
+      dicom::diag::warn(
+          "pixel runtime bootstrap failed plugin path={} status={}",
+          resolved_plugin_path, describe_shared_plugin_load_status(load_status));
       continue;
     }
     state->loaded_shared_plugins.push_back(loaded);

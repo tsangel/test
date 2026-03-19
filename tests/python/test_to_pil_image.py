@@ -247,3 +247,25 @@ def test_to_pil_image_rejects_complex_enhanced_palette_pipeline():
 
     with pytest.raises(NotImplementedError, match="Enhanced Palette"):
         dicom_file.to_pil_image(frame=0, auto_window=True)
+
+
+@pytest.mark.parametrize("photometric", ["YBR_PARTIAL_420", "YBR_PARTIAL_422"])
+def test_to_pil_image_converts_partial_ybr_to_full_display_range(photometric: str):
+    dicom_file = dicom.DicomFile()
+    source = np.array(
+        [[[16, 128, 128], [235, 128, 128]]],
+        dtype=np.uint8,
+    )
+    dicom_file.set_pixel_data("ExplicitVRLittleEndian", source)
+    dicom_file.PhotometricInterpretation = photometric
+
+    image = dicom_file.to_pil_image(frame=0, auto_window=True)
+
+    arr = np.asarray(image)
+    expected = np.array(
+        [[[0, 0, 0], [255, 255, 255]]],
+        dtype=np.uint8,
+    )
+    assert image.mode == "RGB"
+    assert arr.dtype == np.uint8
+    assert np.array_equal(arr, expected)

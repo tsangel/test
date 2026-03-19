@@ -520,28 +520,32 @@ private:
 
 [[nodiscard]] dicom::pixel::ConstPixelSpan build_pixel_span_or_throw(
     const Py_buffer& view) {
+	const auto throw_source_error = [](std::string_view detail) -> void {
+		throw nb::value_error((std::string("set_pixel_data ") + std::string(detail)).c_str());
+	};
+
 	if (view.ndim < 2 || view.ndim > 4) {
-		throw nb::value_error("set_pixel_data source must have ndim 2, 3, or 4");
+		throw_source_error("source must have ndim 2, 3, or 4");
 	}
 	if (view.itemsize <= 0) {
-		throw nb::value_error("set_pixel_data source must have a positive itemsize");
+		throw_source_error("source must have a positive itemsize");
 	}
 	if (view.len < 0) {
-		throw nb::value_error("set_pixel_data source buffer length is invalid");
+		throw_source_error("source buffer length is invalid");
 	}
 	if (view.len > 0 && view.buf == nullptr) {
-		throw nb::value_error("set_pixel_data source buffer is null");
+		throw_source_error("source buffer is null");
 	}
 	if (view.shape == nullptr) {
-		throw nb::value_error("set_pixel_data source must expose shape metadata");
+		throw_source_error("source must expose shape metadata");
 	}
 	if (view.format == nullptr || view.format[0] == '\0') {
-		throw nb::value_error("set_pixel_data source must expose dtype format metadata");
+		throw_source_error("source must expose dtype format metadata");
 	}
 
 	const auto format = std::string_view(view.format);
 	if (!format.empty() && format.front() == '>') {
-		throw nb::value_error("set_pixel_data does not support big-endian source dtype");
+		throw_source_error("does not support big-endian source dtype");
 	}
 
 	const auto bytes_per_sample = static_cast<std::size_t>(view.itemsize);
@@ -551,7 +555,7 @@ private:
 	const auto read_dim = [&](int axis) -> std::size_t {
 		const auto value = view.shape[axis];
 		if (value <= 0) {
-			throw nb::value_error("set_pixel_data source shape values must be positive");
+			throw_source_error("source shape values must be positive");
 		}
 		return static_cast<std::size_t>(value);
 	};
@@ -585,40 +589,38 @@ private:
 	}
 
 	if (samples_per_pixel != 1 && samples_per_pixel != 3) {
-		throw nb::value_error(
-		    "set_pixel_data currently supports samples_per_pixel 1 or 3");
+		throw_source_error("currently supports samples_per_pixel 1 or 3");
 	}
 
 	if (rows > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
 	    cols > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
 	    frames > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
 	    samples_per_pixel > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
-		throw nb::value_error("set_pixel_data source dimensions exceed int range");
+		throw_source_error("source dimensions exceed int range");
 	}
 
 	const auto max_size = std::numeric_limits<std::size_t>::max();
 	if (samples_per_pixel != 0 &&
 	    cols > (max_size / samples_per_pixel)) {
-		throw nb::value_error("set_pixel_data row size overflow");
+		throw_source_error("row size overflow");
 	}
 	const auto row_components = cols * samples_per_pixel;
 	if (bytes_per_sample != 0 &&
 	    row_components > (max_size / bytes_per_sample)) {
-		throw nb::value_error("set_pixel_data row stride overflow");
+		throw_source_error("row stride overflow");
 	}
 	const auto row_stride = row_components * bytes_per_sample;
 	if (rows != 0 && row_stride > (max_size / rows)) {
-		throw nb::value_error("set_pixel_data frame stride overflow");
+		throw_source_error("frame stride overflow");
 	}
 	const auto frame_stride = row_stride * rows;
 	if (frames != 0 && frame_stride > (max_size / frames)) {
-		throw nb::value_error("set_pixel_data total byte size overflow");
+		throw_source_error("total byte size overflow");
 	}
 	const auto required_bytes = frame_stride * frames;
 	const auto actual_bytes = static_cast<std::size_t>(view.len);
 	if (actual_bytes != required_bytes) {
-		throw nb::value_error(
-		    "set_pixel_data source buffer size does not match inferred shape and dtype");
+		throw_source_error("source buffer size does not match inferred shape and dtype");
 	}
 
 	// Build the normalized layout once so Python callers share the same encode path
@@ -645,10 +647,133 @@ private:
 	};
 }
 
+[[nodiscard]] dicom::pixel::ConstPixelSpan build_transform_pixel_span_or_throw(
+    const Py_buffer& view) {
+	const auto throw_source_error = [](std::string_view detail) -> void {
+		throw nb::value_error((std::string("pixel transform ") + std::string(detail)).c_str());
+	};
+
+	if (view.ndim < 2 || view.ndim > 4) {
+		throw_source_error("source must have ndim 2, 3, or 4");
+	}
+	if (view.itemsize <= 0) {
+		throw_source_error("source must have a positive itemsize");
+	}
+	if (view.len < 0) {
+		throw_source_error("source buffer length is invalid");
+	}
+	if (view.len > 0 && view.buf == nullptr) {
+		throw_source_error("source buffer is null");
+	}
+	if (view.shape == nullptr) {
+		throw_source_error("source must expose shape metadata");
+	}
+	if (view.format == nullptr || view.format[0] == '\0') {
+		throw_source_error("source must expose dtype format metadata");
+	}
+
+	const auto format = std::string_view(view.format);
+	if (!format.empty() && format.front() == '>') {
+		throw_source_error("does not support big-endian source dtype");
+	}
+
+	const auto bytes_per_sample = static_cast<std::size_t>(view.itemsize);
+	const auto data_type =
+	    parse_pixel_source_data_type_or_throw(format, bytes_per_sample);
+
+	const auto read_dim = [&](int axis) -> std::size_t {
+		const auto value = view.shape[axis];
+		if (value <= 0) {
+			throw_source_error("source shape values must be positive");
+		}
+		return static_cast<std::size_t>(value);
+	};
+
+	std::size_t frames = 1;
+	std::size_t rows = 0;
+	std::size_t cols = 0;
+	std::size_t samples_per_pixel = 1;
+
+	if (view.ndim == 2) {
+		rows = read_dim(0);
+		cols = read_dim(1);
+	} else if (view.ndim == 3) {
+		const auto d0 = read_dim(0);
+		const auto d1 = read_dim(1);
+		const auto d2 = read_dim(2);
+		if (d2 == 1 || d2 == 3) {
+			throw_source_error(
+			    "source shape is ambiguous when ndim == 3 and the trailing dimension is 1 or 3; "
+			    "reshape to (rows, cols), (frames, rows, cols), or (frames, rows, cols, 1) explicitly");
+		}
+		frames = d0;
+		rows = d1;
+		cols = d2;
+	} else {
+		frames = read_dim(0);
+		rows = read_dim(1);
+		cols = read_dim(2);
+		samples_per_pixel = read_dim(3);
+	}
+
+	if (samples_per_pixel != 1) {
+		throw_source_error("currently supports only monochrome/indexed samples_per_pixel 1");
+	}
+
+	if (rows > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
+	    cols > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
+	    frames > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+		throw_source_error("source dimensions exceed int range");
+	}
+
+	const auto max_size = std::numeric_limits<std::size_t>::max();
+	if (samples_per_pixel != 0 &&
+	    cols > (max_size / samples_per_pixel)) {
+		throw_source_error("row size overflow");
+	}
+	const auto row_components = cols * samples_per_pixel;
+	if (bytes_per_sample != 0 &&
+	    row_components > (max_size / bytes_per_sample)) {
+		throw_source_error("row stride overflow");
+	}
+	const auto row_stride = row_components * bytes_per_sample;
+	if (rows != 0 && row_stride > (max_size / rows)) {
+		throw_source_error("frame stride overflow");
+	}
+	const auto frame_stride = row_stride * rows;
+	if (frames != 0 && frame_stride > (max_size / frames)) {
+		throw_source_error("total byte size overflow");
+	}
+	const auto required_bytes = frame_stride * frames;
+	const auto actual_bytes = static_cast<std::size_t>(view.len);
+	if (actual_bytes != required_bytes) {
+		throw_source_error("source buffer size does not match inferred shape and dtype");
+	}
+
+	dicom::pixel::PixelLayout layout{
+	    .data_type = data_type,
+	    .photometric = dicom::pixel::Photometric::monochrome2,
+	    .planar = dicom::pixel::Planar::interleaved,
+	    .reserved = 0,
+	    .rows = static_cast<std::uint32_t>(rows),
+	    .cols = static_cast<std::uint32_t>(cols),
+	    .frames = static_cast<std::uint32_t>(frames),
+	    .samples_per_pixel = static_cast<std::uint16_t>(samples_per_pixel),
+	    .bits_stored = dicom::pixel::normalized_bits_stored_of(data_type),
+	    .row_stride = row_stride,
+	    .frame_stride = frame_stride,
+	};
+	return dicom::pixel::ConstPixelSpan{
+	    .layout = layout,
+	    .bytes = std::span<const std::uint8_t>(
+	        reinterpret_cast<const std::uint8_t*>(view.buf), actual_bytes),
+	};
+}
+
 nb::object apply_rescale_to_numpy_array(
     nb::handle source, float slope, float intercept) {
 	PyReadOnlyBufferView source_view(source);
-	const auto pixel_span = build_pixel_span_or_throw(source_view.view());
+	const auto pixel_span = build_transform_pixel_span_or_throw(source_view.view());
 	return numpy_array_from_owned_pixel_buffer(
 	    dicom::pixel::apply_rescale(pixel_span, slope, intercept));
 }
@@ -657,7 +782,7 @@ nb::object apply_rescale_frames_to_numpy_array(
     nb::handle source, const std::vector<float>& slopes,
     const std::vector<float>& intercepts) {
 	PyReadOnlyBufferView source_view(source);
-	const auto pixel_span = build_pixel_span_or_throw(source_view.view());
+	const auto pixel_span = build_transform_pixel_span_or_throw(source_view.view());
 	auto output = dicom::pixel::PixelBuffer::allocate(
 	    dicom::pixel::make_rescale_output_layout(pixel_span.layout));
 	dicom::pixel::apply_rescale_frames_into(
@@ -668,7 +793,7 @@ nb::object apply_rescale_frames_to_numpy_array(
 nb::object apply_modality_lut_to_numpy_array(
     nb::handle source, const dicom::pixel::ModalityLut& lut) {
 	PyReadOnlyBufferView source_view(source);
-	const auto pixel_span = build_pixel_span_or_throw(source_view.view());
+	const auto pixel_span = build_transform_pixel_span_or_throw(source_view.view());
 	return numpy_array_from_owned_pixel_buffer(
 	    dicom::pixel::apply_modality_lut(pixel_span, lut));
 }
@@ -676,7 +801,7 @@ nb::object apply_modality_lut_to_numpy_array(
 nb::object apply_palette_lut_to_numpy_array(
     nb::handle source, const dicom::pixel::PaletteLut& lut) {
 	PyReadOnlyBufferView source_view(source);
-	const auto pixel_span = build_pixel_span_or_throw(source_view.view());
+	const auto pixel_span = build_transform_pixel_span_or_throw(source_view.view());
 	return numpy_array_from_owned_pixel_buffer(
 	    dicom::pixel::apply_palette_lut(pixel_span, lut));
 }
@@ -684,7 +809,7 @@ nb::object apply_palette_lut_to_numpy_array(
 nb::object apply_voi_lut_to_numpy_array(
     nb::handle source, const dicom::pixel::VoiLut& lut) {
 	PyReadOnlyBufferView source_view(source);
-	const auto pixel_span = build_pixel_span_or_throw(source_view.view());
+	const auto pixel_span = build_transform_pixel_span_or_throw(source_view.view());
 	return numpy_array_from_owned_pixel_buffer(
 	    dicom::pixel::apply_voi_lut(pixel_span, lut));
 }
@@ -692,7 +817,7 @@ nb::object apply_voi_lut_to_numpy_array(
 nb::object apply_window_to_numpy_array(
     nb::handle source, const dicom::pixel::WindowTransform& window) {
 	PyReadOnlyBufferView source_view(source);
-	const auto pixel_span = build_pixel_span_or_throw(source_view.view());
+	const auto pixel_span = build_transform_pixel_span_or_throw(source_view.view());
 	return numpy_array_from_owned_pixel_buffer(
 	    dicom::pixel::apply_window(pixel_span, window));
 }
