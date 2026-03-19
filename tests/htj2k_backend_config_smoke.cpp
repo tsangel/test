@@ -6,15 +6,15 @@
 #include <dicom.h>
 
 #include "codec_builtin_flags.hpp"
-#include "pixel/runtime/plugin_registry_v2.hpp"
+#include "pixel/runtime/plugin_registry.hpp"
 
 namespace {
 
 void expect_auto_backend_binding() {
-	pixel::runtime_v2::BindingRegistryV2 registry{};
-	pixel::runtime_v2::init_builtin_registry_v2(&registry);
+	pixel::runtime::BindingRegistry registry{};
+	pixel::runtime::init_builtin_registry(&registry);
 	const auto* binding =
-	    registry.find_decoder_binding(PIXEL_CODEC_PROFILE_HTJ2K_LOSSLESS_V2);
+	    registry.find_decoder_binding(PIXEL_CODEC_PROFILE_HTJ2K_LOSSLESS);
 
 	if (dicom::test::kHtj2kBuiltin && dicom::test::kJpeg2kBuiltin &&
 	    dicom::test::kHasOpenJphBackend) {
@@ -119,3 +119,4 @@ int main() {
 
 	return 0;
 }
+

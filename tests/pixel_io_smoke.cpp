@@ -29,6 +29,48 @@ int main() {
 		std::cerr << msg << std::endl;
 		std::exit(1);
 	};
+	auto make_layout = [](dicom::pixel::DataType data_type, std::uint32_t frames,
+	                      std::uint32_t rows, std::uint32_t cols,
+	                      std::uint16_t samples_per_pixel,
+	                      dicom::pixel::Photometric photometric,
+	                      dicom::pixel::Planar planar = dicom::pixel::Planar::interleaved,
+	                      std::size_t row_stride = 0,
+	                      std::size_t frame_stride = 0,
+	                      std::uint16_t bits_stored = 0) {
+		// Keep test sources on the same normalized layout contract used by production code.
+		dicom::pixel::PixelLayout layout{
+		    .data_type = data_type,
+		    .photometric = photometric,
+		    .planar = planar,
+		    .reserved = 0,
+		    .rows = rows,
+		    .cols = cols,
+		    .frames = frames,
+		    .samples_per_pixel = samples_per_pixel,
+		    .bits_stored = bits_stored == 0
+		                       ? dicom::pixel::normalized_bits_stored_of(data_type)
+		                       : bits_stored,
+		    .row_stride = row_stride,
+		    .frame_stride = frame_stride,
+		};
+		if (layout.row_stride == 0 || layout.frame_stride == 0) {
+			const auto packed = layout.packed();
+			if (layout.row_stride == 0) {
+				layout.row_stride = packed.row_stride;
+			}
+			if (layout.frame_stride == 0) {
+				layout.frame_stride = packed.frame_stride;
+			}
+		}
+		return layout;
+	};
+	auto make_source_span =
+	    [](std::span<const std::uint8_t> bytes, const dicom::pixel::PixelLayout& layout) {
+		    return dicom::pixel::ConstPixelSpan{
+		        .layout = layout,
+		        .bytes = bytes,
+		    };
+	    };
 
 	namespace fs = std::filesystem;
 	std::error_code path_ec;
@@ -148,7 +190,7 @@ int main() {
 		}
 	}
 
-	auto make_u16_source = []() {
+	auto make_u16_source = [&]() {
 		std::vector<std::uint8_t> source_bytes(40, 0xEEu);
 		const auto write_row = [&](std::size_t frame, std::size_t row,
 		                           std::array<std::uint8_t, 6> payload) {
@@ -164,17 +206,12 @@ int main() {
 		write_row(1, 0, {0x11u, 0x00u, 0x12u, 0x00u, 0x13u, 0x00u});
 		write_row(1, 1, {0x14u, 0x00u, 0x15u, 0x00u, 0x16u, 0x00u});
 
-		dicom::pixel::PixelSource source{};
-		source.bytes = std::span<const std::uint8_t>(source_bytes.data(), source_bytes.size());
-		source.data_type = dicom::pixel::DataType::u16;
-		source.rows = 2;
-		source.cols = 3;
-		source.frames = 2;
-		source.samples_per_pixel = 1;
-		source.row_stride = 8;
-		source.frame_stride = 20;
-		source.photometric = dicom::pixel::Photometric::monochrome2;
-		return std::pair{std::move(source_bytes), source};
+		return std::pair{
+		    std::move(source_bytes),
+		    make_layout(dicom::pixel::DataType::u16, 2, 2, 3, 1,
+		        dicom::pixel::Photometric::monochrome2,
+		        dicom::pixel::Planar::interleaved, 8, 20, 16),
+		};
 	};
 
 	auto append_u16_le = [](std::vector<std::uint8_t>& out, std::uint16_t v) {
@@ -301,9 +338,10 @@ int main() {
 	};
 
 	{
-		auto [source_bytes, source] = make_u16_source();
+		auto [source_bytes, source_layout] = make_u16_source();
 		dicom::DicomFile native_file;
-		native_file.set_pixel_data("ExplicitVRLittleEndian"_uid, source);
+		native_file.set_pixel_data("ExplicitVRLittleEndian"_uid,
+		    make_source_span(source_bytes, source_layout));
 		const auto& pixel_data = native_file.get_dataelement("PixelData"_tag);
 		if (pixel_data.is_missing()) fail("set_pixel_data should create PixelData");
 		if (pixel_data.vr() != dicom::VR::OW) fail("set_pixel_data should create OW for 16-bit input");
@@ -331,7 +369,7 @@ int main() {
 	}
 
 	{
-		auto [source_bytes, source] = make_u16_source();
+		auto [source_bytes, source_layout] = make_u16_source();
 		const std::vector<std::uint8_t> expected_frame0{
 		    0x01u, 0x00u, 0x02u, 0x00u, 0x03u, 0x00u,
 		    0x04u, 0x00u, 0x05u, 0x00u, 0x06u, 0x00u};
@@ -340,7 +378,8 @@ int main() {
 		    0x14u, 0x00u, 0x15u, 0x00u, 0x16u, 0x00u};
 
 		dicom::DicomFile rle_file;
-		rle_file.set_pixel_data("RLELossless"_uid, source);
+		rle_file.set_pixel_data("RLELossless"_uid,
+		    make_source_span(source_bytes, source_layout));
 		const auto& pixel_data = rle_file.get_dataelement("PixelData"_tag);
 		if (pixel_data.is_missing() || !pixel_data.vr().is_pixel_sequence()) {
 			fail("RLE set_pixel_data should create encapsulated PixelData");
@@ -359,7 +398,8 @@ int main() {
 
 		const auto rle_encoder_context = dicom::pixel::create_encoder_context("RLELossless"_uid);
 		dicom::DicomFile with_context_file;
-		with_context_file.set_pixel_data("RLELossless"_uid, source, rle_encoder_context);
+		with_context_file.set_pixel_data("RLELossless"_uid,
+		    make_source_span(source_bytes, source_layout), rle_encoder_context);
 		if (with_context_file.pixel_data(0) != expected_frame0 ||
 		    with_context_file.pixel_data(1) != expected_frame1) {
 			fail("set_pixel_data with reusable encoder context mismatch");
@@ -367,7 +407,8 @@ int main() {
 
 		if (dicom::test::kJpeg2kBuiltin) {
 			dicom::DicomFile transcode_chain_file;
-			transcode_chain_file.set_pixel_data("RLELossless"_uid, source);
+			transcode_chain_file.set_pixel_data("RLELossless"_uid,
+			    make_source_span(source_bytes, source_layout));
 			transcode_chain_file.set_transfer_syntax("JPEG2000Lossless"_uid);
 			const auto& transcoded_pixel_data =
 			    transcode_chain_file.get_dataelement("PixelData"_tag);
@@ -387,9 +428,10 @@ int main() {
 	}
 
 	{
-		auto [source_bytes, source] = make_u16_source();
+		auto [source_bytes, source_layout] = make_u16_source();
 		dicom::DicomFile encap_file;
-		encap_file.set_pixel_data("EncapsulatedUncompressedExplicitVRLittleEndian"_uid, source);
+		encap_file.set_pixel_data("EncapsulatedUncompressedExplicitVRLittleEndian"_uid,
+		    make_source_span(source_bytes, source_layout));
 		auto& pixel_data = encap_file.get_dataelement("PixelData"_tag);
 		if (pixel_data.is_missing() || !pixel_data.vr().is_pixel_sequence()) {
 			fail("EncapsulatedUncompressed set_pixel_data should create encapsulated PixelData");
@@ -418,15 +460,9 @@ int main() {
 		const std::vector<std::uint8_t> rgb_source{
 		    0x10u, 0x20u, 0x30u, 0x40u, 0x50u, 0x60u,
 		    0x70u, 0x80u, 0x90u, 0xA0u, 0xB0u, 0xC0u};
-		dicom::pixel::PixelSource color_source{};
-		color_source.bytes = std::span<const std::uint8_t>(rgb_source.data(), rgb_source.size());
-		color_source.data_type = dicom::pixel::DataType::u8;
-		color_source.rows = 2;
-		color_source.cols = 2;
-		color_source.frames = 1;
-		color_source.samples_per_pixel = 3;
-		color_source.planar = dicom::pixel::Planar::interleaved;
-		color_source.photometric = dicom::pixel::Photometric::rgb;
+		const auto color_layout = make_layout(dicom::pixel::DataType::u8, 1, 2, 2, 3,
+		    dicom::pixel::Photometric::rgb);
+		const auto color_source = make_source_span(rgb_source, color_layout);
 
 		if (dicom::test::kJpeg2kBuiltin) {
 			dicom::DicomFile j2k_file;
@@ -464,9 +500,10 @@ int main() {
 	}
 
 	if (dicom::test::kJpegLsBuiltin) {
-		auto [source_bytes, source] = make_u16_source();
+		auto [source_bytes, source_layout] = make_u16_source();
 		dicom::DicomFile jpegls_file;
-		jpegls_file.set_pixel_data("JPEGLSLossless"_uid, source);
+		jpegls_file.set_pixel_data("JPEGLSLossless"_uid,
+		    make_source_span(source_bytes, source_layout));
 		const auto& pixel_data = jpegls_file.get_dataelement("PixelData"_tag);
 		if (pixel_data.is_missing() || !pixel_data.vr().is_pixel_sequence()) {
 			fail("JPEG-LS set_pixel_data should create encapsulated PixelData");
@@ -482,14 +519,9 @@ int main() {
 		}
 
 		const std::vector<std::uint8_t> lossy_source_bytes{0x10u, 0x20u, 0x30u, 0x40u, 0x50u, 0x60u};
-		dicom::pixel::PixelSource lossy_source{};
-		lossy_source.bytes = std::span<const std::uint8_t>(lossy_source_bytes.data(), lossy_source_bytes.size());
-		lossy_source.data_type = dicom::pixel::DataType::u8;
-		lossy_source.rows = 2;
-		lossy_source.cols = 3;
-		lossy_source.frames = 1;
-		lossy_source.samples_per_pixel = 1;
-		lossy_source.photometric = dicom::pixel::Photometric::monochrome2;
+		const auto lossy_source = make_source_span(lossy_source_bytes,
+		    make_layout(dicom::pixel::DataType::u8, 1, 2, 3, 1,
+		        dicom::pixel::Photometric::monochrome2));
 		const std::array<dicom::pixel::CodecOptionTextKv, 1> near_lossless_options{{{"near_lossless_error", "2"}}};
 		dicom::DicomFile near_lossless_file;
 		near_lossless_file.set_pixel_data(
@@ -501,9 +533,10 @@ int main() {
 	}
 
 	if (dicom::test::kJpegBuiltin) {
-		auto [source_bytes, source] = make_u16_source();
+		auto [source_bytes, source_layout] = make_u16_source();
 		dicom::DicomFile jpeg_file;
-		jpeg_file.set_pixel_data("JPEGLosslessSV1"_uid, source);
+		jpeg_file.set_pixel_data("JPEGLosslessSV1"_uid,
+		    make_source_span(source_bytes, source_layout));
 		const auto& pixel_data = jpeg_file.get_dataelement("PixelData"_tag);
 		if (pixel_data.is_missing() || !pixel_data.vr().is_pixel_sequence()) {
 			fail("JPEG set_pixel_data should create encapsulated PixelData");
@@ -519,14 +552,9 @@ int main() {
 		}
 
 		const std::vector<std::uint8_t> lossy_source_bytes{0x12u, 0x34u, 0x56u, 0x78u, 0x9Au, 0xBCu};
-		dicom::pixel::PixelSource lossy_source{};
-		lossy_source.bytes = std::span<const std::uint8_t>(lossy_source_bytes.data(), lossy_source_bytes.size());
-		lossy_source.data_type = dicom::pixel::DataType::u8;
-		lossy_source.rows = 2;
-		lossy_source.cols = 3;
-		lossy_source.frames = 1;
-		lossy_source.samples_per_pixel = 1;
-		lossy_source.photometric = dicom::pixel::Photometric::monochrome2;
+		const auto lossy_source = make_source_span(lossy_source_bytes,
+		    make_layout(dicom::pixel::DataType::u8, 1, 2, 3, 1,
+		        dicom::pixel::Photometric::monochrome2));
 		const std::array<dicom::pixel::CodecOptionTextKv, 1> jpeg_lossy_options{{{"quality", "90"}}};
 		dicom::DicomFile jpeg_lossy_file;
 		jpeg_lossy_file.set_pixel_data(
@@ -538,7 +566,7 @@ int main() {
 	}
 
 	{
-		auto [source_bytes, source] = make_u16_source();
+		auto [source_bytes, source_layout] = make_u16_source();
 		const std::vector<std::uint8_t> expected_frame0{
 		    0x01u, 0x00u, 0x02u, 0x00u, 0x03u, 0x00u,
 		    0x04u, 0x00u, 0x05u, 0x00u, 0x06u, 0x00u};
@@ -547,7 +575,8 @@ int main() {
 		    0x14u, 0x00u, 0x15u, 0x00u, 0x16u, 0x00u};
 
 		dicom::DicomFile native_file;
-		native_file.set_pixel_data("ExplicitVRLittleEndian"_uid, source);
+		native_file.set_pixel_data("ExplicitVRLittleEndian"_uid,
+		    make_source_span(source_bytes, source_layout));
 
 		std::ostringstream os(std::ios::binary);
 		native_file.write_with_transfer_syntax(os, "RLELossless"_uid);
@@ -579,9 +608,10 @@ int main() {
 	}
 
 	{
-		auto [source_bytes, source] = make_u16_source();
+		auto [source_bytes, source_layout] = make_u16_source();
 		dicom::DicomFile native_file;
-		native_file.set_pixel_data("ExplicitVRLittleEndian"_uid, source);
+		native_file.set_pixel_data("ExplicitVRLittleEndian"_uid,
+		    make_source_span(source_bytes, source_layout));
 		static constexpr std::string_view kLowerPhotometric = "monochrome2";
 		native_file.add_dataelement("PhotometricInterpretation"_tag, dicom::VR::CS)
 		    .set_value_bytes(std::span<const std::uint8_t>(
@@ -601,7 +631,7 @@ int main() {
 	}
 
 	{
-		auto [source_bytes, source] = make_u16_source();
+		auto [source_bytes, source_layout] = make_u16_source();
 		const std::vector<std::uint8_t> expected_frame0{
 		    0x01u, 0x00u, 0x02u, 0x00u, 0x03u, 0x00u,
 		    0x04u, 0x00u, 0x05u, 0x00u, 0x06u, 0x00u};
@@ -610,7 +640,8 @@ int main() {
 		    0x14u, 0x00u, 0x15u, 0x00u, 0x16u, 0x00u};
 
 		dicom::DicomFile rle_file;
-		rle_file.set_pixel_data("RLELossless"_uid, source);
+		rle_file.set_pixel_data("RLELossless"_uid,
+		    make_source_span(source_bytes, source_layout));
 
 		std::ostringstream os(std::ios::binary);
 		rle_file.write_with_transfer_syntax(os, "ExplicitVRLittleEndian"_uid);
@@ -681,15 +712,9 @@ int main() {
 		const std::vector<std::uint8_t> lossy_source_bytes{
 		    0x10u, 0x20u, 0x30u, 0x40u, 0x50u, 0x60u};
 		const int near_lossless_error = 2;
-		dicom::pixel::PixelSource lossy_source{};
-		lossy_source.bytes = std::span<const std::uint8_t>(
-		    lossy_source_bytes.data(), lossy_source_bytes.size());
-		lossy_source.data_type = dicom::pixel::DataType::u8;
-		lossy_source.rows = 2;
-		lossy_source.cols = 3;
-		lossy_source.frames = 1;
-		lossy_source.samples_per_pixel = 1;
-		lossy_source.photometric = dicom::pixel::Photometric::monochrome2;
+		const auto lossy_source = make_source_span(lossy_source_bytes,
+		    make_layout(dicom::pixel::DataType::u8, 1, 2, 3, 1,
+		        dicom::pixel::Photometric::monochrome2));
 
 		dicom::DicomFile lossy_writer_file;
 		lossy_writer_file.set_pixel_data("ExplicitVRLittleEndian"_uid, lossy_source);
@@ -769,7 +794,7 @@ int main() {
 	}
 
 	{
-		auto [source_bytes, source] = make_u16_source();
+		auto [source_bytes, source_layout] = make_u16_source();
 		const std::vector<std::uint8_t> expected_frame0{
 		    0x01u, 0x00u, 0x02u, 0x00u, 0x03u, 0x00u,
 		    0x04u, 0x00u, 0x05u, 0x00u, 0x06u, 0x00u};
@@ -778,7 +803,8 @@ int main() {
 		    0x14u, 0x00u, 0x15u, 0x00u, 0x16u, 0x00u};
 
 		dicom::DicomFile native_file;
-		native_file.set_pixel_data("ExplicitVRLittleEndian"_uid, source);
+		native_file.set_pixel_data("ExplicitVRLittleEndian"_uid,
+		    make_source_span(source_bytes, source_layout));
 		dicom::WriteOptions rebuilt_meta_opts;
 		rebuilt_meta_opts.keep_existing_meta = false;
 

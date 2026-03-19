@@ -17,6 +17,29 @@ using namespace dicom::literals;
 	std::exit(1);
 }
 
+[[nodiscard]] dicom::pixel::ConstPixelSpan build_u16_source_span(
+    std::span<const std::uint8_t> bytes, std::uint32_t frames,
+    std::uint32_t rows, std::uint32_t cols, std::size_t row_stride,
+    std::size_t frame_stride) {
+	// Keep the smoke test source description aligned with the normalized encode API.
+	return dicom::pixel::ConstPixelSpan{
+	    .layout = dicom::pixel::PixelLayout{
+	        .data_type = dicom::pixel::DataType::u16,
+	        .photometric = dicom::pixel::Photometric::monochrome2,
+	        .planar = dicom::pixel::Planar::interleaved,
+	        .reserved = 0,
+	        .rows = rows,
+	        .cols = cols,
+	        .frames = frames,
+	        .samples_per_pixel = 1,
+	        .bits_stored = 16,
+	        .row_stride = row_stride,
+	        .frame_stride = frame_stride,
+	    },
+	    .bytes = bytes,
+	};
+}
+
 void assert_bytes_equal(const std::vector<std::uint8_t>& actual,
     const std::vector<std::uint8_t>& expected, std::string_view label) {
 	if (actual.size() != expected.size()) {
@@ -54,17 +77,8 @@ void verify_three_cycle_roundtrip(std::string_view codec_name, dicom::uid::WellK
 	    0x14u, 0x00u, 0x15u, 0x00u, 0x16u, 0x00u};
 
 	dicom::DicomFile file;
-	dicom::pixel::PixelSource source{};
-	source.bytes = std::span<const std::uint8_t>(source_bytes.data(), source_bytes.size());
-	source.data_type = dicom::pixel::DataType::u16;
-	source.rows = 2;
-	source.cols = 3;
-	source.frames = 2;
-	source.samples_per_pixel = 1;
-	source.row_stride = 8;
-	source.frame_stride = 20;
-	source.photometric = dicom::pixel::Photometric::monochrome2;
-	file.set_pixel_data("ExplicitVRLittleEndian"_uid, source);
+	file.set_pixel_data("ExplicitVRLittleEndian"_uid,
+	    build_u16_source_span(source_bytes, 2, 2, 3, 8, 20));
 
 	for (int cycle = 1; cycle <= 3; ++cycle) {
 		file.set_transfer_syntax(transfer_syntax);

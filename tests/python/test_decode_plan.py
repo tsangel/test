@@ -28,34 +28,33 @@ def test_create_decode_plan_exposes_shape_dtype_and_strides():
     assert plan.frame_stride == 32
     assert plan.required_bytes(frame=0) == 32
     assert plan.options.planar_out == dicom.Planar.interleaved
-    assert plan.options.to_modality_value is False
     assert plan.options.worker_threads == -1
     assert plan.options.codec_threads == -1
 
 
 def test_to_array_accepts_reusable_decode_plan():
     dicom_file = dicom.read_file(_test_file())
-    options = dicom.DecodeOptions(to_modality_value=True)
+    options = dicom.DecodeOptions()
     plan = dicom_file.create_decode_plan(options)
 
     arr = dicom_file.to_array(frame=0, plan=plan)
-    expected = dicom_file.to_array(frame=0, to_modality_value=True)
+    expected = dicom_file.to_array(frame=0)
 
     assert isinstance(arr, np.ndarray)
-    assert arr.dtype == np.float32
+    assert arr.dtype == np.int16
     assert np.array_equal(arr, expected)
 
 
 def test_decode_into_accepts_reusable_decode_plan():
     dicom_file = dicom.read_file(_test_file())
-    options = dicom.DecodeOptions(to_modality_value=True)
+    options = dicom.DecodeOptions()
     plan = dicom_file.create_decode_plan(options)
 
     out = np.empty(plan.shape(frame=0), dtype=plan.dtype)
     returned = dicom_file.decode_into(out, frame=0, plan=plan)
 
-    expected = dicom_file.to_array(frame=0, to_modality_value=True)
+    expected = dicom_file.to_array(frame=0)
 
     assert returned is out
-    assert out.dtype == np.float32
+    assert out.dtype == np.int16
     assert np.array_equal(out, expected)

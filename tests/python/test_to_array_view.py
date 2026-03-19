@@ -17,7 +17,7 @@ def test_to_array_view_method_exists():
 def test_to_array_view_matches_to_array():
     dicom_file = dicom.read_file(_test_file())
     arr_view = dicom_file.to_array_view(frame=0)
-    arr_copy = dicom_file.to_array(frame=0, to_modality_value=False)
+    arr_copy = dicom_file.to_array(frame=0)
 
     assert isinstance(arr_view, np.ndarray)
     assert arr_view.shape == arr_copy.shape

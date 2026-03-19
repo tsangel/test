@@ -28,16 +28,24 @@ void fill_htj2k_test_file(dicom::DicomFile& df) {
 	write_row(0, {0x01u, 0x00u, 0x02u, 0x00u, 0x03u, 0x00u});
 	write_row(1, {0x04u, 0x00u, 0x05u, 0x00u, 0x06u, 0x00u});
 
-	dicom::pixel::PixelSource source{};
-	source.bytes = std::span<const std::uint8_t>(source_bytes.data(), source_bytes.size());
-	source.data_type = dicom::pixel::DataType::u16;
-	source.rows = 2;
-	source.cols = 3;
-	source.frames = 1;
-	source.samples_per_pixel = 1;
-	source.row_stride = 8;
-	source.frame_stride = 16;
-	source.photometric = dicom::pixel::Photometric::monochrome2;
+	// Keep the padded source layout explicit so the test still exercises
+	// row/frame stride handling during HTJ2K encode.
+	const dicom::pixel::ConstPixelSpan source{
+	    .layout = dicom::pixel::PixelLayout{
+	        .data_type = dicom::pixel::DataType::u16,
+	        .photometric = dicom::pixel::Photometric::monochrome2,
+	        .planar = dicom::pixel::Planar::interleaved,
+	        .reserved = 0,
+	        .rows = 2,
+	        .cols = 3,
+	        .frames = 1,
+	        .samples_per_pixel = 1,
+	        .bits_stored = 16,
+	        .row_stride = 8,
+	        .frame_stride = 16,
+	    },
+	    .bytes = std::span<const std::uint8_t>(source_bytes.data(), source_bytes.size()),
+	};
 	using namespace dicom::literals;
 	df.set_pixel_data("HTJ2KLossless"_uid, source);
 }
@@ -48,7 +56,7 @@ void expect_decode_with_threads_hint(
 	dicom::pixel::DecodeOptions opt{};
 	opt.codec_threads = codec_threads;
 	const auto plan = df.create_decode_plan(opt);
-	std::vector<std::uint8_t> dst(plan.strides.frame, std::uint8_t{0});
+	std::vector<std::uint8_t> dst(plan.output_layout.frame_stride, std::uint8_t{0});
 	dicom::pixel::decode_frame_into(
 	    df, 0, std::span<std::uint8_t>(dst.data(), dst.size()), plan);
 	if (dst != expected) {

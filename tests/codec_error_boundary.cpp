@@ -78,7 +78,7 @@ void expect_create_decode_plan_throw(
 		fail(std::string(label) + " should throw");
 	} catch (const std::exception& e) {
 		const std::string what = e.what();
-		expect_contains(what, "DicomFile::calc_decode_strides", label);
+		expect_contains(what, "DicomFile::calc_decode_output_layout", label);
 		expect_contains(what, "reason=" + std::string(expected_reason), label);
 	}
 }
@@ -169,7 +169,7 @@ int main() {
 		df.set_transfer_syntax("ExplicitVRLittleEndian"_uid);
 		configure_minimal_integral_pixel_metadata(df);
 		const auto plan = df.create_decode_plan(dicom::pixel::DecodeOptions{});
-		std::vector<std::uint8_t> dst(plan.strides.frame, std::uint8_t{0});
+		std::vector<std::uint8_t> dst(plan.output_layout.frame_stride, std::uint8_t{0});
 		expect_decode_throw("native load_frame_source throw message", df, 0,
 		    std::span<std::uint8_t>(dst.data(), dst.size()), plan,
 		    "ExplicitVRLittleEndian"_uid.value(),
@@ -183,7 +183,7 @@ int main() {
 		df.set_native_pixel_data(std::vector<std::uint8_t>{0x00, 0x00});
 
 		const auto plan = df.create_decode_plan(dicom::pixel::DecodeOptions{});
-		std::vector<std::uint8_t> dst(plan.strides.frame, std::uint8_t{0});
+		std::vector<std::uint8_t> dst(plan.output_layout.frame_stride, std::uint8_t{0});
 		try {
 			dicom::pixel::decode_frame_into(df, 1,
 			    std::span<std::uint8_t>(dst.data(), dst.size()), plan);
@@ -223,7 +223,7 @@ int main() {
 		df.set_transfer_syntax(ts);
 		configure_minimal_integral_pixel_metadata(df);
 		const auto plan = df.create_decode_plan(dicom::pixel::DecodeOptions{});
-		std::vector<std::uint8_t> dst(plan.strides.frame, std::uint8_t{0});
+		std::vector<std::uint8_t> dst(plan.output_layout.frame_stride, std::uint8_t{0});
 		expect_decode_throw(label, df, 0,
 		    std::span<std::uint8_t>(dst.data(), dst.size()), plan, ts.value(), "invalid_argument",
 		    "load_frame_source");
@@ -237,7 +237,7 @@ int main() {
 		df.set_encoded_pixel_frame(0, std::vector<std::uint8_t>{0x00, 0x01, 0x02, 0x03});
 
 		const auto plan = df.create_decode_plan(dicom::pixel::DecodeOptions{});
-		std::vector<std::uint8_t> dst(plan.strides.frame, std::uint8_t{0});
+		std::vector<std::uint8_t> dst(plan.output_layout.frame_stride, std::uint8_t{0});
 		try {
 			dicom::pixel::decode_frame_into(df, 0,
 			    std::span<std::uint8_t>(dst.data(), dst.size()), plan);
@@ -262,7 +262,7 @@ int main() {
 		df.set_encoded_pixel_frame(0, std::vector<std::uint8_t>{0x00, 0x01, 0x02, 0x03});
 
 		const auto plan = df.create_decode_plan(dicom::pixel::DecodeOptions{});
-		std::vector<std::uint8_t> dst(plan.strides.frame, std::uint8_t{0});
+		std::vector<std::uint8_t> dst(plan.output_layout.frame_stride, std::uint8_t{0});
 		try {
 			dicom::pixel::decode_frame_into(df, 0,
 			    std::span<std::uint8_t>(dst.data(), dst.size()), plan);
@@ -289,7 +289,7 @@ int main() {
 		auto decode_opt = dicom::pixel::DecodeOptions{};
 		decode_opt.codec_threads = -2;
 		const auto plan = df.create_decode_plan(decode_opt);
-		std::vector<std::uint8_t> dst(plan.strides.frame, std::uint8_t{0});
+		std::vector<std::uint8_t> dst(plan.output_layout.frame_stride, std::uint8_t{0});
 		try {
 			dicom::pixel::decode_frame_into(df, 0,
 			    std::span<std::uint8_t>(dst.data(), dst.size()), plan);

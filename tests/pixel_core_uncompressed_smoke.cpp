@@ -1,13 +1,12 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <cmath>
 #include <iostream>
 #include <string>
 #include <string_view>
 #include <vector>
 
-#include "direct_api_v2.hpp"
+#include "direct_api.hpp"
 
 namespace {
 
@@ -29,15 +28,9 @@ void expect_eq(const T& actual, const T& expected, std::string_view label) {
   }
 }
 
-void expect_near(double actual, double expected, double tolerance, std::string_view label) {
-  if (std::fabs(actual - expected) > tolerance) {
-    fail(std::string(label) + " mismatch");
-  }
-}
-
-std::string error_detail(const pixel::core_v2::ErrorState& state) {
+std::string error_detail(const pixel::core::ErrorState& state) {
   char buffer[1024] = {};
-  const uint32_t copied = pixel::core_v2::copy_last_error_detail(
+  const uint32_t copied = pixel::core::copy_last_error_detail(
       &state, buffer, static_cast<uint32_t>(sizeof(buffer)));
   if (copied == 0) {
     return {};
@@ -45,23 +38,23 @@ std::string error_detail(const pixel::core_v2::ErrorState& state) {
   return std::string(buffer);
 }
 
-pixel_encoder_request_v2 make_encode_request(
+pixel_encoder_request make_encode_request(
     std::vector<uint8_t>& source, uint32_t profile_code, uint64_t source_row_stride,
-    pixel_output_buffer_v2 encoded_buffer, uint64_t encoded_size) {
-  pixel_encoder_request_v2 request{};
-  request.struct_size = sizeof(pixel_encoder_request_v2);
-  request.abi_version = PIXEL_ENCODER_PLUGIN_ABI_V2;
+    pixel_output_buffer encoded_buffer, uint64_t encoded_size) {
+  pixel_encoder_request request{};
+  request.struct_size = sizeof(pixel_encoder_request);
+  request.abi_version = PIXEL_ENCODER_PLUGIN_ABI;
 
-  request.source.struct_size = sizeof(pixel_encoder_source_v2);
-  request.source.abi_version = PIXEL_ENCODER_PLUGIN_ABI_V2;
+  request.source.struct_size = sizeof(pixel_encoder_source);
+  request.source.abi_version = PIXEL_ENCODER_PLUGIN_ABI;
   request.source.source_buffer.data = source.data();
   request.source.source_buffer.size = source.size();
 
-  request.frame.struct_size = sizeof(pixel_encoder_frame_info_v2);
-  request.frame.abi_version = PIXEL_ENCODER_PLUGIN_ABI_V2;
+  request.frame.struct_size = sizeof(pixel_encoder_frame_info);
+  request.frame.abi_version = PIXEL_ENCODER_PLUGIN_ABI;
   request.frame.codec_profile_code = profile_code;
-  request.frame.source_dtype = PIXEL_DTYPE_U8_V2;
-  request.frame.source_planar = PIXEL_PLANAR_INTERLEAVED_V2;
+  request.frame.source_dtype = PIXEL_DTYPE_U8;
+  request.frame.source_planar = PIXEL_PLANAR_INTERLEAVED;
   request.frame.rows = 8;
   request.frame.cols = 8;
   request.frame.samples_per_pixel = 1;
@@ -73,49 +66,45 @@ pixel_encoder_request_v2 make_encode_request(
   request.frame.source_frame_size_bytes = source.size();
   request.frame.use_multicomponent_transform = 0;
 
-  request.output.struct_size = sizeof(pixel_encoder_output_v2);
-  request.output.abi_version = PIXEL_ENCODER_PLUGIN_ABI_V2;
+  request.output.struct_size = sizeof(pixel_encoder_output);
+  request.output.abi_version = PIXEL_ENCODER_PLUGIN_ABI;
   request.output.encoded_buffer = encoded_buffer;
   request.output.encoded_size = encoded_size;
 
   return request;
 }
 
-pixel_decoder_request_v2 make_decode_request(
+pixel_decoder_request make_decode_request(
     std::vector<uint8_t>& encoded, std::vector<uint8_t>& decoded, uint32_t profile_code,
-    uint8_t dst_dtype = PIXEL_DTYPE_U8_V2) {
-  pixel_decoder_request_v2 request{};
-  request.struct_size = sizeof(pixel_decoder_request_v2);
-  request.abi_version = PIXEL_DECODER_PLUGIN_ABI_V2;
+    uint8_t dst_dtype = PIXEL_DTYPE_U8) {
+  pixel_decoder_request request{};
+  request.struct_size = sizeof(pixel_decoder_request);
+  request.abi_version = PIXEL_DECODER_PLUGIN_ABI;
 
-  request.source.struct_size = sizeof(pixel_decoder_source_v2);
-  request.source.abi_version = PIXEL_DECODER_PLUGIN_ABI_V2;
+  request.source.struct_size = sizeof(pixel_decoder_source);
+  request.source.abi_version = PIXEL_DECODER_PLUGIN_ABI;
   request.source.source_buffer.data = encoded.data();
   request.source.source_buffer.size = encoded.size();
 
-  request.frame.struct_size = sizeof(pixel_decoder_frame_info_v2);
-  request.frame.abi_version = PIXEL_DECODER_PLUGIN_ABI_V2;
+  request.frame.struct_size = sizeof(pixel_decoder_frame_info);
+  request.frame.abi_version = PIXEL_DECODER_PLUGIN_ABI;
   request.frame.codec_profile_code = profile_code;
-  request.frame.source_dtype = PIXEL_DTYPE_U8_V2;
-  request.frame.source_planar = PIXEL_PLANAR_INTERLEAVED_V2;
+  request.frame.source_dtype = PIXEL_DTYPE_U8;
+  request.frame.source_planar = PIXEL_PLANAR_INTERLEAVED;
   request.frame.rows = 8;
   request.frame.cols = 8;
   request.frame.samples_per_pixel = 1;
   request.frame.bits_stored = 8;
   request.frame.decode_mct = 0;
 
-  request.output.struct_size = sizeof(pixel_decoder_output_v2);
-  request.output.abi_version = PIXEL_DECODER_PLUGIN_ABI_V2;
+  request.output.struct_size = sizeof(pixel_decoder_output);
+  request.output.abi_version = PIXEL_DECODER_PLUGIN_ABI;
   request.output.dst = decoded.data();
   request.output.dst_size = decoded.size();
   request.output.row_stride = 0;
   request.output.frame_stride = 0;
   request.output.dst_dtype = dst_dtype;
-  request.output.dst_planar = PIXEL_PLANAR_INTERLEAVED_V2;
-
-  request.value_transform.struct_size = sizeof(pixel_decoder_value_transform_v2);
-  request.value_transform.abi_version = PIXEL_DECODER_PLUGIN_ABI_V2;
-  request.value_transform.transform_kind = PIXEL_DECODER_VALUE_TRANSFORM_NONE_V2;
+  request.output.dst_planar = PIXEL_PLANAR_INTERLEAVED;
 
   return request;
 }
@@ -123,7 +112,7 @@ pixel_decoder_request_v2 make_decode_request(
 }  // namespace
 
 int main() {
-  pixel::core_v2::ErrorState core_error{};
+  pixel::core::ErrorState core_error{};
 
   const std::size_t rows = 8;
   const std::size_t cols = 8;
@@ -138,11 +127,11 @@ int main() {
     }
   }
 
-  pixel_output_buffer_v2 tiny_output{};
+  pixel_output_buffer tiny_output{};
   auto first_native_encode_request = make_encode_request(
-      source, PIXEL_CODEC_PROFILE_NATIVE_UNCOMPRESSED_V2, source_row_stride,
+      source, PIXEL_CODEC_PROFILE_NATIVE_UNCOMPRESSED, source_row_stride,
       tiny_output, 0);
-  auto ec = pixel::core_v2::encode_uncompressed_frame(
+  auto ec = pixel::core::encode_uncompressed_frame(
       &core_error, &first_native_encode_request);
   expect_eq(ec, PIXEL_CODEC_ERR_OUTPUT_TOO_SMALL,
       "native first encode should report output too small");
@@ -150,14 +139,14 @@ int main() {
       "native first encode returns expected payload size");
 
   std::vector<uint8_t> encoded_native(first_native_encode_request.output.encoded_size);
-  pixel_output_buffer_v2 native_output{};
+  pixel_output_buffer native_output{};
   native_output.data = encoded_native.data();
   native_output.size = encoded_native.size();
 
   auto second_native_encode_request = make_encode_request(
-      source, PIXEL_CODEC_PROFILE_NATIVE_UNCOMPRESSED_V2, source_row_stride,
+      source, PIXEL_CODEC_PROFILE_NATIVE_UNCOMPRESSED, source_row_stride,
       native_output, 0);
-  ec = pixel::core_v2::encode_uncompressed_frame(&core_error, &second_native_encode_request);
+  ec = pixel::core::encode_uncompressed_frame(&core_error, &second_native_encode_request);
   if (ec != PIXEL_CODEC_ERR_OK) {
     fail("native second encode failed: " + error_detail(core_error));
   }
@@ -168,8 +157,8 @@ int main() {
 
   std::vector<uint8_t> decoded_native(expected.size(), uint8_t{0});
   auto native_decode_request = make_decode_request(
-      encoded_native, decoded_native, PIXEL_CODEC_PROFILE_NATIVE_UNCOMPRESSED_V2);
-  ec = pixel::core_v2::decode_uncompressed_frame(&core_error, &native_decode_request);
+      encoded_native, decoded_native, PIXEL_CODEC_PROFILE_NATIVE_UNCOMPRESSED);
+  ec = pixel::core::decode_uncompressed_frame(&core_error, &native_decode_request);
   if (ec != PIXEL_CODEC_ERR_OK) {
     fail("native decode failed: " + error_detail(core_error));
   }
@@ -178,10 +167,10 @@ int main() {
 
   std::vector<uint8_t> decoded_native_single_channel(expected.size(), uint8_t{0});
   auto native_single_channel_decode_request = make_decode_request(
-      encoded_native, decoded_native_single_channel, PIXEL_CODEC_PROFILE_NATIVE_UNCOMPRESSED_V2);
-  native_single_channel_decode_request.frame.source_planar = PIXEL_PLANAR_PLANAR_V2;
-  native_single_channel_decode_request.output.dst_planar = PIXEL_PLANAR_INTERLEAVED_V2;
-  ec = pixel::core_v2::decode_uncompressed_frame(
+      encoded_native, decoded_native_single_channel, PIXEL_CODEC_PROFILE_NATIVE_UNCOMPRESSED);
+  native_single_channel_decode_request.frame.source_planar = PIXEL_PLANAR_PLANAR;
+  native_single_channel_decode_request.output.dst_planar = PIXEL_PLANAR_INTERLEAVED;
+  ec = pixel::core::decode_uncompressed_frame(
       &core_error, &native_single_channel_decode_request);
   if (ec != PIXEL_CODEC_ERR_OK) {
     fail("native single-channel layout-equivalent decode failed: " + error_detail(core_error));
@@ -190,57 +179,10 @@ int main() {
       std::memcmp(decoded_native_single_channel.data(), expected.data(), expected.size()) == 0,
       "native single-channel layout-equivalent payload equality");
 
-  std::vector<uint8_t> decoded_rescale(rows * cols * sizeof(float), uint8_t{0});
-  auto native_rescale_decode_request = make_decode_request(
-      encoded_native, decoded_rescale, PIXEL_CODEC_PROFILE_NATIVE_UNCOMPRESSED_V2,
-      PIXEL_DTYPE_F32_V2);
-  native_rescale_decode_request.value_transform.transform_kind =
-      PIXEL_DECODER_VALUE_TRANSFORM_RESCALE_V2;
-  native_rescale_decode_request.value_transform.rescale_slope = 1.5;
-  native_rescale_decode_request.value_transform.rescale_intercept = -2.0;
-  ec = pixel::core_v2::decode_uncompressed_frame(&core_error, &native_rescale_decode_request);
-  if (ec != PIXEL_CODEC_ERR_OK) {
-    fail("native rescale decode failed: " + error_detail(core_error));
-  }
-  const float* native_rescaled_values =
-      reinterpret_cast<const float*>(decoded_rescale.data());
-  for (std::size_t i = 0; i < expected.size(); ++i) {
-    const double expected_value = static_cast<double>(expected[i]) * 1.5 - 2.0;
-    expect_near(native_rescaled_values[i], expected_value, 1e-5,
-        "native rescale decoded sample");
-  }
-
-  std::vector<float> modality_lut(256, 0.0f);
-  for (std::size_t i = 0; i < modality_lut.size(); ++i) {
-    modality_lut[i] = static_cast<float>(i * 10.0 + 0.5);
-  }
-  std::vector<uint8_t> decoded_lut(rows * cols * sizeof(float), uint8_t{0});
-  auto native_lut_decode_request = make_decode_request(
-      encoded_native, decoded_lut, PIXEL_CODEC_PROFILE_NATIVE_UNCOMPRESSED_V2,
-      PIXEL_DTYPE_F32_V2);
-  native_lut_decode_request.value_transform.transform_kind =
-      PIXEL_DECODER_VALUE_TRANSFORM_MODALITY_LUT_V2;
-  native_lut_decode_request.value_transform.lut_first_mapped = 0;
-  native_lut_decode_request.value_transform.lut_value_count =
-      static_cast<uint64_t>(modality_lut.size());
-  native_lut_decode_request.value_transform.lut_values_f32.data =
-      reinterpret_cast<const uint8_t*>(modality_lut.data());
-  native_lut_decode_request.value_transform.lut_values_f32.size =
-      static_cast<uint64_t>(modality_lut.size() * sizeof(float));
-  ec = pixel::core_v2::decode_uncompressed_frame(&core_error, &native_lut_decode_request);
-  if (ec != PIXEL_CODEC_ERR_OK) {
-    fail("native modality LUT decode failed: " + error_detail(core_error));
-  }
-  const float* native_lut_values = reinterpret_cast<const float*>(decoded_lut.data());
-  for (std::size_t i = 0; i < expected.size(); ++i) {
-    expect_near(native_lut_values[i], modality_lut[expected[i]], 1e-5,
-        "native modality LUT decoded sample");
-  }
-
   auto first_encap_encode_request = make_encode_request(
-      source, PIXEL_CODEC_PROFILE_ENCAPSULATED_UNCOMPRESSED_V2, source_row_stride,
+      source, PIXEL_CODEC_PROFILE_ENCAPSULATED_UNCOMPRESSED, source_row_stride,
       tiny_output, 0);
-  ec = pixel::core_v2::encode_uncompressed_frame(
+  ec = pixel::core::encode_uncompressed_frame(
       &core_error, &first_encap_encode_request);
   expect_eq(ec, PIXEL_CODEC_ERR_OUTPUT_TOO_SMALL,
       "encapsulated first encode should report output too small");
@@ -248,14 +190,14 @@ int main() {
       "encapsulated first encode returns expected payload size");
 
   std::vector<uint8_t> encoded_encap(first_encap_encode_request.output.encoded_size);
-  pixel_output_buffer_v2 encap_output{};
+  pixel_output_buffer encap_output{};
   encap_output.data = encoded_encap.data();
   encap_output.size = encoded_encap.size();
 
   auto second_encap_encode_request = make_encode_request(
-      source, PIXEL_CODEC_PROFILE_ENCAPSULATED_UNCOMPRESSED_V2, source_row_stride,
+      source, PIXEL_CODEC_PROFILE_ENCAPSULATED_UNCOMPRESSED, source_row_stride,
       encap_output, 0);
-  ec = pixel::core_v2::encode_uncompressed_frame(&core_error, &second_encap_encode_request);
+  ec = pixel::core::encode_uncompressed_frame(&core_error, &second_encap_encode_request);
   if (ec != PIXEL_CODEC_ERR_OK) {
     fail("encapsulated second encode failed: " + error_detail(core_error));
   }
@@ -264,8 +206,8 @@ int main() {
 
   std::vector<uint8_t> decoded_encap(expected.size(), uint8_t{0});
   auto encap_decode_request = make_decode_request(
-      encoded_encap, decoded_encap, PIXEL_CODEC_PROFILE_ENCAPSULATED_UNCOMPRESSED_V2);
-  ec = pixel::core_v2::decode_uncompressed_frame(&core_error, &encap_decode_request);
+      encoded_encap, decoded_encap, PIXEL_CODEC_PROFILE_ENCAPSULATED_UNCOMPRESSED);
+  ec = pixel::core::decode_uncompressed_frame(&core_error, &encap_decode_request);
   if (ec != PIXEL_CODEC_ERR_OK) {
     fail("encapsulated decode failed: " + error_detail(core_error));
   }

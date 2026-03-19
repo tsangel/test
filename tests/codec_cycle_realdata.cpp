@@ -43,12 +43,12 @@ struct FrameDigest {
 }
 
 [[nodiscard]] std::vector<FrameDigest> build_frame_digests(const dicom::DicomFile& file) {
-	const auto& info = file.pixeldata_info();
-	if (!info.has_pixel_data || info.frames <= 0) {
+	const auto layout = file.native_pixel_layout();
+	if (!file.has_pixel_data() || !layout || layout->frames == 0) {
 		throw std::runtime_error("No decodable pixel data");
 	}
 
-	const std::size_t frame_count = static_cast<std::size_t>(info.frames);
+	const std::size_t frame_count = static_cast<std::size_t>(layout->frames);
 	std::vector<FrameDigest> digests;
 	digests.reserve(frame_count);
 	for (std::size_t frame_index = 0; frame_index < frame_count; ++frame_index) {
