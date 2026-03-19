@@ -246,6 +246,96 @@ nb::tuple shape_tuple_from_layout(const DecodedArrayLayout& layout) {
 	return shape;
 }
 
+struct NormalizedArrayGeometry {
+	std::array<std::size_t, 4> shape{};
+	std::array<std::int64_t, 4> strides{};
+	std::size_t ndim{0};
+};
+
+NormalizedArrayGeometry build_normalized_array_geometry_or_throw(
+    const dicom::pixel::PixelLayout& pixel_layout, std::size_t bytes_per_sample,
+    bool decode_all_frames) {
+	NormalizedArrayGeometry geometry{};
+	const auto rows = static_cast<std::size_t>(pixel_layout.rows);
+	const auto cols = static_cast<std::size_t>(pixel_layout.cols);
+	const auto frames = static_cast<std::size_t>(pixel_layout.frames);
+	const auto samples_per_pixel =
+	    static_cast<std::size_t>(pixel_layout.samples_per_pixel);
+	const auto row_stride_elems = pixel_layout.row_stride / bytes_per_sample;
+	const auto frame_stride_elems = pixel_layout.frame_stride / bytes_per_sample;
+	const auto planar_multisample =
+	    pixel_layout.planar == dicom::pixel::Planar::planar && samples_per_pixel > 1;
+
+	std::size_t plane_stride_elems = 0;
+	if (planar_multisample) {
+		if ((frame_stride_elems % samples_per_pixel) != 0) {
+			throw nb::value_error(
+			    "pixel layout planar frame stride is not divisible by samples_per_pixel");
+		}
+		plane_stride_elems = frame_stride_elems / samples_per_pixel;
+	}
+
+	if (!decode_all_frames) {
+		if (samples_per_pixel == 1) {
+			geometry.ndim = 2;
+			geometry.shape[0] = rows;
+			geometry.shape[1] = cols;
+			geometry.strides[0] = static_cast<std::int64_t>(row_stride_elems);
+			geometry.strides[1] = 1;
+		} else if (planar_multisample) {
+			// Expose planar decode output as plane-first so Python callers can
+			// use a standard C-contiguous array for decode_into(plan=...).
+			geometry.ndim = 3;
+			geometry.shape[0] = samples_per_pixel;
+			geometry.shape[1] = rows;
+			geometry.shape[2] = cols;
+			geometry.strides[0] = static_cast<std::int64_t>(plane_stride_elems);
+			geometry.strides[1] = static_cast<std::int64_t>(row_stride_elems);
+			geometry.strides[2] = 1;
+		} else {
+			geometry.ndim = 3;
+			geometry.shape[0] = rows;
+			geometry.shape[1] = cols;
+			geometry.shape[2] = samples_per_pixel;
+			geometry.strides[0] = static_cast<std::int64_t>(row_stride_elems);
+			geometry.strides[1] = static_cast<std::int64_t>(samples_per_pixel);
+			geometry.strides[2] = 1;
+		}
+		return geometry;
+	}
+
+	if (samples_per_pixel == 1) {
+		geometry.ndim = 3;
+		geometry.shape[0] = frames;
+		geometry.shape[1] = rows;
+		geometry.shape[2] = cols;
+		geometry.strides[0] = static_cast<std::int64_t>(frame_stride_elems);
+		geometry.strides[1] = static_cast<std::int64_t>(row_stride_elems);
+		geometry.strides[2] = 1;
+	} else if (planar_multisample) {
+		geometry.ndim = 4;
+		geometry.shape[0] = frames;
+		geometry.shape[1] = samples_per_pixel;
+		geometry.shape[2] = rows;
+		geometry.shape[3] = cols;
+		geometry.strides[0] = static_cast<std::int64_t>(frame_stride_elems);
+		geometry.strides[1] = static_cast<std::int64_t>(plane_stride_elems);
+		geometry.strides[2] = static_cast<std::int64_t>(row_stride_elems);
+		geometry.strides[3] = 1;
+	} else {
+		geometry.ndim = 4;
+		geometry.shape[0] = frames;
+		geometry.shape[1] = rows;
+		geometry.shape[2] = cols;
+		geometry.shape[3] = samples_per_pixel;
+		geometry.strides[0] = static_cast<std::int64_t>(frame_stride_elems);
+		geometry.strides[1] = static_cast<std::int64_t>(row_stride_elems);
+		geometry.strides[2] = static_cast<std::int64_t>(samples_per_pixel);
+		geometry.strides[3] = 1;
+	}
+	return geometry;
+}
+
 PixelArrayLayout build_array_layout_from_pixel_layout(
     const dicom::pixel::PixelLayout& pixel_layout) {
 	PixelArrayLayout layout{};
@@ -267,59 +357,17 @@ PixelArrayLayout build_array_layout_from_pixel_layout(
 		throw nb::value_error("pixel transform output strides are not aligned to sample size");
 	}
 
-	const auto rows = static_cast<std::size_t>(pixel_layout.rows);
-	const auto cols = static_cast<std::size_t>(pixel_layout.cols);
 	const auto frames = static_cast<std::size_t>(pixel_layout.frames);
-	const auto samples_per_pixel =
-	    static_cast<std::size_t>(pixel_layout.samples_per_pixel);
-	const auto row_stride_elems = pixel_layout.row_stride / bytes_per_sample;
-	const auto frame_stride_elems = pixel_layout.frame_stride / bytes_per_sample;
-	const auto col_stride_elems = samples_per_pixel;
-
 	if (frames != 0 &&
 	    pixel_layout.frame_stride > (std::numeric_limits<std::size_t>::max() / frames)) {
 		throw std::overflow_error("pixel transform output size overflow");
 	}
 	layout.required_bytes = pixel_layout.frame_stride * frames;
-
-	if (frames == 1) {
-		if (samples_per_pixel == 1) {
-			layout.ndim = 2;
-			layout.shape[0] = rows;
-			layout.shape[1] = cols;
-			layout.strides[0] = static_cast<std::int64_t>(row_stride_elems);
-			layout.strides[1] = 1;
-		} else {
-			layout.ndim = 3;
-			layout.shape[0] = rows;
-			layout.shape[1] = cols;
-			layout.shape[2] = samples_per_pixel;
-			layout.strides[0] = static_cast<std::int64_t>(row_stride_elems);
-			layout.strides[1] = static_cast<std::int64_t>(col_stride_elems);
-			layout.strides[2] = 1;
-		}
-		return layout;
-	}
-
-	if (samples_per_pixel == 1) {
-		layout.ndim = 3;
-		layout.shape[0] = frames;
-		layout.shape[1] = rows;
-		layout.shape[2] = cols;
-		layout.strides[0] = static_cast<std::int64_t>(frame_stride_elems);
-		layout.strides[1] = static_cast<std::int64_t>(row_stride_elems);
-		layout.strides[2] = 1;
-	} else {
-		layout.ndim = 4;
-		layout.shape[0] = frames;
-		layout.shape[1] = rows;
-		layout.shape[2] = cols;
-		layout.shape[3] = samples_per_pixel;
-		layout.strides[0] = static_cast<std::int64_t>(frame_stride_elems);
-		layout.strides[1] = static_cast<std::int64_t>(row_stride_elems);
-		layout.strides[2] = static_cast<std::int64_t>(col_stride_elems);
-		layout.strides[3] = 1;
-	}
+	const auto geometry =
+	    build_normalized_array_geometry_or_throw(pixel_layout, bytes_per_sample, frames > 1);
+	layout.ndim = geometry.ndim;
+	layout.shape = geometry.shape;
+	layout.strides = geometry.strides;
 	return layout;
 }
 
@@ -1245,9 +1293,6 @@ DecodedArrayLayout build_decode_layout_from_plan(
 		throw nb::value_error("to_array/decode_into requires NumberOfFrames >= 1");
 	}
 
-	const auto rows = static_cast<std::size_t>(output_layout.rows);
-	const auto cols = static_cast<std::size_t>(output_layout.cols);
-	const auto samples_per_pixel = static_cast<std::size_t>(output_layout.samples_per_pixel);
 	layout.frames = static_cast<std::size_t>(output_layout.frames);
 	layout.spec = decoded_array_spec(output_layout);
 
@@ -1262,9 +1307,6 @@ DecodedArrayLayout build_decode_layout_from_plan(
 		throw std::runtime_error(
 		    "to_array/decode_into stride is not aligned to output sample size");
 	}
-	const auto row_stride_elems = row_stride / bytes_per_sample;
-	const auto frame_stride_elems = layout.frame_stride / bytes_per_sample;
-	const auto col_stride_elems = samples_per_pixel;
 
 	if (layout.frames != 0 &&
 	    layout.frame_stride > (std::numeric_limits<std::size_t>::max() / layout.frames)) {
@@ -1278,45 +1320,20 @@ DecodedArrayLayout build_decode_layout_from_plan(
 			throw nb::index_error("to_array/decode_into frame index out of range");
 		}
 		layout.required_bytes = layout.frame_stride;
-
-		if (samples_per_pixel == 1) {
-			layout.ndim = 2;
-			layout.shape[0] = rows;
-			layout.shape[1] = cols;
-			layout.strides[0] = static_cast<std::int64_t>(row_stride_elems);
-			layout.strides[1] = 1;
-		} else {
-			layout.ndim = 3;
-			layout.shape[0] = rows;
-			layout.shape[1] = cols;
-			layout.shape[2] = samples_per_pixel;
-			layout.strides[0] = static_cast<std::int64_t>(row_stride_elems);
-			layout.strides[1] = static_cast<std::int64_t>(col_stride_elems);
-			layout.strides[2] = 1;
-		}
+		const auto geometry =
+		    build_normalized_array_geometry_or_throw(output_layout, bytes_per_sample, false);
+		layout.ndim = geometry.ndim;
+		layout.shape = geometry.shape;
+		layout.strides = geometry.strides;
 		return layout;
 	}
 
 	layout.required_bytes = layout.frame_stride * layout.frames;
-	if (samples_per_pixel == 1) {
-		layout.ndim = 3;
-		layout.shape[0] = layout.frames;
-		layout.shape[1] = rows;
-		layout.shape[2] = cols;
-		layout.strides[0] = static_cast<std::int64_t>(frame_stride_elems);
-		layout.strides[1] = static_cast<std::int64_t>(row_stride_elems);
-		layout.strides[2] = 1;
-	} else {
-		layout.ndim = 4;
-		layout.shape[0] = layout.frames;
-		layout.shape[1] = rows;
-		layout.shape[2] = cols;
-		layout.shape[3] = samples_per_pixel;
-		layout.strides[0] = static_cast<std::int64_t>(frame_stride_elems);
-		layout.strides[1] = static_cast<std::int64_t>(row_stride_elems);
-		layout.strides[2] = static_cast<std::int64_t>(col_stride_elems);
-		layout.strides[3] = 1;
-	}
+	const auto geometry =
+	    build_normalized_array_geometry_or_throw(output_layout, bytes_per_sample, true);
+	layout.ndim = geometry.ndim;
+	layout.shape = geometry.shape;
+	layout.strides = geometry.strides;
 	return layout;
 }
 
