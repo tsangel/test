@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "../common/integral_hotpath.hpp"
 #include "internal.hpp"
 
 namespace pixel::openjpeg_codec {
@@ -208,6 +209,46 @@ pixel_error_code validate_encoder_request(
   return PIXEL_CODEC_ERR_OK;
 }
 
+template <uint32_t SourceBytes, bool SourceSigned, bool SourcePlanar>
+void load_openjpeg_components_from_source(const pixel_encoder_request* request,
+    opj_image_t* image, const uint8_t* source, std::size_t row_stride,
+    std::size_t plane_stride) {
+  const std::size_t rows = static_cast<std::size_t>(request->frame.rows);
+  const std::size_t cols = static_cast<std::size_t>(request->frame.cols);
+  const std::size_t samples = static_cast<std::size_t>(request->frame.samples_per_pixel);
+  const int bits_stored = request->frame.bits_stored;
+
+  if constexpr (SourcePlanar) {
+    for (std::size_t comp = 0; comp < samples; ++comp) {
+      auto& opj_comp = image->comps[comp];
+      for (std::size_t row = 0; row < rows; ++row) {
+        const uint8_t* src_row = source + comp * plane_stride + row * row_stride;
+        int* dst_row = opj_comp.data + row * cols;
+        for (std::size_t col = 0; col < cols; ++col) {
+          dst_row[col] =
+              ::pixel::codec_common::load_le_integral_as_i32<SourceBytes, SourceSigned>(
+                  src_row + col * SourceBytes, bits_stored);
+        }
+      }
+    }
+    return;
+  }
+
+  const std::size_t pixel_stride = samples * static_cast<std::size_t>(SourceBytes);
+  for (std::size_t comp = 0; comp < samples; ++comp) {
+    auto& opj_comp = image->comps[comp];
+    for (std::size_t row = 0; row < rows; ++row) {
+      const uint8_t* src_row = source + row * row_stride + comp * SourceBytes;
+      int* dst_row = opj_comp.data + row * cols;
+      for (std::size_t col = 0; col < cols; ++col) {
+        dst_row[col] =
+            ::pixel::codec_common::load_le_integral_as_i32<SourceBytes, SourceSigned>(
+                src_row + col * pixel_stride, bits_stored);
+      }
+    }
+  }
+}
+
 
 pixel_error_code encoder_encode_frame_to_context_buffer(
     void* ctx, const pixel_encoder_request* request) {
@@ -274,11 +315,7 @@ pixel_error_code encoder_encode_frame_to_context_buffer(
     const uint8_t* source = request->source.source_buffer.data;
     const std::size_t row_stride_sz = static_cast<std::size_t>(row_stride);
     const std::size_t plane_stride_sz = static_cast<std::size_t>(plane_stride);
-    const std::size_t cols_sz = static_cast<std::size_t>(cols);
-    const std::size_t rows_sz = static_cast<std::size_t>(rows);
     const std::size_t samples_sz = static_cast<std::size_t>(samples);
-    const std::size_t sample_bytes = static_cast<std::size_t>(source_dtype.bytes);
-    const std::size_t pixel_stride = samples_sz * sample_bytes;
     const bool source_is_signed = request->frame.pixel_representation == 1;
 
     for (std::size_t comp = 0; comp < samples_sz; ++comp) {
@@ -288,32 +325,69 @@ pixel_error_code encoder_encode_frame_to_context_buffer(
             "OpenJPEG component buffer is null");
       }
 
-      for (std::size_t r = 0; r < rows_sz; ++r) {
-        const uint8_t* row_base = nullptr;
+    }
+
+    switch (source_dtype.bytes) {
+    case 1:
+      if (source_is_signed) {
         if (source_planar) {
-          row_base = source + comp * plane_stride_sz + r * row_stride_sz;
+          load_openjpeg_components_from_source<1, true, true>(
+              request, image.get(), source, row_stride_sz, plane_stride_sz);
         } else {
-          row_base = source + r * row_stride_sz;
+          load_openjpeg_components_from_source<1, true, false>(
+              request, image.get(), source, row_stride_sz, plane_stride_sz);
         }
-
-        for (std::size_t col = 0; col < cols_sz; ++col) {
-          const uint8_t* sample_ptr = nullptr;
-          if (source_planar) {
-            sample_ptr = row_base + col * sample_bytes;
-          } else {
-            sample_ptr = row_base + col * pixel_stride + comp * sample_bytes;
-          }
-
-          char reason[256];
-          int32_t sample = 0;
-          if (!load_integral_sample_from_le(sample_ptr,
-                  static_cast<uint32_t>(sample_bytes), source_is_signed,
-                  request->frame.bits_stored, &sample, reason, sizeof(reason))) {
-            return fail_detail(c, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "encode_frame", reason);
-          }
-          opj_comp.data[r * cols_sz + col] = sample;
+      } else {
+        if (source_planar) {
+          load_openjpeg_components_from_source<1, false, true>(
+              request, image.get(), source, row_stride_sz, plane_stride_sz);
+        } else {
+          load_openjpeg_components_from_source<1, false, false>(
+              request, image.get(), source, row_stride_sz, plane_stride_sz);
         }
       }
+      break;
+    case 2:
+      if (source_is_signed) {
+        if (source_planar) {
+          load_openjpeg_components_from_source<2, true, true>(
+              request, image.get(), source, row_stride_sz, plane_stride_sz);
+        } else {
+          load_openjpeg_components_from_source<2, true, false>(
+              request, image.get(), source, row_stride_sz, plane_stride_sz);
+        }
+      } else {
+        if (source_planar) {
+          load_openjpeg_components_from_source<2, false, true>(
+              request, image.get(), source, row_stride_sz, plane_stride_sz);
+        } else {
+          load_openjpeg_components_from_source<2, false, false>(
+              request, image.get(), source, row_stride_sz, plane_stride_sz);
+        }
+      }
+      break;
+    case 4:
+      if (source_is_signed) {
+        if (source_planar) {
+          load_openjpeg_components_from_source<4, true, true>(
+              request, image.get(), source, row_stride_sz, plane_stride_sz);
+        } else {
+          load_openjpeg_components_from_source<4, true, false>(
+              request, image.get(), source, row_stride_sz, plane_stride_sz);
+        }
+      } else {
+        if (source_planar) {
+          load_openjpeg_components_from_source<4, false, true>(
+              request, image.get(), source, row_stride_sz, plane_stride_sz);
+        } else {
+          load_openjpeg_components_from_source<4, false, false>(
+              request, image.get(), source, row_stride_sz, plane_stride_sz);
+        }
+      }
+      break;
+    default:
+      return fail_detail(c, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "encode_frame",
+          "unsupported source sample width");
     }
 
     const bool lossless =

@@ -18,6 +18,7 @@ python_api
 python_dataset_access_design
 python_reference
 cpp_api
+pixel_transform_metadata
 dev_notes
 LOGGING
 python_dataset_access_benchmarks

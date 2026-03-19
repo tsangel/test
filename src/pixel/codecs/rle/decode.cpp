@@ -698,31 +698,93 @@ pixel_error_code decoder_decode_frame(
       ::pixel::codec_common::integral_storage_matches_dst_dtype(
           static_cast<uint32_t>(sample_bytes), source_dtype.is_signed, dst_dtype);
   if (matching_integral_storage) {
-    bool typed_load_failed = false;
-
-    // Reuse the common typed writer so planar RLE decode only needs to expose
-    // a sample loader instead of maintaining separate copy/shuffle paths.
-    const auto typed_status =
-        ::pixel::codec_common::write_loaded_integral_rows(
-            request, row_stride_u64, output_planar,
-            [&](std::size_t row, std::size_t col, std::size_t comp) -> int32_t {
-              int32_t sample = 0;
-              const uint8_t* src_ptr = sample_ptr_at(row, col, comp);
-              if (!load_integral_sample(src_ptr, static_cast<uint32_t>(sample_bytes),
-                      source_dtype.is_signed, request->frame.bits_stored, &sample)) {
-                typed_load_failed = true;
-                return 0;
-              }
-              return sample;
-            });
-    if (typed_load_failed) {
-      return fail_detail(c, PIXEL_CODEC_ERR_FAILED, "decode_frame",
-          "failed to parse decoded RLE sample");
-    }
-    if (typed_status == ::pixel::codec_common::loaded_integral_write_status::ok) {
+    if (output_planar) {
+      uint64_t dst_plane_bytes_u64 = 0;
+      if (!mul_u64(static_cast<uint64_t>(row_stride), static_cast<uint64_t>(rows),
+              &dst_plane_bytes_u64)) {
+        return fail_detail(c, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "decode_frame",
+            "destination plane byte size overflow");
+      }
+      std::size_t dst_plane_bytes = 0;
+      if (!u64_to_size(dst_plane_bytes_u64, &dst_plane_bytes)) {
+        return fail_detail(c, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "decode_frame",
+            "destination plane byte size conversion overflow");
+      }
+      for (std::size_t s = 0; s < samples; ++s) {
+        const uint8_t* src_plane = decoded_planar.data() + s * plane_bytes;
+        uint8_t* dst_plane = dst + s * dst_plane_bytes;
+        for (std::size_t r = 0; r < rows; ++r) {
+          const uint8_t* src_row = src_plane + r * row_payload;
+          uint8_t* dst_row = dst_plane + r * row_stride;
+          std::memcpy(dst_row, src_row, row_payload);
+        }
+      }
       clear_detail(c);
       return PIXEL_CODEC_ERR_OK;
     }
+
+    if ((sample_bytes == 1u || sample_bytes == 2u) &&
+        (samples == 3u || samples == 4u)) {
+      if (sample_bytes == 1u) {
+        if (samples == 3u) {
+          copy_planar_to_interleaved_fast<1, 3>(
+              decoded_planar.data(), dst, rows, cols, row_payload, row_stride);
+        } else {
+          copy_planar_to_interleaved_fast<1, 4>(
+              decoded_planar.data(), dst, rows, cols, row_payload, row_stride);
+        }
+      } else {
+        if (samples == 3u) {
+          copy_planar_to_interleaved_fast<2, 3>(
+              decoded_planar.data(), dst, rows, cols, row_payload, row_stride);
+        } else {
+          copy_planar_to_interleaved_fast<2, 4>(
+              decoded_planar.data(), dst, rows, cols, row_payload, row_stride);
+        }
+      }
+      clear_detail(c);
+      return PIXEL_CODEC_ERR_OK;
+    }
+
+    for (std::size_t r = 0; r < rows; ++r) {
+      uint8_t* dst_row = dst + r * row_stride;
+      for (std::size_t col = 0; col < cols; ++col) {
+        uint8_t* dst_pixel = dst_row + (col * samples) * sample_bytes;
+        for (std::size_t s = 0; s < samples; ++s) {
+          const uint8_t* src_sample = sample_ptr_at(r, col, s);
+          std::memcpy(dst_pixel + s * sample_bytes, src_sample, sample_bytes);
+        }
+      }
+    }
+
+    clear_detail(c);
+    return PIXEL_CODEC_ERR_OK;
+  }
+
+  bool typed_load_failed = false;
+
+  // Keep the generic converted path shared so uncommon storage conversions do
+  // not need a separate RLE-only writeback implementation.
+  const auto typed_status =
+      ::pixel::codec_common::write_loaded_integral_rows(
+          request, row_stride_u64, output_planar,
+          [&](std::size_t row, std::size_t col, std::size_t comp) -> int32_t {
+            int32_t sample = 0;
+            const uint8_t* src_ptr = sample_ptr_at(row, col, comp);
+            if (!load_integral_sample(src_ptr, static_cast<uint32_t>(sample_bytes),
+                    source_dtype.is_signed, request->frame.bits_stored, &sample)) {
+              typed_load_failed = true;
+              return 0;
+            }
+            return sample;
+          });
+  if (typed_load_failed) {
+    return fail_detail(c, PIXEL_CODEC_ERR_FAILED, "decode_frame",
+        "failed to parse decoded RLE sample");
+  }
+  if (typed_status == ::pixel::codec_common::loaded_integral_write_status::ok) {
+      clear_detail(c);
+      return PIXEL_CODEC_ERR_OK;
   }
 
   uint64_t dst_plane_bytes_u64 = 0;

@@ -62,6 +62,77 @@ void encode_packbits_segment_append(
   }
 }
 
+template <bool SourcePlanar>
+void extract_byte_plane(const uint8_t* source, std::size_t rows, std::size_t cols,
+    std::size_t samples_per_pixel, std::size_t bytes_per_sample,
+    std::size_t source_row_stride, std::size_t source_plane_stride,
+    std::size_t sample, std::size_t component_byte_index,
+    std::vector<uint8_t>* out_byte_plane) {
+  if (out_byte_plane == nullptr) {
+    return;
+  }
+
+  if constexpr (SourcePlanar) {
+    const uint8_t* sample_base = source + sample * source_plane_stride;
+    for (std::size_t row = 0; row < rows; ++row) {
+      const uint8_t* src_row = sample_base + row * source_row_stride;
+      uint8_t* dst_row = out_byte_plane->data() + row * cols;
+      for (std::size_t col = 0; col < cols; ++col) {
+        dst_row[col] = src_row[col * bytes_per_sample + component_byte_index];
+      }
+    }
+    return;
+  }
+
+  const std::size_t pixel_stride = samples_per_pixel * bytes_per_sample;
+  const std::size_t sample_byte_offset = sample * bytes_per_sample + component_byte_index;
+  for (std::size_t row = 0; row < rows; ++row) {
+    const uint8_t* src_row = source + row * source_row_stride + sample_byte_offset;
+    uint8_t* dst_row = out_byte_plane->data() + row * cols;
+    for (std::size_t col = 0; col < cols; ++col) {
+      dst_row[col] = src_row[col * pixel_stride];
+    }
+  }
+}
+
+template <bool SourcePlanar>
+pixel_error_code append_rle_segments(EncoderCtx* ctx, const uint8_t* source,
+    std::size_t rows, std::size_t cols,
+    std::size_t samples_per_pixel, std::size_t bytes_per_sample,
+    std::size_t source_row_stride, std::size_t source_plane_stride,
+    std::vector<uint8_t>* byte_plane, std::vector<uint8_t>* encoded) {
+  if (byte_plane == nullptr || encoded == nullptr) {
+    return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "encode_frame",
+        "RLE segment buffers are null");
+  }
+
+  const std::size_t max_u32 = static_cast<std::size_t>(std::numeric_limits<uint32_t>::max());
+  for (std::size_t sample = 0; sample < samples_per_pixel; ++sample) {
+    for (std::size_t byte_plane_index = 0; byte_plane_index < bytes_per_sample;
+         ++byte_plane_index) {
+      const std::size_t component_byte_index = bytes_per_sample - 1u - byte_plane_index;
+      extract_byte_plane<SourcePlanar>(source, rows, cols, samples_per_pixel,
+          bytes_per_sample, source_row_stride, source_plane_stride,
+          sample, component_byte_index, byte_plane);
+
+      const std::size_t segment_index = sample * bytes_per_sample + byte_plane_index;
+      if (encoded->size() > max_u32) {
+        return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "encode_frame",
+            "RLE codestream exceeds 32-bit offset range");
+      }
+      store_le32(encoded->data() + 4u + segment_index * sizeof(uint32_t),
+          static_cast<uint32_t>(encoded->size()));
+      encode_packbits_segment_append(byte_plane->data(), byte_plane->size(), encoded);
+      if (encoded->size() > max_u32) {
+        return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "encode_frame",
+            "RLE codestream exceeds 32-bit offset range");
+      }
+    }
+  }
+
+  return PIXEL_CODEC_ERR_OK;
+}
+
 pixel_error_code build_rle_codestream(EncoderCtx* ctx,
     const uint8_t* source, std::size_t rows, std::size_t cols,
     std::size_t samples_per_pixel, std::size_t bytes_per_sample,
@@ -118,52 +189,15 @@ pixel_error_code build_rle_codestream(EncoderCtx* ctx,
       u64_to_size(total_reserve_u64 + 64u, &total_reserve)) {
     encoded.reserve(total_reserve);
   }
-
-  std::size_t interleaved_pixel_stride = 0;
-  if (!source_planar) {
-    uint64_t interleaved_stride_u64 = 0;
-    if (!mul_u64(static_cast<uint64_t>(samples_per_pixel),
-            static_cast<uint64_t>(bytes_per_sample), &interleaved_stride_u64) ||
-        !u64_to_size(interleaved_stride_u64, &interleaved_pixel_stride)) {
-      return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "encode_frame",
-          "interleaved pixel stride overflow");
-    }
-  }
-
-  const std::size_t max_u32 = static_cast<std::size_t>(std::numeric_limits<uint32_t>::max());
-  for (std::size_t sample = 0; sample < samples_per_pixel; ++sample) {
-    for (std::size_t byte_plane_index = 0; byte_plane_index < bytes_per_sample;
-         ++byte_plane_index) {
-      const std::size_t component_byte_index = bytes_per_sample - 1u - byte_plane_index;
-      for (std::size_t row = 0; row < rows; ++row) {
-        for (std::size_t col = 0; col < cols; ++col) {
-          const uint8_t* src_sample = nullptr;
-          if (source_planar) {
-            const uint8_t* src_plane = source + sample * source_plane_stride;
-            const uint8_t* src_row = src_plane + row * source_row_stride;
-            src_sample = src_row + col * bytes_per_sample;
-          } else {
-            const uint8_t* src_row = source + row * source_row_stride;
-            src_sample = src_row + col * interleaved_pixel_stride +
-                sample * bytes_per_sample;
-          }
-          byte_plane[row * cols + col] = src_sample[component_byte_index];
-        }
-      }
-
-      const std::size_t segment_index = sample * bytes_per_sample + byte_plane_index;
-      if (encoded.size() > max_u32) {
-        return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "encode_frame",
-            "RLE codestream exceeds 32-bit offset range");
-      }
-      store_le32(encoded.data() + 4u + segment_index * sizeof(uint32_t),
-          static_cast<uint32_t>(encoded.size()));
-      encode_packbits_segment_append(byte_plane.data(), byte_plane.size(), &encoded);
-      if (encoded.size() > max_u32) {
-        return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "encode_frame",
-            "RLE codestream exceeds 32-bit offset range");
-      }
-    }
+  const pixel_error_code append_ec = source_planar
+      ? append_rle_segments<true>(ctx, source, rows, cols, samples_per_pixel,
+            bytes_per_sample, source_row_stride, source_plane_stride,
+            &byte_plane, &encoded)
+      : append_rle_segments<false>(ctx, source, rows, cols, samples_per_pixel,
+            bytes_per_sample, source_row_stride, source_plane_stride,
+            &byte_plane, &encoded);
+  if (append_ec != PIXEL_CODEC_ERR_OK) {
+    return append_ec;
   }
 
   *out_encoded = std::move(encoded);
@@ -331,6 +365,7 @@ pixel_error_code encoder_encode_frame_to_context_buffer(
   if (validate_ec != PIXEL_CODEC_ERR_OK) {
     return validate_ec;
   }
+  (void)source_frame_size_u64;
 
   std::size_t rows = 0;
   std::size_t cols = 0;
