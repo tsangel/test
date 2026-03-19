@@ -218,8 +218,6 @@ def _decode_pydicom_pixel_array(ds: Any) -> Any:
 def _prepare_reuse_outputs(
     inputs: list[tuple[Path, Any]],
     backend: str,
-    *,
-    scaled: bool,
 ) -> list[Any] | None:
     if backend != "dicomsdl":
         return None
@@ -230,7 +228,7 @@ def _prepare_reuse_outputs(
 
     outputs: list[Any] = []
     for _, ds in inputs:
-        probe = ds.to_array(frame=-1, scaled=scaled)
+        probe = _dicomsdl_to_array(ds, frame=-1)
         outputs.append(np.empty_like(probe))
     return outputs
 
@@ -271,9 +269,7 @@ def _prepare_pydicom_reuse_context(inputs: list[tuple[Path, Any]]) -> PydicomReu
     )
 
 
-def _prepare_dicomsdl_view_copyto_context(
-    inputs: list[tuple[Path, Any]], *, scaled: bool
-) -> DicomsdlViewCopytoContext:
+def _prepare_dicomsdl_view_copyto_context(inputs: list[tuple[Path, Any]]) -> DicomsdlViewCopytoContext:
     try:
         import numpy as np
     except Exception as exc:  # pragma: no cover
@@ -288,7 +284,7 @@ def _prepare_dicomsdl_view_copyto_context(
             outputs.append(np.empty_like(view))
             use_view.append(True)
         except Exception:
-            probe = ds.to_array(frame=-1, scaled=scaled)
+            probe = _dicomsdl_to_array(ds, frame=-1)
             outputs.append(np.empty_like(probe))
             use_view.append(False)
 
@@ -309,6 +305,14 @@ def _legacy_decode_into_thread_kwargs(codec: str, decoder_threads: int) -> dict[
     }
 
 
+def _dicomsdl_to_array(ds: Any, *, frame: int, **kwargs: Any) -> Any:
+    return ds.to_array(frame=frame, **kwargs)
+
+
+def _dicomsdl_decode_into(ds: Any, out: Any, *, frame: int, **kwargs: Any) -> Any:
+    return ds.decode_into(out, frame=frame, **kwargs)
+
+
 def _benchmark_codec(
     backend: str,
     codec: str,
@@ -316,7 +320,6 @@ def _benchmark_codec(
     *,
     warmup: int,
     repeat: int,
-    scaled: bool,
     dicomsdl_mode: str,
     pydicom_mode: str,
     verbose: bool,
@@ -326,14 +329,10 @@ def _benchmark_codec(
     dicomsdl_view_copyto: DicomsdlViewCopytoContext | None = None
     pydicom_reuse: PydicomReuseContext | None = None
     if backend == "dicomsdl" and dicomsdl_mode == "decode_into":
-        reusable_outputs = _prepare_reuse_outputs(
-            inputs,
-            backend,
-            scaled=scaled,
-        )
+        reusable_outputs = _prepare_reuse_outputs(inputs, backend)
     decode_into_thread_kwargs = _legacy_decode_into_thread_kwargs(codec, decoder_threads)
     if backend == "dicomsdl" and dicomsdl_mode == "to_array_view_copyto":
-        dicomsdl_view_copyto = _prepare_dicomsdl_view_copyto_context(inputs, scaled=scaled)
+        dicomsdl_view_copyto = _prepare_dicomsdl_view_copyto_context(inputs)
         fallback_count = sum(1 for enabled in dicomsdl_view_copyto.use_view if not enabled)
         if fallback_count > 0:
             print(
@@ -353,10 +352,10 @@ def _benchmark_codec(
         for index, (_, ds) in enumerate(inputs):
             if backend == "dicomsdl":
                 if dicomsdl_mode == "decode_into" and reusable_outputs is not None:
-                    _ = ds.decode_into(
+                    _ = _dicomsdl_decode_into(
+                        ds,
                         reusable_outputs[index],
                         frame=-1,
-                        scaled=scaled,
                         **decode_into_thread_kwargs,
                     )
                 elif dicomsdl_mode == "to_array_view_copyto" and dicomsdl_view_copyto is not None:
@@ -365,16 +364,16 @@ def _benchmark_codec(
                             dicomsdl_view_copyto.outputs[index], ds.to_array_view(frame=-1)
                         )
                     else:
-                        _ = ds.decode_into(
+                        _ = _dicomsdl_decode_into(
+                            ds,
                             dicomsdl_view_copyto.outputs[index],
                             frame=-1,
-                            scaled=scaled,
                             **decode_into_thread_kwargs,
                         )
                 elif dicomsdl_mode == "to_array_view":
                     _ = ds.to_array_view(frame=-1)
                 else:
-                    _ = ds.to_array(frame=-1, scaled=scaled)
+                    _ = _dicomsdl_to_array(ds, frame=-1)
             elif pydicom_reuse is not None:
                 if pydicom_reuse.use_numpy_handler[index]:
                     flat = pydicom_reuse.get_pixeldata(ds, read_only=True)
@@ -396,10 +395,10 @@ def _benchmark_codec(
         for index, (path, ds) in enumerate(inputs):
             if backend == "dicomsdl":
                 if dicomsdl_mode == "decode_into" and reusable_outputs is not None:
-                    arr = ds.decode_into(
+                    arr = _dicomsdl_decode_into(
+                        ds,
                         reusable_outputs[index],
                         frame=-1,
-                        scaled=scaled,
                         **decode_into_thread_kwargs,
                     )
                 elif dicomsdl_mode == "to_array_view_copyto" and dicomsdl_view_copyto is not None:
@@ -408,17 +407,17 @@ def _benchmark_codec(
                             dicomsdl_view_copyto.outputs[index], ds.to_array_view(frame=-1)
                         )
                     else:
-                        _ = ds.decode_into(
+                        _ = _dicomsdl_decode_into(
+                            ds,
                             dicomsdl_view_copyto.outputs[index],
                             frame=-1,
-                            scaled=scaled,
                             **decode_into_thread_kwargs,
                         )
                     arr = dicomsdl_view_copyto.outputs[index]
                 elif dicomsdl_mode == "to_array_view":
                     arr = ds.to_array_view(frame=-1)
                 else:
-                    arr = ds.to_array(frame=-1, scaled=scaled)
+                    arr = _dicomsdl_to_array(ds, frame=-1)
             elif pydicom_reuse is not None:
                 if pydicom_reuse.use_numpy_handler[index]:
                     flat = pydicom_reuse.get_pixeldata(ds, read_only=True)
@@ -475,12 +474,10 @@ def _print_backend_report(
     backend: str,
     stats: list[CodecStats],
     *,
-    scaled: bool,
     mode: str,
 ) -> None:
     print(f"\n== {backend} ==")
     print(f"WG04 root: {root}")
-    print(f"scaled output: {scaled}")
     mode_set = sorted({row.mode for row in stats})
     if len(mode_set) <= 1:
         mode_display = mode
@@ -808,11 +805,6 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="Measured decode passes per codec.",
     )
     parser.add_argument(
-        "--scaled",
-        action="store_true",
-        help="Use scaled=True (dicomsdl only).",
-    )
-    parser.add_argument(
         "--reuse-output",
         action="store_true",
         help=(
@@ -895,7 +887,6 @@ def _benchmark_codec_for_backend(
     module: Any,
     warmup: int,
     repeat: int,
-    scaled: bool,
     dicomsdl_mode: str,
     pydicom_mode: str,
     verbose: bool,
@@ -912,7 +903,6 @@ def _benchmark_codec_for_backend(
         inputs,
         warmup=warmup,
         repeat=repeat,
-        scaled=scaled,
         dicomsdl_mode=codec_dicomsdl_mode,
         pydicom_mode=pydicom_mode,
         verbose=verbose,
@@ -948,15 +938,6 @@ def main(argv: list[str]) -> int:
     dicomsdl_htj2k_decoder = args.dicomsdl_htj2k_decoder
     pydicom_mode = "reuse_output" if args.reuse_output_pydicom else args.pydicom_mode
 
-    if args.scaled and "pydicom" in selected_backends:
-        print("--scaled is only supported when backend=dicomsdl", file=sys.stderr)
-        return 2
-    if args.scaled and dicomsdl_mode in ("to_array_view", "to_array_view_copyto"):
-        print(
-            "--scaled cannot be combined with --dicomsdl-mode=to_array_view or to_array_view_copyto",
-            file=sys.stderr,
-        )
-        return 2
     if args.reuse_output and "dicomsdl" not in selected_backends:
         print("--reuse-output requires backend=dicomsdl or backend=both", file=sys.stderr)
         return 2
@@ -1006,7 +987,6 @@ def main(argv: list[str]) -> int:
                     module=module,
                     warmup=args.warmup,
                     repeat=args.repeat,
-                    scaled=args.scaled,
                     dicomsdl_mode=dicomsdl_mode,
                     pydicom_mode=pydicom_mode,
                     verbose=args.verbose,
@@ -1032,7 +1012,6 @@ def main(argv: list[str]) -> int:
             root,
             backend,
             backend_stats,
-            scaled=args.scaled,
             mode=(dicomsdl_mode if backend == "dicomsdl" else pydicom_mode),
         )
 
@@ -1063,7 +1042,6 @@ def main(argv: list[str]) -> int:
                 dicomsdl_inputs,
                 warmup=args.warmup,
                 repeat=args.repeat,
-                scaled=args.scaled,
                 dicomsdl_mode=_RAW_BEST_DICOMSDL_MODE,
                 pydicom_mode=pydicom_mode,
                 verbose=args.verbose,
@@ -1077,7 +1055,6 @@ def main(argv: list[str]) -> int:
                 pydicom_inputs,
                 warmup=args.warmup,
                 repeat=args.repeat,
-                scaled=args.scaled,
                 dicomsdl_mode=dicomsdl_mode,
                 pydicom_mode=_RAW_BEST_PYDICOM_MODE,
                 verbose=args.verbose,
@@ -1110,7 +1087,6 @@ def main(argv: list[str]) -> int:
                 dicomsdl_inputs,
                 warmup=args.warmup,
                 repeat=args.repeat,
-                scaled=args.scaled,
                 dicomsdl_mode="decode_into",
                 pydicom_mode=pydicom_mode,
                 verbose=args.verbose,
@@ -1137,7 +1113,6 @@ def main(argv: list[str]) -> int:
     if args.json_path:
         payload = {
             "wg04_root": str(root),
-            "scaled": bool(args.scaled),
             "warmup": int(args.warmup),
             "repeat": int(args.repeat),
             "backend": args.backend,

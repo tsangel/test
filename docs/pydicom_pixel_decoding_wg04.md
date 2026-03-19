@@ -67,11 +67,11 @@ python benchmarks/python/benchmark_wg04_pixel_decode.py \
 - `dicomsdl` path:
   - when `--dicomsdl-htj2k-decoder` is provided, the script configures the HTJ2K
     backend immediately after importing `dicomsdl`, before any decode work starts
-  - default decode call: `df.to_array(frame=-1, scaled=False)`
+  - default decode call: `df.to_array(frame=-1)`
   - for `J2KR`/`J2KI` in the base table, the driver forces
-    `df.decode_into(out, frame=-1, scaled=False, worker_threads=-1, codec_threads=-1)`
+    `df.decode_into(out, frame=-1, worker_threads=-1, codec_threads=-1)`
   - with `--reuse-output`:
-    `df.decode_into(out, frame=-1, scaled=False, worker_threads=-1, codec_threads=-1)`
+    `df.decode_into(out, frame=-1, worker_threads=-1, codec_threads=-1)`
   - in this benchmark driver, `decode_into` uses `worker_threads=-1`,
     `codec_threads=-1` by default.
 - `pydicom` path:
@@ -138,8 +138,6 @@ HTJ2K cross-backend comparison target in this note:
 - HTJ2K (`1.2.840.10008.1.2.4.201`, `1.2.840.10008.1.2.4.203`) decoding in
   `pydicom` depends on plugin availability/runtime compatibility. If decode fails
   in a run, HTJ2K rows are reported as `pydicom=n/a`.
-- `--scaled` is intentionally restricted to `dicomsdl` mode in this script.
-  Cross-backend comparisons should use `scaled=False`.
 - In this benchmark flow, dataset pixel metadata is assumed immutable after
   preload. If pixel-affecting fields are changed, regenerate pixel metadata and
   reallocate output buffers before subsequent `decode_into` calls.

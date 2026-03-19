@@ -78,7 +78,7 @@
 This section adds decode-backend-forced results for HTJ2K (`openjph` vs `openjpeg`), while keeping the same encode settings and MCT on/off combinations.
 
 - Measured date: 2026-02-24
-- Decode benchmark method: `set_htj2k_decoder_backend(...)` + `to_array(frame=-1, scaled=False)`
+- Decode benchmark method: `set_htj2k_decoder_backend(...)` + `to_array(frame=-1)`
 - Backend selection is process-initial only in the current runtime design; it must be
   configured before the first pixel decode/encode.
 - Warm-up discarded: 1 run
