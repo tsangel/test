@@ -15,19 +15,21 @@ void DicomFile::finalize_set_pixel_data_transfer_syntax(
 }
 
 void DicomFile::set_pixel_data(uid::WellKnown transfer_syntax,
-    const pixel::PixelSource& source) {
+    pixel::ConstPixelSpan source) {
+	// The span overload is the new public entry point and reuses the default encoder context.
 	pixel::set_pixel_data(*this, source, pixel::create_encoder_context(transfer_syntax));
 }
 
 void DicomFile::set_pixel_data(uid::WellKnown transfer_syntax,
-    const pixel::PixelSource& source, const pixel::EncoderContext& encoder_ctx) {
+    pixel::ConstPixelSpan source, const pixel::EncoderContext& encoder_ctx) {
+	// Validate the explicit context against the requested transfer syntax before bridging.
 	pixel::detail::validate_encoder_context_for_set_pixel_data_or_throw(path(),
 	    transfer_syntax, encoder_ctx.configured(), encoder_ctx.transfer_syntax_uid());
 	pixel::set_pixel_data(*this, source, encoder_ctx);
 }
 
 void DicomFile::set_pixel_data(uid::WellKnown transfer_syntax,
-    const pixel::PixelSource& source,
+    pixel::ConstPixelSpan source,
     std::span<const pixel::CodecOptionTextKv> codec_opt) {
 	pixel::set_pixel_data(
 	    *this, source, pixel::create_encoder_context(transfer_syntax, codec_opt));

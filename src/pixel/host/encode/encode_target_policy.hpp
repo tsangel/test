@@ -1,7 +1,7 @@
 #pragma once
 
 #include "dicom.h"
-#include "pixel_codec_plugin_abi_v2.h"
+#include "pixel_codec_plugin_abi.h"
 
 #include <optional>
 #include <string_view>

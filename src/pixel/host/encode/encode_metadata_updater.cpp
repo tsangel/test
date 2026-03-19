@@ -22,6 +22,8 @@ namespace {
 		return "MONOCHROME1";
 	case pixel::Photometric::monochrome2:
 		return "MONOCHROME2";
+	case pixel::Photometric::palette_color:
+		return "PALETTE COLOR";
 	case pixel::Photometric::rgb:
 		return "RGB";
 	case pixel::Photometric::ybr_full:
@@ -159,15 +161,18 @@ void update_lossy_compression_metadata_for_set_pixel_data(DataSet& dataset,
 }
 
 void update_pixel_metadata_for_set_pixel_data(DataSet& dataset, std::string_view file_path,
-    uid::WellKnown transfer_syntax, const pixel::PixelSource& source, bool target_is_rle,
+    uid::WellKnown transfer_syntax, const pixel::PixelLayout& source_layout,
+    bool target_is_rle,
     pixel::Photometric output_photometric, int bits_allocated, int bits_stored,
     int high_bit, int pixel_representation,
     std::size_t source_row_stride, std::size_t source_frame_stride) {
 	bool ok = true;
-	ok &= dataset.set_value("Rows"_tag, static_cast<long>(source.rows));
-	ok &= dataset.set_value("Columns"_tag, static_cast<long>(source.cols));
+	// Write the normalized geometry exactly once so every encode path uses the
+	// same metadata source of truth.
+	ok &= dataset.set_value("Rows"_tag, static_cast<long>(source_layout.rows));
+	ok &= dataset.set_value("Columns"_tag, static_cast<long>(source_layout.cols));
 	ok &= dataset.set_value(
-	    "SamplesPerPixel"_tag, static_cast<long>(source.samples_per_pixel));
+	    "SamplesPerPixel"_tag, static_cast<long>(source_layout.samples_per_pixel));
 	ok &= dataset.set_value("BitsAllocated"_tag, static_cast<long>(bits_allocated));
 	ok &= dataset.set_value("BitsStored"_tag, static_cast<long>(bits_stored));
 	ok &= dataset.set_value("HighBit"_tag, static_cast<long>(high_bit));
@@ -177,15 +182,16 @@ void update_pixel_metadata_for_set_pixel_data(DataSet& dataset, std::string_view
 	const auto photometric_text = to_photometric_text(output_photometric);
 	ok &= dataset.set_value("PhotometricInterpretation"_tag, photometric_text);
 
-	if (source.frames > 1) {
-		ok &= dataset.set_value("NumberOfFrames"_tag, static_cast<long>(source.frames));
+	if (source_layout.frames > 1u) {
+		ok &= dataset.set_value(
+		    "NumberOfFrames"_tag, static_cast<long>(source_layout.frames));
 	} else {
 		dataset.remove_dataelement("NumberOfFrames"_tag);
 	}
-	if (source.samples_per_pixel > 1) {
+	if (source_layout.samples_per_pixel > 1u) {
 		const long planar_configuration = target_is_rle
 		                                      ? 1L
-		                                      : (source.planar == pixel::Planar::planar ? 1L : 0L);
+		                                      : (source_layout.planar == pixel::Planar::planar ? 1L : 0L);
 		ok &= dataset.set_value("PlanarConfiguration"_tag, planar_configuration);
 	} else {
 		dataset.remove_dataelement("PlanarConfiguration"_tag);
@@ -193,10 +199,11 @@ void update_pixel_metadata_for_set_pixel_data(DataSet& dataset, std::string_view
 	if (!ok) {
 		diag::error_and_throw(
 		    "DicomFile::set_pixel_data file={} ts={} reason=failed to update one or more pixel metadata tags requested rows={} cols={} frames={} spp={} bits_allocated={} bits_stored={} high_bit={} pixel_representation={} photometric={} planar={} row_stride={} frame_stride={}",
-		    file_path, transfer_syntax.value(), source.rows, source.cols, source.frames,
-		    source.samples_per_pixel, bits_allocated, bits_stored, high_bit,
+		    file_path, transfer_syntax.value(), source_layout.rows, source_layout.cols,
+		    source_layout.frames, source_layout.samples_per_pixel, bits_allocated,
+		    bits_stored, high_bit,
 		    pixel_representation, photometric_text,
-		    source.planar == pixel::Planar::planar ? "planar" : "interleaved",
+		    source_layout.planar == pixel::Planar::planar ? "planar" : "interleaved",
 		    source_row_stride, source_frame_stride);
 	}
 }

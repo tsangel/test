@@ -1,13 +1,14 @@
 #include "writing/transcoded_write.hpp"
 
 #include "writing/detail/overlay_write.hpp"
-#include "pixel/host/adapter/host_adapter_v2.hpp"
+#include "pixel/host/adapter/host_adapter.hpp"
 #include "pixel/host/decode/decode_frame_dispatch.hpp"
 #include "pixel/host/encode/encode_set_pixel_data_runner.hpp"
 #include "pixel/host/encode/encode_target_policy.hpp"
 #include "pixel/host/encode/multicomponent_transform_policy.hpp"
 #include "pixel/host/support/dicom_pixel_support.hpp"
 
+#include <exception>
 #include <limits>
 #include <optional>
 #include <string_view>
@@ -16,69 +17,21 @@
 namespace dicom::write_detail {
 namespace {
 
-// Builds a PixelSource descriptor for frame-by-frame re-encode after decode planning.
-[[nodiscard]] pixel::PixelSource build_set_pixel_source_from_decoded_native_frames_for_write(
-    DicomFile& file, uid::WellKnown target_ts, const pixel::PixelDataInfo& info,
-    const pixel::DecodePlan& decode_plan) {
-	if (!info.has_pixel_data || info.rows <= 0 || info.cols <= 0 || info.frames <= 0 ||
-	    info.samples_per_pixel <= 0) {
-		diag::error_and_throw(
-		    "write_with_transfer_syntax file={} target_ts={} reason=invalid decoded pixel metadata rows={} cols={} frames={} samples_per_pixel={}",
-		    file.path(), target_ts.value(), info.rows, info.cols, info.frames,
-		    info.samples_per_pixel);
-	}
-	if (decode_plan.strides.row == 0 || decode_plan.strides.frame == 0) {
+// Builds the normalized native frame layout used by streaming re-encode.
+[[nodiscard]] pixel::PixelLayout resolve_decoded_source_layout_for_write_or_throw(
+    DicomFile& file, uid::WellKnown target_ts, const pixel::DecodePlan& decode_plan) {
+	if (decode_plan.output_layout.empty()) {
 		diag::error_and_throw(
 		    "write_with_transfer_syntax file={} target_ts={} reason=decoded frame layout is empty",
 		    file.path(), target_ts.value());
 	}
 
-	const auto photometric_text =
-	    file.dataset()["PhotometricInterpretation"_tag].to_string_view();
-	if (!photometric_text) {
-		diag::error_and_throw(
-		    "write_with_transfer_syntax file={} target_ts={} reason=missing or invalid PhotometricInterpretation",
-		    file.path(), target_ts.value());
-	}
-	const auto photometric = parse_photometric_from_text_for_write(*photometric_text);
-	if (!photometric) {
-		diag::error_and_throw(
-		    "write_with_transfer_syntax file={} target_ts={} reason=unsupported PhotometricInterpretation='{}' for streaming write path",
-		    file.path(), target_ts.value(), *photometric_text);
-	}
-
-	const auto parse_optional_int_tag =
-	    [&](Tag tag, std::string_view name) -> std::optional<int> {
-		const auto value = file.dataset()[tag].to_long();
-		if (!value) {
-			return std::nullopt;
-		}
-		if (*value < static_cast<long>(std::numeric_limits<int>::min()) ||
-		    *value > static_cast<long>(std::numeric_limits<int>::max())) {
-			diag::error_and_throw(
-			    "write_with_transfer_syntax file={} target_ts={} reason={} value({}) is outside int range",
-			    file.path(), target_ts.value(), name, *value);
-		}
-		return static_cast<int>(*value);
-	};
-
-	pixel::PixelSource source{};
-	source.data_type = info.sv_dtype;
-	source.rows = info.rows;
-	source.cols = info.cols;
-	source.frames = info.frames;
-	source.samples_per_pixel = info.samples_per_pixel;
-	source.planar = info.planar_configuration;
-	source.row_stride = decode_plan.strides.row;
-	source.frame_stride = decode_plan.strides.frame;
-	source.photometric = *photometric;
-	source.bits_stored =
-	    parse_optional_int_tag("BitsStored"_tag, "BitsStored").value_or(info.bits_stored);
-	return source;
+	// The decode plan already carries the exact normalized frame layout used for re-encode.
+	return decode_plan.output_layout;
 }
 
-// Builds a PixelSource descriptor directly from native PixelData without an intermediate decode.
-[[nodiscard]] pixel::PixelSource build_set_pixel_source_from_native_pixel_data_for_write(
+// Builds the normalized native source span directly from on-disk PixelData.
+[[nodiscard]] pixel::ConstPixelSpan build_native_source_span_for_write(
     DicomFile& file, uid::WellKnown target_ts) {
 	DataSet& dataset = file.dataset();
 	const auto& pixel_data = dataset["PixelData"_tag];
@@ -88,103 +41,39 @@ namespace {
 		    file.path(), target_ts.value());
 	}
 
-	const auto info = file.pixeldata_info();
-	if (!info.has_pixel_data || info.rows <= 0 || info.cols <= 0 || info.frames <= 0 ||
-	    info.samples_per_pixel <= 0) {
+	const auto layout = file.native_pixel_layout();
+	if (!layout.has_value()) {
 		diag::error_and_throw(
-		    "write_with_transfer_syntax file={} target_ts={} reason=invalid native pixel metadata rows={} cols={} frames={} samples_per_pixel={}",
-		    file.path(), target_ts.value(), info.rows, info.cols, info.frames,
-		    info.samples_per_pixel);
-	}
-
-	const auto bytes_per_sample = bytes_per_sample_of(info.sv_dtype);
-	if (bytes_per_sample == 0) {
-		diag::error_and_throw(
-		    "write_with_transfer_syntax file={} target_ts={} reason=failed to resolve bytes per sample for dtype={}",
-		    file.path(), target_ts.value(), static_cast<int>(info.sv_dtype));
-	}
-
-	const auto rows = static_cast<std::size_t>(info.rows);
-	const auto cols = static_cast<std::size_t>(info.cols);
-	const auto frames = static_cast<std::size_t>(info.frames);
-	const auto samples_per_pixel = static_cast<std::size_t>(info.samples_per_pixel);
-	const bool source_is_planar =
-	    info.planar_configuration == pixel::Planar::planar && samples_per_pixel > 1;
-	const std::uint64_t row_components_u64 =
-	    source_is_planar ? static_cast<std::uint64_t>(cols)
-	                     : static_cast<std::uint64_t>(cols) *
-	                           static_cast<std::uint64_t>(samples_per_pixel);
-	const std::uint64_t row_stride_u64 =
-	    row_components_u64 * static_cast<std::uint64_t>(bytes_per_sample);
-	const std::uint64_t plane_stride_u64 =
-	    row_stride_u64 * static_cast<std::uint64_t>(rows);
-	const std::uint64_t frame_stride_u64 =
-	    source_is_planar ? plane_stride_u64 * static_cast<std::uint64_t>(samples_per_pixel)
-	                     : plane_stride_u64;
-	if (frame_stride_u64 == 0) {
-		diag::error_and_throw(
-		    "write_with_transfer_syntax file={} target_ts={} reason=native source frame stride is zero",
+		    "write_with_transfer_syntax file={} target_ts={} reason=invalid native pixel metadata for normalized layout reconstruction",
 		    file.path(), target_ts.value());
 	}
-	if (frame_stride_u64 >
-	    static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) {
-		diag::error_and_throw(
-		    "write_with_transfer_syntax file={} target_ts={} reason=native source frame stride overflows size_t",
-		    file.path(), target_ts.value());
-	}
-	const auto frame_stride = static_cast<std::size_t>(frame_stride_u64);
-	if (frames > std::numeric_limits<std::size_t>::max() / frame_stride) {
-		diag::error_and_throw(
-		    "write_with_transfer_syntax file={} target_ts={} reason=native source total bytes overflow (frames={}, frame_stride={})",
-		    file.path(), target_ts.value(), frames, frame_stride);
-	}
-	const auto required_bytes = frame_stride * frames;
 
 	const auto source_bytes = pixel_data.value_span();
-	if (source_bytes.size() < required_bytes) {
+
+	std::size_t required_bytes = 0;
+	if (!pixel::try_pixel_storage_size(*layout, required_bytes) ||
+	    source_bytes.size() < required_bytes) {
 		diag::error_and_throw(
 		    "write_with_transfer_syntax file={} target_ts={} reason=PixelData bytes({}) are shorter than required native frame payload({})",
 		    file.path(), target_ts.value(), source_bytes.size(), required_bytes);
 	}
 
-	pixel::PixelSource source{};
-	source.bytes = source_bytes.first(required_bytes);
-	source.data_type = info.sv_dtype;
-	source.rows = info.rows;
-	source.cols = info.cols;
-	source.row_stride = static_cast<std::size_t>(row_stride_u64);
-	source.frames = info.frames;
-	source.frame_stride = frame_stride;
-	source.samples_per_pixel = info.samples_per_pixel;
-	source.planar = info.planar_configuration;
-	source.bits_stored = info.bits_stored;
-
-	const auto photometric_text = dataset["PhotometricInterpretation"_tag].to_string_view();
-	if (!photometric_text) {
-		diag::error_and_throw(
-		    "write_with_transfer_syntax file={} target_ts={} reason=missing or invalid PhotometricInterpretation for native source path",
-		    file.path(), target_ts.value());
-	}
-	const auto photometric = parse_photometric_from_text_for_write(*photometric_text);
-	if (!photometric) {
-		diag::error_and_throw(
-		    "write_with_transfer_syntax file={} target_ts={} reason=unsupported PhotometricInterpretation='{}' for native source path",
-		    file.path(), target_ts.value(), *photometric_text);
-	}
-	source.photometric = *photometric;
-	return source;
+	return pixel::ConstPixelSpan{
+	    .layout = *layout,
+	    .bytes = source_bytes.first(required_bytes),
+	};
 }
 
 template <typename FrameProvider>
 std::size_t measure_encoded_payload_bytes_from_frame_provider(DicomFile& file,
-    uid::WellKnown transfer_syntax, const pixel::PixelSource& source_descriptor,
+    uid::WellKnown transfer_syntax, const pixel::PixelLayout& source_layout,
     uint32_t codec_profile_code, std::span<const pixel::CodecOptionKv> codec_options,
     bool use_multicomponent_transform, std::size_t frame_count,
     FrameProvider&& frame_provider) {
 	// Used only for non-seekable lossy outputs where the final ratio cannot be backpatched.
 	std::size_t encoded_payload_bytes = 0;
 	pixel::detail::encode_frames_from_frame_provider_with_runtime_or_throw(
-	    file, transfer_syntax, source_descriptor, codec_profile_code, codec_options,
+	    file, transfer_syntax, source_layout, codec_profile_code, codec_options,
 	    use_multicomponent_transform, frame_count,
 	    std::forward<FrameProvider>(frame_provider),
 	    [&](std::size_t, std::vector<std::uint8_t>&& encoded_frame) {
@@ -265,13 +154,14 @@ struct TransferSyntaxWriteDecision {
 
 // Carries all state shared between prepare and emit steps for streaming writes.
 struct PreparedStreamingTranscodeState {
-	pixel::PixelDataInfo info{};
-	pixel::PixelSource source_descriptor{};
+	pixel::PixelLayout source_decode_layout{};
+	pixel::PixelLayout source_layout{};
+	std::span<const std::uint8_t> source_bytes{};
 	std::optional<pixel::DecodePlan> decode_plan{};
 	pixel::EncoderContext staged_encoder_ctx{};
 	const pixel::EncoderContext* active_encoder_ctx{nullptr};
-	uint32_t codec_profile_code{PIXEL_CODEC_PROFILE_UNKNOWN_V2};
-	pixel::support_detail::ComputedEncodeSourceLayout source_layout{};
+	uint32_t codec_profile_code{PIXEL_CODEC_PROFILE_UNKNOWN};
+	pixel::support_detail::ComputedEncodeSourceLayout encode_source_layout{};
 	bool use_multicomponent_transform{false};
 	pixel::Photometric output_photometric{pixel::Photometric::monochrome2};
 	bool backpatch_lossy_ratio{false};
@@ -282,32 +172,35 @@ struct PreparedStreamingTranscodeState {
 	DatasetWritePlan write_plan{};
 };
 
-// Resolves the frame layout used by downstream encode/write loops.
-void prepare_streaming_source_descriptor_or_throw(
+// Resolves the normalized source layout used by downstream encode/write loops.
+void prepare_streaming_source_layout_or_throw(
     PreparedStreamingTranscodeState& state, DicomFile& file,
     uid::WellKnown target_transfer_syntax,
     const TransferSyntaxWriteDecision& decision) {
 	if (decision.needs_native_to_encapsulated) {
-		state.source_descriptor =
-		    build_set_pixel_source_from_native_pixel_data_for_write(
-		        file, target_transfer_syntax);
+		// Native PixelData can be described directly without a decode plan.
+		const auto source = build_native_source_span_for_write(file, target_transfer_syntax);
+		state.source_layout = source.layout;
+		state.source_bytes = source.bytes;
 		return;
 	}
 
+	// Encapsulated sources need a decode plan so the write path knows the exact
+	// native frame layout it will materialize on demand.
 	pixel::DecodeOptions decode_options{};
-	decode_options.planar_out = state.info.planar_configuration;
 	decode_options.alignment = 1;
-	decode_options.to_modality_value = false;
+	decode_options.planar_out = state.source_decode_layout.planar;
 	decode_options.decode_mct = false;
 	state.decode_plan = file.create_decode_plan(decode_options);
-	if (state.decode_plan->strides.frame == 0) {
+	if (state.decode_plan->output_layout.empty()) {
 		diag::error_and_throw(
 		    "write_with_transfer_syntax file={} target_ts={} reason=calculated native frame size is zero for streaming write",
 		    file.path(), target_transfer_syntax.value());
 	}
-	state.source_descriptor =
-	    build_set_pixel_source_from_decoded_native_frames_for_write(
-	        file, target_transfer_syntax, state.info, *state.decode_plan);
+	state.source_layout =
+	    resolve_decoded_source_layout_for_write_or_throw(
+	        file, target_transfer_syntax, *state.decode_plan);
+	state.source_bytes = {};
 }
 
 // Chooses which encoder context supplies codec options for this write.
@@ -347,20 +240,21 @@ void prepare_streaming_encode_policy_or_throw(
     PreparedStreamingTranscodeState& state, DicomFile& file,
     uid::WellKnown target_transfer_syntax,
     const TransferSyntaxWriteDecision& decision, bool writer_can_overwrite) {
-	state.codec_profile_code = PIXEL_CODEC_PROFILE_UNKNOWN_V2;
-	if (!::pixel::runtime_v2::codec_profile_code_from_transfer_syntax(
+	state.codec_profile_code = PIXEL_CODEC_PROFILE_UNKNOWN;
+	if (!::pixel::runtime::codec_profile_code_from_transfer_syntax(
 	        target_transfer_syntax, &state.codec_profile_code)) {
 		diag::error_and_throw(
 		    "write_with_transfer_syntax file={} ts={} reason=transfer syntax is not mapped to a runtime codec profile",
 		    file.path(), target_transfer_syntax.value());
 	}
-	state.source_layout =
+	state.encode_source_layout =
 	    pixel::support_detail::compute_encode_source_layout_without_source_bytes_or_throw(
-	        state.source_descriptor, file.path());
+	        state.source_layout, file.path());
 	pixel::detail::validate_encode_profile_source_constraints(state.codec_profile_code,
-	    state.source_layout.bits_allocated, state.source_layout.bits_stored, file.path());
+	    state.encode_source_layout.bits_allocated,
+	    state.encode_source_layout.bits_stored, file.path());
 
-	state.output_photometric = state.source_descriptor.photometric;
+	state.output_photometric = state.source_layout.photometric;
 	state.backpatch_lossy_ratio =
 	    decision.target_is_encapsulated &&
 	    pixel::detail::encode_profile_uses_lossy_compression(state.codec_profile_code) &&
@@ -372,11 +266,11 @@ void prepare_streaming_encode_policy_or_throw(
 	state.use_multicomponent_transform =
 	    pixel::detail::should_use_multicomponent_transform(target_transfer_syntax,
 	        state.codec_profile_code, state.active_encoder_ctx->codec_options(),
-	        state.source_layout.samples_per_pixel, file.path());
+	        state.encode_source_layout.samples_per_pixel, file.path());
 	state.output_photometric =
 	    pixel::detail::compute_output_photometric_for_encode_profile(
 	        state.codec_profile_code, state.use_multicomponent_transform,
-	        state.source_descriptor.photometric);
+	        state.source_layout.photometric);
 }
 
 // Runs the lossy size prepass only when backpatching is unavailable.
@@ -391,37 +285,41 @@ void measure_streaming_lossy_payload_prepass_if_needed_or_throw(
 	}
 
 	if (decision.needs_native_to_encapsulated) {
-		const auto source_bytes = state.source_descriptor.bytes;
+		// Native sources can hand frame spans directly to the encoder prepass.
 		state.encoded_payload_bytes =
 		    measure_encoded_payload_bytes_from_frame_provider(
-		        file, target_transfer_syntax, state.source_descriptor,
+		        file, target_transfer_syntax, state.source_layout,
 		        state.codec_profile_code, state.active_encoder_ctx->codec_options(),
-		        state.use_multicomponent_transform, state.source_layout.frames,
+		        state.use_multicomponent_transform, state.encode_source_layout.frames,
 		        [&](std::size_t frame_index) -> std::span<const std::uint8_t> {
 			        const auto frame_offset =
-			            frame_index * state.source_layout.source_frame_stride;
-			        return source_bytes.subspan(
-			            frame_offset, state.source_layout.source_frame_size_bytes);
+			            frame_index * state.encode_source_layout.source_frame_stride;
+			        return state.source_bytes.subspan(
+			            frame_offset,
+			            state.encode_source_layout.source_frame_size_bytes);
 		        });
 		return;
 	}
 
-	state.decoded_frame.resize(state.decode_plan->strides.frame);
+	state.decoded_frame.resize(state.decode_plan->output_layout.frame_stride);
+	// Encapsulated sources reuse one decode buffer while measuring the lossy payload.
 	state.encoded_payload_bytes =
 	    measure_encoded_payload_bytes_from_frame_provider(
-	        file, target_transfer_syntax, state.source_descriptor,
+	        file, target_transfer_syntax, state.source_layout,
 	        state.codec_profile_code, state.active_encoder_ctx->codec_options(),
-	        state.use_multicomponent_transform, state.source_layout.frames,
+	        state.use_multicomponent_transform, state.encode_source_layout.frames,
 	        [&](std::size_t frame_index) -> std::span<const std::uint8_t> {
 		        auto frame_span = std::span<std::uint8_t>(
 		            state.decoded_frame.data(), state.decoded_frame.size());
 		        const auto prepared_source =
 		            pixel::support_detail::prepare_decode_frame_source_without_cache_or_throw(
-		                file, state.info, frame_index);
-		        pixel::detail::dispatch_decode_prepared_frame(file.path(), frame_index,
+		                file, state.source_decode_layout, frame_index);
+		        pixel::detail::dispatch_decode_prepared_frame(file.path(),
+		            file.transfer_syntax_uid(), state.source_decode_layout, frame_index,
 		            prepared_source.bytes, frame_span, *state.decode_plan);
 		        return std::span<const std::uint8_t>(
-		            frame_span.data(), state.source_layout.source_frame_size_bytes);
+		            frame_span.data(),
+		            state.encode_source_layout.source_frame_size_bytes);
 	        });
 }
 
@@ -430,11 +328,11 @@ void prepare_streaming_overlay_or_throw(PreparedStreamingTranscodeState& state,
     DicomFile& file, DataSet& dataset, uid::WellKnown target_transfer_syntax,
     const WriteOptions& options) {
 	update_pixel_metadata_for_streaming_write_overlay(state.overlay, file.path(),
-	    target_transfer_syntax, state.source_descriptor,
+	    target_transfer_syntax, state.source_layout,
 	    pixel::detail::is_rle_encode_profile(state.codec_profile_code),
-	    state.output_photometric, state.source_layout.bits_allocated,
-	    state.source_layout.bits_stored, state.source_layout.high_bit,
-	    state.source_layout.pixel_representation);
+	    state.output_photometric, state.encode_source_layout.bits_allocated,
+	    state.encode_source_layout.bits_stored, state.encode_source_layout.high_bit,
+	    state.encode_source_layout.pixel_representation);
 	if (state.backpatch_lossy_ratio) {
 		state.lossy_ratio_backpatch =
 		    prepare_lossy_metadata_placeholder_for_streaming_write_overlay(
@@ -443,7 +341,8 @@ void prepare_streaming_overlay_or_throw(PreparedStreamingTranscodeState& state,
 	} else {
 		update_lossy_metadata_for_streaming_write_overlay(dataset, state.overlay,
 		    file.path(), target_transfer_syntax, state.codec_profile_code,
-		    state.source_layout.destination_total_bytes, state.encoded_payload_bytes);
+		    state.encode_source_layout.destination_total_bytes,
+		    state.encoded_payload_bytes);
 	}
 	if (options.write_file_meta) {
 		if (!options.keep_existing_meta) {
@@ -467,13 +366,14 @@ prepare_streaming_transcode_state_or_throw(DicomFile& file, DataSet& dataset,
     const TransferSyntaxWriteDecision& decision, bool writer_can_overwrite) {
 	PreparedStreamingTranscodeState state{};
 	// Build state in the same order the write pipeline will consume it.
-	state.info = file.pixeldata_info();
-	if (!state.info.has_pixel_data) {
+	state.source_decode_layout =
+	    pixel::support_detail::compute_decode_source_layout(file);
+	if (state.source_decode_layout.empty()) {
 		diag::error_and_throw(
 		    "write_with_transfer_syntax file={} target_ts={} reason=PixelData metadata is not decodable for the requested transfer syntax conversion",
 		    file.path(), target_transfer_syntax.value());
 	}
-	prepare_streaming_source_descriptor_or_throw(
+	prepare_streaming_source_layout_or_throw(
 	    state, file, target_transfer_syntax, decision);
 	prepare_streaming_encoder_context_or_throw(state, file, target_transfer_syntax,
 	    encode_mode, codec_opt_override, encoder_ctx, decision);
@@ -499,10 +399,11 @@ void write_encapsulated_transcoded_pixel_data_or_throw(DicomFile& file, Writer& 
 		    std::vector<std::uint64_t> extended_offsets{};
 		    std::vector<std::uint64_t> extended_lengths{};
 		    const bool write_extended_offset_table =
-		        direct_writer.can_overwrite() && state.source_layout.frames != 0;
+		        direct_writer.can_overwrite() &&
+		        state.encode_source_layout.frames != 0;
 		    // Reserve EOT space up front so offsets can be backpatched after frame emission.
 		    if (write_extended_offset_table) {
-			    if (state.source_layout.frames >
+			    if (state.encode_source_layout.frames >
 			        std::numeric_limits<std::size_t>::max() /
 			            sizeof(std::uint64_t)) {
 				    diag::error_and_throw(
@@ -510,7 +411,7 @@ void write_encapsulated_transcoded_pixel_data_or_throw(DicomFile& file, Writer& 
 				        file.path(), target_transfer_syntax.value());
 			    }
 			    const auto extended_value_length =
-			        state.source_layout.frames * sizeof(std::uint64_t);
+			        state.encode_source_layout.frames * sizeof(std::uint64_t);
 			    write_element_header(direct_writer, "ExtendedOffsetTable"_tag,
 			        explicit_vr ? VR::OV : VR::None,
 			        checked_u32(extended_value_length, "ExtendedOffsetTable length"),
@@ -527,8 +428,8 @@ void write_encapsulated_transcoded_pixel_data_or_throw(DicomFile& file, Writer& 
 			        direct_writer.position();
 			    append_zero_filled_bytes(direct_writer, extended_value_length);
 
-			    extended_offsets.reserve(state.source_layout.frames);
-			    extended_lengths.reserve(state.source_layout.frames);
+			    extended_offsets.reserve(state.encode_source_layout.frames);
+			    extended_lengths.reserve(state.encode_source_layout.frames);
 		    }
 
 		    // PixelData itself is streamed as an encapsulated undefined-length sequence.
@@ -563,40 +464,44 @@ void write_encapsulated_transcoded_pixel_data_or_throw(DicomFile& file, Writer& 
 
 		    // Source frames come either directly from native PixelData or from decode-on-demand.
 		    if (decision.needs_native_to_encapsulated) {
-			    const auto source_bytes = state.source_descriptor.bytes;
 			    pixel::detail::encode_frames_from_frame_provider_with_runtime_or_throw(
-			        file, target_transfer_syntax, state.source_descriptor,
+			        file, target_transfer_syntax, state.source_layout,
 			        state.codec_profile_code, state.active_encoder_ctx->codec_options(),
-			        state.use_multicomponent_transform, state.source_layout.frames,
+			        state.use_multicomponent_transform, state.encode_source_layout.frames,
 			        [&](std::size_t frame_index) -> std::span<const std::uint8_t> {
 				        const auto frame_offset =
-				            frame_index * state.source_layout.source_frame_stride;
-				        return source_bytes.subspan(
-				            frame_offset, state.source_layout.source_frame_size_bytes);
+				            frame_index *
+				            state.encode_source_layout.source_frame_stride;
+				        return state.source_bytes.subspan(
+				            frame_offset,
+				            state.encode_source_layout.source_frame_size_bytes);
 			        },
 			        [&](std::size_t, std::vector<std::uint8_t>&& encoded_frame) {
 				        commit_encoded_frame(std::move(encoded_frame));
 			        });
 		    } else {
-			    if (state.decoded_frame.size() != state.decode_plan->strides.frame) {
-				    state.decoded_frame.resize(state.decode_plan->strides.frame);
+			    if (state.decoded_frame.size() !=
+			        state.decode_plan->output_layout.frame_stride) {
+				    state.decoded_frame.resize(
+				        state.decode_plan->output_layout.frame_stride);
 			    }
 			    pixel::detail::encode_frames_from_frame_provider_with_runtime_or_throw(
-			        file, target_transfer_syntax, state.source_descriptor,
+			        file, target_transfer_syntax, state.source_layout,
 			        state.codec_profile_code, state.active_encoder_ctx->codec_options(),
-			        state.use_multicomponent_transform, state.source_layout.frames,
+			        state.use_multicomponent_transform, state.encode_source_layout.frames,
 			        [&](std::size_t frame_index) -> std::span<const std::uint8_t> {
 				        auto frame_span = std::span<std::uint8_t>(
 				            state.decoded_frame.data(), state.decoded_frame.size());
 				        const auto prepared_source =
 				            pixel::support_detail::prepare_decode_frame_source_without_cache_or_throw(
-				                file, state.info, frame_index);
+				                file, state.source_decode_layout, frame_index);
 				        pixel::detail::dispatch_decode_prepared_frame(file.path(),
+				            file.transfer_syntax_uid(), state.source_decode_layout,
 				            frame_index, prepared_source.bytes, frame_span,
 				            *state.decode_plan);
 				        return std::span<const std::uint8_t>(
 				            frame_span.data(),
-				            state.source_layout.source_frame_size_bytes);
+				            state.encode_source_layout.source_frame_size_bytes);
 			        },
 			        [&](std::size_t, std::vector<std::uint8_t>&& encoded_frame) {
 				        commit_encoded_frame(std::move(encoded_frame));
@@ -618,7 +523,8 @@ void write_encapsulated_transcoded_pixel_data_or_throw(DicomFile& file, Writer& 
 	if (state.lossy_ratio_backpatch) {
 		// Seekable outputs patch the final lossy ratio once the full payload size is known.
 		backpatch_lossy_ratio_or_throw(writer, file.path(), target_transfer_syntax,
-		    state.source_layout.destination_total_bytes, state.encoded_payload_bytes,
+		    state.encode_source_layout.destination_total_bytes,
+		    state.encoded_payload_bytes,
 		    *state.lossy_ratio_backpatch);
 	}
 }
@@ -626,28 +532,31 @@ void write_encapsulated_transcoded_pixel_data_or_throw(DicomFile& file, Writer& 
 template <typename Writer>
 void write_native_transcoded_pixel_data_or_throw(DicomFile& file, Writer& writer,
     PreparedStreamingTranscodeState& state) {
-	if (state.decoded_frame.size() != state.decode_plan->strides.frame) {
-		state.decoded_frame.resize(state.decode_plan->strides.frame);
+	if (state.decoded_frame.size() != state.decode_plan->output_layout.frame_stride) {
+		state.decoded_frame.resize(state.decode_plan->output_layout.frame_stride);
 	}
 	const auto native_pixel_vr =
-	    native_pixel_vr_from_bits_allocated_for_write(state.source_layout.bits_allocated);
+	    native_pixel_vr_from_bits_allocated_for_write(
+	        state.encode_source_layout.bits_allocated);
 	write_dataset_body_with_overlay_and_pixel_writer(writer, file.dataset(), state.overlay,
 	    state.write_plan, file.path(),
 	    [&](const DataElement& element, auto& direct_writer, bool explicit_vr) {
 		    write_native_pixel_data_from_frame_provider(direct_writer, element, explicit_vr,
-		        native_pixel_vr, state.source_layout.destination_total_bytes,
-		        state.source_layout.frames, state.source_layout.destination_frame_payload,
+		        native_pixel_vr, state.encode_source_layout.destination_total_bytes,
+		        state.encode_source_layout.frames,
+		        state.encode_source_layout.destination_frame_payload,
 		        [&](std::size_t frame_index) -> std::span<const std::uint8_t> {
 			        auto frame_span = std::span<std::uint8_t>(
 			            state.decoded_frame.data(), state.decoded_frame.size());
 			        const auto prepared_source =
 			            pixel::support_detail::prepare_decode_frame_source_without_cache_or_throw(
-			                file, state.info, frame_index);
-			        pixel::detail::dispatch_decode_prepared_frame(file.path(), frame_index,
+			                file, state.source_decode_layout, frame_index);
+			        pixel::detail::dispatch_decode_prepared_frame(file.path(),
+			            file.transfer_syntax_uid(), state.source_decode_layout, frame_index,
 			            prepared_source.bytes, frame_span, *state.decode_plan);
 			        return std::span<const std::uint8_t>(
 			            frame_span.data(),
-			            state.source_layout.destination_frame_payload);
+			            state.encode_source_layout.destination_frame_payload);
 		        });
 	    });
 }
@@ -756,3 +665,4 @@ void write_with_transfer_syntax_to_buffer_writer(DicomFile& file, BufferWriter& 
 }
 
 }  // namespace dicom::write_detail
+

@@ -114,6 +114,8 @@ struct LossyRatioBackpatchState {
 		return "MONOCHROME1";
 	case pixel::Photometric::monochrome2:
 		return "MONOCHROME2";
+	case pixel::Photometric::palette_color:
+		return "PALETTE COLOR";
 	case pixel::Photometric::rgb:
 		return "RGB";
 	case pixel::Photometric::ybr_full:
@@ -315,16 +317,17 @@ void for_each_merged_body_element(const DataSet& dataset,
 
 inline void update_pixel_metadata_for_streaming_write_overlay(
     TransientWriteOverlay& overlay, std::string_view file_path, uid::WellKnown,
-    const pixel::PixelSource& source, bool target_is_rle,
+    const pixel::PixelLayout& source_layout, bool target_is_rle,
     pixel::Photometric output_photometric, int bits_allocated, int bits_stored,
     int high_bit, int pixel_representation) {
 	// Rewrite core pixel description tags to match the streamed output payload.
 	overlay_upsert_long_or_throw(overlay, "write_with_transfer_syntax", file_path,
-	    "Rows"_tag, VR::US, static_cast<long>(source.rows));
+	    "Rows"_tag, VR::US, static_cast<long>(source_layout.rows));
 	overlay_upsert_long_or_throw(overlay, "write_with_transfer_syntax", file_path,
-	    "Columns"_tag, VR::US, static_cast<long>(source.cols));
+	    "Columns"_tag, VR::US, static_cast<long>(source_layout.cols));
 	overlay_upsert_long_or_throw(overlay, "write_with_transfer_syntax", file_path,
-	    "SamplesPerPixel"_tag, VR::US, static_cast<long>(source.samples_per_pixel));
+	    "SamplesPerPixel"_tag, VR::US,
+	    static_cast<long>(source_layout.samples_per_pixel));
 	overlay_upsert_long_or_throw(overlay, "write_with_transfer_syntax", file_path,
 	    "BitsAllocated"_tag, VR::US, static_cast<long>(bits_allocated));
 	overlay_upsert_long_or_throw(overlay, "write_with_transfer_syntax", file_path,
@@ -337,17 +340,17 @@ inline void update_pixel_metadata_for_streaming_write_overlay(
 	    file_path, "PhotometricInterpretation"_tag, VR::CS,
 	    to_photometric_text_for_streaming_write(output_photometric));
 
-	if (source.frames > 1) {
+	if (source_layout.frames > 1u) {
 		overlay_upsert_long_or_throw(overlay, "write_with_transfer_syntax", file_path,
-		    "NumberOfFrames"_tag, VR::IS, static_cast<long>(source.frames));
+		    "NumberOfFrames"_tag, VR::IS, static_cast<long>(source_layout.frames));
 	} else {
 		overlay.erase("NumberOfFrames"_tag);
 	}
 
-	if (source.samples_per_pixel > 1) {
+	if (source_layout.samples_per_pixel > 1u) {
 		const long planar_configuration = target_is_rle
 		                                      ? 1L
-		                                      : (source.planar == pixel::Planar::planar ? 1L : 0L);
+		                                      : (source_layout.planar == pixel::Planar::planar ? 1L : 0L);
 		overlay_upsert_long_or_throw(overlay, "write_with_transfer_syntax", file_path,
 		    "PlanarConfiguration"_tag, VR::US, planar_configuration);
 	} else {

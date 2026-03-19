@@ -137,7 +137,11 @@ add_library(dicomsdl STATIC
     src/pixel/host/error/codec_error.cpp
     src/pixel/host/entrypoint/runtime_entrypoint.cpp
     src/pixel/host/entrypoint/decode_entrypoint.cpp
-    src/pixel/host/decode/decode_modality_value_transform.cpp
+    src/pixel/host/transform/rescale.cpp
+    src/pixel/host/transform/modality_lut.cpp
+    src/pixel/host/transform/palette_lut.cpp
+    src/pixel/host/transform/voi_lut.cpp
+    src/pixel/host/transform/window.cpp
     src/pixel/host/decode/decode_frame_dispatch.cpp
     src/pixel/host/support/dicom_pixel_support.cpp
     src/pixel/host/entrypoint/encode_entrypoint.cpp

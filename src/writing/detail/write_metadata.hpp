@@ -83,6 +83,9 @@ parse_photometric_from_text_for_write(std::string_view text) noexcept {
 	if (ascii_iequals_keyword(text, "MONOCHROME2")) {
 		return pixel::Photometric::monochrome2;
 	}
+	if (ascii_iequals_keyword(text, "PALETTE COLOR")) {
+		return pixel::Photometric::palette_color;
+	}
 	if (ascii_iequals_keyword(text, "RGB")) {
 		return pixel::Photometric::rgb;
 	}

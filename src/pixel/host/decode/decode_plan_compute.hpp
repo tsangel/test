@@ -2,7 +2,6 @@
 
 #include "dicom.h"
 #include "diagnostics.h"
-
 #include <cstddef>
 #include <limits>
 #include <string_view>
@@ -18,66 +17,81 @@ namespace dicom::pixel::detail {
 	    (alignment & static_cast<std::uint16_t>(alignment - 1)) == 0;
 }
 
-// Compute packed/aligned output strides from the finalized decode plan inputs.
-// - bytes_per_sample: float32 when modality output is enabled, otherwise from sv_dtype
-// - row stride: cols * (planar ? 1 : samples_per_pixel) * bytes_per_sample, then alignment
-// - frame stride: row stride * rows, and multiply by samples_per_pixel again for planar output
-[[nodiscard]] inline DecodeStrides compute_decode_strides_or_throw(
-    std::string_view file_path, const PixelDataInfo& info,
+[[nodiscard]] inline PixelLayout compute_decode_output_layout_or_throw(
+    std::string_view file_path, const PixelLayout& source_layout,
     const DecodeOptions& effective_opt) {
+	// Validate caller-controlled layout policy first so plan creation fails early
+	// before any backend-specific work is scheduled.
 	if (!is_valid_alignment(effective_opt.alignment)) {
 		diag::error_and_throw(
-		    "DicomFile::calc_decode_strides file={} reason=alignment must be 0/1 or power-of-two <= 4096",
+		    "DicomFile::calc_decode_output_layout file={} reason=alignment must be 0/1 or power-of-two <= 4096",
 		    file_path);
 	}
 
 	constexpr int kMaxRowsOrColumns = 65535;
 	constexpr int kMaxSamplesPerPixel = 4;
-	if (info.rows <= 0 || info.cols <= 0 || info.samples_per_pixel <= 0) {
+	// Decode planning only supports normalized image metadata ranges that the
+	// runtime and public API can represent safely.
+	if (source_layout.empty()) {
 		diag::error_and_throw(
-		    "DicomFile::calc_decode_strides file={} reason=invalid Rows/Columns/SamplesPerPixel",
+		    "DicomFile::calc_decode_output_layout file={} reason=invalid Rows/Columns/SamplesPerPixel",
 		    file_path);
 	}
-	if (info.rows > kMaxRowsOrColumns || info.cols > kMaxRowsOrColumns) {
+	if (source_layout.rows > static_cast<std::uint32_t>(kMaxRowsOrColumns) ||
+	    source_layout.cols > static_cast<std::uint32_t>(kMaxRowsOrColumns)) {
 		diag::error_and_throw(
-		    "DicomFile::calc_decode_strides file={} reason=Rows/Columns must be <= 65535",
+		    "DicomFile::calc_decode_output_layout file={} reason=Rows/Columns must be <= 65535",
 		    file_path);
 	}
-	if (info.samples_per_pixel > kMaxSamplesPerPixel) {
+	if (source_layout.samples_per_pixel > static_cast<std::uint16_t>(kMaxSamplesPerPixel)) {
 		diag::error_and_throw(
-		    "DicomFile::calc_decode_strides file={} reason=SamplesPerPixel must be <= 4",
-		    file_path);
-	}
-
-	const auto rows = static_cast<std::size_t>(info.rows);
-	const auto cols = static_cast<std::size_t>(info.cols);
-	const auto samples_per_pixel = static_cast<std::size_t>(info.samples_per_pixel);
-	const auto bytes_per_sample = effective_opt.to_modality_value
-	                                  ? sizeof(float)
-	                                  : bytes_per_sample_of(info.sv_dtype);
-	if (bytes_per_sample == 0) {
-		diag::error_and_throw(
-		    "DicomFile::calc_decode_strides file={} reason=unsupported or unknown sv_dtype",
+		    "DicomFile::calc_decode_output_layout file={} reason=SamplesPerPixel must be <= 4",
 		    file_path);
 	}
 
-	const auto row_components = (effective_opt.planar_out == Planar::planar)
-	                                ? std::size_t{1}
-	                                : samples_per_pixel;
-	std::size_t row_stride = cols * row_components * bytes_per_sample;
-	const std::size_t alignment = (effective_opt.alignment <= 1)
-	                                  ? std::size_t{1}
-	                                  : static_cast<std::size_t>(effective_opt.alignment);
-	if (alignment > 1) {
-		row_stride = ((row_stride + alignment - 1) / alignment) * alignment;
+	if (source_layout.frames == 0) {
+		diag::error_and_throw(
+		    "DicomFile::calc_decode_output_layout file={} reason=invalid NumberOfFrames",
+		    file_path);
 	}
 
-	std::size_t frame_stride = row_stride * rows;
-	if (effective_opt.planar_out == Planar::planar) {
-		frame_stride *= samples_per_pixel;
+	if (bytes_per_sample_of(source_layout.data_type) == 0) {
+		diag::error_and_throw(
+		    "DicomFile::calc_decode_output_layout file={} reason=unsupported or unknown source layout dtype",
+		    file_path);
 	}
 
-	return DecodeStrides{row_stride, frame_stride};
+	// Start from semantic pixel metadata, then normalize it into a packed/aligned
+	// storage layout that decode_into() can validate and use directly.
+	const auto photometric = source_layout.photometric;
+	PixelLayout layout{
+	    .data_type = source_layout.data_type,
+	    .photometric = photometric,
+	    .planar = effective_opt.planar_out,
+	    .reserved = 0,
+	    .rows = source_layout.rows,
+	    .cols = source_layout.cols,
+	    .frames = source_layout.frames,
+	    .samples_per_pixel = source_layout.samples_per_pixel,
+	    .bits_stored = source_layout.bits_stored,
+	    .row_stride = 0,
+	    .frame_stride = 0,
+	};
+	try {
+		// packed() is the single place that expands alignment into concrete strides.
+		return layout.packed(effective_opt.alignment);
+	} catch (const std::invalid_argument& e) {
+		diag::error_and_throw(
+		    "DicomFile::calc_decode_output_layout file={} reason={}",
+		    file_path, e.what());
+	} catch (const std::overflow_error& e) {
+		diag::error_and_throw(
+		    "DicomFile::calc_decode_output_layout file={} reason={}",
+		    file_path, e.what());
+	}
+	diag::error_and_throw(
+	    "DicomFile::calc_decode_output_layout file={} reason=unexpected layout computation failure",
+	    file_path);
 }
 
 } // namespace dicom::pixel::detail

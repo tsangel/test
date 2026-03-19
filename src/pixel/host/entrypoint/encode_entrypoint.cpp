@@ -3,7 +3,6 @@
 #include "pixel/host/encode/encode_context_validation.hpp"
 #include "pixel/host/encode/encode_options_policy.hpp"
 #include "pixel/host/encode/encode_set_pixel_data_runner.hpp"
-
 #include <utility>
 #include <vector>
 
@@ -53,8 +52,9 @@ pixel::EncoderContext pixel::create_encoder_context(uid::WellKnown transfer_synt
 }
 
 void pixel::set_pixel_data(
-    DicomFile& file, const pixel::PixelSource& source,
+    DicomFile& file, pixel::ConstPixelSpan source,
     const pixel::EncoderContext& encoder_ctx) {
+	// Validate the configured context before mutating the destination dataset.
 	pixel::detail::validate_encoder_context_for_set_pixel_data_or_throw(file.path(),
 	    encoder_ctx.transfer_syntax_uid_, encoder_ctx.configured_,
 	    encoder_ctx.transfer_syntax_uid_);
