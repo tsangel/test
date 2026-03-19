@@ -1,8 +1,8 @@
 #include "registry_bootstrap.hpp"
 
+#include <cstdio>
 #include <unordered_set>
 
-#include "diagnostics.h"
 #include "shared_library_path.hpp"
 
 namespace pixel::runtime {
@@ -28,6 +28,14 @@ const char* describe_shared_plugin_load_status(
   return "unknown";
 }
 
+void write_registry_bootstrap_warning(
+    const char* path_label, const std::string& path, const char* detail_label,
+    const std::string& detail) noexcept {
+  std::fprintf(stderr,
+      "[WARN] pixel runtime bootstrap %s=%s %s=%s\n", path_label, path.c_str(),
+      detail_label, detail.c_str());
+}
+
 RegistryBootstrapResult initialize_once_impl(
     const std::vector<std::string>& plugin_paths, BindingRegistryRuntime* state) {
   RegistryBootstrapResult result{};
@@ -43,9 +51,8 @@ RegistryBootstrapResult initialize_once_impl(
     std::string resolve_error{};
     if (!detail::resolve_shared_library_path(
             plugin_path, &resolved_plugin_path, &resolve_error)) {
-      dicom::diag::warn(
-          "pixel runtime bootstrap skipped plugin path={} reason={}",
-          plugin_path,
+      write_registry_bootstrap_warning(
+          "path", plugin_path, "reason",
           resolve_error.empty() ? "failed to resolve shared library path"
                                 : resolve_error);
       continue;
@@ -58,9 +65,9 @@ RegistryBootstrapResult initialize_once_impl(
     const SharedPluginLoadStatus load_status =
         load_shared_plugin(resolved_plugin_path.c_str(), &loaded);
     if (load_status != SharedPluginLoadStatus::kOk) {
-      dicom::diag::warn(
-          "pixel runtime bootstrap failed plugin path={} status={}",
-          resolved_plugin_path, describe_shared_plugin_load_status(load_status));
+      write_registry_bootstrap_warning(
+          "path", resolved_plugin_path, "status",
+          describe_shared_plugin_load_status(load_status));
       continue;
     }
     state->loaded_shared_plugins.push_back(loaded);
