@@ -8,6 +8,7 @@
 #endif
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -15,8 +16,10 @@
 #include <exception>
 #include <limits>
 #include <new>
+#include <type_traits>
 #include <vector>
 
+#include "../common/integral_hotpath.hpp"
 #include "internal.hpp"
 
 namespace pixel::jpeg_codec {
@@ -315,45 +318,104 @@ pixel_error_code build_normalized_interleaved(
   const std::size_t row_bytes_sz = static_cast<std::size_t>(row_bytes);
   const std::size_t source_row_stride_sz = static_cast<std::size_t>(source_layout.row_stride);
   const std::size_t source_plane_stride_sz = static_cast<std::size_t>(source_layout.plane_stride);
-  const std::size_t source_sample_bytes_sz = static_cast<std::size_t>(source_dtype.bytes);
-  const std::size_t interleaved_pixel_stride = samples_sz * source_sample_bytes_sz;
-
   const uint8_t* source = request->source.source_buffer.data;
-  for (std::size_t r = 0; r < rows_sz; ++r) {
-    uint8_t* dst_row = out_interleaved->data() + r * row_bytes_sz;
-    for (std::size_t c = 0; c < cols_sz; ++c) {
-      uint8_t* dst_pixel = dst_row + c * interleaved_pixel_stride;
-      for (std::size_t comp = 0; comp < samples_sz; ++comp) {
-        const uint8_t* src_ptr = nullptr;
-        if (source_layout.source_is_planar) {
-          src_ptr = source + comp * source_plane_stride_sz +
-              r * source_row_stride_sz + c * source_sample_bytes_sz;
-        } else {
-          src_ptr = source + r * source_row_stride_sz +
-              (c * samples_sz + comp) * source_sample_bytes_sz;
-        }
+  const int bits_stored = request->frame.bits_stored;
+  const uint32_t mask = ::pixel::codec_common::bit_mask_u32_fast(bits_stored);
 
-        char reason[256];
-        int32_t sample = 0;
-        if (!load_integral_sample(src_ptr,
-                static_cast<uint32_t>(source_sample_bytes_sz),
-                source_signed, request->frame.bits_stored,
-                &sample, reason, sizeof(reason))) {
-          return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "encode_frame", reason);
-        }
+  auto build_fast = [&](auto source_bytes_tag, auto source_signed_tag, auto source_planar_tag) {
+    constexpr uint32_t kSourceBytes = decltype(source_bytes_tag)::value;
+    constexpr bool kSourceSigned = decltype(source_signed_tag)::value;
+    constexpr bool kSourcePlanar = decltype(source_planar_tag)::value;
+    constexpr std::size_t kSourceBytesSz = static_cast<std::size_t>(kSourceBytes);
+    const std::size_t interleaved_pixel_stride = samples_sz * kSourceBytesSz;
 
-        const uint32_t raw = static_cast<uint32_t>(sample) &
-            bit_mask_u32(request->frame.bits_stored);
-        uint8_t* dst_ptr = dst_pixel + comp * source_sample_bytes_sz;
-        if (!store_raw_sample(dst_ptr, source_dtype.bytes, raw)) {
-          return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "encode_frame",
-              "failed to write normalized sample");
+    if constexpr (kSourcePlanar) {
+      for (std::size_t row = 0; row < rows_sz; ++row) {
+        std::array<const uint8_t*, 4> src_rows{};
+        for (std::size_t comp = 0; comp < samples_sz; ++comp) {
+          src_rows[comp] =
+              source + comp * source_plane_stride_sz + row * source_row_stride_sz;
+        }
+        uint8_t* dst_row = out_interleaved->data() + row * row_bytes_sz;
+        for (std::size_t col = 0; col < cols_sz; ++col) {
+          uint8_t* dst_pixel = dst_row + col * interleaved_pixel_stride;
+          for (std::size_t comp = 0; comp < samples_sz; ++comp) {
+            const uint32_t raw =
+                static_cast<uint32_t>(
+                    ::pixel::codec_common::load_native_integral_as_i32<
+                        kSourceBytes, kSourceSigned>(
+                        src_rows[comp] + col * kSourceBytesSz, bits_stored)) & mask;
+            ::pixel::codec_common::store_raw_native_integral<kSourceBytes>(
+                dst_pixel + comp * kSourceBytesSz, raw);
+          }
+        }
+      }
+      return;
+    }
+
+    const std::size_t source_pixel_stride = samples_sz * kSourceBytesSz;
+    for (std::size_t row = 0; row < rows_sz; ++row) {
+      const uint8_t* src_row = source + row * source_row_stride_sz;
+      uint8_t* dst_row = out_interleaved->data() + row * row_bytes_sz;
+      for (std::size_t col = 0; col < cols_sz; ++col) {
+        const uint8_t* src_pixel = src_row + col * source_pixel_stride;
+        uint8_t* dst_pixel = dst_row + col * interleaved_pixel_stride;
+        for (std::size_t comp = 0; comp < samples_sz; ++comp) {
+          const uint32_t raw =
+              static_cast<uint32_t>(
+                  ::pixel::codec_common::load_native_integral_as_i32<
+                      kSourceBytes, kSourceSigned>(
+                      src_pixel + comp * kSourceBytesSz, bits_stored)) & mask;
+          ::pixel::codec_common::store_raw_native_integral<kSourceBytes>(
+              dst_pixel + comp * kSourceBytesSz, raw);
         }
       }
     }
-  }
+  };
 
-  return PIXEL_CODEC_ERR_OK;
+  switch (source_dtype.bytes) {
+  case 1:
+    if (source_signed) {
+      if (source_layout.source_is_planar) {
+        build_fast(std::integral_constant<uint32_t, 1>{},
+            std::true_type{}, std::true_type{});
+      } else {
+        build_fast(std::integral_constant<uint32_t, 1>{},
+            std::true_type{}, std::false_type{});
+      }
+    } else {
+      if (source_layout.source_is_planar) {
+        build_fast(std::integral_constant<uint32_t, 1>{},
+            std::false_type{}, std::true_type{});
+      } else {
+        build_fast(std::integral_constant<uint32_t, 1>{},
+            std::false_type{}, std::false_type{});
+      }
+    }
+    return PIXEL_CODEC_ERR_OK;
+  case 2:
+    if (source_signed) {
+      if (source_layout.source_is_planar) {
+        build_fast(std::integral_constant<uint32_t, 2>{},
+            std::true_type{}, std::true_type{});
+      } else {
+        build_fast(std::integral_constant<uint32_t, 2>{},
+            std::true_type{}, std::false_type{});
+      }
+    } else {
+      if (source_layout.source_is_planar) {
+        build_fast(std::integral_constant<uint32_t, 2>{},
+            std::false_type{}, std::true_type{});
+      } else {
+        build_fast(std::integral_constant<uint32_t, 2>{},
+            std::false_type{}, std::false_type{});
+      }
+    }
+    return PIXEL_CODEC_ERR_OK;
+  default:
+    return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "encode_frame",
+        "unsupported source sample width");
+  }
 }
 
 }  // namespace

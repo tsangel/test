@@ -1,3 +1,4 @@
+#include <array>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -52,6 +53,13 @@ std::string decoder_error_detail(const pixel_decoder_plugin_api& api, const void
     return {};
   }
   return std::string(buffer);
+}
+
+void store_le32(uint8_t* dst, uint32_t value) {
+  dst[0] = static_cast<uint8_t>(value & 0xFFu);
+  dst[1] = static_cast<uint8_t>((value >> 8u) & 0xFFu);
+  dst[2] = static_cast<uint8_t>((value >> 16u) & 0xFFu);
+  dst[3] = static_cast<uint8_t>((value >> 24u) & 0xFFu);
 }
 
 struct EncoderContextGuard {
@@ -214,6 +222,64 @@ pixel_decoder_request make_rgb8_decoder_request(
   return request;
 }
 
+std::vector<uint8_t> build_rle_literal_codestream(
+    const std::vector<std::vector<uint8_t>>& segments) {
+  if (segments.empty() || segments.size() > 15u) {
+    fail("invalid RLE literal segment count");
+  }
+
+  std::vector<uint8_t> encoded(64u, uint8_t{0});
+  store_le32(encoded.data(), static_cast<uint32_t>(segments.size()));
+  for (std::size_t i = 0; i < segments.size(); ++i) {
+    const auto& segment = segments[i];
+    if (segment.empty() || segment.size() > 128u) {
+      fail("invalid RLE literal segment size");
+    }
+    store_le32(encoded.data() + 4u + i * sizeof(uint32_t),
+        static_cast<uint32_t>(encoded.size()));
+    encoded.push_back(static_cast<uint8_t>(segment.size() - 1u));
+    encoded.insert(encoded.end(), segment.begin(), segment.end());
+  }
+  return encoded;
+}
+
+pixel_decoder_request make_custom_decoder_request(
+    std::vector<uint8_t>& encoded, std::vector<uint8_t>& decoded,
+    uint32_t source_dtype, int32_t rows, int32_t cols,
+    int32_t samples_per_pixel, int32_t bits_stored,
+    uint32_t dst_dtype, uint32_t dst_planar) {
+  pixel_decoder_request request{};
+  request.struct_size = sizeof(pixel_decoder_request);
+  request.abi_version = PIXEL_DECODER_PLUGIN_ABI;
+
+  request.source.struct_size = sizeof(pixel_decoder_source);
+  request.source.abi_version = PIXEL_DECODER_PLUGIN_ABI;
+  request.source.source_buffer.data = encoded.data();
+  request.source.source_buffer.size = encoded.size();
+
+  request.frame.struct_size = sizeof(pixel_decoder_frame_info);
+  request.frame.abi_version = PIXEL_DECODER_PLUGIN_ABI;
+  request.frame.codec_profile_code = PIXEL_CODEC_PROFILE_RLE_LOSSLESS;
+  request.frame.source_dtype = source_dtype;
+  request.frame.source_planar = PIXEL_PLANAR_INTERLEAVED;
+  request.frame.rows = rows;
+  request.frame.cols = cols;
+  request.frame.samples_per_pixel = samples_per_pixel;
+  request.frame.bits_stored = bits_stored;
+  request.frame.decode_mct = 0;
+
+  request.output.struct_size = sizeof(pixel_decoder_output);
+  request.output.abi_version = PIXEL_DECODER_PLUGIN_ABI;
+  request.output.dst = decoded.data();
+  request.output.dst_size = decoded.size();
+  request.output.row_stride = 0;
+  request.output.frame_stride = 0;
+  request.output.dst_dtype = dst_dtype;
+  request.output.dst_planar = dst_planar;
+
+  return request;
+}
+
 }  // namespace
 
 int main() {
@@ -325,6 +391,55 @@ int main() {
   }
   expect_true(std::memcmp(rgb_decoded.data(), rgb_source.data(), rgb_source.size()) == 0,
       "RLE RGB round-trip data equality");
+
+  auto masked_u16_rle = build_rle_literal_codestream({
+      {0xF1u},
+      {0x23u},
+  });
+  std::vector<uint8_t> masked_u16_decoded(sizeof(uint16_t), uint8_t{0});
+  auto masked_u16_request = make_custom_decoder_request(
+      masked_u16_rle, masked_u16_decoded,
+      PIXEL_DTYPE_U16, 1, 1, 1, 12,
+      PIXEL_DTYPE_U16, PIXEL_PLANAR_INTERLEAVED);
+  const auto masked_u16_ec =
+      decoder_api.decode_frame(decoder_ctx.context, &masked_u16_request);
+  if (masked_u16_ec != PIXEL_CODEC_ERR_OK) {
+    fail("unsigned 12-bit decode failed: " +
+        decoder_error_detail(decoder_api, decoder_ctx.context));
+  }
+  uint16_t masked_u16_value = 0;
+  std::memcpy(&masked_u16_value, masked_u16_decoded.data(), sizeof(masked_u16_value));
+  expect_eq(masked_u16_value, static_cast<uint16_t>(0x0123u),
+      "RLE unsigned 12-bit decode should mask unused high bits");
+
+  auto signed_rgb12_rle = build_rle_literal_codestream({
+      {0x0Fu},
+      {0xFFu},
+      {0x00u},
+      {0x01u},
+      {0x08u},
+      {0x00u},
+  });
+  std::vector<uint8_t> signed_rgb12_decoded(3u * sizeof(int16_t), uint8_t{0});
+  auto signed_rgb12_request = make_custom_decoder_request(
+      signed_rgb12_rle, signed_rgb12_decoded,
+      PIXEL_DTYPE_S16, 1, 1, 3, 12,
+      PIXEL_DTYPE_S16, PIXEL_PLANAR_INTERLEAVED);
+  const auto signed_rgb12_ec =
+      decoder_api.decode_frame(decoder_ctx.context, &signed_rgb12_request);
+  if (signed_rgb12_ec != PIXEL_CODEC_ERR_OK) {
+    fail("signed RGB 12-bit decode failed: " +
+        decoder_error_detail(decoder_api, decoder_ctx.context));
+  }
+  std::array<int16_t, 3> signed_rgb12_values{};
+  std::memcpy(signed_rgb12_values.data(),
+      signed_rgb12_decoded.data(), signed_rgb12_decoded.size());
+  expect_eq(signed_rgb12_values[0], static_cast<int16_t>(-1),
+      "RLE signed RGB 12-bit decode red sign extension");
+  expect_eq(signed_rgb12_values[1], static_cast<int16_t>(1),
+      "RLE signed RGB 12-bit decode green preserve positive");
+  expect_eq(signed_rgb12_values[2], static_cast<int16_t>(-2048),
+      "RLE signed RGB 12-bit decode blue sign extension");
 
   return 0;
 }

@@ -139,6 +139,12 @@ Note: These attachment calls are intended for the root `DataSet` (the object ret
 - `dicom::uid::Generated::append(component)`: append one UID component with fallback policy.
 - Full behavior and Python equivalents: [Generating UID](generating_uid.md)
 
+## Pixel transform metadata
+
+Frame-aware pixel transform metadata resolution for `rescale_transform(frame)`,
+`window_transform(frame)`, `voi_lut(frame)`, and `modality_lut(frame)` is documented in
+[Pixel Transform Metadata Resolution](pixel_transform_metadata.md).
+
 ## Key types (Doxygen)
 
 :::{doxygenstruct} dicom::Tag

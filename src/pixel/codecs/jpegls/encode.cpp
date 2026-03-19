@@ -7,13 +7,65 @@
 #include <limits>
 #include <new>
 #include <string>
+#include <type_traits>
 #include <vector>
 
+#include "../common/integral_hotpath.hpp"
 #include "internal.hpp"
 
 namespace pixel::jpegls_codec {
 
 namespace {
+
+template <uint32_t SourceBytes, uint32_t PackedBytes, bool SourceSigned, bool SourcePlanar>
+void build_packed_frame(const uint8_t* source,
+    std::size_t rows, std::size_t cols, std::size_t samples,
+    std::size_t source_row_stride, std::size_t source_plane_stride,
+    int bits_stored, std::size_t packed_row_bytes, std::size_t packed_plane_bytes,
+    std::vector<uint8_t>* out_packed) {
+  constexpr std::size_t kSourceBytesSz = static_cast<std::size_t>(SourceBytes);
+  constexpr std::size_t kPackedBytesSz = static_cast<std::size_t>(PackedBytes);
+  const uint32_t mask = ::pixel::codec_common::bit_mask_u32_fast(bits_stored);
+
+  if constexpr (SourcePlanar) {
+    for (std::size_t comp = 0; comp < samples; ++comp) {
+      const uint8_t* src_plane = source + comp * source_plane_stride;
+      uint8_t* packed_plane = out_packed->data() + comp * packed_plane_bytes;
+      for (std::size_t row = 0; row < rows; ++row) {
+        const uint8_t* src_row = src_plane + row * source_row_stride;
+        uint8_t* dst_row = packed_plane + row * packed_row_bytes;
+        for (std::size_t col = 0; col < cols; ++col) {
+          const uint32_t raw = static_cast<uint32_t>(
+              ::pixel::codec_common::load_native_integral_as_i32<
+                  SourceBytes, SourceSigned>(
+                  src_row + col * kSourceBytesSz, bits_stored)) & mask;
+          ::pixel::codec_common::store_raw_native_integral<PackedBytes>(
+              dst_row + col * kPackedBytesSz, raw);
+        }
+      }
+    }
+    return;
+  }
+
+  const std::size_t source_pixel_stride = samples * kSourceBytesSz;
+  const std::size_t packed_pixel_stride = samples * kPackedBytesSz;
+  for (std::size_t row = 0; row < rows; ++row) {
+    const uint8_t* src_row = source + row * source_row_stride;
+    uint8_t* dst_row = out_packed->data() + row * packed_row_bytes;
+    for (std::size_t col = 0; col < cols; ++col) {
+      const uint8_t* src_pixel = src_row + col * source_pixel_stride;
+      uint8_t* dst_pixel = dst_row + col * packed_pixel_stride;
+      for (std::size_t comp = 0; comp < samples; ++comp) {
+        const uint32_t raw = static_cast<uint32_t>(
+            ::pixel::codec_common::load_native_integral_as_i32<
+                SourceBytes, SourceSigned>(
+                src_pixel + comp * kSourceBytesSz, bits_stored)) & mask;
+        ::pixel::codec_common::store_raw_native_integral<PackedBytes>(
+            dst_pixel + comp * kPackedBytesSz, raw);
+      }
+    }
+  }
+}
 
 pixel_error_code validate_encoder_request(
     EncoderCtx* ctx, const pixel_encoder_request* request,
@@ -252,6 +304,7 @@ pixel_error_code encoder_encode_frame_to_context_buffer(
     if (valid_ec != PIXEL_CODEC_ERR_OK) {
       return valid_ec;
     }
+    (void)source_frame_bytes;
 
     const uint64_t rows = static_cast<uint64_t>(request->frame.rows);
     const uint64_t cols = static_cast<uint64_t>(request->frame.cols);
@@ -262,8 +315,6 @@ pixel_error_code encoder_encode_frame_to_context_buffer(
     const std::size_t samples_sz = static_cast<std::size_t>(samples);
     const std::size_t source_row_stride_sz = static_cast<std::size_t>(source_row_stride);
     const std::size_t source_plane_stride_sz = static_cast<std::size_t>(source_plane_stride);
-    const std::size_t source_bytes_per_sample_sz = static_cast<std::size_t>(source_dtype.bytes);
-    const std::size_t packed_sample_bytes_sz = static_cast<std::size_t>(packed_sample_bytes);
     const std::size_t packed_row_bytes_sz = static_cast<std::size_t>(packed_row_bytes);
     const std::size_t packed_plane_bytes_sz = static_cast<std::size_t>(packed_plane_bytes);
 
@@ -271,65 +322,131 @@ pixel_error_code encoder_encode_frame_to_context_buffer(
     const bool source_is_signed = request->frame.pixel_representation == 1;
 
     std::vector<uint8_t> packed(static_cast<std::size_t>(packed_frame_bytes), uint8_t{0});
+    auto build_fast = [&](auto source_bytes_tag, auto packed_bytes_tag,
+                          auto source_signed_tag, auto source_planar_tag) {
+      constexpr uint32_t kSourceBytes = decltype(source_bytes_tag)::value;
+      constexpr uint32_t kPackedBytes = decltype(packed_bytes_tag)::value;
+      constexpr bool kSourceSigned = decltype(source_signed_tag)::value;
+      constexpr bool kSourcePlanar = decltype(source_planar_tag)::value;
+      build_packed_frame<kSourceBytes, kPackedBytes, kSourceSigned, kSourcePlanar>(
+          source,
+          rows_sz, cols_sz, samples_sz,
+          source_row_stride_sz, source_plane_stride_sz,
+          request->frame.bits_stored,
+          packed_row_bytes_sz, packed_plane_bytes_sz,
+          &packed);
+    };
 
-    if (source_planar) {
-      for (std::size_t comp = 0; comp < samples_sz; ++comp) {
-        uint8_t* packed_plane = packed.data() + comp * packed_plane_bytes_sz;
-        for (std::size_t r = 0; r < rows_sz; ++r) {
-          const uint8_t* src_row = source + comp * source_plane_stride_sz +
-              r * source_row_stride_sz;
-          uint8_t* dst_row = packed_plane + r * packed_row_bytes_sz;
-          for (std::size_t cidx = 0; cidx < cols_sz; ++cidx) {
-            const uint8_t* src_ptr = src_row + cidx * source_bytes_per_sample_sz;
-            char reason[256];
-            int32_t sample = 0;
-            if (!load_integral_sample(src_ptr,
-                    static_cast<uint32_t>(source_bytes_per_sample_sz),
-                    source_is_signed, request->frame.bits_stored,
-                    &sample, reason, sizeof(reason))) {
-              return fail_detail(c, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "encode_frame", reason);
-            }
-
-            const uint32_t raw = static_cast<uint32_t>(sample) &
-                bit_mask_u32(request->frame.bits_stored);
-            uint8_t* dst_ptr = dst_row + cidx * packed_sample_bytes_sz;
-            if (!store_raw_sample(dst_ptr, packed_sample_bytes, raw)) {
-              return fail_detail(c, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "encode_frame",
-                  "failed to write packed sample");
-            }
+    switch (source_dtype.bytes) {
+    case 1:
+      switch (packed_sample_bytes) {
+      case 1:
+        if (source_is_signed) {
+          if (source_planar) {
+            build_fast(std::integral_constant<uint32_t, 1>{},
+                std::integral_constant<uint32_t, 1>{},
+                std::true_type{}, std::true_type{});
+          } else {
+            build_fast(std::integral_constant<uint32_t, 1>{},
+                std::integral_constant<uint32_t, 1>{},
+                std::true_type{}, std::false_type{});
+          }
+        } else {
+          if (source_planar) {
+            build_fast(std::integral_constant<uint32_t, 1>{},
+                std::integral_constant<uint32_t, 1>{},
+                std::false_type{}, std::true_type{});
+          } else {
+            build_fast(std::integral_constant<uint32_t, 1>{},
+                std::integral_constant<uint32_t, 1>{},
+                std::false_type{}, std::false_type{});
           }
         }
-      }
-    } else {
-      const std::size_t source_pixel_stride = samples_sz * source_bytes_per_sample_sz;
-      const std::size_t packed_pixel_stride = samples_sz * packed_sample_bytes_sz;
-      for (std::size_t r = 0; r < rows_sz; ++r) {
-        const uint8_t* src_row = source + r * source_row_stride_sz;
-        uint8_t* dst_row = packed.data() + r * packed_row_bytes_sz;
-        for (std::size_t cidx = 0; cidx < cols_sz; ++cidx) {
-          const uint8_t* src_pixel = src_row + cidx * source_pixel_stride;
-          uint8_t* dst_pixel = dst_row + cidx * packed_pixel_stride;
-          for (std::size_t comp = 0; comp < samples_sz; ++comp) {
-            const uint8_t* src_ptr = src_pixel + comp * source_bytes_per_sample_sz;
-            char reason[256];
-            int32_t sample = 0;
-            if (!load_integral_sample(src_ptr,
-                    static_cast<uint32_t>(source_bytes_per_sample_sz),
-                    source_is_signed, request->frame.bits_stored,
-                    &sample, reason, sizeof(reason))) {
-              return fail_detail(c, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "encode_frame", reason);
-            }
-
-            const uint32_t raw = static_cast<uint32_t>(sample) &
-                bit_mask_u32(request->frame.bits_stored);
-            uint8_t* dst_ptr = dst_pixel + comp * packed_sample_bytes_sz;
-            if (!store_raw_sample(dst_ptr, packed_sample_bytes, raw)) {
-              return fail_detail(c, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "encode_frame",
-                  "failed to write packed sample");
-            }
+        break;
+      case 2:
+        if (source_is_signed) {
+          if (source_planar) {
+            build_fast(std::integral_constant<uint32_t, 1>{},
+                std::integral_constant<uint32_t, 2>{},
+                std::true_type{}, std::true_type{});
+          } else {
+            build_fast(std::integral_constant<uint32_t, 1>{},
+                std::integral_constant<uint32_t, 2>{},
+                std::true_type{}, std::false_type{});
+          }
+        } else {
+          if (source_planar) {
+            build_fast(std::integral_constant<uint32_t, 1>{},
+                std::integral_constant<uint32_t, 2>{},
+                std::false_type{}, std::true_type{});
+          } else {
+            build_fast(std::integral_constant<uint32_t, 1>{},
+                std::integral_constant<uint32_t, 2>{},
+                std::false_type{}, std::false_type{});
           }
         }
+        break;
+      default:
+        return fail_detail(c, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "encode_frame",
+            "unsupported packed sample width");
       }
+      break;
+    case 2:
+      switch (packed_sample_bytes) {
+      case 1:
+        if (source_is_signed) {
+          if (source_planar) {
+            build_fast(std::integral_constant<uint32_t, 2>{},
+                std::integral_constant<uint32_t, 1>{},
+                std::true_type{}, std::true_type{});
+          } else {
+            build_fast(std::integral_constant<uint32_t, 2>{},
+                std::integral_constant<uint32_t, 1>{},
+                std::true_type{}, std::false_type{});
+          }
+        } else {
+          if (source_planar) {
+            build_fast(std::integral_constant<uint32_t, 2>{},
+                std::integral_constant<uint32_t, 1>{},
+                std::false_type{}, std::true_type{});
+          } else {
+            build_fast(std::integral_constant<uint32_t, 2>{},
+                std::integral_constant<uint32_t, 1>{},
+                std::false_type{}, std::false_type{});
+          }
+        }
+        break;
+      case 2:
+        if (source_is_signed) {
+          if (source_planar) {
+            build_fast(std::integral_constant<uint32_t, 2>{},
+                std::integral_constant<uint32_t, 2>{},
+                std::true_type{}, std::true_type{});
+          } else {
+            build_fast(std::integral_constant<uint32_t, 2>{},
+                std::integral_constant<uint32_t, 2>{},
+                std::true_type{}, std::false_type{});
+          }
+        } else {
+          if (source_planar) {
+            build_fast(std::integral_constant<uint32_t, 2>{},
+                std::integral_constant<uint32_t, 2>{},
+                std::false_type{}, std::true_type{});
+          } else {
+            build_fast(std::integral_constant<uint32_t, 2>{},
+                std::integral_constant<uint32_t, 2>{},
+                std::false_type{}, std::false_type{});
+          }
+        }
+        break;
+      default:
+        return fail_detail(c, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "encode_frame",
+            "unsupported packed sample width");
+      }
+      break;
+    default:
+      return fail_detail(c, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "encode_frame",
+          "unsupported source sample width");
     }
 
     charls::jpegls_encoder encoder{};

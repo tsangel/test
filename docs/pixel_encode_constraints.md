@@ -17,7 +17,7 @@ This document summarizes the current constraints for the pixel encode path:
   - `src/pixel/runtime/plugin_registry_v2.cpp`
 - Codec implementations:
   - `src/pixel/codecs/*_v2/encode.cpp`
-  - `src/pixel/codecs/rle_v2/*`
+  - `src/pixel/codecs/rle/*`
 - ABI contract:
   - `src/pixel/abi/pixel_encoder_plugin_abi_v2.h`
   - `src/pixel/abi/pixel_codec_plugin_abi_v2.h`

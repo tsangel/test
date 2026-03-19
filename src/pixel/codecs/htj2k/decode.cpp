@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "../common/decode_fastpath.hpp"
+#include "../common/integral_hotpath.hpp"
 #include "internal.hpp"
 
 namespace pixel::htj2k_codec {
@@ -194,7 +195,6 @@ pixel_error_code validate_decoder_request(
 pixel_error_code write_htj2k_decoded_samples(DecoderCtx* ctx,
     const pixel_decoder_request* request,
     const std::vector<int32_t>& decoded_interleaved,
-    DtypeInfo dst_dtype,
     uint64_t row_stride,
     bool output_planar) {
   const uint64_t rows = static_cast<uint64_t>(request->frame.rows);
@@ -211,60 +211,13 @@ pixel_error_code write_htj2k_decoded_samples(DecoderCtx* ctx,
         "decoded sample count mismatch");
   }
 
-  const std::size_t row_stride_sz = static_cast<std::size_t>(row_stride);
-  const std::size_t dst_sample_bytes = static_cast<std::size_t>(dst_dtype.bytes);
-
-  if (output_planar && samples_sz > 1) {
-    const std::size_t plane_bytes = row_stride_sz * rows_sz;
-    for (std::size_t comp = 0; comp < samples_sz; ++comp) {
-      uint8_t* dst_plane = request->output.dst + comp * plane_bytes;
-      for (std::size_t r = 0; r < rows_sz; ++r) {
-        uint8_t* dst_row = dst_plane + r * row_stride_sz;
-        for (std::size_t c = 0; c < cols_sz; ++c) {
-          const std::size_t src_index = (r * cols_sz + c) * samples_sz + comp;
-          const int32_t sample = decoded_interleaved[src_index];
-          uint8_t* dst_ptr = dst_row + c * dst_sample_bytes;
-          if (dst_dtype.is_float) {
-            if (!write_float_sample(request->output.dst_dtype,
-                    static_cast<double>(sample), dst_ptr)) {
-              return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "decode_frame",
-                  "unsupported float destination dtype");
-            }
-          } else {
-            if (!write_integer_sample(request->output.dst_dtype, sample, dst_ptr)) {
-              return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "decode_frame",
-                  "unsupported integer destination dtype");
-            }
-          }
-        }
-      }
-    }
-    return PIXEL_CODEC_ERR_OK;
-  }
-
-  const std::size_t dst_pixel_stride = samples_sz * dst_sample_bytes;
-  for (std::size_t r = 0; r < rows_sz; ++r) {
-    uint8_t* dst_row = request->output.dst + r * row_stride_sz;
-    for (std::size_t c = 0; c < cols_sz; ++c) {
-      uint8_t* dst_pixel = dst_row + c * dst_pixel_stride;
-      const std::size_t src_base = (r * cols_sz + c) * samples_sz;
-      for (std::size_t comp = 0; comp < samples_sz; ++comp) {
-        const int32_t sample = decoded_interleaved[src_base + comp];
-        uint8_t* dst_ptr = dst_pixel + comp * dst_sample_bytes;
-        if (dst_dtype.is_float) {
-          if (!write_float_sample(request->output.dst_dtype,
-                  static_cast<double>(sample), dst_ptr)) {
-            return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "decode_frame",
-                "unsupported float destination dtype");
-          }
-        } else {
-          if (!write_integer_sample(request->output.dst_dtype, sample, dst_ptr)) {
-            return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "decode_frame",
-                "unsupported integer destination dtype");
-          }
-        }
-      }
-    }
+  if (!::pixel::codec_common::write_loaded_converted_rows_to_dst(
+          request, row_stride, output_planar,
+          [&](std::size_t row, std::size_t col, std::size_t comp) -> int32_t {
+            return decoded_interleaved[(row * cols_sz + col) * samples_sz + comp];
+          })) {
+    return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "decode_frame",
+        "unsupported destination dtype");
   }
   return PIXEL_CODEC_ERR_OK;
 }
@@ -543,7 +496,7 @@ pixel_error_code decoder_decode_frame(
     infile.close();
 
     const pixel_error_code write_ec = write_htj2k_decoded_samples(c, request,
-        decoded, dst_dtype, row_stride, output_planar);
+        decoded, row_stride, output_planar);
     if (write_ec != PIXEL_CODEC_ERR_OK) {
       return write_ec;
     }

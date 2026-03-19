@@ -13,6 +13,7 @@
 #include <new>
 #include <vector>
 
+#include "../common/integral_hotpath.hpp"
 #include "internal.hpp"
 
 namespace pixel::htj2k_codec {
@@ -288,10 +289,34 @@ pixel_error_code validate_encoder_request(
   return PIXEL_CODEC_ERR_OK;
 }
 
-pixel_error_code fill_openjph_line_from_source(EncoderCtx* ctx, ojph::line_buf* line,
+template <typename LineT, uint32_t SourceBytes, bool SourceSigned>
+void fill_openjph_line_planar(LineT* dst_line, const uint8_t* source_row,
+    std::size_t cols, int bits_stored) {
+  for (std::size_t col = 0; col < cols; ++col) {
+    dst_line[col] = static_cast<LineT>(
+        ::pixel::codec_common::load_le_integral_as_i32<SourceBytes, SourceSigned>(
+            source_row + col * SourceBytes, bits_stored));
+  }
+}
+
+template <typename LineT, uint32_t SourceBytes, bool SourceSigned>
+void fill_openjph_line_interleaved(LineT* dst_line, const uint8_t* source_row,
+    std::size_t cols, std::size_t samples_per_pixel, std::size_t component_index,
+    int bits_stored) {
+  const std::size_t pixel_stride = samples_per_pixel * static_cast<std::size_t>(SourceBytes);
+  const uint8_t* component_base = source_row + component_index * SourceBytes;
+  for (std::size_t col = 0; col < cols; ++col) {
+    dst_line[col] = static_cast<LineT>(
+        ::pixel::codec_common::load_le_integral_as_i32<SourceBytes, SourceSigned>(
+            component_base + col * pixel_stride, bits_stored));
+  }
+}
+
+template <uint32_t SourceBytes, bool SourceSigned>
+pixel_error_code fill_openjph_line_from_source_as(EncoderCtx* ctx, ojph::line_buf* line,
     const uint8_t* source, const SourceFrameLayout& layout, std::size_t row,
     std::size_t component_index, std::size_t cols, std::size_t samples_per_pixel,
-    uint32_t bytes_per_sample, bool source_signed, int bits_stored) {
+    int bits_stored) {
   if (line == nullptr) {
     return fail_detail(ctx, PIXEL_CODEC_ERR_FAILED, "encode_frame",
         "OpenJPH returned null line buffer");
@@ -319,29 +344,50 @@ pixel_error_code fill_openjph_line_from_source(EncoderCtx* ctx, ojph::line_buf* 
     source_row = source + row * static_cast<std::size_t>(layout.row_stride);
   }
 
-  const std::size_t sample_bytes = static_cast<std::size_t>(bytes_per_sample);
-  for (std::size_t col = 0; col < cols; ++col) {
-    const uint8_t* sample_ptr = nullptr;
-    if (layout.source_is_planar) {
-      sample_ptr = source_row + col * sample_bytes;
-    } else {
-      sample_ptr = source_row + (col * samples_per_pixel + component_index) * sample_bytes;
-    }
-    int32_t sample_value = 0;
-    if (!load_i8_or_i16_sample_from_source(sample_ptr, bytes_per_sample, source_signed,
-            bits_stored, &sample_value)) {
-      return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "encode_frame",
-          "failed to read source sample");
-    }
-
+  if (layout.source_is_planar) {
     if (line_is_integer) {
-      line->i32[col] = sample_value;
+      fill_openjph_line_planar<int32_t, SourceBytes, SourceSigned>(
+          line->i32, source_row, cols, bits_stored);
     } else {
-      line->f32[col] = static_cast<float>(sample_value);
+      fill_openjph_line_planar<float, SourceBytes, SourceSigned>(
+          line->f32, source_row, cols, bits_stored);
     }
+    return PIXEL_CODEC_ERR_OK;
   }
 
+  if (line_is_integer) {
+    fill_openjph_line_interleaved<int32_t, SourceBytes, SourceSigned>(
+        line->i32, source_row, cols, samples_per_pixel, component_index, bits_stored);
+  } else {
+    fill_openjph_line_interleaved<float, SourceBytes, SourceSigned>(
+        line->f32, source_row, cols, samples_per_pixel, component_index, bits_stored);
+  }
   return PIXEL_CODEC_ERR_OK;
+}
+
+pixel_error_code fill_openjph_line_from_source(EncoderCtx* ctx, ojph::line_buf* line,
+    const uint8_t* source, const SourceFrameLayout& layout, std::size_t row,
+    std::size_t component_index, std::size_t cols, std::size_t samples_per_pixel,
+    uint32_t bytes_per_sample, bool source_signed, int bits_stored) {
+  switch (bytes_per_sample) {
+  case 1:
+    if (source_signed) {
+      return fill_openjph_line_from_source_as<1, true>(ctx, line, source, layout,
+          row, component_index, cols, samples_per_pixel, bits_stored);
+    }
+    return fill_openjph_line_from_source_as<1, false>(ctx, line, source, layout,
+        row, component_index, cols, samples_per_pixel, bits_stored);
+  case 2:
+    if (source_signed) {
+      return fill_openjph_line_from_source_as<2, true>(ctx, line, source, layout,
+          row, component_index, cols, samples_per_pixel, bits_stored);
+    }
+    return fill_openjph_line_from_source_as<2, false>(ctx, line, source, layout,
+        row, component_index, cols, samples_per_pixel, bits_stored);
+  default:
+    return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "encode_frame",
+        "unsupported source sample width");
+  }
 }
 
 }  // namespace

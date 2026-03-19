@@ -98,6 +98,17 @@ if elem:
 - Keyword/tag lookups are constant-time (perfect hash).
 - On large files, prefer targeted element access over full iteration in Python hot loops.
 
+## Pixel transform metadata
+
+Frame-aware metadata resolution for:
+
+- `DicomFile.rescale_transform_for_frame(frame_index)`
+- `DicomFile.window_transform_for_frame(frame_index)`
+- `DicomFile.voi_lut_for_frame(frame_index)`
+- `DicomFile.modality_lut_for_frame(frame_index)`
+
+is documented in [Pixel Transform Metadata Resolution](pixel_transform_metadata.md).
+
 ## Related docs
 - Python DataSet Access Guide: [Python DataSet Access Guide](python_dataset_access_design.md)
 - UID generation and append details: [Generating UID](generating_uid.md)

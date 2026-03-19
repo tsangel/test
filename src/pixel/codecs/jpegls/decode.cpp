@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 
-#include "../common/decode_fastpath.hpp"
+#include "../common/decoded_bytes_writeback.hpp"
 #include "internal.hpp"
 
 namespace pixel::jpegls_codec {
@@ -155,7 +155,6 @@ pixel_error_code write_decoded_pixels(DecoderCtx* ctx,
     bool source_is_signed,
     bool source_is_planar,
     uint64_t source_row_bytes,
-    DtypeInfo dst_dtype,
     uint64_t row_stride,
     bool output_planar) {
   if (decoded == nullptr) {
@@ -163,118 +162,43 @@ pixel_error_code write_decoded_pixels(DecoderCtx* ctx,
         "decoded source buffer is null");
   }
 
-  const uint64_t rows = static_cast<uint64_t>(request->frame.rows);
-  const uint64_t cols = static_cast<uint64_t>(request->frame.cols);
-  const uint64_t samples = static_cast<uint64_t>(request->frame.samples_per_pixel);
-
-  const std::size_t rows_sz = static_cast<std::size_t>(rows);
-  const std::size_t cols_sz = static_cast<std::size_t>(cols);
-  const std::size_t samples_sz = static_cast<std::size_t>(samples);
-  const std::size_t source_sample_bytes_sz = static_cast<std::size_t>(source_sample_bytes);
-  const std::size_t source_row_bytes_sz = static_cast<std::size_t>(source_row_bytes);
-  const std::size_t dst_sample_bytes = static_cast<std::size_t>(dst_dtype.bytes);
-  const std::size_t row_stride_sz = static_cast<std::size_t>(row_stride);
-  const std::size_t source_plane_bytes_sz = source_row_bytes_sz * rows_sz;
-
-  auto sample_ptr_at = [&](std::size_t r, std::size_t c, std::size_t comp) -> const uint8_t* {
-    if (source_is_planar) {
-      return decoded + comp * source_plane_bytes_sz +
-          r * source_row_bytes_sz + c * source_sample_bytes_sz;
-    }
-    const std::size_t source_pixel_stride = samples_sz * source_sample_bytes_sz;
-    return decoded + r * source_row_bytes_sz +
-        c * source_pixel_stride + comp * source_sample_bytes_sz;
-  };
-
-  const bool matching_integral_storage =
-      ::pixel::codec_common::integral_storage_matches_dst_dtype(
-          source_sample_bytes, source_is_signed, dst_dtype);
-
-  auto load_sample_or_throw = [&](const uint8_t* src_ptr) -> int32_t {
-    char reason[256];
-    int32_t sample = 0;
-    if (!load_integral_sample(src_ptr, source_sample_bytes,
-            source_is_signed, source_bits, &sample, reason, sizeof(reason))) {
-      throw std::runtime_error(reason);
-    }
-    return sample;
-  };
-
-  if (matching_integral_storage) {
-    const auto typed_status =
-        ::pixel::codec_common::write_loaded_integral_rows(
-            request, row_stride, output_planar,
-            [&](std::size_t row, std::size_t col, std::size_t comp) -> int32_t {
-              return load_sample_or_throw(sample_ptr_at(row, col, comp));
-            });
-    if (typed_status == ::pixel::codec_common::loaded_integral_write_status::ok) {
-      return PIXEL_CODEC_ERR_OK;
-    }
-  }
-
-  if (output_planar && samples_sz > 1) {
-    const std::size_t output_plane_bytes_sz = row_stride_sz * rows_sz;
-    for (std::size_t comp = 0; comp < samples_sz; ++comp) {
-      uint8_t* dst_plane = request->output.dst + comp * output_plane_bytes_sz;
-      for (std::size_t r = 0; r < rows_sz; ++r) {
-        uint8_t* dst_row = dst_plane + r * row_stride_sz;
-        for (std::size_t c = 0; c < cols_sz; ++c) {
-          const uint8_t* src_ptr = sample_ptr_at(r, c, comp);
-          char reason[256];
-          int32_t sample = 0;
-          if (!load_integral_sample(src_ptr, source_sample_bytes,
-                  source_is_signed, source_bits, &sample, reason, sizeof(reason))) {
-            return fail_detail(ctx, PIXEL_CODEC_ERR_FAILED, "decode_frame", reason);
-          }
-          uint8_t* dst_ptr = dst_row + c * dst_sample_bytes;
-          if (dst_dtype.is_float) {
-            if (!write_float_sample(request->output.dst_dtype,
-                    static_cast<double>(sample), dst_ptr)) {
-              return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "decode_frame",
-                  "unsupported float destination dtype");
-            }
-          } else {
-            if (!write_integer_sample(request->output.dst_dtype, sample, dst_ptr)) {
-              return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "decode_frame",
-                  "unsupported integer destination dtype");
-            }
-          }
-        }
+  switch (source_sample_bytes) {
+  case 1:
+    if (source_is_signed) {
+      if (::pixel::codec_common::write_decoded_native_bytes_to_dst<1, true>(
+              request, decoded, static_cast<std::size_t>(source_row_bytes),
+              source_is_planar, row_stride, output_planar, source_bits)) {
+        return PIXEL_CODEC_ERR_OK;
+      }
+    } else {
+      if (::pixel::codec_common::write_decoded_native_bytes_to_dst<1, false>(
+              request, decoded, static_cast<std::size_t>(source_row_bytes),
+              source_is_planar, row_stride, output_planar, source_bits)) {
+        return PIXEL_CODEC_ERR_OK;
       }
     }
-    return PIXEL_CODEC_ERR_OK;
-  }
-
-  const std::size_t dst_pixel_stride = samples_sz * dst_sample_bytes;
-  for (std::size_t r = 0; r < rows_sz; ++r) {
-    uint8_t* dst_row = request->output.dst + r * row_stride_sz;
-    for (std::size_t c = 0; c < cols_sz; ++c) {
-      uint8_t* dst_pixel = dst_row + c * dst_pixel_stride;
-      for (std::size_t comp = 0; comp < samples_sz; ++comp) {
-        const uint8_t* src_ptr = sample_ptr_at(r, c, comp);
-        char reason[256];
-        int32_t sample = 0;
-        if (!load_integral_sample(src_ptr, source_sample_bytes,
-                source_is_signed, source_bits, &sample, reason, sizeof(reason))) {
-          return fail_detail(ctx, PIXEL_CODEC_ERR_FAILED, "decode_frame", reason);
-        }
-        uint8_t* dst_ptr = dst_pixel + comp * dst_sample_bytes;
-        if (dst_dtype.is_float) {
-          if (!write_float_sample(request->output.dst_dtype,
-                  static_cast<double>(sample), dst_ptr)) {
-            return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "decode_frame",
-                "unsupported float destination dtype");
-          }
-        } else {
-          if (!write_integer_sample(request->output.dst_dtype, sample, dst_ptr)) {
-            return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "decode_frame",
-                "unsupported integer destination dtype");
-          }
-        }
+    break;
+  case 2:
+    if (source_is_signed) {
+      if (::pixel::codec_common::write_decoded_native_bytes_to_dst<2, true>(
+              request, decoded, static_cast<std::size_t>(source_row_bytes),
+              source_is_planar, row_stride, output_planar, source_bits)) {
+        return PIXEL_CODEC_ERR_OK;
+      }
+    } else {
+      if (::pixel::codec_common::write_decoded_native_bytes_to_dst<2, false>(
+              request, decoded, static_cast<std::size_t>(source_row_bytes),
+              source_is_planar, row_stride, output_planar, source_bits)) {
+        return PIXEL_CODEC_ERR_OK;
       }
     }
+    break;
+  default:
+    return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "decode_frame",
+        "unsupported decoded sample width");
   }
-  return PIXEL_CODEC_ERR_OK;
+  return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "decode_frame",
+      "unsupported destination dtype");
 }
 
 }  // namespace
@@ -418,7 +342,7 @@ pixel_error_code decoder_decode_frame(
     const pixel_error_code write_ec = write_decoded_pixels(c, request,
         decoded.data(), decoded_sample_bytes, frame_info.bits_per_sample,
         source_dtype.is_signed, source_planar, source_row_bytes,
-        dst_dtype, row_stride, output_planar);
+        row_stride, output_planar);
     if (write_ec != PIXEL_CODEC_ERR_OK) {
       return write_ec;
     }
