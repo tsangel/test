@@ -18,10 +18,28 @@ jobs:
             macos_env: ""
           - os: macos-15-intel
             archs: x86_64
-            macos_env: "MACOSX_DEPLOYMENT_TARGET=10.15"
+            macos_env: >-
+              MACOSX_DEPLOYMENT_TARGET=10.15
+              CC=/usr/bin/cc
+              CXX=/usr/bin/c++
+              CPPFLAGS=
+              CFLAGS=
+              CXXFLAGS=
+              LDFLAGS=
+              LIBRARY_PATH=
+              DYLD_LIBRARY_PATH=
           - os: macos-14
             archs: arm64
-            macos_env: "MACOSX_DEPLOYMENT_TARGET=11.0"
+            macos_env: >-
+              MACOSX_DEPLOYMENT_TARGET=11.0
+              CC=/usr/bin/cc
+              CXX=/usr/bin/c++
+              CPPFLAGS=
+              CFLAGS=
+              CXXFLAGS=
+              LDFLAGS=
+              LIBRARY_PATH=
+              DYLD_LIBRARY_PATH=
           - os: windows-latest
             archs: AMD64
             macos_env: ""
@@ -33,6 +51,8 @@ jobs:
       CIBW_PRERELEASE_PYTHONS: "1"
       CIBW_BEFORE_BUILD: python -m pip install --upgrade pip cmake ninja
       CIBW_ENVIRONMENT_MACOS: ${{ matrix.macos_env }}
+      CIBW_REPAIR_WHEEL_COMMAND_MACOS: >-
+        bash {project}/scripts/repair_macos_wheel.sh {wheel} {dest_dir} {delocate_archs}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
