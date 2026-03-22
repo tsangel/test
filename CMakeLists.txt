@@ -146,7 +146,6 @@ add_library(dicomsdl STATIC
     src/pixel/host/support/dicom_pixel_support.cpp
     src/pixel/host/entrypoint/encode_entrypoint.cpp
     src/pixel/host/encode/encode_options_policy.cpp
-    src/pixel/host/encode/encode_context_validation.cpp
     src/pixel/host/encode/encode_set_pixel_data_runner.cpp
     src/pixel/host/encode/encode_target_policy.cpp
     src/pixel/host/encode/multicomponent_transform_policy.cpp

@@ -208,13 +208,4 @@ void update_pixel_metadata_for_set_pixel_data(DataSet& dataset, std::string_view
 	}
 }
 
-void update_transfer_syntax_uid_element_after_set_pixel_data_or_throw(
-    DicomFile& file, uid::WellKnown transfer_syntax) {
-	if (!file.set_value("(0002,0010)"_tag, VR::UI, transfer_syntax.value())) {
-		diag::error_and_throw(
-		    "DicomFile::set_pixel_data file={} reason=failed to update (0002,0010) TransferSyntaxUID",
-		    file.path());
-	}
-}
-
 } // namespace dicom::pixel::detail

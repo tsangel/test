@@ -2893,9 +2893,6 @@ private:
 	    const pixel::EncoderContext& encoder_ctx);
 	void apply_transfer_syntax(uid::WellKnown transfer_syntax,
 	    std::span<const pixel::CodecOptionTextKv> codec_opt_override);
-	// Commit transfer syntax state only after set_pixel_data finished updating
-	// PixelData bytes and related pixel metadata successfully.
-	void finalize_set_pixel_data_transfer_syntax(uid::WellKnown transfer_syntax);
 	void clear_error_state() noexcept;
 	void set_error_state(std::string message);
 

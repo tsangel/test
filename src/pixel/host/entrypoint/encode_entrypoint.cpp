@@ -1,6 +1,6 @@
 #include "dicom.h"
 
-#include "pixel/host/encode/encode_context_validation.hpp"
+#include "diagnostics.h"
 #include "pixel/host/encode/encode_options_policy.hpp"
 #include "pixel/host/encode/encode_set_pixel_data_runner.hpp"
 #include <utility>
@@ -54,13 +54,25 @@ pixel::EncoderContext pixel::create_encoder_context(uid::WellKnown transfer_synt
 void pixel::set_pixel_data(
     DicomFile& file, pixel::ConstPixelSpan source,
     const pixel::EncoderContext& encoder_ctx) {
-	// Validate the configured context before mutating the destination dataset.
-	pixel::detail::validate_encoder_context_for_set_pixel_data_or_throw(file.path(),
-	    encoder_ctx.transfer_syntax_uid_, encoder_ctx.configured_,
-	    encoder_ctx.transfer_syntax_uid_);
+	if (!encoder_ctx.configured()) {
+		dicom::diag::error_and_throw(
+		    "DicomFile::set_pixel_data file={} reason=encoder context is not configured",
+		    file.path());
+	}
+	if (!encoder_ctx.transfer_syntax_uid().valid()) {
+		dicom::diag::error_and_throw(
+		    "DicomFile::set_pixel_data file={} reason=encoder context transfer syntax is not valid",
+		    file.path());
+	}
 	pixel::detail::run_set_pixel_data_with_computed_codec_options(
 	    file, encoder_ctx.transfer_syntax_uid_, source, encoder_ctx.codec_options_);
-	file.finalize_set_pixel_data_transfer_syntax(encoder_ctx.transfer_syntax_uid_);
+	file.set_transfer_syntax_state_only(encoder_ctx.transfer_syntax_uid_);
+	if (!file.set_value("(0002,0010)", VR::UI,
+	        encoder_ctx.transfer_syntax_uid_.value())) {
+		dicom::diag::error_and_throw(
+		    "DicomFile::set_pixel_data file={} reason=failed to update (0002,0010) TransferSyntaxUID",
+		    file.path());
+	}
 }
 
 } // namespace dicom

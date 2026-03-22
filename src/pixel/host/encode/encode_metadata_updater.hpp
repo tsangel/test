@@ -15,9 +15,6 @@ void update_pixel_metadata_for_set_pixel_data(DataSet& dataset, std::string_view
     int bits_stored, int high_bit, int pixel_representation,
     std::size_t source_row_stride, std::size_t source_frame_stride);
 
-void update_transfer_syntax_uid_element_after_set_pixel_data_or_throw(
-    DicomFile& file, uid::WellKnown transfer_syntax);
-
 [[nodiscard]] std::size_t encoded_payload_size_from_pixel_sequence(
     const DataSet& dataset, std::string_view file_path, uid::WellKnown transfer_syntax);
 
