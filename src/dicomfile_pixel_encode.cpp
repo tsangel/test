@@ -12,11 +12,6 @@ void DicomFile::set_pixel_data(uid::WellKnown transfer_syntax,
 
 void DicomFile::set_pixel_data(uid::WellKnown transfer_syntax,
     pixel::ConstPixelSpan source, const pixel::EncoderContext& encoder_ctx) {
-	if (!encoder_ctx.configured()) {
-		diag::error_and_throw(
-		    "DicomFile::set_pixel_data file={} ts={} reason=encoder context is not configured",
-		    path(), transfer_syntax.value());
-	}
 	if (!encoder_ctx.transfer_syntax_uid().valid() ||
 	    encoder_ctx.transfer_syntax_uid() != transfer_syntax) {
 		diag::error_and_throw(
