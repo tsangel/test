@@ -42,6 +42,16 @@ struct PaletteTransformLayoutInfo {
 	bool has_alpha{false};
 };
 
+enum class LayoutRole : std::uint8_t {
+	source,
+	destination,
+};
+
+[[nodiscard]] inline std::string_view layout_role_text(LayoutRole role) noexcept {
+	return role == LayoutRole::source ? std::string_view("source")
+	                                  : std::string_view("destination");
+}
+
 [[nodiscard]] inline bool try_get_integer_stored_value_range(
     const PixelLayout& layout, std::int64_t& out_min_value,
     std::int64_t& out_max_value) noexcept {
@@ -94,23 +104,22 @@ struct PaletteTransformLayoutInfo {
 	return min_value >= first_mapped && max_value <= last_mapped;
 }
 
-[[noreturn]] inline void throw_transform_argument_error(
-    std::string_view function_name, std::string_view reason) {
-	throw std::invalid_argument(
-	    std::string(function_name) + ": " + std::string(reason));
+[[noreturn]] inline void throw_transform_argument_error(std::string_view reason) {
+	throw std::invalid_argument(std::string(reason));
 }
 
 [[nodiscard]] inline LayoutAccessInfo validate_layout_storage_or_throw(
-    const PixelLayout& layout, std::string_view function_name, std::string_view label) {
+    const PixelLayout& layout, LayoutRole role) {
+	const auto role_text = layout_role_text(role);
 	if (layout.empty()) {
-		throw_transform_argument_error(function_name, std::string(label) + " layout is empty");
+		throw_transform_argument_error(std::string(role_text) + " layout is empty");
 	}
 
 	// Sample width and planar arrangement drive every address calculation.
 	const auto sample_bytes = bytes_per_sample_of(layout.data_type);
 	if (sample_bytes == 0) {
 		throw_transform_argument_error(
-		    function_name, std::string(label) + " layout has unknown data_type");
+		    std::string(role_text) + " layout has unknown data_type");
 	}
 	const bool planar_layout =
 	    layout.planar == Planar::planar && layout.samples_per_pixel > std::uint16_t{1};
@@ -122,18 +131,16 @@ struct PaletteTransformLayoutInfo {
 	        planar_layout ? std::size_t{1} : static_cast<std::size_t>(layout.samples_per_pixel),
 	        row_value_count)) {
 		throw std::overflow_error(
-		    std::string(function_name) + ": " + std::string(label) +
-		    " row value count overflow");
+		    std::string(role_text) + " row value count overflow");
 	}
 	std::size_t row_payload_bytes = 0;
 	if (!detail::checked_mul_size_t(row_value_count, sample_bytes, row_payload_bytes)) {
 		throw std::overflow_error(
-		    std::string(function_name) + ": " + std::string(label) +
-		    " row payload overflow");
+		    std::string(role_text) + " row payload overflow");
 	}
 	if (layout.row_stride < row_payload_bytes) {
 		throw_transform_argument_error(
-		    function_name, std::string(label) + " row_stride is smaller than row payload");
+		    std::string(role_text) + " row_stride is smaller than row payload");
 	}
 
 	// Derive the minimal legal frame stride from row stride and plane count.
@@ -141,20 +148,18 @@ struct PaletteTransformLayoutInfo {
 	if (!detail::checked_mul_size_t(
 	        layout.row_stride, static_cast<std::size_t>(layout.rows), plane_stride)) {
 		throw std::overflow_error(
-		    std::string(function_name) + ": " + std::string(label) +
-		    " plane stride overflow");
+		    std::string(role_text) + " plane stride overflow");
 	}
 	std::size_t min_frame_stride = plane_stride;
 	if (planar_layout &&
 	    !detail::checked_mul_size_t(min_frame_stride,
 	        static_cast<std::size_t>(layout.samples_per_pixel), min_frame_stride)) {
 		throw std::overflow_error(
-		    std::string(function_name) + ": " + std::string(label) +
-		    " frame stride overflow");
+		    std::string(role_text) + " frame stride overflow");
 	}
 	if (layout.frame_stride < min_frame_stride) {
 		throw_transform_argument_error(
-		    function_name, std::string(label) + " frame_stride is smaller than frame payload");
+		    std::string(role_text) + " frame_stride is smaller than frame payload");
 	}
 
 	return LayoutAccessInfo{
@@ -166,33 +171,33 @@ struct PaletteTransformLayoutInfo {
 
 [[nodiscard]] inline MonochromeTransformLayoutInfo
 validate_monochrome_storage_pair_or_throw(
-    ConstPixelSpan src, PixelSpan dst, std::string_view function_name) {
+    ConstPixelSpan src, PixelSpan dst) {
 	const auto src_info =
-	    validate_layout_storage_or_throw(src.layout, function_name, "source");
+	    validate_layout_storage_or_throw(src.layout, LayoutRole::source);
 	const auto dst_info =
-	    validate_layout_storage_or_throw(dst.layout, function_name, "destination");
+	    validate_layout_storage_or_throw(dst.layout, LayoutRole::destination);
 	(void)dst_info;
 
 	// Reject malformed spans before the transform loops start walking them.
 	if (!src.has_required_bytes()) {
 		throw_transform_argument_error(
-		    function_name, "source byte span is smaller than the declared layout");
+		    "source byte span is smaller than the declared layout");
 	}
 	if (!dst.has_required_bytes()) {
 		throw_transform_argument_error(
-		    function_name, "destination byte span is smaller than the declared layout");
+		    "destination byte span is smaller than the declared layout");
 	}
 
 	// DICOM rescale and Modality LUT operate on monochrome stored values only.
 	if (src.layout.samples_per_pixel != std::uint16_t{1} ||
 	    dst.layout.samples_per_pixel != std::uint16_t{1}) {
 		throw_transform_argument_error(
-		    function_name, "source and destination layouts must carry one sample per pixel");
+		    "source and destination layouts must carry one sample per pixel");
 	}
 	if (src.layout.rows != dst.layout.rows || src.layout.cols != dst.layout.cols ||
 	    src.layout.frames != dst.layout.frames) {
 		throw_transform_argument_error(
-		    function_name, "source and destination layouts must share geometry");
+		    "source and destination layouts must share geometry");
 	}
 
 	return MonochromeTransformLayoutInfo{
@@ -202,27 +207,27 @@ validate_monochrome_storage_pair_or_throw(
 
 [[nodiscard]] inline MonochromeTransformLayoutInfo
 validate_monochrome_transform_pair_or_throw(
-    ConstPixelSpan src, PixelSpan dst, std::string_view function_name) {
+    ConstPixelSpan src, PixelSpan dst) {
 	const auto info =
-	    validate_monochrome_storage_pair_or_throw(src, dst, function_name);
+	    validate_monochrome_storage_pair_or_throw(src, dst);
 
 	// Rescale and Modality LUT materialize floating-point values.
 	if (dst.layout.data_type != DataType::f32 && dst.layout.data_type != DataType::f64) {
 		throw_transform_argument_error(
-		    function_name, "destination dtype must be float32 or float64");
+		    "destination dtype must be float32 or float64");
 	}
 
 	return info;
 }
 
 [[nodiscard]] inline std::uint16_t normalize_palette_bits_per_entry_or_throw(
-    const PaletteLut& lut, std::string_view function_name) {
+    const PaletteLut& lut) {
 	// Palette LUT metadata may state the entry width explicitly, but callers that
 	// construct a LUT manually can omit it and let the implementation infer 8/16-bit output.
 	if (lut.bits_per_entry != 0) {
 		if (lut.bits_per_entry > 16) {
 			throw_transform_argument_error(
-			    function_name, "palette LUT bits_per_entry must be between 1 and 16");
+			    "palette LUT bits_per_entry must be between 1 and 16");
 		}
 		return lut.bits_per_entry;
 	}
@@ -240,35 +245,34 @@ validate_monochrome_transform_pair_or_throw(
 }
 
 [[nodiscard]] inline PaletteLutInfo validate_palette_lut_or_throw(
-    const PaletteLut& lut, std::string_view function_name) {
+    const PaletteLut& lut) {
 	// Palette LUT needs three synchronized channel tables and a consistent bit depth.
 	if (lut.red_values.empty() || lut.green_values.empty() || lut.blue_values.empty()) {
 		throw_transform_argument_error(
-		    function_name, "palette LUT channel tables must not be empty");
+		    "palette LUT channel tables must not be empty");
 	}
 	if (lut.red_values.size() != lut.green_values.size() ||
 	    lut.red_values.size() != lut.blue_values.size()) {
 		throw_transform_argument_error(
-		    function_name, "palette LUT channel tables must have matching entry counts");
+		    "palette LUT channel tables must have matching entry counts");
 	}
 	if (!lut.alpha_values.empty() &&
 	    lut.alpha_values.size() != lut.red_values.size()) {
 		throw_transform_argument_error(
-		    function_name, "palette LUT alpha channel must match the RGB entry count");
+		    "palette LUT alpha channel must match the RGB entry count");
 	}
 
 	const auto bits_per_entry =
-	    normalize_palette_bits_per_entry_or_throw(lut, function_name);
+	    normalize_palette_bits_per_entry_or_throw(lut);
 	const std::uint32_t value_mask =
 	    bits_per_entry == 16 ? 0xFFFFu : ((1u << bits_per_entry) - 1u);
 	const auto validate_channel = [&](std::span<const std::uint16_t> values,
 	                                  std::string_view label) {
 		for (const auto value : values) {
 			if (static_cast<std::uint32_t>(value) > value_mask) {
-				throw_transform_argument_error(
-				    function_name,
-				    std::string("palette LUT ") + std::string(label) +
-				        " channel has a value outside bits_per_entry");
+				throw_transform_argument_error(std::string("palette LUT ") +
+				    std::string(label) +
+				    " channel has a value outside bits_per_entry");
 			}
 		}
 	};
@@ -289,12 +293,12 @@ validate_monochrome_transform_pair_or_throw(
 }
 
 [[nodiscard]] inline std::uint16_t normalize_voi_bits_per_entry_or_throw(
-    const VoiLut& lut, std::string_view function_name) {
+    const VoiLut& lut) {
 	// VOI LUT metadata may omit the entry width when callers construct a table manually.
 	if (lut.bits_per_entry != 0) {
 		if (lut.bits_per_entry > 16) {
 			throw_transform_argument_error(
-			    function_name, "VOI LUT bits_per_entry must be between 1 and 16");
+			    "VOI LUT bits_per_entry must be between 1 and 16");
 		}
 		return lut.bits_per_entry;
 	}
@@ -307,21 +311,21 @@ validate_monochrome_transform_pair_or_throw(
 }
 
 [[nodiscard]] inline VoiLutInfo validate_voi_lut_or_throw(
-    const VoiLut& lut, std::string_view function_name) {
+    const VoiLut& lut) {
 	// VOI LUT uses one synchronized lookup table and one effective output width.
 	if (lut.values.empty()) {
 		throw_transform_argument_error(
-		    function_name, "VOI LUT values must not be empty");
+		    "VOI LUT values must not be empty");
 	}
 
 	const auto bits_per_entry =
-	    normalize_voi_bits_per_entry_or_throw(lut, function_name);
+	    normalize_voi_bits_per_entry_or_throw(lut);
 	const std::uint32_t value_mask =
 	    bits_per_entry == 16 ? 0xFFFFu : ((1u << bits_per_entry) - 1u);
 	for (const auto value : lut.values) {
 		if (static_cast<std::uint32_t>(value) > value_mask) {
 			throw_transform_argument_error(
-			    function_name, "VOI LUT has a value outside bits_per_entry");
+			    "VOI LUT has a value outside bits_per_entry");
 		}
 	}
 
@@ -334,46 +338,45 @@ validate_monochrome_transform_pair_or_throw(
 }
 
 [[nodiscard]] inline PaletteTransformLayoutInfo validate_palette_transform_pair_or_throw(
-    ConstPixelSpan src, PixelSpan dst, const PaletteLutInfo& lut_info,
-    std::string_view function_name) {
+    ConstPixelSpan src, PixelSpan dst, const PaletteLutInfo& lut_info) {
 	const auto src_info =
-	    validate_layout_storage_or_throw(src.layout, function_name, "source");
+	    validate_layout_storage_or_throw(src.layout, LayoutRole::source);
 	const auto dst_info =
-	    validate_layout_storage_or_throw(dst.layout, function_name, "destination");
+	    validate_layout_storage_or_throw(dst.layout, LayoutRole::destination);
 
 	// Reject malformed source and destination spans before the LUT walk starts.
 	if (!src.has_required_bytes()) {
 		throw_transform_argument_error(
-		    function_name, "source byte span is smaller than the declared layout");
+		    "source byte span is smaller than the declared layout");
 	}
 	if (!dst.has_required_bytes()) {
 		throw_transform_argument_error(
-		    function_name, "destination byte span is smaller than the declared layout");
+		    "destination byte span is smaller than the declared layout");
 	}
 
 	// Indexed palette input must be monochannel; output expands to RGB or RGBA.
 	if (src.layout.samples_per_pixel != std::uint16_t{1}) {
 		throw_transform_argument_error(
-		    function_name, "source layout must carry one sample per pixel");
+		    "source layout must carry one sample per pixel");
 	}
 	if (src.layout.rows != dst.layout.rows || src.layout.cols != dst.layout.cols ||
 	    src.layout.frames != dst.layout.frames) {
 		throw_transform_argument_error(
-		    function_name, "source and destination layouts must share geometry");
+		    "source and destination layouts must share geometry");
 	}
 	const auto expected_samples =
 	    lut_info.has_alpha ? std::uint16_t{4} : std::uint16_t{3};
 	if (dst.layout.samples_per_pixel != expected_samples) {
 		throw_transform_argument_error(
-		    function_name, "destination layout must carry the palette channel count");
+		    "destination layout must carry the palette channel count");
 	}
 	if (dst.layout.photometric != Photometric::rgb) {
 		throw_transform_argument_error(
-		    function_name, "destination photometric must be RGB");
+		    "destination photometric must be RGB");
 	}
 	if (dst.layout.data_type != lut_info.destination_dtype) {
 		throw_transform_argument_error(
-		    function_name, "destination dtype does not match palette LUT bit depth");
+		    "destination dtype does not match palette LUT bit depth");
 	}
 
 	return PaletteTransformLayoutInfo{
@@ -385,15 +388,14 @@ validate_monochrome_transform_pair_or_throw(
 }
 
 [[nodiscard]] inline MonochromeTransformLayoutInfo validate_voi_lut_transform_pair_or_throw(
-    ConstPixelSpan src, PixelSpan dst, const VoiLutInfo& lut_info,
-    std::string_view function_name) {
+    ConstPixelSpan src, PixelSpan dst, const VoiLutInfo& lut_info) {
 	const auto info =
-	    validate_monochrome_storage_pair_or_throw(src, dst, function_name);
+	    validate_monochrome_storage_pair_or_throw(src, dst);
 
 	// VOI LUT output is currently materialized into integer grayscale storage.
 	if (dst.layout.data_type != lut_info.destination_dtype) {
 		throw_transform_argument_error(
-		    function_name, "destination dtype does not match VOI LUT bit depth");
+		    "destination dtype does not match VOI LUT bit depth");
 	}
 
 	return info;
@@ -477,7 +479,7 @@ inline void transform_monochrome_pixels_impl(ConstPixelSpan src, PixelSpan dst,
 template <typename Dst, typename Mapper>
 inline void dispatch_numeric_source_dtype(
     ConstPixelSpan src, PixelSpan dst, const MonochromeTransformLayoutInfo& layout_info,
-    std::string_view function_name, Mapper&& mapper) {
+    Mapper&& mapper) {
 	switch (src.layout.data_type) {
 	case DataType::u8:
 		transform_monochrome_pixels_impl<std::uint8_t, Dst>(src, dst, layout_info, mapper);
@@ -504,14 +506,14 @@ inline void dispatch_numeric_source_dtype(
 		transform_monochrome_pixels_impl<double, Dst>(src, dst, layout_info, mapper);
 		return;
 	default:
-		throw_transform_argument_error(function_name, "source dtype is not supported");
+		throw_transform_argument_error("source dtype is not supported");
 	}
 }
 
 template <typename Dst, typename Mapper>
 inline void dispatch_integral_source_dtype(
     ConstPixelSpan src, PixelSpan dst, const MonochromeTransformLayoutInfo& layout_info,
-    std::string_view function_name, Mapper&& mapper) {
+    Mapper&& mapper) {
 	switch (src.layout.data_type) {
 	case DataType::u8:
 		transform_monochrome_pixels_impl<std::uint8_t, Dst>(src, dst, layout_info, mapper);
@@ -533,14 +535,14 @@ inline void dispatch_integral_source_dtype(
 		return;
 	default:
 		throw_transform_argument_error(
-		    function_name, "source dtype must be an integral stored-value type");
+		    "source dtype must be an integral stored-value type");
 	}
 }
 
 template <typename LayoutInfo, typename Mapper>
 inline void dispatch_float_destination_dtype(
     ConstPixelSpan src, PixelSpan dst, const LayoutInfo& layout_info,
-    std::string_view function_name, Mapper&& mapper) {
+    Mapper&& mapper) {
 	switch (dst.layout.data_type) {
 	case DataType::f32:
 		mapper.template operator()<float>(src, dst, layout_info);
@@ -550,7 +552,7 @@ inline void dispatch_float_destination_dtype(
 		return;
 	default:
 		throw_transform_argument_error(
-		    function_name, "destination dtype must be float32 or float64");
+		    "destination dtype must be float32 or float64");
 	}
 }
 
@@ -873,7 +875,7 @@ inline void dispatch_palette_source_dtype(ConstPixelSpan src, PixelSpan dst,
 		return;
 	default:
 		throw_transform_argument_error(
-		    "apply_palette_lut_into", "source dtype must be an integral stored-value type");
+		    "source dtype must be an integral stored-value type");
 	}
 }
 

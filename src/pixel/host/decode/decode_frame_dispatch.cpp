@@ -1,6 +1,7 @@
 #include "pixel/host/decode/decode_frame_dispatch.hpp"
 #include "pixel/host/decode/decode_thread_policy.hpp"
 
+#include "diagnostics.h"
 #include "pixel/host/error/codec_error.hpp"
 #include "pixel/host/support/dicom_pixel_support.hpp"
 
@@ -26,6 +27,7 @@
 #include <vector>
 
 namespace dicom::pixel::detail {
+namespace diag = dicom::diag;
 
 namespace {
 
@@ -34,19 +36,26 @@ namespace {
 #endif
 
 struct DecodeDispatchRequestView {
-	std::string_view api_name{};
-	std::string_view file_path{};
 	uid::WellKnown transfer_syntax{};
 	PixelLayout source_layout{};
 	DecodeOptions options{};
 	PixelLayout output_layout{};
 };
 
+template <typename... Args>
+[[noreturn]] void throw_decode_stage_exception(std::optional<std::size_t> frame_index,
+    CodecStatusCode code, std::string_view stage,
+    fmt::format_string<Args...> reason_format, Args&&... args) {
+	if (frame_index.has_value()) {
+		throw_frame_codec_stage_exception(*frame_index, code, stage, reason_format,
+		    std::forward<Args>(args)...);
+	}
+	throw_codec_stage_exception(code, stage, reason_format,
+	    std::forward<Args>(args)...);
+}
 [[nodiscard]] DecodeDispatchRequestView build_decode_dispatch_request_view(
-    std::string_view api_name, const DicomFile& df, const DecodePlan& plan) {
+    const DicomFile& df, const DecodePlan& plan) {
 	return DecodeDispatchRequestView{
-	    .api_name = api_name,
-	    .file_path = df.path(),
 	    .transfer_syntax = df.transfer_syntax_uid(),
 	    .source_layout = support_detail::compute_decode_source_layout(df),
 	    .options = plan.options,
@@ -55,12 +64,9 @@ struct DecodeDispatchRequestView {
 }
 
 [[nodiscard]] DecodeDispatchRequestView build_decode_dispatch_request_view(
-    std::string_view api_name, std::string_view file_path,
     uid::WellKnown transfer_syntax, const PixelLayout& source_layout,
     const DecodePlan& plan) {
 	return DecodeDispatchRequestView{
-	    .api_name = api_name,
-	    .file_path = file_path,
 	    .transfer_syntax = transfer_syntax,
 	    .source_layout = source_layout,
 	    .options = plan.options,
@@ -69,24 +75,16 @@ struct DecodeDispatchRequestView {
 }
 
 void validate_decode_thread_settings_or_throw(
-    const DecodeDispatchRequestView& request, std::size_t frame_index) {
+    const DecodeDispatchRequestView& request, std::optional<std::size_t> frame_index) {
 	if (request.options.worker_threads < -1) {
-		throw_codec_error_with_context(request.api_name, request.file_path,
-		    request.transfer_syntax, frame_index,
-		    CodecError{
-		        .code = CodecStatusCode::invalid_argument,
-		        .stage = "validate_plan",
-		        .detail = "worker_threads must be -1, 0, or positive",
-		    });
+		throw_decode_stage_exception(frame_index,
+		    CodecStatusCode::invalid_argument, "validate_plan",
+		    "worker_threads must be -1, 0, or positive");
 	}
 	if (request.options.codec_threads < -1) {
-		throw_codec_error_with_context(request.api_name, request.file_path,
-		    request.transfer_syntax, frame_index,
-		    CodecError{
-		        .code = CodecStatusCode::invalid_argument,
-		        .stage = "validate_plan",
-		        .detail = "codec_threads must be -1, 0, or positive",
-		    });
+		throw_decode_stage_exception(frame_index,
+		    CodecStatusCode::invalid_argument, "validate_plan",
+		    "codec_threads must be -1, 0, or positive");
 	}
 }
 
@@ -96,13 +94,9 @@ void validate_decode_frame_request_or_throw(
 	// concrete destination layout.
 	if (!request.transfer_syntax.valid() || request.source_layout.empty() ||
 	    request.output_layout.empty()) {
-		throw_codec_error_with_context(request.api_name, request.file_path,
-		    request.transfer_syntax, frame_index,
-		    CodecError{
-		        .code = CodecStatusCode::invalid_argument,
-		        .stage = "validate_plan",
-		        .detail = "decode plan is not initialized; call create_decode_plan()",
-		    });
+		throw_decode_stage_exception(frame_index,
+		    CodecStatusCode::invalid_argument, "validate_plan",
+		    "decode plan is not initialized; call create_decode_plan()");
 	}
 	validate_decode_thread_settings_or_throw(request, frame_index);
 }
@@ -110,39 +104,33 @@ void validate_decode_frame_request_or_throw(
 void validate_decode_all_frames_request_or_throw(
     const DecodeDispatchRequestView& request, std::span<std::uint8_t> dst) {
 	// Batch decode shares the same layout and threading invariants as single-frame decode.
-	validate_decode_frame_request_or_throw(request, 0);
+	if (!request.transfer_syntax.valid() || request.source_layout.empty() ||
+	    request.output_layout.empty()) {
+		throw_decode_stage_exception(std::nullopt,
+		    CodecStatusCode::invalid_argument, "validate_plan",
+		    "decode plan is not initialized; call create_decode_plan()");
+	}
+	validate_decode_thread_settings_or_throw(request, std::nullopt);
 	if (request.output_layout.frames == 0) {
-		throw_codec_error_with_context(request.api_name, request.file_path,
-		    request.transfer_syntax, 0,
-		    CodecError{
-		        .code = CodecStatusCode::invalid_argument,
-		        .stage = "validate_plan",
-		        .detail = "decode plan does not describe any frames",
-		    });
+		throw_decode_stage_exception(std::nullopt,
+		    CodecStatusCode::invalid_argument, "validate_plan",
+		    "decode plan does not describe any frames");
 	}
 
 	const auto frames = static_cast<std::size_t>(request.output_layout.frames);
 	if (request.output_layout.frame_stride >
 	    (std::numeric_limits<std::size_t>::max() / frames)) {
-		throw_codec_error_with_context(request.api_name, request.file_path,
-		    request.transfer_syntax, 0,
-		    CodecError{
-		        .code = CodecStatusCode::invalid_argument,
-		        .stage = "validate_dst",
-		        .detail = "decoded output size overflow for all frames",
-		    });
+		throw_decode_stage_exception(std::nullopt,
+		    CodecStatusCode::invalid_argument, "validate_dst",
+		    "decoded output size overflow for all frames");
 	}
 
 	const auto required_bytes = request.output_layout.frame_stride * frames;
 	// The destination must cover the full contiguous multi-frame storage span.
 	if (dst.size() < required_bytes) {
-		throw_codec_error_with_context(request.api_name, request.file_path,
-		    request.transfer_syntax, 0,
-		    CodecError{
-		        .code = CodecStatusCode::invalid_argument,
-		        .stage = "validate_dst",
-		        .detail = "destination buffer is smaller than required decoded size",
-		    });
+		throw_decode_stage_exception(std::nullopt,
+		    CodecStatusCode::invalid_argument, "validate_dst",
+		    "destination buffer is smaller than required decoded size");
 	}
 }
 
@@ -161,17 +149,11 @@ void validate_decode_all_frames_request_or_throw(
 	                                                : observer->notify_every;
 }
 
-[[noreturn]] void throw_decode_all_frames_cancelled(std::string_view file_path,
-    uid::WellKnown transfer_syntax, std::size_t completed, std::size_t total) {
-	throw_codec_error_with_context("pixel::decode_all_frames_into", file_path,
-	    transfer_syntax, std::nullopt,
-	    CodecError{
-	        .code = CodecStatusCode::cancelled,
-	        .stage = "cancel",
-	        .detail = "decode cancelled by observer after " +
-	            std::to_string(completed) + " of " + std::to_string(total) +
-	            " frames",
-	    });
+[[noreturn]] void throw_decode_all_frames_cancelled(
+    std::size_t completed, std::size_t total) {
+	throw_codec_stage_exception(CodecStatusCode::cancelled, "cancel",
+	    "decode cancelled by observer after {} of {} frames",
+	    completed, total);
 }
 
 [[nodiscard]] EffectiveExecutionThreadSettings resolve_decode_frame_thread_settings(
@@ -352,38 +334,8 @@ void parse_runtime_detail_or_default(
 	}
 }
 
-// Normalize runtime detail so callers always see file/frame context at the host API boundary.
-[[nodiscard]] std::string decorate_runtime_detail_with_callsite_context(
-    std::string detail, std::string_view file_path, std::size_t frame_index) {
-	// Strip any duplicated host callsite prefix emitted by lower layers.
-	if (detail.rfind("pixel::decode_frame_into ", 0) == 0) {
-		const std::size_t reason_pos = detail.find("reason=");
-		if (reason_pos != std::string::npos) {
-			detail = detail.substr(reason_pos + 7);
-		}
-	}
-
-	// Normalize leading whitespace and guarantee a readable fallback message.
-	while (!detail.empty() &&
-	       std::isspace(static_cast<unsigned char>(detail.front())) != 0) {
-		detail.erase(detail.begin());
-	}
-	if (detail.empty()) {
-		detail = "decoder runtime host adapter failed";
-	}
-
-	// Preserve already-decorated detail, otherwise prepend the host callsite context.
-	if (detail.rfind("file=", 0) == 0) {
-		return detail;
-	}
-	return "file=" + std::string(file_path) + " frame=" +
-	    std::to_string(frame_index) + " " + detail;
-}
-
 // Translate one runtime decoder failure into the host codec_error exception shape.
 [[noreturn]] void throw_runtime_decode_error(
-    std::string_view api_name, std::string_view file_path,
-    uid::WellKnown transfer_syntax,
     std::size_t frame_index, pixel_error_code ec,
     std::string_view raw_detail) {
 	CodecError decode_error{};
@@ -391,10 +343,7 @@ void parse_runtime_detail_or_default(
 	// Convert runtime status/detail into the host error schema before throwing.
 	decode_error.code = map_runtime_error_code(ec);
 	parse_runtime_detail_or_default(raw_detail, decode_error.stage, decode_error.detail);
-	decode_error.detail = decorate_runtime_detail_with_callsite_context(
-	    std::move(decode_error.detail), file_path, frame_index);
-	throw_codec_error_with_context(api_name, file_path,
-	    transfer_syntax, frame_index, decode_error);
+	throw_codec_exception(frame_index, decode_error);
 }
 
 // Copy the current runtime decoder detail string into an owning std::string.
@@ -421,31 +370,19 @@ void parse_runtime_detail_or_default(
 		    df, request.source_layout, frame_index);
 	} catch (const std::bad_alloc&) {
 		// Report allocation failures with a stable host-side stage label.
-		throw_codec_error_with_context(request.api_name, df.path(),
-		    request.transfer_syntax, frame_index,
-		    CodecError{
-		        .code = CodecStatusCode::internal_error,
-		        .stage = "allocate",
-		        .detail = "memory allocation failed",
-		    });
+		throw_frame_codec_stage_exception(frame_index,
+		    CodecStatusCode::internal_error, "allocate",
+		    "memory allocation failed");
 	} catch (const std::exception& e) {
 		// Surface ordinary loader/validation failures as invalid arguments.
-		throw_codec_error_with_context(request.api_name, df.path(),
-		    request.transfer_syntax, frame_index,
-		    CodecError{
-		        .code = CodecStatusCode::invalid_argument,
-		        .stage = "load_frame_source",
-		        .detail = e.what(),
-		    });
+		throw_frame_codec_stage_exception(frame_index,
+		    CodecStatusCode::invalid_argument, "load_frame_source", "{}",
+		    e.what());
 	} catch (...) {
 		// Preserve the host error shape even for non-standard exceptions.
-		throw_codec_error_with_context(request.api_name, df.path(),
-		    request.transfer_syntax, frame_index,
-		    CodecError{
-		        .code = CodecStatusCode::backend_error,
-		        .stage = "load_frame_source",
-		        .detail = "non-standard exception",
-		    });
+		throw_frame_codec_stage_exception(frame_index,
+		    CodecStatusCode::backend_error, "load_frame_source",
+		    "non-standard exception");
 	}
 }
 
@@ -503,19 +440,13 @@ void parse_runtime_detail_or_default(
 	// Translate configure-time binding failures into the public host error model.
 	if (configure_ec == PIXEL_CODEC_ERR_UNSUPPORTED) {
 		cache.configured = false;
-		throw_codec_error_with_context(request.api_name, request.file_path,
-		    request.transfer_syntax,
-		    frame_index,
-		    CodecError{
-		        .code = CodecStatusCode::unsupported,
-		        .stage = "plugin_lookup",
-		        .detail = "decoder binding is not registered in runtime registry",
-		    });
+		throw_frame_codec_stage_exception(frame_index,
+		    CodecStatusCode::unsupported, "plugin_lookup",
+		    "decoder binding is not registered in runtime registry");
 	}
 	if (configure_ec != PIXEL_CODEC_ERR_OK) {
 		cache.configured = false;
-		throw_runtime_decode_error(request.api_name, request.file_path,
-		    request.transfer_syntax, frame_index, configure_ec, configure_detail);
+		throw_runtime_decode_error(frame_index, configure_ec, configure_detail);
 	}
 	if (needs_configure) {
 		cache.configured = true;
@@ -533,18 +464,12 @@ void parse_runtime_detail_or_default(
 
 	// Normalize runtime decode failures before they cross the public API boundary.
 	if (decode_ec == PIXEL_CODEC_ERR_UNSUPPORTED) {
-		throw_codec_error_with_context(request.api_name, request.file_path,
-		    request.transfer_syntax,
-		    frame_index,
-		    CodecError{
-		        .code = CodecStatusCode::unsupported,
-		        .stage = "decode_frame",
-		        .detail = "runtime decoder does not support this request",
-		    });
+		throw_frame_codec_stage_exception(frame_index,
+		    CodecStatusCode::unsupported, "decode_frame",
+		    "runtime decoder does not support this request");
 	}
 	if (decode_ec != PIXEL_CODEC_ERR_OK) {
-		throw_runtime_decode_error(request.api_name, request.file_path,
-		    request.transfer_syntax, frame_index, decode_ec,
+		throw_runtime_decode_error(frame_index, decode_ec,
 		    copy_decoder_error_detail(*ctx));
 	}
 	return true;
@@ -676,9 +601,7 @@ void parse_runtime_detail_or_default(
 	const pixel_error_code decode_ec =
 	    ::pixel::core::decode_uncompressed_frame(&error_state, &core_request);
 	if (decode_ec != PIXEL_CODEC_ERR_OK) {
-		throw_runtime_decode_error(decode_request.api_name,
-		    decode_request.file_path, decode_request.transfer_syntax, frame_index,
-		    decode_ec,
+		throw_runtime_decode_error(frame_index, decode_ec,
 		    copy_core_error_detail(error_state));
 	}
 	return true;
@@ -736,54 +659,52 @@ void dispatch_decode_frame_with_codec_threads(const DicomFile& df,
 #endif
 
 	// Without a runtime registry there is currently no alternate backend in this layer.
-	CodecError decode_error{};
-	decode_error.code = CodecStatusCode::unsupported;
-	decode_error.stage = "plugin_lookup";
-	decode_error.detail = "runtime registry is not available";
-	throw_codec_error_with_context(request.api_name, df.path(),
-	    request.transfer_syntax, frame_index, decode_error);
+	throw_frame_codec_stage_exception(frame_index,
+	    CodecStatusCode::unsupported, "plugin_lookup",
+	    "runtime registry is not available");
 }
 
 // Dispatch one frame decode through the runtime path or fail with a stable unsupported error.
 void dispatch_decode_frame(const DicomFile& df, std::size_t frame_index,
     std::span<std::uint8_t> dst, const DecodePlan& plan) {
-	const auto request =
-	    build_decode_dispatch_request_view("pixel::decode_frame_into", df, plan);
+	const auto request = build_decode_dispatch_request_view(df, plan);
 	const auto settings = resolve_decode_frame_thread_settings(request);
 	dispatch_decode_frame_with_codec_threads(df, request, frame_index, dst,
 	    settings.codec_threads);
 }
 
-void dispatch_decode_prepared_frame(std::string_view file_path,
-    uid::WellKnown transfer_syntax, const PixelLayout& source_layout,
+void dispatch_decode_prepared_frame(const DicomFile& df,
+    const PixelLayout& source_layout,
     std::size_t frame_index, std::span<const std::uint8_t> prepared_source,
 	std::span<std::uint8_t> dst, const DecodePlan& plan) {
-	const auto request = build_decode_dispatch_request_view(
-	    "pixel::decode_frame_into", file_path, transfer_syntax, source_layout, plan);
-	// This entry point is used when another layer already materialized one frame source.
-	validate_decode_frame_request_or_throw(request, frame_index);
+	try {
+		const auto request = build_decode_dispatch_request_view(
+		    df.transfer_syntax_uid(), source_layout, plan);
+		// This entry point is used when another layer already materialized one frame source.
+		validate_decode_frame_request_or_throw(request, frame_index);
 
 #if defined(DICOMSDL_PIXEL_RUNTIME_ENABLED)
-	// Prepared-frame dispatch skips the raw-copy shortcut because the caller already
-	// chose the source representation; builtin uncompressed decode is still worth trying.
-	if (request.transfer_syntax.is_uncompressed() &&
-	    try_decode_frame_with_builtin_uncompressed_core_source(
-	        request, prepared_source, frame_index, dst)) {
-		return;
-	}
-	const auto settings = resolve_decode_frame_thread_settings(request);
-	if (try_decode_frame_with_runtime_source(
-	        request, prepared_source, frame_index, dst, settings.codec_threads)) {
-		return;
-	}
+		// Prepared-frame dispatch skips the raw-copy shortcut because the caller already
+		// chose the source representation; builtin uncompressed decode is still worth trying.
+		if (request.transfer_syntax.is_uncompressed() &&
+		    try_decode_frame_with_builtin_uncompressed_core_source(
+		        request, prepared_source, frame_index, dst)) {
+			return;
+		}
+		const auto settings = resolve_decode_frame_thread_settings(request);
+		if (try_decode_frame_with_runtime_source(
+		        request, prepared_source, frame_index, dst, settings.codec_threads)) {
+			return;
+		}
 #endif
 
-	CodecError decode_error{};
-	decode_error.code = CodecStatusCode::unsupported;
-	decode_error.stage = "plugin_lookup";
-	decode_error.detail = "runtime registry is not available";
-	throw_codec_error_with_context(request.api_name, file_path,
-	    request.transfer_syntax, frame_index, decode_error);
+		throw_frame_codec_stage_exception(frame_index,
+		    CodecStatusCode::unsupported, "plugin_lookup",
+		    "runtime registry is not available");
+	} catch (const diag::DicomException& ex) {
+		rethrow_codec_exception_at_boundary(
+		    "pixel::decode_frame_into", df, ex);
+	}
 }
 
 void dispatch_decode_all_frames(
@@ -794,15 +715,14 @@ void dispatch_decode_all_frames(
 void dispatch_decode_all_frames(const DicomFile& df,
     std::span<std::uint8_t> dst, const DecodePlan& plan,
     const ExecutionObserver* observer) {
-	const auto request = build_decode_dispatch_request_view(
-	    "pixel::decode_all_frames_into", df, plan);
+	const auto request = build_decode_dispatch_request_view(df, plan);
 	validate_decode_all_frames_request_or_throw(request, dst);
 	const auto frames = static_cast<std::size_t>(request.output_layout.frames);
 	const auto settings = resolve_decode_all_frames_thread_settings(request);
 	const auto worker_count = settings.worker_count;
 	const auto notify_every = resolve_execution_notify_every(observer);
 	if (should_cancel_execution(observer)) {
-		throw_decode_all_frames_cancelled(df.path(), request.transfer_syntax, 0, frames);
+		throw_decode_all_frames_cancelled(0, frames);
 	}
 
 	std::atomic<std::size_t> next_frame{0};
@@ -884,8 +804,7 @@ void dispatch_decode_all_frames(const DicomFile& df,
 		return;
 	}
 	if (cancelled.load(std::memory_order_acquire)) {
-		throw_decode_all_frames_cancelled(
-		    df.path(), request.transfer_syntax, completed, frames);
+		throw_decode_all_frames_cancelled(completed, frames);
 	}
 }
 

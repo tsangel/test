@@ -10,6 +10,6 @@ namespace dicom::pixel::detail {
 
 [[nodiscard]] bool should_use_multicomponent_transform(uid::WellKnown transfer_syntax,
     uint32_t codec_profile_code, std::span<const CodecOptionKv> codec_options,
-    std::size_t samples_per_pixel, std::string_view file_path);
+    std::size_t samples_per_pixel);
 
 } // namespace dicom::pixel::detail

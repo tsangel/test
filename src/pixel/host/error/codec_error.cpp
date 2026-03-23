@@ -25,9 +25,8 @@ std::string_view codec_status_code_name(CodecStatusCode code) noexcept {
 	return "unknown";
 }
 
-std::string format_codec_error_context(std::string_view function_name,
-    std::string_view file_path, uid::WellKnown transfer_syntax,
-    std::optional<std::size_t> frame_index, const CodecError& error) {
+std::string format_codec_error_suffix(std::optional<std::size_t> frame_index,
+    const CodecError& error) {
 	const auto status = codec_status_code_name(error.code);
 	const std::string_view stage =
 	    error.stage.empty() ? std::string_view("unknown") : std::string_view(error.stage);
@@ -36,23 +35,66 @@ std::string format_codec_error_context(std::string_view function_name,
 	                         : std::string_view(error.detail);
 
 	if (frame_index.has_value()) {
-		return fmt::format(
-		    "{} file={} ts={} frame={} status={} stage={} reason={}",
-		    function_name, file_path, transfer_syntax.value(),
+		return fmt::format("frame={} status={} stage={} reason={}",
 		    *frame_index, status, stage, detail);
 	}
-	return fmt::format(
-	    "{} file={} ts={} status={} stage={} reason={}",
-	    function_name, file_path, transfer_syntax.value(), status,
-	    stage, detail);
+	return fmt::format("status={} stage={} reason={}",
+	    status, stage, detail);
 }
 
-[[noreturn]] void throw_codec_error_with_context(
-    std::string_view function_name, std::string_view file_path,
-    uid::WellKnown transfer_syntax, std::optional<std::size_t> frame_index,
+bool codec_exception_needs_boundary_prefix(std::string_view message) noexcept {
+	return message.starts_with("status=") || message.starts_with("frame=") ||
+	    message.starts_with("stage=");
+}
+
+[[nodiscard]] bool codec_exception_has_boundary_prefix(
+    std::string_view operation, std::string_view message) noexcept {
+	return message.starts_with(operation);
+}
+
+std::string_view boundary_transfer_syntax_text(
+    uid::WellKnown transfer_syntax) noexcept {
+	return transfer_syntax.valid() ? transfer_syntax.value() : std::string_view("<invalid>");
+}
+
+[[nodiscard]] std::string format_codec_boundary_message(
+    std::string_view operation, std::string_view file_path,
+    uid::WellKnown transfer_syntax, std::string_view message) {
+	return fmt::format("{} file={} ts={} {}",
+	    operation, file_path,
+	    boundary_transfer_syntax_text(transfer_syntax), message);
+}
+
+[[noreturn]] void throw_codec_exception(std::optional<std::size_t> frame_index,
     const CodecError& error) {
-	diag::error_and_throw("{}", format_codec_error_context(
-	    function_name, file_path, transfer_syntax, frame_index, error));
+	throw diag::DicomException(format_codec_error_suffix(frame_index, error));
+}
+
+[[noreturn]] void rethrow_codec_exception_at_boundary(
+    std::string_view operation, std::string_view file_path,
+    uid::WellKnown transfer_syntax, const std::exception& ex) {
+	const std::string_view message = ex.what();
+	if (codec_exception_needs_boundary_prefix(message)) {
+		diag::throw_exception("{}",
+		    format_codec_boundary_message(
+		        operation, file_path, transfer_syntax, message));
+	}
+	throw;
+}
+
+[[noreturn]] void rethrow_codec_exception_at_boundary_or_throw(
+    std::string_view operation, std::string_view file_path,
+    uid::WellKnown transfer_syntax, const std::exception& ex) {
+	const std::string_view message = ex.what();
+	if (codec_exception_needs_boundary_prefix(message)) {
+		diag::error_and_throw("{}",
+		    format_codec_boundary_message(
+		        operation, file_path, transfer_syntax, message));
+	}
+	if (codec_exception_has_boundary_prefix(operation, message)) {
+		diag::error_and_throw("{}", message);
+	}
+	throw;
 }
 
 } // namespace dicom::pixel::detail

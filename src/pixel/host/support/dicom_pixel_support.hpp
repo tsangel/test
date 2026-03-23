@@ -68,10 +68,10 @@ struct ComputedEncodeSourceLayout {
 };
 
 [[nodiscard]] ComputedEncodeSourceLayout compute_encode_source_layout_or_throw(
-    pixel::ConstPixelSpan source, std::string_view file_path);
+    pixel::ConstPixelSpan source);
 [[nodiscard]] ComputedEncodeSourceLayout
 compute_encode_source_layout_without_source_bytes_or_throw(
-    const pixel::PixelLayout& source_layout, std::string_view file_path);
+    const pixel::PixelLayout& source_layout);
 
 struct NativePixelCopyInput {
 	std::span<const std::uint8_t> source_bytes{};

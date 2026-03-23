@@ -19,6 +19,7 @@
 #include <string>
 #include <string_view>
 #include <optional>
+#include <source_location>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -2356,7 +2357,9 @@ public:
 	///         for a tag beyond the current load frontier.
 	DataElement& add_dataelement(Tag tag, VR vr = VR::None);
 	/// Add or replace a leaf element addressed by a dotted tag path.
-	/// Intermediate sequence/item components are created as needed.
+	/// Intermediate sequence/item components are created as needed. If an
+	/// intermediate element already exists with a non-sequence VR, it is reset
+	/// in place to `SQ` so the requested path can be materialized.
 	DataElement& add_dataelement(std::string_view tag_path, VR vr = VR::None);
 
 	/// Remove a data element by tag (no-op if missing).
@@ -2387,7 +2390,9 @@ public:
 	///         current load frontier.
 	DataElement& ensure_dataelement(Tag tag, VR vr = VR::None);
 	/// Ensure that a leaf element exists for a dotted tag path.
-	/// Intermediate sequence/item components are created as needed.
+	/// Intermediate sequence/item components are created as needed. If an
+	/// intermediate element already exists with a non-sequence VR, it is reset
+	/// in place to `SQ` so the requested path can be materialized.
 	DataElement& ensure_dataelement(std::string_view tag_path, VR vr = VR::None);
 
 	/// Low-level dotted tag-path resolver (e.g., "00540016.0.00181075").
@@ -2562,12 +2567,14 @@ private:
 	[[nodiscard]] bool is_beyond_last_loaded_tag(Tag tag) const noexcept {
 		return tag > last_tag_loaded_;
 	}
-	[[noreturn]] void throw_beyond_last_loaded_tag(Tag tag, const char* api_name) const;
+	[[noreturn]] void throw_beyond_last_loaded_tag(
+	    Tag tag,
+	    std::source_location location = std::source_location::current()) const;
 	[[nodiscard]] DataElement* find_dataelement_in_elements(std::uint32_t tag_value);
 	[[nodiscard]] const DataElement* find_dataelement_in_elements(std::uint32_t tag_value) const;
-	[[nodiscard]] Sequence& ensure_sequence_element(Tag tag, const char* api_name);
 	[[nodiscard]] TagPathParent ensure_tag_path_parent(
-	    std::string_view tag_path, const char* api_name);
+	    std::string_view tag_path,
+	    std::source_location location = std::source_location::current());
 	DataElement& append_parsed_dataelement_nocheck(
 	    Tag tag, VR vr, std::size_t offset, std::size_t length);
 	DataElement& add_dataelement_nocheck(Tag tag, VR vr);

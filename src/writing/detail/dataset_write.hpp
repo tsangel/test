@@ -71,8 +71,8 @@ struct PixelSequenceOffsetTables {
 			}
 			if (fragment_length >
 			    std::numeric_limits<std::uint64_t>::max() - frame_length) {
-				diag::error_and_throw(
-				    "write_to_stream reason=encapsulated frame length exceeds uint64 range");
+				throw_write_stage_error("write_pixel_sequence_offsets",
+				    "encapsulated frame length exceeds uint64 range");
 			}
 			frame_length += static_cast<std::uint64_t>(fragment_length);
 
@@ -81,8 +81,8 @@ struct PixelSequenceOffsetTables {
 			    full_fragment_length >
 			        std::numeric_limits<std::size_t>::max() - next_frame_offset -
 			            kItemHeaderBytes) {
-				diag::error_and_throw(
-				    "write_to_stream reason=encapsulated pixel frame size exceeds size_t range");
+				throw_write_stage_error("write_pixel_sequence_offsets",
+				    "encapsulated pixel frame size exceeds size_t range");
 			}
 			next_frame_offset += kItemHeaderBytes + full_fragment_length;
 		};
@@ -94,13 +94,13 @@ struct PixelSequenceOffsetTables {
 			const auto& fragments = frame->fragments();
 			for (const auto& fragment : fragments) {
 				if (!seq_stream) {
-					diag::error_and_throw(
-					    "write_to_stream reason=pixel fragment references stream but stream is null");
+					throw_write_stage_error("write_pixel_sequence_offsets",
+					    "pixel fragment references stream but stream is null");
 				}
 				if (fragment.offset > seq_stream->end_offset() ||
 				    fragment.length > seq_stream->end_offset() - fragment.offset) {
-					diag::error_and_throw(
-					    "write_to_stream reason=pixel fragment out of bounds offset=0x{:X} length={}",
+					throw_write_stage_error("write_pixel_sequence_offsets",
+					    "pixel fragment out of bounds offset=0x{:X} length={}",
 					    fragment.offset, fragment.length);
 				}
 				append_fragment(fragment.length);
@@ -134,7 +134,8 @@ void write_non_sequence_element(Writer& writer, Tag tag, VR vr,
 	const auto raw_length = value.size();
 	const auto even_value_length = padded_length(raw_length);
 	write_element_header(
-	    writer, tag, normalized_vr, checked_u32(even_value_length, "element length"), false,
+	    writer, tag, normalized_vr,
+	    checked_u32(even_value_length, CheckedU32Label::element_length), false,
 	    explicit_vr);
 	if (!value.empty()) {
 		writer.append(value.data(), value.size());
@@ -151,7 +152,8 @@ template <typename Writer>
 void write_sequence_element(const DataElement& element, Writer& writer, bool explicit_vr) {
 	const Sequence* sequence = element.as_sequence();
 	if (!sequence) {
-		diag::error_and_throw("write_to_stream reason=SQ element has null sequence pointer");
+		throw_write_stage_error(
+		    "write_sequence_element", "SQ element has null sequence pointer");
 	}
 
 	write_element_header(writer, element.tag(), VR::SQ, 0xFFFFFFFFu, true, explicit_vr);
@@ -171,7 +173,8 @@ void write_pixel_sequence_element(const DataElement& element, Writer& writer,
     bool explicit_vr) {
 	const PixelSequence* pixel_sequence = element.as_pixel_sequence();
 	if (!pixel_sequence) {
-		diag::error_and_throw("write_to_stream reason=PX element has null pixel sequence pointer");
+		throw_write_stage_error(
+		    "write_pixel_sequence_element", "PX element has null pixel sequence pointer");
 	}
 
 	const InStream* seq_stream = pixel_sequence->stream();
@@ -197,7 +200,7 @@ void write_pixel_sequence_element(const DataElement& element, Writer& writer,
 
 	const auto basic_offset_table_length =
 	    checked_u32(offset_tables.basic_offsets.size() * sizeof(std::uint32_t),
-	        "basic offset table length");
+	        CheckedU32Label::basic_offset_table_length);
 	write_item_header(writer, kItemTag, basic_offset_table_length);
 	for (const auto offset : offset_tables.basic_offsets) {
 		write_u32(writer, offset);
@@ -206,7 +209,8 @@ void write_pixel_sequence_element(const DataElement& element, Writer& writer,
 	const auto write_fragment = [&](std::span<const std::uint8_t> fragment) {
 		const auto even_value_length = padded_length(fragment.size());
 		write_item_header(
-		    writer, kItemTag, checked_u32(even_value_length, "pixel fragment length"));
+		    writer, kItemTag,
+		    checked_u32(even_value_length, CheckedU32Label::pixel_fragment_length));
 		if (!fragment.empty()) {
 			writer.append(fragment.data(), fragment.size());
 		}
@@ -232,13 +236,13 @@ void write_pixel_sequence_element(const DataElement& element, Writer& writer,
 		const auto& fragments = frame->fragments();
 		for (const auto& fragment : fragments) {
 			if (!seq_stream) {
-				diag::error_and_throw(
-				    "write_to_stream reason=pixel fragment references stream but stream is null");
+				throw_write_stage_error("write_pixel_sequence_element",
+				    "pixel fragment references stream but stream is null");
 			}
 			if (fragment.offset > seq_stream->end_offset() ||
 			    fragment.length > seq_stream->end_offset() - fragment.offset) {
-				diag::error_and_throw(
-				    "write_to_stream reason=pixel fragment out of bounds offset=0x{:X} length={}",
+				throw_write_stage_error("write_pixel_sequence_element",
+				    "pixel fragment out of bounds offset=0x{:X} length={}",
 				    fragment.offset, fragment.length);
 			}
 			write_fragment(seq_stream->get_span(fragment.offset, fragment.length));
@@ -315,28 +319,31 @@ void write_dataset_with_pixel_writer(const DataSet& dataset, Writer& writer,
 
 template <typename Writer>
 void write_root_dataset_body(Writer& writer, const DataSet& dataset,
-    const DatasetWritePlan& write_plan, const std::string& file_path) {
-	std::vector<std::uint8_t> body;
-	body.reserve(4096);
-	BufferWriter body_writer(body);
+    const DatasetWritePlan& write_plan) {
+	try {
+		if (write_plan.convert_body_to_big_endian && write_plan.deflate_body) {
+			throw_write_stage_error("write_root_dataset_body",
+			    "unsupported encoding pipeline: both big-endian conversion and deflate requested");
+		}
 
-	// Serialize into a temporary little-endian body first, then apply TS-specific transforms.
-	write_dataset(dataset, body_writer, write_plan.explicit_vr, true);
+		std::vector<std::uint8_t> body;
+		body.reserve(4096);
+		BufferWriter body_writer(body);
 
-	if (write_plan.convert_body_to_big_endian && write_plan.deflate_body) {
-		diag::error_and_throw(
-		    "write_to_stream reason=unsupported encoding pipeline: both big-endian conversion and deflate requested");
-	}
-
-	if (write_plan.convert_body_to_big_endian) {
-		body = convert_little_endian_dataset_to_big_endian(body, 0, file_path);
-	}
-	if (write_plan.deflate_body) {
-		body = deflate_dataset_body(body, file_path);
-	}
-
-	if (!body.empty()) {
-		writer.append(body.data(), body.size());
+		// Serialize into a temporary little-endian body first, then apply TS-specific transforms.
+		write_dataset(dataset, body_writer, write_plan.explicit_vr, true);
+		if (write_plan.convert_body_to_big_endian) {
+			body = convert_little_endian_dataset_to_big_endian(body, 0);
+		}
+		if (write_plan.deflate_body) {
+			body = deflate_dataset_body(body);
+		}
+		if (!body.empty()) {
+			writer.append(body.data(), body.size());
+		}
+	} catch (const diag::DicomException& ex) {
+		rethrow_write_exception_at_boundary(
+		    "write_to_stream", dataset.path(), ex);
 	}
 }
 
@@ -344,7 +351,8 @@ template <typename Writer>
 void write_pixel_fragment(Writer& writer, std::span<const std::uint8_t> fragment) {
 	const auto even_value_length = padded_length(fragment.size());
 	write_item_header(
-	    writer, kItemTag, checked_u32(even_value_length, "pixel fragment length"));
+	    writer, kItemTag,
+	    checked_u32(even_value_length, CheckedU32Label::pixel_fragment_length));
 	if (!fragment.empty()) {
 		writer.append(fragment.data(), fragment.size());
 	}
@@ -355,36 +363,40 @@ void write_pixel_fragment(Writer& writer, std::span<const std::uint8_t> fragment
 
 template <typename Writer, typename PixelWriter>
 void write_root_dataset_body_with_pixel_writer(Writer& writer, const DataSet& dataset,
-    const DatasetWritePlan& write_plan, const std::string& file_path,
-    PixelWriter&& pixel_writer) {
-	if (write_plan.convert_body_to_big_endian && write_plan.deflate_body) {
-		diag::error_and_throw(
-		    "write_to_stream reason=unsupported encoding pipeline: both big-endian conversion and deflate requested");
-	}
+    const DatasetWritePlan& write_plan, PixelWriter&& pixel_writer) {
+	try {
+		if (write_plan.convert_body_to_big_endian && write_plan.deflate_body) {
+			throw_write_stage_error("write_root_dataset_body_with_pixel_writer",
+			    "unsupported encoding pipeline: both big-endian conversion and deflate requested");
+		}
 
-	if (!write_plan.convert_body_to_big_endian && !write_plan.deflate_body) {
-		// Fast path: stream elements directly when no post-processing is required.
-		write_dataset_with_pixel_writer(
-		    dataset, writer, write_plan.explicit_vr, true,
+		if (!write_plan.convert_body_to_big_endian && !write_plan.deflate_body) {
+			// Fast path: stream elements directly when no post-processing is required.
+			write_dataset_with_pixel_writer(
+			    dataset, writer, write_plan.explicit_vr, true,
+			    std::forward<PixelWriter>(pixel_writer));
+			return;
+		}
+
+		std::vector<std::uint8_t> body;
+		body.reserve(4096);
+		BufferWriter body_writer(body);
+		// Slow path: serialize to a temporary body so endian conversion or deflate can rewrite it.
+		write_dataset_with_pixel_writer(dataset, body_writer, write_plan.explicit_vr, true,
 		    std::forward<PixelWriter>(pixel_writer));
-		return;
-	}
 
-	std::vector<std::uint8_t> body;
-	body.reserve(4096);
-	BufferWriter body_writer(body);
-	// Slow path: serialize to a temporary body so endian conversion or deflate can rewrite it.
-	write_dataset_with_pixel_writer(dataset, body_writer, write_plan.explicit_vr, true,
-	    std::forward<PixelWriter>(pixel_writer));
-
-	if (write_plan.convert_body_to_big_endian) {
-		body = convert_little_endian_dataset_to_big_endian(body, 0, file_path);
-	}
-	if (write_plan.deflate_body) {
-		body = deflate_dataset_body(body, file_path);
-	}
-	if (!body.empty()) {
-		writer.append(body.data(), body.size());
+		if (write_plan.convert_body_to_big_endian) {
+			body = convert_little_endian_dataset_to_big_endian(body, 0);
+		}
+		if (write_plan.deflate_body) {
+			body = deflate_dataset_body(body);
+		}
+		if (!body.empty()) {
+			writer.append(body.data(), body.size());
+		}
+	} catch (const diag::DicomException& ex) {
+		rethrow_write_exception_at_boundary(
+		    "write_to_stream", dataset.path(), ex);
 	}
 }
 
@@ -395,28 +407,30 @@ void write_native_pixel_data_from_frame_provider(Writer& writer,
     std::size_t frame_payload_bytes, FrameProvider&& frame_provider) {
 	const auto even_value_length = padded_length(total_payload_bytes);
 	write_element_header(writer, element.tag(), explicit_vr ? native_pixel_vr : VR::None,
-	    checked_u32(even_value_length, "native PixelData length"), false, explicit_vr);
+	    checked_u32(
+	        even_value_length, CheckedU32Label::native_pixel_data_length),
+	    false, explicit_vr);
 
 	std::size_t bytes_written = 0;
 	// Stream each frame payload and verify the provider matches the precomputed layout.
 	for (std::size_t frame_index = 0; frame_index < frame_count; ++frame_index) {
 		const auto frame_bytes = frame_provider(frame_index);
 		if (frame_bytes.size() != frame_payload_bytes) {
-			diag::error_and_throw(
-			    "write_with_transfer_syntax reason=native output frame size mismatch frame={} expected={} actual={}",
+			throw_write_stage_error("write_native_pixel_data",
+			    "native output frame size mismatch frame={} expected={} actual={}",
 			    frame_index, frame_payload_bytes, frame_bytes.size());
 		}
 		writer.append(frame_bytes.data(), frame_bytes.size());
 		if (bytes_written > std::numeric_limits<std::size_t>::max() - frame_bytes.size()) {
-			diag::error_and_throw(
-			    "write_with_transfer_syntax reason=native PixelData byte count overflow");
+			throw_write_stage_error(
+			    "write_native_pixel_data", "native PixelData byte count overflow");
 		}
 		bytes_written += frame_bytes.size();
 	}
 
 	if (bytes_written != total_payload_bytes) {
-		diag::error_and_throw(
-		    "write_with_transfer_syntax reason=native PixelData length mismatch expected={} actual={}",
+		throw_write_stage_error("write_native_pixel_data",
+		    "native PixelData length mismatch expected={} actual={}",
 		    total_payload_bytes, bytes_written);
 	}
 	if ((total_payload_bytes & 1u) != 0u) {

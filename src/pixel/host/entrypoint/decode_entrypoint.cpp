@@ -1,7 +1,9 @@
 #include "dicom.h"
 
+#include "diagnostics.h"
 #include "pixel/host/decode/decode_frame_dispatch.hpp"
 #include "pixel/host/decode/decode_plan_compute.hpp"
+#include "pixel/host/error/codec_error.hpp"
 #include "pixel/host/support/dicom_pixel_support.hpp"
 
 namespace dicom {
@@ -16,14 +18,19 @@ DecodePlan create_decode_plan(const DicomFile& df, const DecodeOptions& opt) {
 	plan.options = opt;
 	// Precompute the exact destination layout expected by the decode path.
 	plan.output_layout =
-	    detail::compute_decode_output_layout_or_throw(df.path(), source_layout, plan.options);
+	    detail::compute_decode_output_layout_or_throw(df, source_layout, plan.options);
 	return plan;
 }
 
 void decode_frame_into(const DicomFile& df, std::size_t frame_index,
     std::span<std::uint8_t> dst, const DecodePlan& plan) {
 	// Keep the public wrapper thin so dispatch logic stays in one implementation unit.
-	detail::dispatch_decode_frame(df, frame_index, dst, plan);
+	try {
+		detail::dispatch_decode_frame(df, frame_index, dst, plan);
+	} catch (const diag::DicomException& ex) {
+		detail::rethrow_codec_exception_at_boundary_or_throw(
+		    "pixel::decode_frame_into", df, ex);
+	}
 }
 
 PixelBuffer decode_frame(
@@ -40,7 +47,12 @@ PixelBuffer decode_frame(
 void decode_all_frames_into(
     const DicomFile& df, std::span<std::uint8_t> dst, const DecodePlan& plan) {
 	// Batch decode shares the same dispatcher and validation rules as single-frame decode.
-	detail::dispatch_decode_all_frames(df, dst, plan);
+	try {
+		detail::dispatch_decode_all_frames(df, dst, plan);
+	} catch (const diag::DicomException& ex) {
+		detail::rethrow_codec_exception_at_boundary_or_throw(
+		    "pixel::decode_all_frames_into", df, ex);
+	}
 }
 
 PixelBuffer decode_all_frames(const DicomFile& df, const DecodePlan& plan) {
@@ -55,7 +67,12 @@ PixelBuffer decode_all_frames(const DicomFile& df, const DecodePlan& plan) {
 void decode_all_frames_into(const DicomFile& df, std::span<std::uint8_t> dst,
     const DecodePlan& plan, const ExecutionObserver* observer) {
 	// Observer-aware decode is just the same batch path with cooperative progress/cancel hooks.
-	detail::dispatch_decode_all_frames(df, dst, plan, observer);
+	try {
+		detail::dispatch_decode_all_frames(df, dst, plan, observer);
+	} catch (const diag::DicomException& ex) {
+		detail::rethrow_codec_exception_at_boundary_or_throw(
+		    "pixel::decode_all_frames_into", df, ex);
+	}
 }
 
 PixelBuffer decode_all_frames(

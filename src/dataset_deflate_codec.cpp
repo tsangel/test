@@ -14,6 +14,16 @@ namespace dicom {
 
 namespace {
 
+[[noreturn]] void throw_dataset_transform_error(const char* stage, std::string_view reason) {
+	throw diag::DicomException(fmt::format("stage={} reason={}", stage, reason));
+}
+
+[[noreturn]] void throw_dataset_transform_error(const char* stage, std::size_t offset,
+    std::string_view reason) {
+	throw diag::DicomException(fmt::format(
+	    "stage={} offset=0x{:X} reason={}", stage, offset, reason));
+}
+
 const char* libdeflate_result_name(enum libdeflate_result result) noexcept {
 	switch (result) {
 	case LIBDEFLATE_SUCCESS:
@@ -32,12 +42,10 @@ const char* libdeflate_result_name(enum libdeflate_result result) noexcept {
 } // namespace
 
 std::vector<std::uint8_t> inflate_deflated_dataset(std::span<const std::uint8_t> full_input,
-    std::size_t deflated_start_offset, const std::string& file_path) {
+    std::size_t deflated_start_offset) {
 	if (deflated_start_offset > full_input.size()) {
-		diag::error_and_throw(
-		    fmt::format(
-		        "DataSet::read_attached_stream file={} offset=0x{:X} reason=invalid deflated data start offset",
-		        file_path, deflated_start_offset));
+		throw_dataset_transform_error(
+		    "dataset_inflate", deflated_start_offset, "invalid deflated data start offset");
 	}
 
 	const auto compressed_input = full_input.subspan(deflated_start_offset);
@@ -48,19 +56,15 @@ std::vector<std::uint8_t> inflate_deflated_dataset(std::span<const std::uint8_t>
 
 	struct libdeflate_decompressor* decompressor = libdeflate_alloc_decompressor();
 	if (!decompressor) {
-		diag::error_and_throw(
-		    fmt::format(
-		        "DataSet::read_attached_stream file={} offset=0x{:X} reason=failed to allocate libdeflate decompressor",
-		        file_path, deflated_start_offset));
+		throw_dataset_transform_error("dataset_inflate", deflated_start_offset,
+		    "failed to allocate libdeflate decompressor");
 	}
 
 	std::size_t tail_capacity = std::max<std::size_t>(compressed_input.size() * 4, 1u << 20);
 	if (deflated_start_offset > std::numeric_limits<std::size_t>::max() - tail_capacity) {
 		libdeflate_free_decompressor(decompressor);
-		diag::error_and_throw(
-		    fmt::format(
-		        "DataSet::read_attached_stream file={} offset=0x{:X} reason=deflated output too large",
-		        file_path, deflated_start_offset));
+		throw_dataset_transform_error(
+		    "dataset_inflate", deflated_start_offset, "deflated output too large");
 	}
 
 	std::vector<std::uint8_t> output(deflated_start_offset + tail_capacity);
@@ -80,28 +84,23 @@ std::vector<std::uint8_t> inflate_deflated_dataset(std::span<const std::uint8_t>
 		}
 		if (result != LIBDEFLATE_INSUFFICIENT_SPACE) {
 			libdeflate_free_decompressor(decompressor);
-			diag::error_and_throw(
-			    fmt::format(
-			        "DataSet::read_attached_stream file={} offset=0x{:X} reason=deflate decompression failed result={}",
-			        file_path, deflated_start_offset, libdeflate_result_name(result)));
+			throw_dataset_transform_error("dataset_inflate", deflated_start_offset,
+			    fmt::format("deflate decompression failed result={}",
+			        libdeflate_result_name(result)));
 		}
 
 		const auto current_tail_capacity = output.size() - deflated_start_offset;
 		if (current_tail_capacity > std::numeric_limits<std::size_t>::max() / 2) {
 			libdeflate_free_decompressor(decompressor);
-			diag::error_and_throw(
-			    fmt::format(
-			        "DataSet::read_attached_stream file={} offset=0x{:X} reason=deflated output too large",
-			        file_path, deflated_start_offset));
+			throw_dataset_transform_error(
+			    "dataset_inflate", deflated_start_offset, "deflated output too large");
 		}
 
 		const auto next_tail_capacity = current_tail_capacity * 2;
 		if (deflated_start_offset > std::numeric_limits<std::size_t>::max() - next_tail_capacity) {
 			libdeflate_free_decompressor(decompressor);
-			diag::error_and_throw(
-			    fmt::format(
-			        "DataSet::read_attached_stream file={} offset=0x{:X} reason=deflated output too large",
-			        file_path, deflated_start_offset));
+			throw_dataset_transform_error(
+			    "dataset_inflate", deflated_start_offset, "deflated output too large");
 		}
 		output.resize(deflated_start_offset + next_tail_capacity);
 	}
@@ -110,25 +109,20 @@ std::vector<std::uint8_t> inflate_deflated_dataset(std::span<const std::uint8_t>
 	return output;
 }
 
-std::vector<std::uint8_t> deflate_dataset_body(std::span<const std::uint8_t> dataset_body,
-    const std::string& file_path) {
+std::vector<std::uint8_t> deflate_dataset_body(std::span<const std::uint8_t> dataset_body) {
 	constexpr int kCompressionLevel = 6;
 
 	struct libdeflate_compressor* compressor = libdeflate_alloc_compressor(kCompressionLevel);
 	if (!compressor) {
-		diag::error_and_throw(
-		    fmt::format(
-		        "write_to_stream file={} reason=failed to allocate libdeflate compressor",
-		        file_path));
+		throw_dataset_transform_error(
+		    "dataset_deflate", "failed to allocate libdeflate compressor");
 	}
 
 	const auto bound = libdeflate_deflate_compress_bound(compressor, dataset_body.size());
 	if (bound == 0) {
 		libdeflate_free_compressor(compressor);
-		diag::error_and_throw(
-		    fmt::format(
-		        "write_to_stream file={} reason=invalid deflate bound for dataset body",
-		        file_path));
+		throw_dataset_transform_error(
+		    "dataset_deflate", "invalid deflate bound for dataset body");
 	}
 
 	std::vector<std::uint8_t> compressed(bound);
@@ -137,10 +131,7 @@ std::vector<std::uint8_t> deflate_dataset_body(std::span<const std::uint8_t> dat
 	libdeflate_free_compressor(compressor);
 
 	if (actual == 0) {
-		diag::error_and_throw(
-		    fmt::format(
-		        "write_to_stream file={} reason=deflate compression failed",
-		        file_path));
+		throw_dataset_transform_error("dataset_deflate", "deflate compression failed");
 	}
 
 	compressed.resize(actual);

@@ -39,7 +39,8 @@ struct StreamWriter {
 		}
 		os.write(reinterpret_cast<const char*>(data), static_cast<std::streamsize>(size));
 		if (!os) {
-			diag::error_and_throw("write_to_stream reason=failed to write output bytes");
+			throw diag::DicomException(
+			    "stage=ostream_write reason=failed to write output bytes");
 		}
 		written += size;
 	}
@@ -47,7 +48,8 @@ struct StreamWriter {
 	void append_byte(std::uint8_t value) {
 		os.put(static_cast<char>(value));
 		if (!os) {
-			diag::error_and_throw("write_to_stream reason=failed to write output byte");
+			throw diag::DicomException(
+			    "stage=ostream_write reason=failed to write output byte");
 		}
 		++written;
 	}
@@ -62,24 +64,24 @@ struct StreamWriter {
 		}
 		const auto resume = os.tellp();
 		if (resume == std::streampos(-1)) {
-			diag::error_and_throw(
-			    "write_with_transfer_syntax reason=output stream is not seekable for backpatch");
+			throw diag::DicomException(
+			    "stage=ostream_backpatch reason=output stream is not seekable for backpatch");
 		}
 		os.seekp(static_cast<std::streamoff>(position), std::ios::beg);
 		if (!os) {
-			diag::error_and_throw(
-			    "write_with_transfer_syntax reason=failed to seek for backpatch");
+			throw diag::DicomException(
+			    "stage=ostream_backpatch reason=failed to seek for backpatch");
 		}
 		os.write(reinterpret_cast<const char*>(bytes.data()),
 		    static_cast<std::streamsize>(bytes.size()));
 		if (!os) {
-			diag::error_and_throw(
-			    "write_with_transfer_syntax reason=failed to backpatch output bytes");
+			throw diag::DicomException(
+			    "stage=ostream_backpatch reason=failed to backpatch output bytes");
 		}
 		os.seekp(resume, std::ios::beg);
 		if (!os) {
-			diag::error_and_throw(
-			    "write_with_transfer_syntax reason=failed to restore stream position after backpatch");
+			throw diag::DicomException(
+			    "stage=ostream_backpatch reason=failed to restore stream position after backpatch");
 		}
 	}
 
@@ -126,8 +128,9 @@ struct BufferWriter {
 			return;
 		}
 		if (position > bytes.size() || data.size() > bytes.size() - position) {
-			diag::error_and_throw(
-			    "write_with_transfer_syntax reason=buffer backpatch out of bounds");
+			throw diag::DicomException(fmt::format(
+			    "stage=buffer_backpatch reason=backpatch out of bounds position={} size={} buffer_size={}",
+			    position, data.size(), bytes.size()));
 		}
 		std::memcpy(bytes.data() + position, data.data(), data.size());
 	}
@@ -158,6 +161,78 @@ enum class WriteEncoderConfigSource : std::uint8_t {
 	use_encoder_context,
 };
 
+enum class CheckedU32Label : std::uint8_t {
+	element_length = 0,
+	pixel_fragment_length,
+	native_pixel_data_length,
+	file_meta_group_length,
+	basic_offset_table_length,
+	extended_offset_table_length,
+	extended_offset_table_lengths_length,
+};
+
+template <typename... Args>
+[[noreturn]] inline void throw_write_stage_error(std::string_view stage,
+    fmt::format_string<Args...> reason_format, Args&&... args) {
+	throw diag::DicomException(fmt::format(
+	    "stage={} reason={}", stage,
+	    fmt::format(reason_format, std::forward<Args>(args)...)));
+}
+
+[[nodiscard]] inline bool write_exception_needs_boundary_prefix(
+    std::string_view message) noexcept {
+	return message.starts_with("stage=");
+}
+
+[[nodiscard]] inline bool write_exception_has_boundary_prefix(
+    std::string_view operation, std::string_view message) noexcept {
+	return message.starts_with(operation);
+}
+
+[[noreturn]] inline void rethrow_write_exception_at_boundary_or_throw(
+    std::string_view operation, std::string_view file_path,
+    const diag::DicomException& ex) {
+	const std::string_view message = ex.what();
+	if (write_exception_needs_boundary_prefix(message)) {
+		diag::error_and_throw("{} file={} {}", operation, file_path, message);
+	}
+	if (write_exception_has_boundary_prefix(operation, message)) {
+		diag::error_and_throw("{}", message);
+	}
+	throw;
+}
+
+[[noreturn]] inline void rethrow_write_exception_at_boundary(
+    std::string_view operation, std::string_view file_path,
+    const diag::DicomException& ex) {
+	const std::string_view message = ex.what();
+	if (write_exception_needs_boundary_prefix(message)) {
+		diag::throw_exception("{} file={} {}", operation, file_path, message);
+	}
+	throw;
+}
+
+[[nodiscard]] inline std::string_view checked_u32_label_text(
+    CheckedU32Label label) noexcept {
+	switch (label) {
+	case CheckedU32Label::element_length:
+		return "element length";
+	case CheckedU32Label::pixel_fragment_length:
+		return "pixel fragment length";
+	case CheckedU32Label::native_pixel_data_length:
+		return "native PixelData length";
+	case CheckedU32Label::file_meta_group_length:
+		return "file meta group length";
+	case CheckedU32Label::basic_offset_table_length:
+		return "basic offset table length";
+	case CheckedU32Label::extended_offset_table_length:
+		return "ExtendedOffsetTable length";
+	case CheckedU32Label::extended_offset_table_lengths_length:
+		return "ExtendedOffsetTableLengths length";
+	}
+	return "length";
+}
+
 inline void write_u16(BufferWriter& writer, std::uint16_t value) {
 	writer.append_u16_le(value);
 }
@@ -171,9 +246,11 @@ inline void write_tag(BufferWriter& writer, Tag tag) {
 }
 
 // Guards size_t -> uint32_t conversions for DICOM VL fields.
-[[nodiscard]] inline std::uint32_t checked_u32(std::size_t value, std::string_view label) {
+[[nodiscard]] inline std::uint32_t checked_u32(
+    std::size_t value, CheckedU32Label label) {
 	if (value > std::numeric_limits<std::uint32_t>::max()) {
-		diag::error_and_throw("write_to_stream reason={} exceeds 32-bit range", label);
+		throw_write_stage_error("checked_u32",
+		    "{} exceeds 32-bit range", checked_u32_label_text(label));
 	}
 	return static_cast<std::uint32_t>(value);
 }
@@ -257,8 +334,8 @@ void write_element_header(Writer& writer, Tag tag, VR vr, std::uint32_t value_le
 
 	if (!undefined_length && vr.uses_explicit_16bit_vl()) {
 		if (value_length > std::numeric_limits<std::uint16_t>::max()) {
-			diag::error_and_throw(
-			    "write_to_stream reason=16-bit VL overflow for tag={} vr={} length={}",
+			throw_write_stage_error("write_element_header",
+			    "16-bit VL overflow for tag={} vr={} length={}",
 			    tag.to_string(), vr.str(), value_length);
 		}
 		endian::store_le<std::uint16_t>(

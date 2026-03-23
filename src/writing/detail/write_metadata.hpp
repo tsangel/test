@@ -116,8 +116,8 @@ void for_each_file_meta_element(const DataSet& dataset, Fn&& fn) {
 			break;
 		}
 		if (element.vr().is_sequence() || element.vr().is_pixel_sequence()) {
-			diag::error_and_throw(
-			    "write_to_stream reason=file meta element is SQ/PX tag={} vr={}",
+			throw_write_stage_error("write_file_meta_group",
+			    "file meta element is SQ/PX tag={} vr={}",
 			    element.tag().to_string(), element.vr().str());
 		}
 		fn(element);
@@ -133,7 +133,8 @@ void for_each_file_meta_element(const DataSet& dataset, Fn&& fn) {
 		write_non_sequence_element(
 		    measuring_writer, element.tag(), element.vr(), element.value_span(), true);
 	});
-	return checked_u32(measuring_writer.written, "file meta group length");
+	return checked_u32(
+	    measuring_writer.written, CheckedU32Label::file_meta_group_length);
 }
 
 inline void clear_existing_meta_group(DataSet& dataset) {

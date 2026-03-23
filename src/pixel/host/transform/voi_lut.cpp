@@ -13,7 +13,7 @@ using transform_detail::validate_voi_lut_transform_pair_or_throw;
 
 PixelLayout make_voi_lut_output_layout(PixelLayout src, const VoiLut& lut) {
 	// VOI LUT preserves monochrome geometry and chooses output width from LUT metadata.
-	const auto lut_info = validate_voi_lut_or_throw(lut, "make_voi_lut_output_layout");
+	const auto lut_info = validate_voi_lut_or_throw(lut);
 	return src.with_data_type(lut_info.destination_dtype, lut_info.bits_per_entry).packed();
 }
 
@@ -30,7 +30,7 @@ void apply_voi_lut_into_impl(ConstPixelSpan src, PixelSpan dst,
     bool clamp_indices) {
 	// Dispatch once on the source dtype so the hot loop only performs LUT index math and stores.
 	dispatch_integral_source_dtype<Dst>(
-	    src, dst, layout_info, "apply_voi_lut_into",
+	    src, dst, layout_info,
 	    [&](auto stored_value, std::size_t /*frame_index*/) -> Dst {
 		    if (clamp_indices) {
 			    return static_cast<Dst>(lookup_voi_lut_value<true>(
@@ -43,9 +43,8 @@ void apply_voi_lut_into_impl(ConstPixelSpan src, PixelSpan dst,
 
 void apply_voi_lut_into(ConstPixelSpan src, PixelSpan dst, const VoiLut& lut) {
 	// VOI LUT validation covers both table shape and source/destination layout rules.
-	const auto lut_info = validate_voi_lut_or_throw(lut, "apply_voi_lut_into");
-	const auto layout_info =
-	    validate_voi_lut_transform_pair_or_throw(src, dst, lut_info, "apply_voi_lut_into");
+	const auto lut_info = validate_voi_lut_or_throw(lut);
+	const auto layout_info = validate_voi_lut_transform_pair_or_throw(src, dst, lut_info);
 	const bool clamp_indices =
 	    !lut_covers_integer_stored_range(src.layout, lut.first_mapped, lut_info.entry_count);
 
@@ -57,8 +56,7 @@ void apply_voi_lut_into(ConstPixelSpan src, PixelSpan dst, const VoiLut& lut) {
 		apply_voi_lut_into_impl<std::uint16_t>(src, dst, layout_info, lut, clamp_indices);
 		return;
 	default:
-		throw_transform_argument_error(
-		    "apply_voi_lut_into", "VOI LUT destination dtype is not supported");
+		throw_transform_argument_error("VOI LUT destination dtype is not supported");
 	}
 }
 

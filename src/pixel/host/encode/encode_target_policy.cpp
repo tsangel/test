@@ -1,5 +1,7 @@
 #include "pixel/host/encode/encode_target_policy.hpp"
 
+#include "pixel/host/error/codec_error.hpp"
+#include "diagnostics.h"
 namespace dicom::pixel::detail {
 
 bool is_native_uncompressed_encode_profile(uint32_t codec_profile_code) noexcept {
@@ -21,6 +23,12 @@ bool is_htj2k_encode_profile(uint32_t codec_profile_code) noexcept {
 	    codec_profile_code == PIXEL_CODEC_PROFILE_HTJ2K_LOSSY;
 }
 
+void validate_encode_profile_source_constraints(uint32_t codec_profile_code,
+    int bits_allocated, int bits_stored) {
+	(void)codec_profile_code;
+	(void)bits_allocated;
+	(void)bits_stored;
+}
 pixel::Photometric compute_output_photometric_for_encode_profile(
     uint32_t codec_profile_code,
     bool use_multicomponent_transform,

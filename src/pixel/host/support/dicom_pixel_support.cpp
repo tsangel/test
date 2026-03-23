@@ -1,5 +1,6 @@
 #include "pixel/host/support/dicom_pixel_support.hpp"
 
+#include "pixel/host/error/codec_error.hpp"
 #include "diagnostics.h"
 
 #include <cstring>
@@ -10,6 +11,7 @@
 #include <vector>
 
 namespace diag = dicom::diag;
+namespace codec_detail = dicom::pixel::detail;
 
 namespace dicom::pixel::support_detail {
 using namespace dicom::literals;
@@ -512,31 +514,35 @@ namespace {
 
 [[nodiscard]] ComputedEncodeSourceLayout compute_encode_source_layout_impl(
     const pixel::PixelLayout& layout, std::span<const std::uint8_t> source_bytes,
-    std::string_view file_path,
     bool validate_source_bytes) {
+	constexpr std::string_view kStage = "compute_encode_source_layout";
+	const auto throw_invalid_argument =
+	    [kStage](std::string_view reason) -> void {
+		    codec_detail::throw_codec_stage_exception(
+		        codec_detail::CodecStatusCode::invalid_argument, kStage, "{}", reason);
+	    };
+	const auto throw_internal_error =
+	    [kStage](std::string_view reason) -> void {
+		    codec_detail::throw_codec_stage_exception(
+		        codec_detail::CodecStatusCode::internal_error, kStage, "{}", reason);
+	    };
+
 	const auto native_layout = native_source_layout_of(layout.data_type);
 	if (!native_layout) {
-		diag::error_and_throw(
-		    "DicomFile::set_pixel_data file={} reason=source layout dtype must be one of u8/s8/u16/s16/u32/s32 for current implementation",
-		    file_path);
+		throw_invalid_argument(
+		    "source layout dtype must be one of u8/s8/u16/s16/u32/s32 for current implementation");
 	}
 	const auto bytes_per_sample = bytes_per_sample_of(layout.data_type);
 	if (bytes_per_sample == 0) {
-		diag::error_and_throw(
-		    "DicomFile::set_pixel_data file={} reason=invalid source layout dtype",
-		    file_path);
+		throw_invalid_argument("invalid source layout dtype");
 	}
 
 	// Encode always expects a normalized non-empty layout with concrete geometry.
 	if (layout.empty()) {
-		diag::error_and_throw(
-		    "DicomFile::set_pixel_data file={} reason=source layout must be non-empty",
-		    file_path);
+		throw_invalid_argument("source layout must be non-empty");
 	}
 	if (layout.rows > 65535u || layout.cols > 65535u) {
-		diag::error_and_throw(
-		    "DicomFile::set_pixel_data file={} reason=rows/cols must be <= 65535",
-		    file_path);
+		throw_invalid_argument("rows/cols must be <= 65535");
 	}
 
 	const auto rows = static_cast<std::size_t>(layout.rows);
@@ -549,74 +555,60 @@ namespace {
 	constexpr std::size_t kSizeMax = std::numeric_limits<std::size_t>::max();
 
 	if (!planar_source && samples_per_pixel > kSizeMax / cols) {
-		diag::error_and_throw(
-		    "DicomFile::set_pixel_data file={} reason=row samples overflows size_t",
-		    file_path);
+		throw_internal_error("row samples overflows size_t");
 	}
 	const std::size_t row_samples = planar_source ? cols : cols * samples_per_pixel;
 	if (row_samples > kSizeMax / bytes_per_sample) {
-		diag::error_and_throw(
-		    "DicomFile::set_pixel_data file={} reason=row payload bytes overflows size_t",
-		    file_path);
+		throw_internal_error("row payload bytes overflows size_t");
 	}
 	const std::size_t row_payload_bytes = row_samples * bytes_per_sample;
 
 	// Preserve any explicit caller stride instead of silently repacking it here.
 	const std::size_t source_row_stride = layout.row_stride;
 	if (source_row_stride < row_payload_bytes) {
-		diag::error_and_throw(
-		    "DicomFile::set_pixel_data file={} reason=row_stride({}) is smaller than row payload({})",
-		    file_path, source_row_stride, row_payload_bytes);
+		codec_detail::throw_codec_stage_exception(
+		    codec_detail::CodecStatusCode::invalid_argument, kStage,
+		    "row_stride({}) is smaller than row payload({})",
+		    source_row_stride, row_payload_bytes);
 	}
 	if (source_row_stride > kSizeMax / rows) {
-		diag::error_and_throw(
-		    "DicomFile::set_pixel_data file={} reason=source plane stride overflows size_t",
-		    file_path);
+		throw_internal_error("source plane stride overflows size_t");
 	}
 	const std::size_t source_plane_stride = source_row_stride * rows;
 
 	std::size_t source_frame_size_bytes = source_plane_stride;
 	if (planar_source) {
 		if (samples_per_pixel > kSizeMax / source_plane_stride) {
-			diag::error_and_throw(
-			    "DicomFile::set_pixel_data file={} reason=source frame size bytes overflows size_t",
-			file_path);
+			throw_internal_error("source frame size bytes overflows size_t");
 		}
 		source_frame_size_bytes = source_plane_stride * samples_per_pixel;
 	}
 	const std::size_t source_frame_stride = layout.frame_stride;
 	if (source_frame_stride < source_frame_size_bytes) {
-		diag::error_and_throw(
-		    "DicomFile::set_pixel_data file={} reason=frame_stride({}) is smaller than frame size({})",
-		    file_path, source_frame_stride, source_frame_size_bytes);
+		codec_detail::throw_codec_stage_exception(
+		    codec_detail::CodecStatusCode::invalid_argument, kStage,
+		    "frame_stride({}) is smaller than frame size({})",
+		    source_frame_stride, source_frame_size_bytes);
 	}
 
 	if (row_payload_bytes > kSizeMax / rows) {
-		diag::error_and_throw(
-		    "DicomFile::set_pixel_data file={} reason=destination plane stride overflows size_t",
-		    file_path);
+		throw_internal_error("destination plane stride overflows size_t");
 	}
 	const std::size_t destination_plane_stride = row_payload_bytes * rows;
 	std::size_t destination_frame_payload = destination_plane_stride;
 	if (planar_source) {
 		if (samples_per_pixel > kSizeMax / destination_plane_stride) {
-			diag::error_and_throw(
-			    "DicomFile::set_pixel_data file={} reason=destination frame size bytes overflows size_t",
-			    file_path);
+			throw_internal_error("destination frame size bytes overflows size_t");
 		}
 		destination_frame_payload = destination_plane_stride * samples_per_pixel;
 	}
 	if (frames > kSizeMax / destination_frame_payload) {
-		diag::error_and_throw(
-		    "DicomFile::set_pixel_data file={} reason=destination total bytes overflows size_t",
-		    file_path);
+		throw_internal_error("destination total bytes overflows size_t");
 	}
 	const std::size_t destination_total_bytes = destination_frame_payload * frames;
 
 	if (frames > std::size_t{1} && (frames - 1) > kSizeMax / source_frame_stride) {
-		diag::error_and_throw(
-		    "DicomFile::set_pixel_data file={} reason=source last frame begin overflows size_t",
-		    file_path);
+		throw_internal_error("source last frame begin overflows size_t");
 	}
 	const std::size_t source_last_frame_begin = (frames - 1) * source_frame_stride;
 	const std::size_t source_last_plane_used =
@@ -626,15 +618,14 @@ namespace {
 	                                                     source_last_plane_used
 	                                               : source_last_plane_used;
 	if (source_last_frame_begin > kSizeMax - source_last_frame_used) {
-		diag::error_and_throw(
-		    "DicomFile::set_pixel_data file={} reason=minimum source byte requirement overflows size_t",
-		    file_path);
+		throw_internal_error("minimum source byte requirement overflows size_t");
 	}
 	const std::size_t source_required_bytes = source_last_frame_begin + source_last_frame_used;
 	if (validate_source_bytes && source_bytes.size() < source_required_bytes) {
-		diag::error_and_throw(
-		    "DicomFile::set_pixel_data file={} reason=source bytes({}) are shorter than required({})",
-		    file_path, source_bytes.size(), source_required_bytes);
+		codec_detail::throw_codec_stage_exception(
+		    codec_detail::CodecStatusCode::invalid_argument, kStage,
+		    "source bytes({}) are shorter than required({})",
+		    source_bytes.size(), source_required_bytes);
 	}
 
 	const int bits_allocated = native_layout->bits_allocated;
@@ -642,9 +633,10 @@ namespace {
 	    layout.bits_stored > 0 ? static_cast<int>(layout.bits_stored) : bits_allocated;
 	const int pixel_representation = native_layout->pixel_representation;
 	if (bits_stored <= 0 || bits_stored > bits_allocated) {
-		diag::error_and_throw(
-		    "DicomFile::set_pixel_data file={} reason=bits_stored({}) must be in [1, bits_allocated({})]",
-		    file_path, bits_stored, bits_allocated);
+		codec_detail::throw_codec_stage_exception(
+		    codec_detail::CodecStatusCode::invalid_argument, kStage,
+		    "bits_stored({}) must be in [1, bits_allocated({})]",
+		    bits_stored, bits_allocated);
 	}
 
 	return ComputedEncodeSourceLayout{
@@ -671,15 +663,15 @@ namespace {
 } // namespace
 
 ComputedEncodeSourceLayout compute_encode_source_layout_or_throw(
-    pixel::ConstPixelSpan source, std::string_view file_path) {
+    pixel::ConstPixelSpan source) {
 	return compute_encode_source_layout_impl(
-	    source.layout, source.bytes, file_path, true);
+	    source.layout, source.bytes, true);
 }
 
 ComputedEncodeSourceLayout compute_encode_source_layout_without_source_bytes_or_throw(
-    const pixel::PixelLayout& source_layout, std::string_view file_path) {
+    const pixel::PixelLayout& source_layout) {
 	return compute_encode_source_layout_impl(
-	    source_layout, {}, file_path, false);
+	    source_layout, {}, false);
 }
 
 bool source_aliases_native_pixel_data(
