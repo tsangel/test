@@ -18,14 +18,14 @@ namespace dicom::pixel::detail {
 }
 
 [[nodiscard]] inline PixelLayout compute_decode_output_layout_or_throw(
-    std::string_view file_path, const PixelLayout& source_layout,
+    const DicomFile& file, const PixelLayout& source_layout,
     const DecodeOptions& effective_opt) {
 	// Validate caller-controlled layout policy first so plan creation fails early
 	// before any backend-specific work is scheduled.
 	if (!is_valid_alignment(effective_opt.alignment)) {
 		diag::error_and_throw(
 		    "DicomFile::calc_decode_output_layout file={} reason=alignment must be 0/1 or power-of-two <= 4096",
-		    file_path);
+		    file.path());
 	}
 
 	constexpr int kMaxRowsOrColumns = 65535;
@@ -35,30 +35,30 @@ namespace dicom::pixel::detail {
 	if (source_layout.empty()) {
 		diag::error_and_throw(
 		    "DicomFile::calc_decode_output_layout file={} reason=invalid Rows/Columns/SamplesPerPixel",
-		    file_path);
+		    file.path());
 	}
 	if (source_layout.rows > static_cast<std::uint32_t>(kMaxRowsOrColumns) ||
 	    source_layout.cols > static_cast<std::uint32_t>(kMaxRowsOrColumns)) {
 		diag::error_and_throw(
 		    "DicomFile::calc_decode_output_layout file={} reason=Rows/Columns must be <= 65535",
-		    file_path);
+		    file.path());
 	}
 	if (source_layout.samples_per_pixel > static_cast<std::uint16_t>(kMaxSamplesPerPixel)) {
 		diag::error_and_throw(
 		    "DicomFile::calc_decode_output_layout file={} reason=SamplesPerPixel must be <= 4",
-		    file_path);
+		    file.path());
 	}
 
 	if (source_layout.frames == 0) {
 		diag::error_and_throw(
 		    "DicomFile::calc_decode_output_layout file={} reason=invalid NumberOfFrames",
-		    file_path);
+		    file.path());
 	}
 
 	if (bytes_per_sample_of(source_layout.data_type) == 0) {
 		diag::error_and_throw(
 		    "DicomFile::calc_decode_output_layout file={} reason=unsupported or unknown source layout dtype",
-		    file_path);
+		    file.path());
 	}
 
 	// Start from semantic pixel metadata, then normalize it into a packed/aligned
@@ -83,15 +83,15 @@ namespace dicom::pixel::detail {
 	} catch (const std::invalid_argument& e) {
 		diag::error_and_throw(
 		    "DicomFile::calc_decode_output_layout file={} reason={}",
-		    file_path, e.what());
+		    file.path(), e.what());
 	} catch (const std::overflow_error& e) {
 		diag::error_and_throw(
 		    "DicomFile::calc_decode_output_layout file={} reason={}",
-		    file_path, e.what());
+		    file.path(), e.what());
 	}
 	diag::error_and_throw(
 	    "DicomFile::calc_decode_output_layout file={} reason=unexpected layout computation failure",
-	    file_path);
+	    file.path());
 }
 
 } // namespace dicom::pixel::detail

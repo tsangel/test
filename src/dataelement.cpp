@@ -15,6 +15,7 @@
 #include <fmt/format.h>
 #include <limits>
 #include <optional>
+#include <source_location>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -30,10 +31,24 @@ inline std::string_view trim(std::string_view s) {
 	return s;
 }
 
-bool report_from_assignment_failure(
-    std::string_view function_name, const DataElement& element, std::string_view reason) {
+[[nodiscard]] std::string_view tidy_fn_name(
+    std::source_location location) noexcept {
+	auto name = std::string_view(location.function_name());
+	const auto open_paren = name.find('(');
+	if (open_paren != std::string_view::npos) {
+		name = name.substr(0, open_paren);
+	}
+	const auto last_space = name.rfind(' ');
+	if (last_space != std::string_view::npos) {
+		name.remove_prefix(last_space + 1);
+	}
+	return name;
+}
+
+bool report_from_assignment_failure(const DataElement& element, std::string_view reason,
+    std::source_location location = std::source_location::current()) {
 	diag::error("{} tag={} vr={} reason={}",
-	    function_name, element.tag().to_string(), element.vr().str(), reason);
+	    tidy_fn_name(location), element.tag().to_string(), element.vr().str(), reason);
 	return false;
 }
 
@@ -688,13 +703,11 @@ bool DataElement::from_int(int value) {
 		ok = assign_integer_string_from_value(*this, value);
 		break;
 	default:
-		return report_from_assignment_failure(
-		    "DataElement::from_int", *this, "unsupported VR for from_int");
+		return report_from_assignment_failure(*this, "unsupported VR for from_int");
 	}
 
 	if (!ok) {
-		return report_from_assignment_failure(
-		    "DataElement::from_int", *this, "value out of range for VR");
+		return report_from_assignment_failure(*this, "value out of range for VR");
 	}
 	return true;
 }
@@ -725,13 +738,11 @@ bool DataElement::from_int_vector(std::span<const int> values) {
 		ok = assign_integer_string_from_values(*this, values);
 		break;
 	default:
-		return report_from_assignment_failure(
-		    "DataElement::from_int_vector", *this, "unsupported VR for from_int_vector");
+		return report_from_assignment_failure(*this, "unsupported VR for from_int_vector");
 	}
 
 	if (!ok) {
-		return report_from_assignment_failure(
-		    "DataElement::from_int_vector", *this, "one or more values are out of range for VR");
+		return report_from_assignment_failure(*this, "one or more values are out of range for VR");
 	}
 	return true;
 }
@@ -762,13 +773,11 @@ bool DataElement::from_long(long value) {
 		ok = assign_integer_string_from_value(*this, value);
 		break;
 	default:
-		return report_from_assignment_failure(
-		    "DataElement::from_long", *this, "unsupported VR for from_long");
+		return report_from_assignment_failure(*this, "unsupported VR for from_long");
 	}
 
 	if (!ok) {
-		return report_from_assignment_failure(
-		    "DataElement::from_long", *this, "value out of range for VR");
+		return report_from_assignment_failure(*this, "value out of range for VR");
 	}
 	return true;
 }
@@ -799,13 +808,11 @@ bool DataElement::from_long_vector(std::span<const long> values) {
 		ok = assign_integer_string_from_values(*this, values);
 		break;
 	default:
-		return report_from_assignment_failure(
-		    "DataElement::from_long_vector", *this, "unsupported VR for from_long_vector");
+		return report_from_assignment_failure(*this, "unsupported VR for from_long_vector");
 	}
 
 	if (!ok) {
-		return report_from_assignment_failure(
-		    "DataElement::from_long_vector", *this, "one or more values are out of range for VR");
+		return report_from_assignment_failure(*this, "one or more values are out of range for VR");
 	}
 	return true;
 }
@@ -836,13 +843,11 @@ bool DataElement::from_longlong(long long value) {
 		ok = assign_integer_string_from_value(*this, value);
 		break;
 	default:
-		return report_from_assignment_failure(
-		    "DataElement::from_longlong", *this, "unsupported VR for from_longlong");
+		return report_from_assignment_failure(*this, "unsupported VR for from_longlong");
 	}
 
 	if (!ok) {
-		return report_from_assignment_failure(
-		    "DataElement::from_longlong", *this, "value out of range for VR");
+		return report_from_assignment_failure(*this, "value out of range for VR");
 	}
 	return true;
 }
@@ -873,13 +878,11 @@ bool DataElement::from_longlong_vector(std::span<const long long> values) {
 		ok = assign_integer_string_from_values(*this, values);
 		break;
 	default:
-		return report_from_assignment_failure(
-		    "DataElement::from_longlong_vector", *this, "unsupported VR for from_longlong_vector");
+		return report_from_assignment_failure(*this, "unsupported VR for from_longlong_vector");
 	}
 
 	if (!ok) {
-		return report_from_assignment_failure(
-		    "DataElement::from_longlong_vector", *this, "one or more values are out of range for VR");
+		return report_from_assignment_failure(*this, "one or more values are out of range for VR");
 	}
 	return true;
 }
@@ -897,13 +900,11 @@ bool DataElement::from_double(double value) {
 		ok = assign_decimal_string_from_double(*this, value);
 		break;
 	default:
-		return report_from_assignment_failure(
-		    "DataElement::from_double", *this, "unsupported VR for from_double");
+		return report_from_assignment_failure(*this, "unsupported VR for from_double");
 	}
 
 	if (!ok) {
-		return report_from_assignment_failure(
-		    "DataElement::from_double", *this, "value out of range for VR");
+		return report_from_assignment_failure(*this, "value out of range for VR");
 	}
 	return true;
 }
@@ -921,22 +922,18 @@ bool DataElement::from_double_vector(std::span<const double> values) {
 		ok = assign_decimal_string_vector_from_double(*this, values);
 		break;
 	default:
-		return report_from_assignment_failure(
-		    "DataElement::from_double_vector", *this, "unsupported VR for from_double_vector");
+		return report_from_assignment_failure(*this, "unsupported VR for from_double_vector");
 	}
 
 	if (!ok) {
-		return report_from_assignment_failure(
-		    "DataElement::from_double_vector", *this,
-		    "one or more values are out of range for VR");
+		return report_from_assignment_failure(*this, "one or more values are out of range for VR");
 	}
 	return true;
 }
 
 bool DataElement::from_tag(Tag value) {
 	if (vr_ != dicom::VR::AT) {
-		return report_from_assignment_failure(
-		    "DataElement::from_tag", *this, "AT VR required for from_tag");
+		return report_from_assignment_failure(*this, "AT VR required for from_tag");
 	}
 
 	reserve_value_bytes(4);
@@ -949,16 +946,14 @@ bool DataElement::from_tag(Tag value) {
 
 bool DataElement::from_tag_vector(std::span<const Tag> values) {
 	if (vr_ != dicom::VR::AT) {
-		return report_from_assignment_failure(
-		    "DataElement::from_tag_vector", *this, "AT VR required for from_tag_vector");
+		return report_from_assignment_failure(*this, "AT VR required for from_tag_vector");
 	}
 	if (values.empty()) {
 		reserve_value_bytes(0);
 		return true;
 	}
 	if (values.size() > std::numeric_limits<std::size_t>::max() / 4) {
-		return report_from_assignment_failure(
-		    "DataElement::from_tag_vector", *this, "too many tag values for AT element");
+		return report_from_assignment_failure(*this, "too many tag values for AT element");
 	}
 
 	const std::size_t total_bytes = values.size() * 4;
@@ -979,8 +974,7 @@ bool DataElement::from_string_view(std::string_view value) {
 		return from_uid_string(value);
 	}
 	if (!vr_.is_string()) {
-		return report_from_assignment_failure(
-		    "DataElement::from_string_view", *this, "unsupported VR for from_string_view");
+		return report_from_assignment_failure(*this, "unsupported VR for from_string_view");
 	}
 
 	const auto* ptr = reinterpret_cast<const std::uint8_t*>(value.data());
@@ -1005,9 +999,7 @@ bool DataElement::from_string_views(std::span<const std::string_view> values) {
 		for (std::size_t i = 0; i < values.size(); ++i) {
 			std::string normalized = uid::normalize_uid_text(values[i]);
 			if (!uid::is_valid_uid_text_strict(normalized)) {
-				return report_from_assignment_failure(
-				    "DataElement::from_string_views", *this,
-				    "invalid UID text in one or more values");
+				return report_from_assignment_failure(*this, "invalid UID text in one or more values");
 			}
 			if (i != 0) {
 				text.push_back('\\');
@@ -1022,8 +1014,7 @@ bool DataElement::from_string_views(std::span<const std::string_view> values) {
 		return true;
 	}
 	if (!vr_.is_string()) {
-		return report_from_assignment_failure(
-		    "DataElement::from_string_views", *this, "unsupported VR for from_string_views");
+		return report_from_assignment_failure(*this, "unsupported VR for from_string_views");
 	}
 
 	switch (static_cast<std::uint16_t>(vr_)) {
@@ -1032,9 +1023,7 @@ bool DataElement::from_string_views(std::span<const std::string_view> values) {
 	case VR::UT_val:
 	case VR::UR_val:
 		if (values.size() != 1) {
-			return report_from_assignment_failure(
-			    "DataElement::from_string_views", *this,
-			    "VR requires a single value for from_string_views");
+			return report_from_assignment_failure(*this, "VR requires a single value for from_string_views");
 		}
 		return from_string_view(values.front());
 	default:
@@ -1076,20 +1065,17 @@ bool DataElement::from_utf8_views(
 		return from_string_views(values);
 	}
 	if (!vr_.is_string()) {
-		return report_from_assignment_failure(
-		    "DataElement::from_utf8_views", *this, "unsupported VR for from_utf8_views");
+		return report_from_assignment_failure(*this, "unsupported VR for from_utf8_views");
 	}
 	for (const auto value : values) {
 		if (!charset::validate_utf8(value)) {
-			return report_from_assignment_failure(
-			    "DataElement::from_utf8_views", *this, "input is not valid UTF-8");
+			return report_from_assignment_failure(*this, "input is not valid UTF-8");
 		}
 	}
 	if (!vr_.uses_specific_character_set()) {
 		for (const auto value : values) {
 			if (!charset::validate_ascii(value)) {
-				return report_from_assignment_failure(
-				    "DataElement::from_utf8_views", *this, "VR requires ASCII-compatible text");
+				return report_from_assignment_failure(*this, "VR requires ASCII-compatible text");
 			}
 		}
 		if (out_replaced) {
@@ -1102,14 +1088,12 @@ bool DataElement::from_utf8_views(
 	        *this, values, errors, &error, out_replaced)) {
 		return true;
 	}
-	return report_from_assignment_failure(
-	    "DataElement::from_utf8_views", *this, error.empty() ? "failed to encode UTF-8 text" : error);
+	return report_from_assignment_failure(*this, error.empty() ? "failed to encode UTF-8 text" : error);
 }
 
 bool DataElement::from_uid(uid::WellKnown uid) {
 	if (!uid.valid()) {
-		return report_from_assignment_failure(
-		    "DataElement::from_uid", *this, "invalid uid::WellKnown value");
+		return report_from_assignment_failure(*this, "invalid uid::WellKnown value");
 	}
 	return from_uid_string(uid.value());
 }
@@ -1121,34 +1105,27 @@ bool DataElement::from_uid(const uid::Generated& uid) {
 bool DataElement::from_uid_string(std::string_view uid_value) {
 	if (!assign_uid_string(*this, uid_value)) {
 		if (vr_ != dicom::VR::UI) {
-			return report_from_assignment_failure(
-			    "DataElement::from_uid_string", *this, "UI VR required");
+			return report_from_assignment_failure(*this, "UI VR required");
 		}
-		return report_from_assignment_failure(
-		    "DataElement::from_uid_string", *this, "invalid UID text");
+		return report_from_assignment_failure(*this, "invalid UID text");
 	}
 	return true;
 }
 
 bool DataElement::from_transfer_syntax_uid(uid::WellKnown uid) {
 	if (!uid.valid() || uid.uid_type() != UidType::TransferSyntax) {
-		return report_from_assignment_failure(
-		    "DataElement::from_transfer_syntax_uid", *this,
-		    "uid must be a valid Transfer Syntax UID");
+		return report_from_assignment_failure(*this, "uid must be a valid Transfer Syntax UID");
 	}
 	return from_uid(uid);
 }
 
 bool DataElement::from_sop_class_uid(uid::WellKnown uid) {
 	if (!uid.valid()) {
-		return report_from_assignment_failure(
-		    "DataElement::from_sop_class_uid", *this, "uid must be valid");
+		return report_from_assignment_failure(*this, "uid must be valid");
 	}
 	const auto type = uid.uid_type();
 	if (type != UidType::SopClass && type != UidType::MetaSopClass) {
-		return report_from_assignment_failure(
-		    "DataElement::from_sop_class_uid", *this,
-		    "uid must be SOP Class or Meta SOP Class");
+		return report_from_assignment_failure(*this, "uid must be SOP Class or Meta SOP Class");
 	}
 	return from_uid(uid);
 }
@@ -1918,8 +1895,7 @@ std::optional<std::vector<PersonName>> DataElement::to_person_names(
 bool DataElement::from_person_name(
     const PersonName& value, CharsetEncodeErrorPolicy errors, bool* out_replaced) {
 	if (vr_ != dicom::VR::PN) {
-		return report_from_assignment_failure(
-		    "DataElement::from_person_name", *this, "PN VR required for from_person_name");
+		return report_from_assignment_failure(*this, "PN VR required for from_person_name");
 	}
 	return from_utf8_view(value.to_dicom_string(), errors, out_replaced);
 }
@@ -1928,8 +1904,7 @@ bool DataElement::from_person_names(
     std::span<const PersonName> values, CharsetEncodeErrorPolicy errors,
     bool* out_replaced) {
 	if (vr_ != dicom::VR::PN) {
-		return report_from_assignment_failure(
-		    "DataElement::from_person_names", *this, "PN VR required for from_person_names");
+		return report_from_assignment_failure(*this, "PN VR required for from_person_names");
 	}
 	std::vector<std::string> encoded_values;
 	std::vector<std::string_view> encoded_views;

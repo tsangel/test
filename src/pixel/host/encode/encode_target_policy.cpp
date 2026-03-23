@@ -1,5 +1,6 @@
 #include "pixel/host/encode/encode_target_policy.hpp"
 
+#include "pixel/host/error/codec_error.hpp"
 #include "diagnostics.h"
 
 namespace dicom::pixel::detail {
@@ -62,18 +63,18 @@ bool is_htj2k_encode_profile(uint32_t codec_profile_code) noexcept {
 }
 
 void validate_encode_profile_source_constraints(uint32_t codec_profile_code,
-    int bits_allocated, int bits_stored, std::string_view file_path) {
+    int bits_allocated, int bits_stored) {
 	if (is_16bit_limited_encode_profile(codec_profile_code) &&
 	    bits_allocated > 16) {
-		diag::error_and_throw(
-		    "DicomFile::set_pixel_data file={} reason=selected encoder currently supports bits_allocated <= 16",
-		    file_path);
+		throw_codec_stage_exception(CodecStatusCode::invalid_argument,
+		    "validate_target",
+		    "selected encoder currently supports bits_allocated <= 16");
 	}
 	if (codec_profile_code == PIXEL_CODEC_PROFILE_JPEG_LOSSY &&
 	    bits_stored > 12) {
-		diag::error_and_throw(
-		    "DicomFile::set_pixel_data file={} reason=lossy JPEG transfer syntax requires bits_stored <= 12",
-		    file_path);
+		throw_codec_stage_exception(CodecStatusCode::invalid_argument,
+		    "validate_target",
+		    "lossy JPEG transfer syntax requires bits_stored <= 12");
 	}
 }
 

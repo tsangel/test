@@ -265,8 +265,7 @@ PixelBuffer apply_rescale(ConstPixelSpan src, float slope, float intercept) {
 
 void apply_rescale_into(ConstPixelSpan src, PixelSpan dst, float slope, float intercept) {
 	// Validate source/destination layout contracts before touching caller memory.
-	const auto layout_info =
-	    validate_monochrome_transform_pair_or_throw(src, dst, "apply_rescale_into");
+	const auto layout_info = validate_monochrome_transform_pair_or_throw(src, dst);
 	switch (dst.layout.data_type) {
 	case DataType::f32:
 		if (try_apply_rescale_into_autovec<float>(src, dst, layout_info, slope, intercept)) {
@@ -284,11 +283,11 @@ void apply_rescale_into(ConstPixelSpan src, PixelSpan dst, float slope, float in
 
 	// Dispatch once on destination dtype so the inner loops can stay strongly typed.
 	dispatch_float_destination_dtype(
-	    src, dst, layout_info, "apply_rescale_into",
+	    src, dst, layout_info,
 	    [&]<typename Dst>(ConstPixelSpan src_view, PixelSpan dst_view,
 	        const MonochromeTransformLayoutInfo& info) {
 		    dispatch_numeric_source_dtype<Dst>(
-		        src_view, dst_view, info, "apply_rescale_into",
+		        src_view, dst_view, info,
 		        [=](auto stored_value, std::size_t /*frame_index*/) -> double {
 			        return static_cast<double>(stored_value) * static_cast<double>(slope) +
 			            static_cast<double>(intercept);
@@ -300,13 +299,10 @@ void apply_rescale_frames_into(ConstPixelSpan src, PixelSpan dst,
     std::span<const float> slopes, std::span<const float> intercepts) {
 	// Frame-wise rescale still keeps layout identical, but requires one coefficient pair
 	// for each logical frame.
-	const auto layout_info =
-	    validate_monochrome_transform_pair_or_throw(
-	        src, dst, "apply_rescale_frames_into");
+	const auto layout_info = validate_monochrome_transform_pair_or_throw(src, dst);
 	const auto frame_count = static_cast<std::size_t>(src.layout.frames);
 	if (slopes.size() != frame_count || intercepts.size() != frame_count) {
 		throw_transform_argument_error(
-		    "apply_rescale_frames_into",
 		    "slopes and intercepts must both match the source frame count");
 	}
 	switch (dst.layout.data_type) {
@@ -327,11 +323,11 @@ void apply_rescale_frames_into(ConstPixelSpan src, PixelSpan dst,
 	}
 
 	dispatch_float_destination_dtype(
-	    src, dst, layout_info, "apply_rescale_frames_into",
+	    src, dst, layout_info,
 	    [&]<typename Dst>(ConstPixelSpan src_view, PixelSpan dst_view,
 	        const MonochromeTransformLayoutInfo& info) {
 		    dispatch_numeric_source_dtype<Dst>(
-		        src_view, dst_view, info, "apply_rescale_frames_into",
+		        src_view, dst_view, info,
 		        [&](auto stored_value, std::size_t frame_index) -> double {
 			        return static_cast<double>(stored_value) *
 			                   static_cast<double>(slopes[frame_index]) +

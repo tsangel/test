@@ -51,6 +51,20 @@ void update_root_elements_reserve_hint(std::size_t parsed_elements) noexcept {
 	}
 }
 
+[[nodiscard]] std::string_view tidy_fn_name(
+    std::source_location location) noexcept {
+	auto name = std::string_view(location.function_name());
+	const auto open_paren = name.find('(');
+	if (open_paren != std::string_view::npos) {
+		name = name.substr(0, open_paren);
+	}
+	const auto last_space = name.rfind(' ');
+	if (last_space != std::string_view::npos) {
+		name.remove_prefix(last_space + 1);
+	}
+	return name;
+}
+
 template <typename IndexIter>
 IndexIter lower_bound_element_index(
     IndexIter begin, IndexIter end, std::uint32_t tag_value) {
@@ -69,12 +83,14 @@ ElementIter lower_bound_elements(
 		});
 }
 
-VR resolve_vr_or_throw(DataSet* dataset, Tag tag, VR vr, const char* opname) {
+VR resolve_vr_or_throw(DataSet* dataset, Tag tag, VR vr,
+    std::source_location location = std::source_location::current()) {
 	const auto vr_value = lookup::tag_to_vr(tag.value());
 	if (vr_value == 0) {
 		diag::error_and_throw(
 		    "{} file={} tag={} reason=VR required for unknown tag",
-		    opname, dataset->root_dataset()->path(), tag.to_string());
+		    tidy_fn_name(location), dataset->root_dataset()->path(),
+		    tag.to_string());
 	}
 	return VR(vr_value);
 }
@@ -196,17 +212,21 @@ std::optional<Tag> parse_private_creator_tag(DataSetPtr* dataset, std::string_vi
 }
 
 inline std::size_t parse_tag_path_index_or_throw(
-    std::string_view token, const char* api_name) {
+    std::string_view token, std::source_location location) {
 	token = trim(token);
 	if (token.empty()) {
-		diag::error_and_throw("{} reason=malformed sequence index in tag path", api_name);
+		diag::error_and_throw(
+		    "{} reason=malformed sequence index in tag path",
+		    tidy_fn_name(location));
 	}
 	std::size_t value = 0;
 	const auto* begin = token.data();
 	const auto* end = token.data() + token.size();
 	const auto result = std::from_chars(begin, end, value, 10);
 	if (result.ec != std::errc() || result.ptr != end) {
-		diag::error_and_throw("{} reason=malformed sequence index in tag path", api_name);
+		diag::error_and_throw(
+		    "{} reason=malformed sequence index in tag path",
+		    tidy_fn_name(location));
 	}
 	return value;
 }
@@ -218,13 +238,15 @@ struct TagPathStep {
 };
 
 inline bool next_tag_path_step(
-    std::string_view& remaining, TagPathStep& step, const char* api_name, bool empty_is_missing) {
+    std::string_view& remaining, TagPathStep& step, std::source_location location,
+    bool empty_is_missing) {
 	remaining = trim(remaining);
 	if (remaining.empty()) {
 		if (empty_is_missing) {
 			return false;
 		}
-		diag::error_and_throw("{} reason=empty tag path", api_name);
+		diag::error_and_throw(
+		    "{} reason=empty tag path", tidy_fn_name(location));
 	}
 
 	const auto dot_pos = remaining.find('.');
@@ -261,7 +283,7 @@ using tag_path_element_ref_t =
 
 template <typename DataSetPtr>
 tag_path_element_ref_t<DataSetPtr> get_dataelement_by_path_impl(
-    DataSetPtr* dataset, std::string_view tag_path, const char* api_name) {
+    DataSetPtr* dataset, std::string_view tag_path, std::source_location location) {
 	DataSetPtr* current = dataset;
 	std::string_view remaining = trim(tag_path);
 	if (remaining.empty()) {
@@ -275,7 +297,7 @@ tag_path_element_ref_t<DataSetPtr> get_dataelement_by_path_impl(
 		return current->get_dataelement(*tag);
 	}
 	TagPathStep step;
-	while (next_tag_path_step(remaining, step, api_name, true)) {
+	while (next_tag_path_step(remaining, step, location, true)) {
 		const auto tag = locate_tag_path_token(current, step.tag_token);
 		if (!tag) {
 			return *NullElement();
@@ -288,7 +310,7 @@ tag_path_element_ref_t<DataSetPtr> get_dataelement_by_path_impl(
 		if (!element.vr().is_sequence()) {
 			diag::error_and_throw(
 			    "{} element={} reason=intermediate path element is not a sequence",
-			    api_name, element.tag().to_string());
+			    tidy_fn_name(location), element.tag().to_string());
 		}
 
 		auto* seq = element.as_sequence();
@@ -297,7 +319,7 @@ tag_path_element_ref_t<DataSetPtr> get_dataelement_by_path_impl(
 		}
 
 		const std::size_t index =
-		    parse_tag_path_index_or_throw(step.child_index_token, api_name);
+		    parse_tag_path_index_or_throw(step.child_index_token, location);
 		current = seq->get_dataset(index);
 		if (!current) {
 			return *NullElement();
@@ -308,7 +330,7 @@ tag_path_element_ref_t<DataSetPtr> get_dataelement_by_path_impl(
 
 template <typename DataSetPtr>
 Tag parse_tag_path_token_or_throw(
-    DataSetPtr* dataset, std::string_view token, const char* api_name) {
+    DataSetPtr* dataset, std::string_view token, std::source_location location) {
 	token = strip_parens(trim(token));
 	try {
 		return Tag(token);
@@ -319,7 +341,8 @@ Tag parse_tag_path_token_or_throw(
 		}
 		diag::error_and_throw(
 		    "{} file={} token={} reason=unable to resolve tag-path token",
-		    api_name, dataset->root_dataset()->path(), std::string(token));
+		    tidy_fn_name(location), dataset->root_dataset()->path(),
+		    std::string(token));
 	}
 }
 DataSet::DataSet() : root_dataset_(this) {
@@ -563,11 +586,13 @@ bool DataSet::should_append_to_elements(std::uint32_t tag_value) const noexcept 
 	return element_index_.empty() || element_index_.back().tag.value() < tag_value;
 }
 
-[[noreturn]] void DataSet::throw_beyond_last_loaded_tag(Tag tag, const char* api_name) const {
+[[noreturn]] void DataSet::throw_beyond_last_loaded_tag(
+    Tag tag, std::source_location location) const {
 	diag::error_and_throw(
 	    "{} file={} tag={} last_loaded={} reason=tag is beyond the loaded frontier; "
 	    "call ensure_loaded(tag) or fully load the dataset before mutating this tag",
-	    api_name, path(), tag.to_string(), last_tag_loaded_.to_string());
+	    tidy_fn_name(location), path(), tag.to_string(),
+	    last_tag_loaded_.to_string());
 }
 
 DataElement* DataSet::find_dataelement_in_elements(std::uint32_t tag_value) {
@@ -700,26 +725,27 @@ DataElement& DataSet::append_parsed_dataelement_nocheck(
 }
 
 DataSet::TagPathParent DataSet::ensure_tag_path_parent(
-    std::string_view tag_path, const char* api_name) {
+    std::string_view tag_path, std::source_location location) {
 	DataSet* current = this;
 	std::string_view remaining = trim(tag_path);
 	if (remaining.empty()) {
-		diag::error_and_throw("{} reason=empty tag path", api_name);
+		diag::error_and_throw(
+		    "{} reason=empty tag path", tidy_fn_name(location));
 	}
 	if (remaining.find('.') == std::string_view::npos) {
-		return {current, parse_tag_path_token_or_throw(current, remaining, api_name)};
+		return {current, parse_tag_path_token_or_throw(current, remaining, location)};
 	}
 
 	TagPathStep step;
-	while (next_tag_path_step(remaining, step, api_name, false)) {
-		const Tag tag = parse_tag_path_token_or_throw(current, step.tag_token, api_name);
+	while (next_tag_path_step(remaining, step, location, false)) {
+		const Tag tag = parse_tag_path_token_or_throw(current, step.tag_token, location);
 		if (!step.has_child) {
 			return {current, tag};
 		}
 
-		Sequence& seq = current->ensure_sequence_element(tag, api_name);
+		Sequence& seq = *current->ensure_dataelement(tag, VR::SQ).as_sequence();
 		const std::size_t index =
-		    parse_tag_path_index_or_throw(step.child_index_token, api_name);
+		    parse_tag_path_index_or_throw(step.child_index_token, location);
 		if (auto* next = seq.get_dataset(index)) {
 			current = next;
 			continue;
@@ -727,46 +753,24 @@ DataSet::TagPathParent DataSet::ensure_tag_path_parent(
 		if (index != static_cast<std::size_t>(seq.size())) {
 			diag::error_and_throw(
 			    "{} element={} index={} reason=sequence item index must be an existing item or the next append slot",
-			    api_name, tag.to_string(), index);
+			    tidy_fn_name(location), tag.to_string(), index);
 		}
 		current = seq.add_dataset();
 	}
 
-	diag::error_and_throw("{} reason=empty tag path", api_name);
-}
-
-Sequence& DataSet::ensure_sequence_element(Tag tag, const char* api_name) {
-	DataElement& existing = get_dataelement(tag);
-	DataElement* sequence_element = nullptr;
-	if (existing.is_missing()) {
-		sequence_element = &ensure_dataelement(tag, VR::SQ);
-	} else {
-		if (!existing.vr().is_sequence()) {
-			diag::error_and_throw(
-			    "{} element={} reason=intermediate path element is not a sequence",
-			    api_name, existing.tag().to_string());
-		}
-		sequence_element = &existing;
-	}
-
-	auto* seq = sequence_element->as_sequence();
-	if (!seq) {
-		diag::error_and_throw(
-		    "{} element={} reason=sequence storage is unavailable",
-		    api_name, sequence_element->tag().to_string());
-	}
-	return *seq;
+	diag::error_and_throw(
+	    "{} reason=empty tag path", tidy_fn_name(location));
 }
 
 DataElement& DataSet::add_dataelement(Tag tag, VR vr) {
 	if (is_beyond_last_loaded_tag(tag)) [[unlikely]] {
-		throw_beyond_last_loaded_tag(tag, "DataSet::add_dataelement");
+		throw_beyond_last_loaded_tag(tag);
 	}
 	const auto tag_value = tag.value();
 	// Fast append path for in-order growth: create a fresh zero-length element at the tail.
 	if (should_append_to_elements(tag_value)) {
 		if (vr == VR::None) {
-			vr = resolve_vr_or_throw(this, tag, vr, "DataSet::add_dataelement");
+			vr = resolve_vr_or_throw(this, tag, vr);
 		}
 		elements_.emplace_back();
 		auto* element = &elements_.back();
@@ -788,7 +792,7 @@ DataElement& DataSet::add_dataelement(Tag tag, VR vr) {
 		} else {
 			// Tombstone revive path: resolve the requested/default VR, then reactivate in place.
 			if (vr == VR::None) {
-				vr = resolve_vr_or_throw(this, tag, vr, "DataSet::add_dataelement");
+				vr = resolve_vr_or_throw(this, tag, vr);
 			}
 			element->reset_without_release(tag, vr, 0, 0, this, false);
 			++active_element_count_;
@@ -814,7 +818,7 @@ DataElement& DataSet::add_dataelement(Tag tag, VR vr) {
 
 	// Missing out-of-order tag: materialize a new map-backed zero-length element.
 	if (vr == VR::None) {
-		vr = resolve_vr_or_throw(this, tag, vr, "DataSet::add_dataelement");
+		vr = resolve_vr_or_throw(this, tag, vr);
 	}
 	auto insert_it = element_map_.try_emplace(map_it, tag_value);
 	auto& element = insert_it->second;
@@ -827,7 +831,7 @@ DataElement& DataSet::add_dataelement(Tag tag, VR vr) {
 }
 
 DataElement& DataSet::add_dataelement(std::string_view tag_path, VR vr) {
-	auto resolved = ensure_tag_path_parent(tag_path, "DataSet::add_dataelement");
+	auto resolved = ensure_tag_path_parent(tag_path);
 	return resolved.parent->add_dataelement(resolved.leaf_tag, vr);
 }
 
@@ -863,13 +867,13 @@ const DataElement& DataSet::get_dataelement(Tag tag) const {
 
 DataElement& DataSet::ensure_dataelement(Tag tag, VR vr) {
 	if (is_beyond_last_loaded_tag(tag)) [[unlikely]] {
-		throw_beyond_last_loaded_tag(tag, "DataSet::ensure_dataelement");
+		throw_beyond_last_loaded_tag(tag);
 	}
 	const auto tag_value = tag.value();
 	// Fast append path for in-order growth: create a fresh zero-length element at the tail.
 	if (should_append_to_elements(tag_value)) {
 		if (vr == VR::None) {
-			vr = resolve_vr_or_throw(this, tag, vr, "DataSet::ensure_dataelement");
+			vr = resolve_vr_or_throw(this, tag, vr);
 		}
 		elements_.emplace_back();
 		auto* element = &elements_.back();
@@ -896,7 +900,7 @@ DataElement& DataSet::ensure_dataelement(Tag tag, VR vr) {
 		}
 		// Tombstone revive path: resolve the requested/default VR, then reactivate in place.
 		if (vr == VR::None) {
-			vr = resolve_vr_or_throw(this, tag, vr, "DataSet::ensure_dataelement");
+			vr = resolve_vr_or_throw(this, tag, vr);
 		}
 		element->reset_without_release(tag, vr, 0, 0, this, false);
 		++active_element_count_;
@@ -922,7 +926,7 @@ DataElement& DataSet::ensure_dataelement(Tag tag, VR vr) {
 
 	// Missing out-of-order tag: materialize a new map-backed zero-length element.
 	if (vr == VR::None) {
-		vr = resolve_vr_or_throw(this, tag, vr, "DataSet::ensure_dataelement");
+		vr = resolve_vr_or_throw(this, tag, vr);
 	}
 	auto insert_it = element_map_.try_emplace(map_it, tag_value);
 	auto& inserted = insert_it->second;
@@ -935,16 +939,16 @@ DataElement& DataSet::ensure_dataelement(Tag tag, VR vr) {
 }
 
 DataElement& DataSet::ensure_dataelement(std::string_view tag_path, VR vr) {
-	auto resolved = ensure_tag_path_parent(tag_path, "DataSet::ensure_dataelement");
+	auto resolved = ensure_tag_path_parent(tag_path);
 	return resolved.parent->ensure_dataelement(resolved.leaf_tag, vr);
 }
 
 DataElement& DataSet::get_dataelement(std::string_view tag_path) {
-	return get_dataelement_by_path_impl(this, tag_path, "DataSet::get_dataelement");
+	return get_dataelement_by_path_impl(this, tag_path, std::source_location::current());
 }
 
 const DataElement& DataSet::get_dataelement(std::string_view tag_path) const {
-	return get_dataelement_by_path_impl(this, tag_path, "DataSet::get_dataelement");
+	return get_dataelement_by_path_impl(this, tag_path, std::source_location::current());
 }
 
 DataElement& DataSet::operator[](Tag tag) {
@@ -1048,11 +1052,17 @@ void DataSet::read_attached_stream(const ReadOptions& options) {
 		}
 
 		std::vector<std::uint8_t> normalized_image;
-		if (transfer_syntax_uid() == "DeflatedExplicitVRLittleEndian"_uid) {
-			normalized_image = inflate_deflated_dataset(full_span, dataset_start_offset, path());
-		} else {
-			normalized_image = normalize_big_endian_dataset(
-			    full_span, dataset_start_offset, path());
+		try {
+			if (transfer_syntax_uid() == "DeflatedExplicitVRLittleEndian"_uid) {
+				normalized_image =
+				    inflate_deflated_dataset(full_span, dataset_start_offset);
+			} else {
+				normalized_image =
+				    normalize_big_endian_dataset(full_span, dataset_start_offset);
+			}
+		} catch (const diag::DicomException& ex) {
+			diag::error_and_throw(
+			    "DataSet::read_attached_stream file={} {}", path(), ex.what());
 		}
 
 		const std::string stream_identifier = path();
@@ -1164,7 +1174,7 @@ void DataSet::read_elements_until(Tag load_until, InStream* stream) {
 					}
 						length = endian::load_le<std::uint32_t>(buf4.data());
 						
-						// Some non‑conforming writers store VR UT with a 2‑byte length; salvage it.
+						// Some non-conforming writers store VR UT with a 2-byte length; salvage it.
 						if (length != 0xffffffff && length > stream->bytes_remaining()) {
 							stream->unread(4);
 							length = endian::load_le<std::uint16_t>(buf8.data() + 6);

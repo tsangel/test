@@ -19,6 +19,7 @@
 #include <string>
 #include <string_view>
 #include <optional>
+#include <source_location>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -2562,12 +2563,14 @@ private:
 	[[nodiscard]] bool is_beyond_last_loaded_tag(Tag tag) const noexcept {
 		return tag > last_tag_loaded_;
 	}
-	[[noreturn]] void throw_beyond_last_loaded_tag(Tag tag, const char* api_name) const;
+	[[noreturn]] void throw_beyond_last_loaded_tag(
+	    Tag tag,
+	    std::source_location location = std::source_location::current()) const;
 	[[nodiscard]] DataElement* find_dataelement_in_elements(std::uint32_t tag_value);
 	[[nodiscard]] const DataElement* find_dataelement_in_elements(std::uint32_t tag_value) const;
-	[[nodiscard]] Sequence& ensure_sequence_element(Tag tag, const char* api_name);
 	[[nodiscard]] TagPathParent ensure_tag_path_parent(
-	    std::string_view tag_path, const char* api_name);
+	    std::string_view tag_path,
+	    std::source_location location = std::source_location::current());
 	DataElement& append_parsed_dataelement_nocheck(
 	    Tag tag, VR vr, std::size_t offset, std::size_t length);
 	DataElement& add_dataelement_nocheck(Tag tag, VR vr);
@@ -2893,9 +2896,6 @@ private:
 	    const pixel::EncoderContext& encoder_ctx);
 	void apply_transfer_syntax(uid::WellKnown transfer_syntax,
 	    std::span<const pixel::CodecOptionTextKv> codec_opt_override);
-	// Commit transfer syntax state only after set_pixel_data finished updating
-	// PixelData bytes and related pixel metadata successfully.
-	void finalize_set_pixel_data_transfer_syntax(uid::WellKnown transfer_syntax);
 	void clear_error_state() noexcept;
 	void set_error_state(std::string message);
 

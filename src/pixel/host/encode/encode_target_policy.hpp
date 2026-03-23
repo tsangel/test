@@ -18,7 +18,7 @@ namespace dicom::pixel::detail {
 [[nodiscard]] bool is_htj2k_encode_profile(uint32_t codec_profile_code) noexcept;
 
 void validate_encode_profile_source_constraints(uint32_t codec_profile_code,
-    int bits_allocated, int bits_stored, std::string_view file_path);
+    int bits_allocated, int bits_stored);
 
 [[nodiscard]] pixel::Photometric compute_output_photometric_for_encode_profile(
     uint32_t codec_profile_code, bool use_multicomponent_transform,

@@ -265,6 +265,10 @@ inline void warn(std::string_view msg, const std::shared_ptr<Reporter>& r = null
 inline void error(std::string_view msg, const std::shared_ptr<Reporter>& r = nullptr) {
 	if (meets_log_level(LogLevel::Error)) get(r).error(msg);
 }
+// Throws DicomException without emitting a log entry.
+[[noreturn]] inline void throw_exception(std::string_view msg) {
+	throw DicomException(std::string(msg));
+}
 // Logs an error then throws DicomException with the same message.
 [[noreturn]] inline void error_and_throw(std::string_view msg, const std::shared_ptr<Reporter>& r = nullptr) {
 	get(r).error_and_throw(msg);
@@ -319,6 +323,11 @@ inline void error(const std::shared_ptr<Reporter>& r, fmt::format_string<Args...
 	if (meets_log_level(LogLevel::Error)) {
 		get(r).error(fmt::format(fmt, std::forward<Args>(args)...));
 	}
+}
+
+template <typename... Args>
+[[noreturn]] inline void throw_exception(fmt::format_string<Args...> fmt, Args&&... args) {
+	throw DicomException(fmt::format(fmt, std::forward<Args>(args)...));
 }
 
 template <typename... Args>

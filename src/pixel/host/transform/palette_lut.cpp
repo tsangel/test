@@ -10,7 +10,7 @@ using transform_detail::validate_palette_transform_pair_or_throw;
 
 PixelLayout make_palette_output_layout(PixelLayout src, const PaletteLut& lut) {
 	// Palette LUT expands indexed samples into RGB/RGBA while preserving frame geometry.
-	const auto lut_info = validate_palette_lut_or_throw(lut, "make_palette_output_layout");
+	const auto lut_info = validate_palette_lut_or_throw(lut);
 	return src.with_samples(
 	           lut_info.has_alpha ? std::uint16_t{4} : std::uint16_t{3},
 	           Photometric::rgb, src.planar)
@@ -27,9 +27,8 @@ PixelBuffer apply_palette_lut(ConstPixelSpan src, const PaletteLut& lut) {
 
 void apply_palette_lut_into(ConstPixelSpan src, PixelSpan dst, const PaletteLut& lut) {
 	// Palette LUT validation covers both table shape and source/destination layout rules.
-	const auto lut_info = validate_palette_lut_or_throw(lut, "apply_palette_lut_into");
-	const auto layout_info =
-	    validate_palette_transform_pair_or_throw(src, dst, lut_info, "apply_palette_lut_into");
+	const auto lut_info = validate_palette_lut_or_throw(lut);
+	const auto layout_info = validate_palette_transform_pair_or_throw(src, dst, lut_info);
 	const bool clamp_indices = !lut_covers_integer_stored_range(
 	    src.layout, lut.first_mapped, lut_info.entry_count);
 
@@ -43,8 +42,7 @@ void apply_palette_lut_into(ConstPixelSpan src, PixelSpan dst, const PaletteLut&
 		    src, dst, layout_info, lut, clamp_indices);
 		return;
 	default:
-		throw_transform_argument_error(
-		    "apply_palette_lut_into", "palette LUT destination dtype is not supported");
+		throw_transform_argument_error("palette LUT destination dtype is not supported");
 	}
 }
 

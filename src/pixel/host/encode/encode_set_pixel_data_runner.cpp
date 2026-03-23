@@ -33,20 +33,15 @@ namespace dicom::pixel::detail {
 namespace {
 
 [[nodiscard]] uint32_t encode_codec_profile_code_from_transfer_syntax_or_throw(
-    std::string_view file_path, uid::WellKnown transfer_syntax) {
+    uid::WellKnown transfer_syntax) {
 	uint32_t codec_profile_code = PIXEL_CODEC_PROFILE_UNKNOWN;
 	if (::pixel::runtime::codec_profile_code_from_transfer_syntax(
 	        transfer_syntax, &codec_profile_code)) {
 		return codec_profile_code;
 	}
 
-	throw_codec_error_with_context("DicomFile::set_pixel_data", file_path,
-	    transfer_syntax, std::nullopt,
-	    CodecError{
-	        .code = CodecStatusCode::unsupported,
-	        .stage = "plugin_lookup",
-	        .detail = "transfer syntax is not mapped to a runtime codec profile",
-	    });
+	throw_codec_stage_exception(CodecStatusCode::unsupported, "plugin_lookup",
+	    "transfer syntax is not mapped to a runtime codec profile");
 }
 
 } // namespace
@@ -245,24 +240,18 @@ struct EncapsulatedEncodeInput {
 }
 
 [[nodiscard]] std::size_t encoded_size_to_size_t_or_throw(
-    std::string_view file_path, uid::WellKnown transfer_syntax,
     std::size_t frame_index, uint64_t encoded_size_u64) {
 	const auto max_size_u64 =
 	    static_cast<uint64_t>((std::numeric_limits<std::size_t>::max)());
 	if (encoded_size_u64 > max_size_u64) {
-		throw_codec_error_with_context("DicomFile::set_pixel_data", file_path,
-		    transfer_syntax, frame_index,
-		    CodecError{
-		        .code = CodecStatusCode::internal_error,
-		        .stage = "encode_frame",
-		        .detail = "encoded size exceeds size_t range",
-		    });
+		throw_frame_codec_stage_exception(frame_index,
+		    CodecStatusCode::internal_error, "encode_frame",
+		    "encoded size exceeds size_t range");
 	}
 	return static_cast<std::size_t>(encoded_size_u64);
 }
 
 [[nodiscard]] std::size_t required_source_bytes_for_encode_input_or_throw(
-    std::string_view file_path, uid::WellKnown transfer_syntax,
     const EncapsulatedEncodeInput& encode_input) {
 	if (encode_input.frame_count == 0) {
 		return 0;
@@ -271,24 +260,14 @@ struct EncapsulatedEncodeInput {
 	const auto last_frame_index = encode_input.frame_count - std::size_t{1};
 	if (encode_input.source_frame_stride != 0 &&
 	    last_frame_index > max_value / encode_input.source_frame_stride) {
-		throw_codec_error_with_context("DicomFile::set_pixel_data", file_path,
-		    transfer_syntax, std::nullopt,
-		    CodecError{
-		        .code = CodecStatusCode::internal_error,
-		        .stage = "copy_source",
-		        .detail = "source frame offsets overflow size_t",
-		    });
+		throw_codec_stage_exception(CodecStatusCode::internal_error,
+		    "copy_source", "source frame offsets overflow size_t");
 	}
 	const auto last_frame_begin =
 	    last_frame_index * encode_input.source_frame_stride;
 	if (last_frame_begin > max_value - encode_input.source_frame_size_bytes) {
-		throw_codec_error_with_context("DicomFile::set_pixel_data", file_path,
-		    transfer_syntax, std::nullopt,
-		    CodecError{
-		        .code = CodecStatusCode::internal_error,
-		        .stage = "copy_source",
-		        .detail = "source copy size overflows size_t",
-		    });
+		throw_codec_stage_exception(CodecStatusCode::internal_error,
+		    "copy_source", "source copy size overflows size_t");
 	}
 	return last_frame_begin + encode_input.source_frame_size_bytes;
 }
@@ -353,14 +332,12 @@ void parse_runtime_detail_or_default(
 }
 
 [[noreturn]] void throw_runtime_encode_error(
-    std::string_view file_path, uid::WellKnown transfer_syntax,
     std::optional<std::size_t> frame_index, pixel_error_code ec,
     std::string_view raw_detail) {
 	CodecError encode_error{};
 	encode_error.code = map_runtime_error_code(ec);
 	parse_runtime_detail_or_default(raw_detail, encode_error.stage, encode_error.detail);
-	throw_codec_error_with_context("DicomFile::set_pixel_data", file_path,
-	    transfer_syntax, frame_index, encode_error);
+	throw_codec_exception(frame_index, encode_error);
 }
 
 [[nodiscard]] bool should_skip_option_for_profile(
@@ -454,8 +431,7 @@ bool build_runtime_option_list_from_pairs(std::span<const CodecOptionKv> option_
 }
 
 [[nodiscard]] std::vector<std::uint8_t> encode_frame_with_runtime_or_throw(
-    ::pixel::runtime::HostEncoderContext& ctx, std::string_view file_path,
-    uid::WellKnown transfer_syntax, uint32_t codec_profile_code,
+    ::pixel::runtime::HostEncoderContext& ctx, uint32_t codec_profile_code,
     const pixel::PixelLayout& source_layout,
     std::span<const std::uint8_t> source_frame,
     bool use_multicomponent_transform, std::size_t frame_index,
@@ -471,11 +447,11 @@ bool build_runtime_option_list_from_pairs(std::span<const CodecOptionKv> option_
 		        &ctx, &frame_layout, source_frame, use_multicomponent_transform,
 		        &encoded_view);
 		if (encode_ec != PIXEL_CODEC_ERR_OK) {
-			throw_runtime_encode_error(file_path, transfer_syntax, frame_index,
-			    encode_ec, copy_encoder_error_detail(ctx));
+			throw_runtime_encode_error(frame_index, encode_ec,
+			    copy_encoder_error_detail(ctx));
 		}
-		const auto encoded_size = encoded_size_to_size_t_or_throw(
-		    file_path, transfer_syntax, frame_index, encoded_view.size);
+		const auto encoded_size =
+		    encoded_size_to_size_t_or_throw(frame_index, encoded_view.size);
 		std::vector<std::uint8_t> encoded_frame(
 		    encoded_view.data, encoded_view.data + encoded_size);
 		if (capacity_hint != nullptr) {
@@ -500,8 +476,7 @@ bool build_runtime_option_list_from_pairs(std::span<const CodecOptionKv> option_
 	    &actual_size);
 	if (encode_ec == PIXEL_CODEC_ERR_OUTPUT_TOO_SMALL) {
 		const auto required_size =
-		    encoded_size_to_size_t_or_throw(file_path, transfer_syntax,
-		        frame_index, actual_size);
+		    encoded_size_to_size_t_or_throw(frame_index, actual_size);
 		encoded_frame.resize(required_size);
 		actual_size = static_cast<uint64_t>(encoded_frame.size());
 		encode_ec = ::pixel::runtime::encode_frame_with_host_context(
@@ -513,17 +488,13 @@ bool build_runtime_option_list_from_pairs(std::span<const CodecOptionKv> option_
 		    &actual_size);
 	}
 	if (encode_ec != PIXEL_CODEC_ERR_OK) {
-		throw_runtime_encode_error(file_path, transfer_syntax, frame_index,
-		    encode_ec, copy_encoder_error_detail(ctx));
+		throw_runtime_encode_error(frame_index, encode_ec,
+		    copy_encoder_error_detail(ctx));
 	}
 	if (actual_size > static_cast<uint64_t>(encoded_frame.size())) {
-		throw_codec_error_with_context("DicomFile::set_pixel_data", file_path,
-		    transfer_syntax, frame_index,
-		    CodecError{
-		        .code = CodecStatusCode::internal_error,
-		        .stage = "encode_frame",
-		        .detail = "encoded size grew beyond allocated output buffer",
-		    });
+		throw_frame_codec_stage_exception(frame_index,
+		    CodecStatusCode::internal_error, "encode_frame",
+		    "encoded size grew beyond allocated output buffer");
 	}
 	encoded_frame.resize(static_cast<std::size_t>(actual_size));
 	if (capacity_hint != nullptr) {
@@ -533,27 +504,22 @@ bool build_runtime_option_list_from_pairs(std::span<const CodecOptionKv> option_
 }
 
 template <typename FrameProvider, typename FrameSink>
-void encode_frames_with_runtime_or_throw_impl(DicomFile& file,
-    uid::WellKnown transfer_syntax, const pixel::PixelLayout& source_layout,
+void encode_frames_with_runtime_or_throw_impl(uid::WellKnown transfer_syntax,
+    const pixel::PixelLayout& source_layout,
     uint32_t codec_profile_code, std::span<const CodecOptionKv> codec_options,
     bool use_multicomponent_transform, std::size_t frame_count,
     FrameProvider&& frame_provider, FrameSink&& frame_sink) {
 	const auto* registry = get_runtime_registry();
 	if (registry == nullptr) {
-		CodecError encode_error{};
-		encode_error.code = CodecStatusCode::unsupported;
-		encode_error.stage = "plugin_lookup";
-		encode_error.detail = "runtime registry is not available";
-		throw_codec_error_with_context("DicomFile::set_pixel_data", file.path(),
-		    transfer_syntax, std::nullopt, encode_error);
+		throw_codec_stage_exception(CodecStatusCode::unsupported,
+		    "plugin_lookup", "runtime registry is not available");
 	}
 
 	CodecError option_error{};
 	RuntimeOptionListStorage option_storage{};
 	if (!build_runtime_option_list_from_pairs(
 	        codec_options, codec_profile_code, option_storage, option_error)) {
-		throw_codec_error_with_context("DicomFile::set_pixel_data", file.path(),
-		    transfer_syntax, std::nullopt, option_error);
+		throw_codec_exception(std::nullopt, option_error);
 	}
 	const pixel_option_list* option_ptr =
 	    option_storage.list.count == 0 ? nullptr : &option_storage.list;
@@ -565,23 +531,18 @@ void encode_frames_with_runtime_or_throw_impl(DicomFile& file,
 	        &encoder_ctx, registry, transfer_syntax, option_ptr);
 	const std::string configure_detail = copy_encoder_error_detail(encoder_ctx);
 	if (configure_ec == PIXEL_CODEC_ERR_UNSUPPORTED) {
-		throw_codec_error_with_context("DicomFile::set_pixel_data", file.path(),
-		    transfer_syntax, std::nullopt,
-		    CodecError{
-		        .code = CodecStatusCode::unsupported,
-		        .stage = "plugin_lookup",
-		        .detail = "encoder binding is not registered in runtime registry",
-		    });
+		throw_codec_stage_exception(CodecStatusCode::unsupported,
+		    "plugin_lookup",
+		    "encoder binding is not registered in runtime registry");
 	}
 	if (configure_ec != PIXEL_CODEC_ERR_OK) {
-		throw_runtime_encode_error(
-		    file.path(), transfer_syntax, std::nullopt, configure_ec, configure_detail);
+		throw_runtime_encode_error(std::nullopt, configure_ec, configure_detail);
 	}
 
 	std::size_t encoded_capacity_hint = 0;
 	for (std::size_t frame_index = 0; frame_index < frame_count; ++frame_index) {
 		auto encoded_frame = encode_frame_with_runtime_or_throw(encoder_ctx,
-		    file.path(), transfer_syntax, codec_profile_code, source_layout,
+		    codec_profile_code, source_layout,
 		    frame_provider(frame_index), use_multicomponent_transform,
 		    frame_index, &encoded_capacity_hint);
 		frame_sink(frame_index, std::move(encoded_frame));
@@ -596,8 +557,7 @@ void encode_frames_with_runtime_or_throw_impl(DicomFile& file,
 	const std::uint8_t* source_base = encode_input.source_base;
 	if (encode_input.source_aliases_current_native_pixel_data) {
 		const auto source_bytes_to_copy =
-		    required_source_bytes_for_encode_input_or_throw(
-		        file.path(), transfer_syntax, encode_input);
+		    required_source_bytes_for_encode_input_or_throw(encode_input);
 		source_storage.assign(
 		    encode_input.source_base,
 		    encode_input.source_base + source_bytes_to_copy);
@@ -605,7 +565,7 @@ void encode_frames_with_runtime_or_throw_impl(DicomFile& file,
 	}
 
 	file.reset_encapsulated_pixel_data(encode_input.frame_count);
-	encode_frames_with_runtime_or_throw_impl(file, transfer_syntax, source_layout,
+	encode_frames_with_runtime_or_throw_impl(transfer_syntax, source_layout,
 	    codec_profile_code, codec_options, use_multicomponent_transform,
 	    encode_input.frame_count,
 	    [&](std::size_t frame_index) {
@@ -623,13 +583,13 @@ void encode_frames_with_runtime_or_throw_impl(DicomFile& file,
 }  // namespace
 
 void encode_frames_from_frame_provider_with_runtime_or_throw(
-    DicomFile& file, uid::WellKnown transfer_syntax,
-    const pixel::PixelLayout& source_layout, uint32_t codec_profile_code,
+    uid::WellKnown transfer_syntax, const pixel::PixelLayout& source_layout,
+    uint32_t codec_profile_code,
     std::span<const CodecOptionKv> codec_options,
     bool use_multicomponent_transform, std::size_t frame_count,
     const std::function<std::span<const std::uint8_t>(std::size_t)>& frame_provider,
     const std::function<void(std::size_t, std::vector<std::uint8_t>&&)>& frame_sink) {
-	encode_frames_with_runtime_or_throw_impl(file, transfer_syntax, source_layout,
+	encode_frames_with_runtime_or_throw_impl(transfer_syntax, source_layout,
 	    codec_profile_code, codec_options, use_multicomponent_transform,
 	    frame_count, frame_provider, frame_sink);
 }
@@ -638,26 +598,22 @@ void encode_frames_from_frame_provider_with_runtime_or_throw(
 void run_set_pixel_data_with_computed_codec_options(DicomFile& file,
     uid::WellKnown transfer_syntax, pixel::ConstPixelSpan source,
     std::span<const CodecOptionKv> codec_options) {
-	const auto file_path = file.path();
 	const auto codec_profile_code =
-	    encode_codec_profile_code_from_transfer_syntax_or_throw(
-	        file_path, transfer_syntax);
+	    encode_codec_profile_code_from_transfer_syntax_or_throw(transfer_syntax);
 	const auto source_layout =
-	    support_detail::compute_encode_source_layout_or_throw(source, file_path);
+	    support_detail::compute_encode_source_layout_or_throw(source);
 	validate_encode_profile_source_constraints(codec_profile_code,
-	    source_layout.bits_allocated, source_layout.bits_stored, file_path);
+	    source_layout.bits_allocated, source_layout.bits_stored);
 	const bool use_multicomponent_transform =
 	    should_use_multicomponent_transform(transfer_syntax, codec_profile_code,
-	        codec_options, source_layout.samples_per_pixel,
-	        file_path);
+	        codec_options, source_layout.samples_per_pixel);
 	const pixel::Photometric output_photometric =
 	    compute_output_photometric_for_encode_profile(codec_profile_code,
 	        use_multicomponent_transform, source.layout.photometric);
 
 	auto& dataset = file.dataset();
 	dataset.ensure_loaded(Tag(0xFFFFu, 0xFFFFu));
-	update_pixel_metadata_for_set_pixel_data(dataset, file_path, transfer_syntax,
-	    source.layout,
+	update_pixel_metadata_for_set_pixel_data(dataset, source.layout,
 	    is_rle_encode_profile(codec_profile_code), output_photometric,
 	    source_layout.bits_allocated,
 	    source_layout.bits_stored, source_layout.high_bit,
@@ -701,29 +657,21 @@ void run_set_pixel_data_with_computed_codec_options(DicomFile& file,
 		if (!encode_encapsulated_pixel_data_with_runtime_or_throw(file, transfer_syntax,
 		        source.layout, encapsulated_encode_input, codec_profile_code, codec_options,
 		        use_multicomponent_transform)) {
-			CodecError encode_error{};
-			encode_error.code = CodecStatusCode::unsupported;
-			encode_error.stage = "plugin_lookup";
-			encode_error.detail = "runtime registry is not available";
-			throw_codec_error_with_context("DicomFile::set_pixel_data", file_path,
-			    transfer_syntax, std::nullopt, encode_error);
+			throw_codec_stage_exception(CodecStatusCode::unsupported,
+			    "plugin_lookup", "runtime registry is not available");
 		}
 #else
-		CodecError encode_error{};
-		encode_error.code = CodecStatusCode::unsupported;
-		encode_error.stage = "plugin_lookup";
-		encode_error.detail = "runtime is disabled at build time";
-		throw_codec_error_with_context("DicomFile::set_pixel_data", file_path,
-		    transfer_syntax, std::nullopt, encode_error);
+		throw_codec_stage_exception(CodecStatusCode::unsupported,
+		    "plugin_lookup", "runtime is disabled at build time");
 #endif
 	}
 
 	const auto encoded_payload_bytes =
 	    encode_profile_uses_lossy_compression(codec_profile_code)
-	    ? encoded_payload_size_from_pixel_sequence(dataset, file_path, transfer_syntax)
+	    ? encoded_payload_size_from_pixel_sequence(dataset)
 	    : std::size_t{0};
-	update_lossy_compression_metadata_for_set_pixel_data(dataset, file_path,
-	    transfer_syntax, codec_profile_code, source_layout.destination_total_bytes,
+	update_lossy_compression_metadata_for_set_pixel_data(dataset,
+	    codec_profile_code, source_layout.destination_total_bytes,
 	    encoded_payload_bytes);
 }
 
@@ -733,28 +681,23 @@ void run_set_pixel_data_from_frame_provider_with_computed_codec_options_impl(
     std::span<const CodecOptionKv> codec_options,
     const std::function<std::span<const std::uint8_t>(std::size_t)>& frame_provider,
     bool stream_output_frames) {
-	const auto file_path = file.path();
 	const auto codec_profile_code =
-	    encode_codec_profile_code_from_transfer_syntax_or_throw(
-	        file_path, transfer_syntax);
+	    encode_codec_profile_code_from_transfer_syntax_or_throw(transfer_syntax);
 	const auto encode_source_layout =
 	    support_detail::compute_encode_source_layout_without_source_bytes_or_throw(
-	        source_layout, file_path);
+	        source_layout);
 	validate_encode_profile_source_constraints(codec_profile_code,
-	    encode_source_layout.bits_allocated, encode_source_layout.bits_stored,
-	    file_path);
+	    encode_source_layout.bits_allocated, encode_source_layout.bits_stored);
 	const bool use_multicomponent_transform =
 	    should_use_multicomponent_transform(transfer_syntax, codec_profile_code,
-	        codec_options, encode_source_layout.samples_per_pixel,
-	        file_path);
+	        codec_options, encode_source_layout.samples_per_pixel);
 	const pixel::Photometric output_photometric =
 	    compute_output_photometric_for_encode_profile(codec_profile_code,
 	        use_multicomponent_transform, source_layout.photometric);
 
 	auto& dataset = file.dataset();
 	dataset.ensure_loaded(Tag(0xFFFFu, 0xFFFFu));
-	update_pixel_metadata_for_set_pixel_data(dataset, file_path, transfer_syntax,
-	    source_layout,
+	update_pixel_metadata_for_set_pixel_data(dataset, source_layout,
 	    is_rle_encode_profile(codec_profile_code),
 	    output_photometric, encode_source_layout.bits_allocated,
 	    encode_source_layout.bits_stored, encode_source_layout.high_bit,
@@ -763,19 +706,15 @@ void run_set_pixel_data_from_frame_provider_with_computed_codec_options_impl(
 	    encode_source_layout.source_frame_stride);
 
 	if (is_native_uncompressed_encode_profile(codec_profile_code)) {
-		throw_codec_error_with_context("DicomFile::set_pixel_data", file_path,
-		    transfer_syntax, std::nullopt,
-		    CodecError{
-		        .code = CodecStatusCode::invalid_argument,
-		        .stage = "validate_target",
-		        .detail = "frame provider path requires encapsulated target transfer syntax",
-		    });
+		throw_codec_stage_exception(CodecStatusCode::invalid_argument,
+		    "validate_target",
+		    "frame provider path requires encapsulated target transfer syntax");
 	}
 
 #if defined(DICOMSDL_PIXEL_RUNTIME_ENABLED)
 	if (stream_output_frames) {
 		file.reset_encapsulated_pixel_data(encode_source_layout.frames);
-		encode_frames_with_runtime_or_throw_impl(file, transfer_syntax, source_layout,
+		encode_frames_with_runtime_or_throw_impl(transfer_syntax, source_layout,
 		    codec_profile_code, codec_options, use_multicomponent_transform,
 		    encode_source_layout.frames, frame_provider,
 		    [&](std::size_t frame_index, std::vector<std::uint8_t>&& encoded_frame) {
@@ -784,7 +723,7 @@ void run_set_pixel_data_from_frame_provider_with_computed_codec_options_impl(
 	} else {
 		std::vector<std::vector<std::uint8_t>> encoded_frames;
 		encoded_frames.reserve(encode_source_layout.frames);
-		encode_frames_with_runtime_or_throw_impl(file, transfer_syntax, source_layout,
+		encode_frames_with_runtime_or_throw_impl(transfer_syntax, source_layout,
 		    codec_profile_code, codec_options, use_multicomponent_transform,
 		    encode_source_layout.frames, frame_provider,
 		    [&](std::size_t, std::vector<std::uint8_t>&& encoded_frame) {
@@ -799,20 +738,15 @@ void run_set_pixel_data_from_frame_provider_with_computed_codec_options_impl(
 		}
 	}
 #else
-	CodecError encode_error{};
-	encode_error.code = CodecStatusCode::unsupported;
-	encode_error.stage = "plugin_lookup";
-	encode_error.detail = "runtime is disabled at build time";
-	throw_codec_error_with_context("DicomFile::set_pixel_data", file_path,
-	    transfer_syntax, std::nullopt, encode_error);
+	throw_codec_stage_exception(CodecStatusCode::unsupported,
+	    "plugin_lookup", "runtime is disabled at build time");
 #endif
 
 	const auto encoded_payload_bytes =
 	    encode_profile_uses_lossy_compression(codec_profile_code)
-	    ? encoded_payload_size_from_pixel_sequence(dataset, file_path, transfer_syntax)
+	    ? encoded_payload_size_from_pixel_sequence(dataset)
 	    : std::size_t{0};
-	update_lossy_compression_metadata_for_set_pixel_data(dataset, file_path,
-	    transfer_syntax, codec_profile_code,
+	update_lossy_compression_metadata_for_set_pixel_data(dataset, codec_profile_code,
 	    encode_source_layout.destination_total_bytes,
 	    encoded_payload_bytes);
 }

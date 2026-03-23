@@ -1,6 +1,7 @@
 #include "pixel/host/encode/multicomponent_transform_policy.hpp"
 
 #include "pixel/host/encode/encode_target_policy.hpp"
+#include "pixel/host/error/codec_error.hpp"
 #include "diagnostics.h"
 
 #include <cmath>
@@ -139,26 +140,26 @@ struct BoolOptionLookupResult {
 
 bool should_use_multicomponent_transform(uid::WellKnown transfer_syntax,
     uint32_t codec_profile_code, std::span<const CodecOptionKv> codec_options,
-    std::size_t samples_per_pixel, std::string_view file_path) {
+    std::size_t samples_per_pixel) {
 	const auto mct_option = lookup_use_mct_option(codec_options);
 	if (mct_option.found && !mct_option.valid) {
-		diag::error_and_throw(
-		    "DicomFile::set_pixel_data file={} reason=color_transform/mct option must be bool (or 0/1)",
-		    file_path);
+		throw_codec_stage_exception(CodecStatusCode::invalid_argument,
+		    "validate_options",
+		    "color_transform/mct option must be bool (or 0/1)");
 	}
 	const bool use_color_transform = mct_option.found ? mct_option.value : true;
 
 	if (is_jpeg2000_encode_profile(codec_profile_code)) {
 		if (is_jpeg2000_mc_transfer_syntax(transfer_syntax)) {
 			if (!use_color_transform) {
-				diag::error_and_throw(
-				    "DicomFile::set_pixel_data file={} ts={} reason=JPEG2000 MC transfer syntax requires color transform enabled",
-				    file_path, transfer_syntax.value());
+				throw_codec_stage_exception(CodecStatusCode::invalid_argument,
+				    "validate_target",
+				    "JPEG2000 MC transfer syntax requires color transform enabled");
 			}
 			if (samples_per_pixel != std::size_t{3}) {
-				diag::error_and_throw(
-				    "DicomFile::set_pixel_data file={} ts={} reason=JPEG2000 MC transfer syntax requires samples_per_pixel=3",
-				    file_path, transfer_syntax.value());
+				throw_codec_stage_exception(CodecStatusCode::invalid_argument,
+				    "validate_target",
+				    "JPEG2000 MC transfer syntax requires samples_per_pixel=3");
 			}
 			return true;
 		}

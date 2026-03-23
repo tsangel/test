@@ -13,42 +13,36 @@ using transform_detail::throw_transform_argument_error;
 using transform_detail::validate_monochrome_storage_pair_or_throw;
 
 void validate_window_transform_or_throw(
-    const WindowTransform& window, std::string_view function_name) {
+    const WindowTransform& window) {
 	// Window transforms require finite center/width metadata before any sample mapping starts.
 	if (!std::isfinite(window.center) || !std::isfinite(window.width)) {
-		throw_transform_argument_error(
-		    function_name, "window center and width must be finite");
+		throw_transform_argument_error("window center and width must be finite");
 	}
 
 	switch (window.function) {
 	case VoiLutFunction::linear:
 		if (window.width < 1.0f) {
-			throw_transform_argument_error(
-			    function_name, "LINEAR window width must be >= 1");
+			throw_transform_argument_error("LINEAR window width must be >= 1");
 		}
 		return;
 	case VoiLutFunction::linear_exact:
 	case VoiLutFunction::sigmoid:
 		if (window.width <= 0.0f) {
-			throw_transform_argument_error(
-			    function_name, "window width must be > 0");
+			throw_transform_argument_error("window width must be > 0");
 		}
 		return;
 	default:
-		throw_transform_argument_error(
-		    function_name, "VOI LUT function is not supported");
+		throw_transform_argument_error("VOI LUT function is not supported");
 	}
 }
 
 [[nodiscard]] MonochromeTransformLayoutInfo validate_window_transform_pair_or_throw(
-    ConstPixelSpan src, PixelSpan dst, std::string_view function_name) {
-	const auto info =
-	    validate_monochrome_storage_pair_or_throw(src, dst, function_name);
+    ConstPixelSpan src, PixelSpan dst) {
+	const auto info = validate_monochrome_storage_pair_or_throw(src, dst);
 
 	// Display window output is currently materialized into integer grayscale storage.
 	if (dst.layout.data_type != DataType::u8 && dst.layout.data_type != DataType::u16) {
-		throw_transform_argument_error(
-		    function_name, "destination dtype must be uint8 or uint16");
+		throw_transform_argument_error("destination dtype must be uint8 or uint16");
 	}
 
 	return info;
@@ -109,7 +103,7 @@ void apply_window_into_impl(ConstPixelSpan src, PixelSpan dst,
     const WindowTransform& window) {
 	// Dispatch once on the source dtype so the hot loop only performs scalar math and stores.
 	dispatch_numeric_source_dtype<Dst>(
-	    src, dst, layout_info, "apply_window_into",
+	    src, dst, layout_info,
 	    [&](auto stored_value, std::size_t /*frame_index*/) -> Dst {
 		    const double value = static_cast<double>(stored_value);
 		    const double normalized = [&]() noexcept {
@@ -148,9 +142,8 @@ PixelBuffer apply_window(ConstPixelSpan src, const WindowTransform& window) {
 
 void apply_window_into(ConstPixelSpan src, PixelSpan dst, const WindowTransform& window) {
 	// Validate metadata and layout constraints before entering the sample loop.
-	validate_window_transform_or_throw(window, "apply_window_into");
-	const auto layout_info =
-	    validate_window_transform_pair_or_throw(src, dst, "apply_window_into");
+	validate_window_transform_or_throw(window);
+	const auto layout_info = validate_window_transform_pair_or_throw(src, dst);
 
 	switch (dst.layout.data_type) {
 	case DataType::u8:
@@ -160,8 +153,7 @@ void apply_window_into(ConstPixelSpan src, PixelSpan dst, const WindowTransform&
 		apply_window_into_impl<std::uint16_t>(src, dst, layout_info, window);
 		return;
 	default:
-		throw_transform_argument_error(
-		    "apply_window_into", "destination dtype must be uint8 or uint16");
+		throw_transform_argument_error("destination dtype must be uint8 or uint16");
 	}
 }
 

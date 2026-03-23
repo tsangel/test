@@ -24,22 +24,19 @@ PixelBuffer apply_modality_lut(ConstPixelSpan src, const ModalityLut& lut) {
 
 void apply_modality_lut_into(ConstPixelSpan src, PixelSpan dst, const ModalityLut& lut) {
 	// Modality LUT requires one stored-value sample per pixel and a non-empty lookup table.
-	const auto layout_info =
-	    validate_monochrome_transform_pair_or_throw(
-	        src, dst, "apply_modality_lut_into");
+	const auto layout_info = validate_monochrome_transform_pair_or_throw(src, dst);
 	if (lut.values.empty()) {
-		throw_transform_argument_error(
-		    "apply_modality_lut_into", "Modality LUT values must not be empty");
+		throw_transform_argument_error("Modality LUT values must not be empty");
 	}
 	const bool clamp_indices =
 	    !lut_covers_integer_stored_range(src.layout, lut.first_mapped, lut.values.size());
 
 	dispatch_float_destination_dtype(
-	    src, dst, layout_info, "apply_modality_lut_into",
+	    src, dst, layout_info,
 	    [&]<typename Dst>(ConstPixelSpan src_view, PixelSpan dst_view,
 	        const MonochromeTransformLayoutInfo& info) {
 		    dispatch_integral_source_dtype<Dst>(
-		        src_view, dst_view, info, "apply_modality_lut_into",
+		        src_view, dst_view, info,
 		        [&](auto stored_value, std::size_t /*frame_index*/) -> double {
 			        if (clamp_indices) {
 				        return static_cast<double>(lookup_modality_lut_value<true>(

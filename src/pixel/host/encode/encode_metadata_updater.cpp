@@ -1,6 +1,7 @@
 #include "pixel/host/encode/encode_metadata_updater.hpp"
 
 #include "pixel/host/encode/encode_target_policy.hpp"
+#include "pixel/host/error/codec_error.hpp"
 #include "diagnostics.h"
 
 #include <algorithm>
@@ -41,19 +42,18 @@ namespace {
 
 } // namespace
 
-std::size_t encoded_payload_size_from_pixel_sequence(const DataSet& dataset,
-    std::string_view file_path, uid::WellKnown transfer_syntax) {
+std::size_t encoded_payload_size_from_pixel_sequence(const DataSet& dataset) {
 	const auto& pixel_data = dataset["PixelData"_tag];
 	if (!pixel_data || !pixel_data.vr().is_pixel_sequence()) {
-		diag::error_and_throw(
-		    "DicomFile::set_pixel_data file={} ts={} reason=lossy metadata update requires encapsulated PixelData sequence",
-		    file_path, transfer_syntax.value());
+		throw_codec_stage_exception(CodecStatusCode::invalid_argument,
+		    "update_lossy_metadata",
+		    "lossy metadata update requires encapsulated PixelData sequence");
 	}
 	const auto* pixel_sequence = pixel_data.as_pixel_sequence();
 	if (!pixel_sequence) {
-		diag::error_and_throw(
-		    "DicomFile::set_pixel_data file={} ts={} reason=lossy metadata update requires encapsulated PixelData sequence",
-		    file_path, transfer_syntax.value());
+		throw_codec_stage_exception(CodecStatusCode::invalid_argument,
+		    "update_lossy_metadata",
+		    "lossy metadata update requires encapsulated PixelData sequence");
 	}
 
 	std::size_t encoded_payload_bytes = 0;
@@ -62,15 +62,15 @@ std::size_t encoded_payload_size_from_pixel_sequence(const DataSet& dataset,
 	     ++frame_index) {
 		const auto* frame = pixel_sequence->frame(frame_index);
 		if (!frame) {
-			diag::error_and_throw(
-			    "DicomFile::set_pixel_data file={} ts={} reason=encoded frame {} missing while updating lossy metadata",
-			    file_path, transfer_syntax.value(), frame_index);
+			throw_frame_codec_stage_exception(frame_index,
+			    CodecStatusCode::internal_error, "update_lossy_metadata",
+			    "encoded frame missing while updating lossy metadata");
 		}
 		const auto frame_bytes = frame->encoded_data_size();
 		if (encoded_payload_bytes > kSizeMax - frame_bytes) {
-			diag::error_and_throw(
-			    "DicomFile::set_pixel_data file={} ts={} reason=encoded payload size overflows size_t while updating lossy metadata",
-			    file_path, transfer_syntax.value());
+			throw_codec_stage_exception(CodecStatusCode::internal_error,
+			    "update_lossy_metadata",
+			    "encoded payload size overflows size_t while updating lossy metadata");
 		}
 		encoded_payload_bytes += frame_bytes;
 	}
@@ -78,7 +78,6 @@ std::size_t encoded_payload_size_from_pixel_sequence(const DataSet& dataset,
 }
 
 void update_lossy_compression_metadata_for_set_pixel_data(DataSet& dataset,
-    std::string_view file_path, uid::WellKnown transfer_syntax,
     uint32_t codec_profile_code, std::size_t uncompressed_payload_bytes,
     std::size_t encoded_payload_bytes) {
 	const bool current_encode_is_lossy =
@@ -96,33 +95,33 @@ void update_lossy_compression_metadata_for_set_pixel_data(DataSet& dataset,
 			dataset.remove_dataelement("LossyImageCompressionMethod"_tag);
 		}
 		if (!ok) {
-			diag::error_and_throw(
-			    "DicomFile::set_pixel_data file={} ts={} reason=failed to update LossyImageCompression metadata for non-lossy encode",
-			    file_path, transfer_syntax.value());
+			throw_codec_stage_exception(CodecStatusCode::internal_error,
+			    "update_lossy_metadata",
+			    "failed to update LossyImageCompression metadata for non-lossy encode");
 		}
 		return;
 	}
 
 	if (encoded_payload_bytes == 0 || uncompressed_payload_bytes == 0) {
-		diag::error_and_throw(
-		    "DicomFile::set_pixel_data file={} ts={} reason=cannot compute lossy compression ratio from zero payload size (uncompressed={} encoded={})",
-		    file_path, transfer_syntax.value(), uncompressed_payload_bytes,
-		    encoded_payload_bytes);
+		throw_codec_stage_exception(CodecStatusCode::invalid_argument,
+		    "update_lossy_metadata",
+		    "cannot compute lossy compression ratio from zero payload size (uncompressed={} encoded={})",
+		    uncompressed_payload_bytes, encoded_payload_bytes);
 	}
 	const auto method = lossy_method_for_encode_profile(codec_profile_code);
 	if (!method) {
-		diag::error_and_throw(
-		    "DicomFile::set_pixel_data file={} ts={} reason=missing lossy compression method mapping for transfer syntax",
-		    file_path, transfer_syntax.value());
+		throw_codec_stage_exception(CodecStatusCode::internal_error,
+		    "update_lossy_metadata",
+		    "missing lossy compression method mapping for transfer syntax");
 	}
 
 	const double ratio = static_cast<double>(uncompressed_payload_bytes) /
 	    static_cast<double>(encoded_payload_bytes);
 	if (!std::isfinite(ratio) || ratio <= 0.0) {
-		diag::error_and_throw(
-		    "DicomFile::set_pixel_data file={} ts={} reason=invalid lossy compression ratio computed from uncompressed={} encoded={}",
-		    file_path, transfer_syntax.value(), uncompressed_payload_bytes,
-		    encoded_payload_bytes);
+		throw_codec_stage_exception(CodecStatusCode::internal_error,
+		    "update_lossy_metadata",
+		    "invalid lossy compression ratio computed from uncompressed={} encoded={}",
+		    uncompressed_payload_bytes, encoded_payload_bytes);
 	}
 
 	std::vector<std::string> methods;
@@ -154,15 +153,15 @@ void update_lossy_compression_metadata_for_set_pixel_data(DataSet& dataset,
 	    std::span<const std::string_view>(method_views.data(), method_views.size()));
 
 	if (!ok) {
-		diag::error_and_throw(
-		    "DicomFile::set_pixel_data file={} ts={} reason=failed to update lossy compression metadata ratio={} method={} history_vm={}",
-		    file_path, transfer_syntax.value(), ratio, *method, methods.size());
+		throw_codec_stage_exception(CodecStatusCode::internal_error,
+		    "update_lossy_metadata",
+		    "failed to update lossy compression metadata ratio={} method={} history_vm={}",
+		    ratio, *method, methods.size());
 	}
 }
 
-void update_pixel_metadata_for_set_pixel_data(DataSet& dataset, std::string_view file_path,
-    uid::WellKnown transfer_syntax, const pixel::PixelLayout& source_layout,
-    bool target_is_rle,
+void update_pixel_metadata_for_set_pixel_data(DataSet& dataset,
+    const pixel::PixelLayout& source_layout, bool target_is_rle,
     pixel::Photometric output_photometric, int bits_allocated, int bits_stored,
     int high_bit, int pixel_representation,
     std::size_t source_row_stride, std::size_t source_frame_stride) {
@@ -197,23 +196,14 @@ void update_pixel_metadata_for_set_pixel_data(DataSet& dataset, std::string_view
 		dataset.remove_dataelement("PlanarConfiguration"_tag);
 	}
 	if (!ok) {
-		diag::error_and_throw(
-		    "DicomFile::set_pixel_data file={} ts={} reason=failed to update one or more pixel metadata tags requested rows={} cols={} frames={} spp={} bits_allocated={} bits_stored={} high_bit={} pixel_representation={} photometric={} planar={} row_stride={} frame_stride={}",
-		    file_path, transfer_syntax.value(), source_layout.rows, source_layout.cols,
-		    source_layout.frames, source_layout.samples_per_pixel, bits_allocated,
-		    bits_stored, high_bit,
+		throw_codec_stage_exception(CodecStatusCode::internal_error,
+		    "update_pixel_metadata",
+		    "failed to update one or more pixel metadata tags requested rows={} cols={} frames={} spp={} bits_allocated={} bits_stored={} high_bit={} pixel_representation={} photometric={} planar={} row_stride={} frame_stride={}",
+		    source_layout.rows, source_layout.cols, source_layout.frames,
+		    source_layout.samples_per_pixel, bits_allocated, bits_stored, high_bit,
 		    pixel_representation, photometric_text,
 		    source_layout.planar == pixel::Planar::planar ? "planar" : "interleaved",
 		    source_row_stride, source_frame_stride);
-	}
-}
-
-void update_transfer_syntax_uid_element_after_set_pixel_data_or_throw(
-    DicomFile& file, uid::WellKnown transfer_syntax) {
-	if (!file.set_value("(0002,0010)"_tag, VR::UI, transfer_syntax.value())) {
-		diag::error_and_throw(
-		    "DicomFile::set_pixel_data file={} reason=failed to update (0002,0010) TransferSyntaxUID",
-		    file.path());
 	}
 }
 

@@ -2,6 +2,7 @@
 #include <exception>
 #include <iostream>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -88,8 +89,8 @@ void expect_create_decode_plan_throw(
 int main() {
 	using dicom::pixel::detail::CodecError;
 	using dicom::pixel::detail::CodecStatusCode;
-	using dicom::pixel::detail::format_codec_error_context;
-	using dicom::pixel::detail::throw_codec_error_with_context;
+	using dicom::pixel::detail::format_codec_error_suffix;
+	using dicom::pixel::detail::rethrow_codec_exception_at_boundary_or_throw;
 
 	if (!(dicom::test::kJpegBuiltin &&
 	        dicom::test::kJpegLsBuiltin &&
@@ -104,40 +105,66 @@ int main() {
 	    .stage = "encode_frame",
 	    .detail = "CharLS encode failed (simulated)",
 	};
-	const auto frame_message = format_codec_error_context(
-	    "DicomFile::set_pixel_data", "/tmp/codec_error_test.dcm",
-	    "JPEGLSLossless"_uid, std::size_t{2}, frame_error);
-	expect_contains(frame_message, "DicomFile::set_pixel_data", "frame message");
-	expect_contains(frame_message, "file=/tmp/codec_error_test.dcm", "frame message");
+	const auto frame_suffix = format_codec_error_suffix(std::size_t{2}, frame_error);
+	expect_contains(frame_suffix, "frame=2", "frame suffix");
+	expect_contains(frame_suffix, "status=backend_error", "frame suffix");
+	expect_contains(frame_suffix, "stage=encode_frame", "frame suffix");
 	expect_contains(
-	    frame_message, std::string("ts=") + std::string("JPEGLSLossless"_uid.value()),
-	    "frame message");
-	expect_contains(frame_message, "frame=2", "frame message");
-	expect_contains(frame_message, "status=backend_error", "frame message");
-	expect_contains(frame_message, "stage=encode_frame", "frame message");
-	expect_contains(
-	    frame_message, "reason=CharLS encode failed (simulated)", "frame message");
+	    frame_suffix, "reason=CharLS encode failed (simulated)", "frame suffix");
 
 	try {
-		throw_codec_error_with_context("DicomFile::set_pixel_data",
-		    "/tmp/codec_error_test.dcm", "JPEGXLLossless"_uid, std::nullopt,
+		throw std::runtime_error(frame_suffix);
+	} catch (const std::exception& e) {
+		try {
+			rethrow_codec_exception_at_boundary_or_throw(
+			    "DicomFile::set_pixel_data", "/tmp/codec_error_test.dcm",
+			    "JPEGLSLossless"_uid, e);
+			fail("rethrow_codec_exception_at_boundary_or_throw should throw");
+		} catch (const std::exception& wrapped) {
+			const std::string frame_message = wrapped.what();
+			expect_contains(frame_message, "DicomFile::set_pixel_data", "frame message");
+			expect_contains(
+			    frame_message, "file=/tmp/codec_error_test.dcm", "frame message");
+			expect_contains(
+			    frame_message,
+			    std::string("ts=") + std::string("JPEGLSLossless"_uid.value()),
+			    "frame message");
+			expect_contains(frame_message, "frame=2", "frame message");
+			expect_contains(frame_message, "status=backend_error", "frame message");
+			expect_contains(frame_message, "stage=encode_frame", "frame message");
+			expect_contains(
+			    frame_message, "reason=CharLS encode failed (simulated)",
+			    "frame message");
+		}
+	}
+
+	try {
+		dicom::pixel::detail::throw_codec_exception(std::nullopt,
 		    CodecError{
 		        .code = CodecStatusCode::unsupported,
 		        .stage = "plugin_lookup",
 		        .detail = "plugin is not registered in runtime registry",
 		    });
-		fail("throw_codec_error_with_context should throw");
+		fail("throw_codec_exception should throw");
 	} catch (const std::exception& e) {
-		const std::string what = e.what();
-		expect_contains(what, "DicomFile::set_pixel_data", "throw message");
-		expect_contains(what, "file=/tmp/codec_error_test.dcm", "throw message");
-		expect_contains(
-		    what, std::string("ts=") + std::string("JPEGXLLossless"_uid.value()),
-		    "throw message");
-		expect_contains(what, "status=unsupported", "throw message");
-		expect_contains(what, "stage=plugin_lookup", "throw message");
-		expect_contains(
-		    what, "reason=plugin is not registered in runtime registry", "throw message");
+		try {
+			rethrow_codec_exception_at_boundary_or_throw(
+			    "DicomFile::set_pixel_data", "/tmp/codec_error_test.dcm",
+			    "JPEGXLLossless"_uid, e);
+			fail("boundary rethrow should throw");
+		} catch (const std::exception& wrapped) {
+			const std::string what = wrapped.what();
+			expect_contains(what, "DicomFile::set_pixel_data", "throw message");
+			expect_contains(what, "file=/tmp/codec_error_test.dcm", "throw message");
+			expect_contains(
+			    what, std::string("ts=") + std::string("JPEGXLLossless"_uid.value()),
+			    "throw message");
+			expect_contains(what, "status=unsupported", "throw message");
+			expect_contains(what, "stage=plugin_lookup", "throw message");
+			expect_contains(
+			    what, "reason=plugin is not registered in runtime registry",
+			    "throw message");
+		}
 	}
 
 	{
@@ -197,6 +224,42 @@ int main() {
 			    "native frame index throw message");
 			expect_contains(what, "raw frame index out of range",
 			    "native frame index throw message");
+		}
+	}
+
+	{
+		dicom::DicomFile df{};
+		df.set_transfer_syntax("ExplicitVRLittleEndian"_uid);
+		configure_minimal_integral_pixel_metadata(df);
+		set_long_element(df, "NumberOfFrames"_tag, dicom::VR::IS, 2, "NumberOfFrames");
+		df.set_native_pixel_data(std::vector<std::uint8_t>{0x00, 0x00});
+
+		auto decode_opt = dicom::pixel::DecodeOptions{};
+		decode_opt.worker_threads = 2;
+		const auto plan = df.create_decode_plan(decode_opt);
+		std::vector<std::uint8_t> dst(
+		    plan.output_layout.frame_stride * plan.output_layout.frames,
+		    std::uint8_t{0});
+		try {
+			dicom::pixel::decode_all_frames_into(
+			    df, std::span<std::uint8_t>(dst.data(), dst.size()), plan);
+			fail("native all-frames worker throw message should throw");
+		} catch (const std::exception& e) {
+			const std::string what = e.what();
+			expect_contains(what, "pixel::decode_all_frames_into",
+			    "native all-frames worker throw message");
+			expect_contains(what,
+			    std::string("ts=") + std::string("ExplicitVRLittleEndian"_uid.value()),
+			    "native all-frames worker throw message");
+			expect_contains(what, "frame=1", "native all-frames worker throw message");
+			expect_contains(what, "status=invalid_argument",
+			    "native all-frames worker throw message");
+			expect_contains(what, "stage=load_frame_source",
+			    "native all-frames worker throw message");
+			expect_contains(what, "raw frame index out of range",
+			    "native all-frames worker throw message");
+			expect_not_contains(what, "reason=pixel::decode_all_frames_into ",
+			    "native all-frames worker throw message");
 		}
 	}
 

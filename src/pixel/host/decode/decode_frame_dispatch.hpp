@@ -11,8 +11,8 @@ namespace dicom::pixel::detail {
 
 void dispatch_decode_frame(const DicomFile& df, std::size_t frame_index,
     std::span<std::uint8_t> dst, const DecodePlan& plan);
-void dispatch_decode_prepared_frame(std::string_view file_path,
-    uid::WellKnown transfer_syntax, const PixelLayout& source_layout,
+void dispatch_decode_prepared_frame(const DicomFile& df,
+    const PixelLayout& source_layout,
     std::size_t frame_index, std::span<const std::uint8_t> prepared_source,
     std::span<std::uint8_t> dst, const DecodePlan& plan);
 
