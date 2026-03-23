@@ -308,7 +308,14 @@ int main() {
 			try {
 				(void)ds.ensure_dataelement(dicom::Tag(0x0009, 0x1030));
 				fail("DataSet::ensure_dataelement(private tag) without VR should throw");
-			} catch (const std::exception&) {
+			} catch (const std::exception& ex) {
+				const std::string what = ex.what();
+				if (what.find("&dicom::DataSet::ensure_dataelement") != std::string::npos) {
+					fail("DataSet::ensure_dataelement error prefix should not include a leading '&'");
+				}
+				if (what.find("ensure_dataelement") == std::string::npos) {
+					fail("DataSet::ensure_dataelement error prefix should include the operation name");
+				}
 			}
 		}
 		{
@@ -335,14 +342,26 @@ int main() {
 			}
 
 			ds.add_dataelement("Rows"_tag, dicom::VR::US);
-			bool non_sequence_threw = false;
-			try {
-				(void)ds.ensure_dataelement("Rows.0.Columns", dicom::VR::US);
-			} catch (const std::exception&) {
-				non_sequence_threw = true;
+			auto& nested_from_overwrite =
+			    ds.ensure_dataelement("Rows.0.Columns", dicom::VR::US);
+			if (nested_from_overwrite.vr() != dicom::VR::US) {
+				fail("Nested ensure_dataelement should create the requested leaf VR");
 			}
-			if (!non_sequence_threw) {
-				fail("Nested ensure_dataelement should throw when an intermediate element is not a sequence");
+			const auto& rows_element = ds.get_dataelement("Rows"_tag);
+			const auto* rows_seq = rows_element.as_sequence();
+			if (!rows_seq || rows_element.vr() != dicom::VR::SQ) {
+				fail("Nested ensure_dataelement should reset a non-sequence intermediate element to SQ");
+			}
+			if (rows_seq->size() != 1) {
+				fail("Nested ensure_dataelement should create the first missing sequence item");
+			}
+			const auto* row_item = rows_seq->get_dataset(0);
+			if (!row_item) {
+				fail("Nested ensure_dataelement should materialize the requested sequence item");
+			}
+			const auto& nested_columns = row_item->get_dataelement("Columns"_tag);
+			if (nested_columns.is_missing() || nested_columns.vr() != dicom::VR::US) {
+				fail("Nested ensure_dataelement should create the requested leaf inside the new item");
 			}
 		}
 		{

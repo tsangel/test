@@ -2357,7 +2357,9 @@ public:
 	///         for a tag beyond the current load frontier.
 	DataElement& add_dataelement(Tag tag, VR vr = VR::None);
 	/// Add or replace a leaf element addressed by a dotted tag path.
-	/// Intermediate sequence/item components are created as needed.
+	/// Intermediate sequence/item components are created as needed. If an
+	/// intermediate element already exists with a non-sequence VR, it is reset
+	/// in place to `SQ` so the requested path can be materialized.
 	DataElement& add_dataelement(std::string_view tag_path, VR vr = VR::None);
 
 	/// Remove a data element by tag (no-op if missing).
@@ -2388,7 +2390,9 @@ public:
 	///         current load frontier.
 	DataElement& ensure_dataelement(Tag tag, VR vr = VR::None);
 	/// Ensure that a leaf element exists for a dotted tag path.
-	/// Intermediate sequence/item components are created as needed.
+	/// Intermediate sequence/item components are created as needed. If an
+	/// intermediate element already exists with a non-sequence VR, it is reset
+	/// in place to `SQ` so the requested path can be materialized.
 	DataElement& ensure_dataelement(std::string_view tag_path, VR vr = VR::None);
 
 	/// Low-level dotted tag-path resolver (e.g., "00540016.0.00181075").

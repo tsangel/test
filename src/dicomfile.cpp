@@ -78,6 +78,9 @@ private:
 	if (last_space != std::string_view::npos) {
 		name.remove_prefix(last_space + 1);
 	}
+	while (!name.empty() && (name.front() == '&' || name.front() == '*')) {
+		name.remove_prefix(1);
+	}
 	return name;
 }
 
