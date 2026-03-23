@@ -181,8 +181,12 @@ def _build_compression_ratio_maps(
 
 def _import_backend(backend: str) -> Any:
     if backend == "dicomsdl":
-        sys.path.remove('C:\\Lab\\workspace\\test.git\\bindings\\python')
-        sys.path.remove('C:\\Lab\\workspace\\test.git\\benchmarks\\python')
+        for repo_path in (
+            r"C:\Lab\workspace\test.git\bindings\python",
+            r"C:\Lab\workspace\test.git\benchmarks\python",
+        ):
+            if repo_path in sys.path:
+                sys.path.remove(repo_path)
         import dicomsdl as mod
 
         return mod
@@ -842,6 +846,15 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="pydicom decode mode.",
     )
     parser.add_argument(
+        "--raw-best-repeat",
+        type=int,
+        default=None,
+        help=(
+            "Override repeat count for the extra REF* raw best-path row. "
+            "Defaults to the base --repeat value."
+        ),
+    )
+    parser.add_argument(
         "--include-j2k-multicpu",
         action="store_true",
         help=(
@@ -929,6 +942,9 @@ def main(argv: list[str]) -> int:
     if args.repeat <= 0:
         print("--repeat must be > 0", file=sys.stderr)
         return 2
+    if args.raw_best_repeat is not None and args.raw_best_repeat <= 0:
+        print("--raw-best-repeat must be > 0", file=sys.stderr)
+        return 2
     if args.include_j2k_multicpu and args.j2k_multicpu_threads < -1:
         print("--j2k-multicpu-threads must be >= -1", file=sys.stderr)
         return 2
@@ -937,6 +953,7 @@ def main(argv: list[str]) -> int:
     dicomsdl_mode = "decode_into" if args.reuse_output else args.dicomsdl_mode
     dicomsdl_htj2k_decoder = args.dicomsdl_htj2k_decoder
     pydicom_mode = "reuse_output" if args.reuse_output_pydicom else args.pydicom_mode
+    raw_best_repeat = args.raw_best_repeat if args.raw_best_repeat is not None else args.repeat
 
     if args.reuse_output and "dicomsdl" not in selected_backends:
         print("--reuse-output requires backend=dicomsdl or backend=both", file=sys.stderr)
@@ -1041,7 +1058,7 @@ def main(argv: list[str]) -> int:
                 _RAW_BEST_CODEC,
                 dicomsdl_inputs,
                 warmup=args.warmup,
-                repeat=args.repeat,
+                repeat=raw_best_repeat,
                 dicomsdl_mode=_RAW_BEST_DICOMSDL_MODE,
                 pydicom_mode=pydicom_mode,
                 verbose=args.verbose,
@@ -1054,7 +1071,7 @@ def main(argv: list[str]) -> int:
                 _RAW_BEST_CODEC,
                 pydicom_inputs,
                 warmup=args.warmup,
-                repeat=args.repeat,
+                repeat=raw_best_repeat,
                 dicomsdl_mode=dicomsdl_mode,
                 pydicom_mode=_RAW_BEST_PYDICOM_MODE,
                 verbose=args.verbose,
@@ -1072,6 +1089,11 @@ def main(argv: list[str]) -> int:
             )
 
         _print_comparison_table(comparison_rows)
+        if raw_best_stats_by_backend and raw_best_repeat != args.repeat:
+            print(
+                f"note: REF* raw best row used repeat={raw_best_repeat} "
+                f"(base --repeat={args.repeat})."
+            )
 
     j2k_multicpu_stats: list[CodecStats] = []
     j2k_multicpu_comparison: list[dict[str, float | int | str]] = []
@@ -1115,6 +1137,7 @@ def main(argv: list[str]) -> int:
             "wg04_root": str(root),
             "warmup": int(args.warmup),
             "repeat": int(args.repeat),
+            "raw_best_repeat": int(raw_best_repeat),
             "backend": args.backend,
             "reuse_output": bool(args.reuse_output),
             "reuse_output_pydicom": bool(args.reuse_output_pydicom),

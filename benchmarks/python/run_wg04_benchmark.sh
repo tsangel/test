@@ -8,6 +8,7 @@ PRINT_SCRIPT="${SCRIPT_DIR}/print_wg04_tables.py"
 
 WARMUP="${WARMUP:-1}"
 REPEAT="${REPEAT:-3}"
+RAW_BEST_REPEAT="${RAW_BEST_REPEAT:-}"
 WG04_ROOT="${WG04_ROOT:-}"
 PYTHON_BIN="${PYTHON_BIN:-}"
 USE_INSTALLED_DICOMSDL="${USE_INSTALLED_DICOMSDL:-0}"
@@ -15,6 +16,14 @@ USE_INSTALLED_DICOMSDL="${USE_INSTALLED_DICOMSDL:-0}"
 MAIN_JSON="${MAIN_JSON:-${ROOT_DIR}/build/wg04_pixel_decode_compare_r3_htj2k.json}"
 HTJ2K_OPENJPEG_JSON="${HTJ2K_OPENJPEG_JSON:-${ROOT_DIR}/build/wg04_htj2k_openjpeg_r3_toarray_postopt.json}"
 HTJ2K_OPENJPH_JSON="${HTJ2K_OPENJPH_JSON:-${ROOT_DIR}/build/wg04_htj2k_openjph_r3_toarray_postopt.json}"
+
+if [[ -z "${RAW_BEST_REPEAT}" ]]; then
+  if (( REPEAT < 100 )); then
+    RAW_BEST_REPEAT=100
+  else
+    RAW_BEST_REPEAT="${REPEAT}"
+  fi
+fi
 
 resolve_python() {
   if [[ -n "${PYTHON_BIN}" ]]; then
@@ -63,14 +72,14 @@ if [[ "${USE_INSTALLED_DICOMSDL}" == "1" ]]; then
 else
   echo "DICOMSDL source: workspace"
 fi
-echo "WARMUP/REPEAT: ${WARMUP}/${REPEAT}"
+echo "WARMUP/REPEAT/RAW_BEST_REPEAT: ${WARMUP}/${REPEAT}/${RAW_BEST_REPEAT}"
 if [[ -n "${WG04_ROOT}" ]]; then
   echo "WG04_ROOT: ${WG04_ROOT}"
 fi
 
 echo
 echo "[1/4] Full WG04 benchmark (dicomsdl + pydicom)"
-run_bench "${MAIN_JSON}" --backend both --dicomsdl-htj2k-decoder openjpeg
+run_bench "${MAIN_JSON}" --backend both --dicomsdl-htj2k-decoder openjpeg --raw-best-repeat "${RAW_BEST_REPEAT}"
 
 echo
 echo "[2/4] HTJ2K benchmark (openjpeg)"

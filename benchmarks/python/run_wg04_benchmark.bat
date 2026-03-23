@@ -10,6 +10,10 @@ set "PRINT_SCRIPT=%SCRIPT_DIR%\print_wg04_tables.py"
 
 if "%WARMUP%"=="" set "WARMUP=1"
 if "%REPEAT%"=="" set "REPEAT=3"
+if "%RAW_BEST_REPEAT%"=="" (
+  set "RAW_BEST_REPEAT=%REPEAT%"
+  if %REPEAT% LSS 100 set "RAW_BEST_REPEAT=100"
+)
 if "%USE_INSTALLED_DICOMSDL%"=="" set "USE_INSTALLED_DICOMSDL=0"
 
 if "%MAIN_JSON%"=="" set "MAIN_JSON=%ROOT_DIR%\build\wg04_pixel_decode_compare_r3_htj2k.json"
@@ -43,15 +47,15 @@ if defined WG04_ROOT (
 
 echo Using Python: %PYTHON_BIN%
 echo DICOMSDL source: %DICOMSDL_IMPORT_SOURCE%
-echo WARMUP/REPEAT: %WARMUP%/%REPEAT%
+echo WARMUP/REPEAT/RAW_BEST_REPEAT: %WARMUP%/%REPEAT%/%RAW_BEST_REPEAT%
 if defined WG04_ROOT echo WG04_ROOT: %WG04_ROOT%
 
 echo.
 echo [1/4] Full WG04 benchmark ^(dicomsdl + pydicom^)
 if defined WG04_ROOT (
-  "%PYTHON_BIN%" "%BENCH_SCRIPT%" "%ROOT_ARG%" --backend both --dicomsdl-htj2k-decoder openjpeg --warmup %WARMUP% --repeat %REPEAT% --json "%MAIN_JSON%"
+  "%PYTHON_BIN%" "%BENCH_SCRIPT%" "%ROOT_ARG%" --backend both --dicomsdl-htj2k-decoder openjpeg --warmup %WARMUP% --repeat %REPEAT% --raw-best-repeat %RAW_BEST_REPEAT% --json "%MAIN_JSON%"
 ) else (
-  "%PYTHON_BIN%" "%BENCH_SCRIPT%" --backend both --dicomsdl-htj2k-decoder openjpeg --warmup %WARMUP% --repeat %REPEAT% --json "%MAIN_JSON%"
+  "%PYTHON_BIN%" "%BENCH_SCRIPT%" --backend both --dicomsdl-htj2k-decoder openjpeg --warmup %WARMUP% --repeat %REPEAT% --raw-best-repeat %RAW_BEST_REPEAT% --json "%MAIN_JSON%"
 )
 if errorlevel 1 exit /b 1
 
