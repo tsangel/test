@@ -2429,8 +2429,16 @@ public:
 	/// Preferred map-style access by tag. Missing lookups return a falsey DataElement (VR::None).
 	DataElement& operator[](Tag tag);
 
+	/// Preferred map-style access by dotted tag-path or keyword string.
+	/// Missing lookups return a falsey DataElement (VR::None).
+	DataElement& operator[](std::string_view tag_path);
+
 	/// Preferred const map-style access by tag. Missing lookups return a falsey DataElement (VR::None).
 	const DataElement& operator[](Tag tag) const;
+
+	/// Preferred const map-style access by dotted tag-path or keyword string.
+	/// Missing lookups return a falsey DataElement (VR::None).
+	const DataElement& operator[](std::string_view tag_path) const;
 
 	/// Print elements to stdout (debug).
 	void dump_elements() const;
@@ -2675,6 +2683,8 @@ public:
 	const DataElement& get_dataelement(Tag tag) const;
 	DataElement& get_dataelement(std::string_view tag_path);
 	const DataElement& get_dataelement(std::string_view tag_path) const;
+	void ensure_loaded(Tag tag);
+	void ensure_loaded(Tag tag) const;
 	template <typename T>
 	[[nodiscard]] std::optional<T> get_value(Tag tag) const;
 	template <typename T>
@@ -2684,7 +2694,9 @@ public:
 	template <typename T>
 	[[nodiscard]] T get_value(std::string_view tag_path, T default_value) const;
 	DataElement& operator[](Tag tag);
+	DataElement& operator[](std::string_view tag_path);
 	const DataElement& operator[](Tag tag) const;
+	const DataElement& operator[](std::string_view tag_path) const;
 	/// One-shot typed assignment helpers.
 	/// On failure these return false and leave the DicomFile/root DataSet valid, but the
 	/// destination element state is unspecified. Callers that need rollback semantics

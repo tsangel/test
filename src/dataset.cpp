@@ -958,8 +958,16 @@ DataElement& DataSet::operator[](Tag tag) {
 	return get_dataelement(tag);
 }
 
+DataElement& DataSet::operator[](std::string_view tag_path) {
+	return get_dataelement(tag_path);
+}
+
 const DataElement& DataSet::operator[](Tag tag) const {
 	return get_dataelement(tag);
+}
+
+const DataElement& DataSet::operator[](std::string_view tag_path) const {
+	return get_dataelement(tag_path);
 }
 
 void DataSet::remove_dataelement_nocheck(Tag tag) {

@@ -615,6 +615,54 @@ class DicomFile:
         write_file_meta: bool = ...,
         keep_existing_meta: bool = ...,
     ) -> None: ...
+    @overload
+    def write_with_transfer_syntax(
+        self,
+        path: str | os.PathLike[str],
+        transfer_syntax: Uid,
+        /,
+        *,
+        options: object = ...,
+        include_preamble: bool = ...,
+        write_file_meta: bool = ...,
+        keep_existing_meta: bool = ...,
+    ) -> None: ...
+    @overload
+    def write_with_transfer_syntax(
+        self,
+        path: str | os.PathLike[str],
+        transfer_syntax: str,
+        /,
+        *,
+        options: object = ...,
+        include_preamble: bool = ...,
+        write_file_meta: bool = ...,
+        keep_existing_meta: bool = ...,
+    ) -> None: ...
+    @overload
+    def write_with_transfer_syntax(
+        self,
+        path: str | os.PathLike[str],
+        transfer_syntax: Uid,
+        /,
+        *,
+        encoder_context: EncoderContext,
+        include_preamble: bool = ...,
+        write_file_meta: bool = ...,
+        keep_existing_meta: bool = ...,
+    ) -> None: ...
+    @overload
+    def write_with_transfer_syntax(
+        self,
+        path: str | os.PathLike[str],
+        transfer_syntax: str,
+        /,
+        *,
+        encoder_context: EncoderContext,
+        include_preamble: bool = ...,
+        write_file_meta: bool = ...,
+        keep_existing_meta: bool = ...,
+    ) -> None: ...
     def write_bytes(
         self,
         *,
@@ -664,6 +712,7 @@ class DicomFile:
     def ensure_dataelement(
         self, tag: Tag | int | str, vr: VR | None = ..., /
     ) -> DataElement: ...
+    def ensure_loaded(self, tag: Tag | int | str, /) -> None: ...
     def get_value(self, key: Tag | int | str, /, default: Any | None = ...) -> Any: ...
     @overload
     def set_value(self, key: Tag | int | str, value: Any | None, /) -> bool: ...
@@ -719,6 +768,7 @@ class DataSet:
     def ensure_dataelement(
         self, tag: Tag | int | str, vr: VR | None = ..., /
     ) -> DataElement: ...
+    def ensure_loaded(self, tag: Tag | int | str, /) -> None: ...
     def get_value(self, key: Tag | int | str, /, default: Any | None = ...) -> Any: ...
     @overload
     def set_value(self, key: Tag | int | str, value: Any | None, /) -> bool: ...

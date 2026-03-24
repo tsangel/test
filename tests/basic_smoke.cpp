@@ -86,20 +86,30 @@ int main() {
 		const auto log_path = std::filesystem::temp_directory_path() / "dicomsdl_basic_smoke.log";
 		const auto reporter_path = log_path.parent_path() / "." / log_path.filename();
 		std::filesystem::remove(log_path);
-		auto reporter = std::make_shared<dicom::diag::FileReporter>(reporter_path);
-		dicom::diag::set_thread_reporter(reporter);
-		dicom::diag::warn("basic-smoke-file-reporter");
-		dicom::diag::set_thread_reporter(nullptr);
-
-		std::ifstream log_file(log_path);
 		std::string line;
-		if (!std::getline(log_file, line)) {
-			fail("FileReporter should append a log line");
+		{
+			auto reporter = std::make_shared<dicom::diag::FileReporter>(reporter_path);
+			dicom::diag::set_thread_reporter(reporter);
+			dicom::diag::warn("basic-smoke-file-reporter");
+			dicom::diag::set_thread_reporter(nullptr);
+		}
+		{
+			std::ifstream log_file(log_path);
+			if (!log_file.is_open()) {
+				fail("FileReporter log file should open for reading");
+			}
+			if (!std::getline(log_file, line)) {
+				fail("FileReporter should append a log line");
+			}
 		}
 		if (line.find("basic-smoke-file-reporter") == std::string::npos) {
 			fail("FileReporter log line mismatch");
 		}
-		std::filesystem::remove(log_path);
+		std::error_code remove_error;
+		const bool removed = std::filesystem::remove(log_path, remove_error);
+		if (!removed || remove_error) {
+			fail("FileReporter cleanup should release the log file before removal");
+		}
 	}
 
 	if (!dicom::uid::is_valid_uid_text_strict(
@@ -335,6 +345,11 @@ int main() {
 			if (!nested_uid || *nested_uid != "1.2.3.4") {
 				fail("DataSet::get_value(tag_path) should read nested leaf elements after assignment");
 			}
+			const auto nested_uid_via_index =
+			    ds["ReferencedStudySequence.0.ReferencedSOPInstanceUID"].to_string_view();
+			if (!nested_uid_via_index || *nested_uid_via_index != std::string_view("1.2.3.4")) {
+				fail("DataSet::operator[](tag_path) should read nested leaf elements");
+			}
 			auto& reset_leaf = ds.add_dataelement(
 			    "ReferencedStudySequence.0.ReferencedSOPInstanceUID", dicom::VR::LO);
 			if (&reset_leaf != &ensured || reset_leaf.vr() != dicom::VR::LO) {
@@ -363,6 +378,9 @@ int main() {
 			if (nested_columns.is_missing() || nested_columns.vr() != dicom::VR::US) {
 				fail("Nested ensure_dataelement should create the requested leaf inside the new item");
 			}
+			if (ds["Rows.0.Columns"].vr() != dicom::VR::US) {
+				fail("DataSet::operator[](tag_path) should resolve nested keyword paths");
+			}
 		}
 		{
 			const auto fixture_dir = std::filesystem::path(__FILE__).parent_path();
@@ -376,6 +394,11 @@ int main() {
 			}
 			if (partial_read->get_value<long>("Rows"_tag).has_value()) {
 				fail("get_value should not implicitly continue partial loading");
+			}
+			const auto& partial_read_const = *partial_read;
+			partial_read_const.ensure_loaded("Rows"_tag);
+			if (!partial_read_const.get_value<long>("Rows"_tag).has_value()) {
+				fail("DicomFile::ensure_loaded should forward to the root dataset frontier");
 			}
 
 			auto partial_set = read_file(fixture_path, opts);
@@ -558,6 +581,12 @@ int main() {
 			auto rows = df.get_value<long>("Rows"_tag);
 			if (!rows || *rows != 1024L) {
 				fail("DicomFile::get_value<long> should forward to the root dataset");
+			}
+			if (df["Rows"].to_long().value_or(0) != 1024L) {
+				fail("DicomFile::operator[](tag_path) should forward string lookups to the root dataset");
+			}
+			if (df["Columns"].vr() != dicom::VR::US) {
+				fail("DicomFile::operator[](tag_path) should resolve keyword strings");
 			}
 		}
 		{

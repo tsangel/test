@@ -1524,12 +1524,28 @@ const DataElement& DicomFile::get_dataelement(std::string_view tag_path) const {
 	return root_dataset_.get_dataelement(tag_path);
 }
 
+void DicomFile::ensure_loaded(Tag tag) {
+	root_dataset_.ensure_loaded(tag);
+}
+
+void DicomFile::ensure_loaded(Tag tag) const {
+	root_dataset_.ensure_loaded(tag);
+}
+
 DataElement& DicomFile::operator[](Tag tag) {
 	return root_dataset_[tag];
 }
 
+DataElement& DicomFile::operator[](std::string_view tag_path) {
+	return root_dataset_[tag_path];
+}
+
 const DataElement& DicomFile::operator[](Tag tag) const {
 	return root_dataset_[tag];
+}
+
+const DataElement& DicomFile::operator[](std::string_view tag_path) const {
+	return root_dataset_[tag_path];
 }
 
 DicomFile::iterator DicomFile::begin() {

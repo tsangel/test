@@ -1227,6 +1227,36 @@ void set_transfer_syntax_with_options(
 	self.set_transfer_syntax(transfer_syntax, text_options.span());
 }
 
+void write_with_transfer_syntax_with_options(DicomFile& self, nb::handle path,
+    Uid transfer_syntax, nb::handle options, bool include_preamble,
+    bool write_file_meta, bool keep_existing_meta) {
+	dicom::WriteOptions write_options;
+	write_options.include_preamble = include_preamble;
+	write_options.write_file_meta = write_file_meta;
+	write_options.keep_existing_meta = keep_existing_meta;
+
+	const auto output_path = python_path_to_string(path, "path");
+	const auto text_options =
+	    parse_encoder_options_to_text_storage(options, transfer_syntax);
+	if (text_options.auto_mode) {
+		self.write_with_transfer_syntax(output_path, transfer_syntax, write_options);
+		return;
+	}
+	self.write_with_transfer_syntax(
+	    output_path, transfer_syntax, text_options.span(), write_options);
+}
+
+void write_with_transfer_syntax_with_encoder_context(DicomFile& self, nb::handle path,
+    Uid transfer_syntax, const EncoderContext& encoder_context, bool include_preamble,
+    bool write_file_meta, bool keep_existing_meta) {
+	dicom::WriteOptions write_options;
+	write_options.include_preamble = include_preamble;
+	write_options.write_file_meta = write_file_meta;
+	write_options.keep_existing_meta = keep_existing_meta;
+	self.write_with_transfer_syntax(python_path_to_string(path, "path"),
+	    transfer_syntax, encoder_context, write_options);
+}
+
 void set_pixel_data_with_options(DicomFile& self, Uid transfer_syntax,
     nb::handle source_obj, nb::handle options) {
 	PyReadOnlyBufferView source_view(source_obj);
@@ -3489,6 +3519,13 @@ NB_MODULE(_dicomsdl, m) {
 		    "is guaranteed. "
 		    "On partially loaded file-backed datasets, unread future tags raise instead of "
 		    "mutating past the current load frontier.")
+		.def("ensure_loaded",
+		    [](DataSet& self, nb::handle key) {
+			    self.ensure_loaded(dataset_assignment_key_to_tag(key));
+		    },
+		    nb::arg("tag"),
+		    "Advance partial loading through the requested Tag, packed int, or keyword "
+		    "string frontier. Nested tag-path strings are not supported.")
 		.def("remove_dataelement",
 		    [](DataSet& self, nb::handle key) {
 		        self.remove_dataelement(dataset_assignment_key_to_tag(key));
@@ -4190,6 +4227,13 @@ NB_MODULE(_dicomsdl, m) {
 		    "existing element VR, the existing element is reset in place so the requested VR "
 		    "is guaranteed. On partially loaded file-backed datasets, unread future tags raise "
 		    "instead of mutating past the current load frontier.")
+		.def("ensure_loaded",
+		    [](DicomFile& self, nb::handle key) {
+			    self.ensure_loaded(dataset_assignment_key_to_tag(key));
+		    },
+		    nb::arg("tag"),
+		    "Advance partial loading through the requested Tag, packed int, or keyword "
+		    "string frontier of the root DataSet. Nested tag-path strings are not supported.")
 		.def("remove_dataelement",
 		    [](DicomFile& self, nb::handle key) {
 		        self.remove_dataelement(dataset_assignment_key_to_tag(key));
@@ -4419,6 +4463,74 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::arg("write_file_meta") = true,
 		    nb::arg("keep_existing_meta") = true,
 		    "Write this DicomFile to `path` using the current dataset state.")
+		.def("write_with_transfer_syntax",
+		    [](DicomFile& self, nb::handle path, const Uid& transfer_syntax,
+		        nb::handle options, bool include_preamble, bool write_file_meta,
+		        bool keep_existing_meta) {
+			    write_with_transfer_syntax_with_options(self, path, transfer_syntax,
+			        options, include_preamble, write_file_meta, keep_existing_meta);
+		    },
+		    nb::arg("path"),
+		    nb::arg("transfer_syntax"),
+		    nb::kw_only(),
+		    nb::arg("options") = nb::none(),
+		    nb::arg("include_preamble") = true,
+		    nb::arg("write_file_meta") = true,
+		    nb::arg("keep_existing_meta") = true,
+		    "Write this DicomFile to `path` using the requested transfer syntax without "
+		    "mutating the source object.")
+		.def("write_with_transfer_syntax",
+		    [](DicomFile& self, nb::handle path, const std::string& transfer_syntax_text,
+		        nb::handle options, bool include_preamble, bool write_file_meta,
+		        bool keep_existing_meta) {
+			    write_with_transfer_syntax_with_options(self, path,
+			        parse_transfer_syntax_text_or_throw(transfer_syntax_text), options,
+			        include_preamble, write_file_meta, keep_existing_meta);
+		    },
+		    nb::arg("path"),
+		    nb::arg("transfer_syntax"),
+		    nb::kw_only(),
+		    nb::arg("options") = nb::none(),
+		    nb::arg("include_preamble") = true,
+		    nb::arg("write_file_meta") = true,
+		    nb::arg("keep_existing_meta") = true,
+		    "Write this DicomFile to `path` using transfer syntax text without mutating "
+		    "the source object.")
+		.def("write_with_transfer_syntax",
+		    [](DicomFile& self, nb::handle path, const Uid& transfer_syntax,
+		        const EncoderContext& encoder_context, bool include_preamble,
+		        bool write_file_meta, bool keep_existing_meta) {
+			    write_with_transfer_syntax_with_encoder_context(self, path, transfer_syntax,
+			        encoder_context, include_preamble, write_file_meta,
+			        keep_existing_meta);
+		    },
+		    nb::arg("path"),
+		    nb::arg("transfer_syntax"),
+		    nb::kw_only(),
+		    nb::arg("encoder_context"),
+		    nb::arg("include_preamble") = true,
+		    nb::arg("write_file_meta") = true,
+		    nb::arg("keep_existing_meta") = true,
+		    "Write this DicomFile to `path` using the requested transfer syntax and a "
+		    "preconfigured EncoderContext without mutating the source object.")
+		.def("write_with_transfer_syntax",
+		    [](DicomFile& self, nb::handle path, const std::string& transfer_syntax_text,
+		        const EncoderContext& encoder_context, bool include_preamble,
+		        bool write_file_meta, bool keep_existing_meta) {
+			    write_with_transfer_syntax_with_encoder_context(self, path,
+			        parse_transfer_syntax_text_or_throw(transfer_syntax_text),
+			        encoder_context, include_preamble, write_file_meta,
+			        keep_existing_meta);
+		    },
+		    nb::arg("path"),
+		    nb::arg("transfer_syntax"),
+		    nb::kw_only(),
+		    nb::arg("encoder_context"),
+		    nb::arg("include_preamble") = true,
+		    nb::arg("write_file_meta") = true,
+		    nb::arg("keep_existing_meta") = true,
+		    "Write this DicomFile to `path` using transfer syntax text and a "
+		    "preconfigured EncoderContext without mutating the source object.")
 		.def("write_bytes",
 		    [](DicomFile& self, bool include_preamble, bool write_file_meta,
 		        bool keep_existing_meta) {

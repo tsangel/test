@@ -365,6 +365,21 @@ def test_partial_load_set_value_add_and_ensure_fail_beyond_frontier():
 		partial_ensure.ensure_dataelement("Rows", dicom.VR.US)
 
 
+def test_partial_load_ensure_loaded_advances_frontier_for_file_and_dataset():
+	expected = dicom.read_file(_test_file())
+	df = dicom.read_file(_test_file(), load_until=dicom.Tag("StudyTime"))
+
+	assert df.get_value("Rows") is None
+	df.ensure_loaded("Rows")
+	assert df.get_value("Rows") == expected.get_value("Rows")
+	assert df["Rows"].value == expected["Rows"].value
+
+	assert df.get_value("Columns") is None
+	df.dataset.ensure_loaded(dicom.Tag("Columns"))
+	assert df.get_value("Columns") == expected.get_value("Columns")
+	assert df.dataset["Columns"].value == expected.dataset["Columns"].value
+
+
 def test_attribute_assignment_preserves_dicom_errors():
 	ds = dicom.DataSet()
 	with pytest.raises((RuntimeError, ValueError)) as excinfo:
@@ -419,8 +434,10 @@ def test_nested_path_add_ensure_and_set_value():
 	assert reset_leaf.vr == dicom.VR.LO
 
 	ds.add_dataelement(dicom.Tag("Rows"), dicom.VR.US)
-	with pytest.raises(Exception):
-		ds.ensure_dataelement("Rows.0.Columns", dicom.VR.US)
+	nested_under_existing = ds.ensure_dataelement("Rows.0.Columns", dicom.VR.US)
+	assert nested_under_existing
+	assert nested_under_existing.vr == dicom.VR.US
+	assert ds["Rows"].is_sequence
 
 
 def test_dicomfile_dir_includes_dataset_members():
@@ -531,6 +548,37 @@ def test_write_roundtrip_sequence_and_pixel(tmp_path):
 	from_file = dicom.read_file(out_path)
 	assert from_file.get_dataelement("ReferencedStudySequence").is_sequence
 	assert from_file.get_dataelement("PixelData").is_pixel_sequence
+
+
+def test_write_with_transfer_syntax_roundtrip_without_mutating_source(tmp_path):
+	supported = {
+		uid.keyword or uid.value for uid in dicom.transfer_syntax_uids_encode_supported()
+	}
+	if "RLELossless" not in supported:
+		pytest.skip("RLELossless encoder is not available in this build")
+
+	df = dicom.read_file(_test_file())
+	baseline_ts = df.transfer_syntax_uid.keyword or df.transfer_syntax_uid.value
+	baseline_frame = df.pixel_data(0)
+
+	out_path = tmp_path / "write_with_transfer_syntax_rle.dcm"
+	df.write_with_transfer_syntax(out_path, "RLELossless", options="rle")
+
+	roundtrip = dicom.read_file(out_path)
+	assert roundtrip.transfer_syntax_uid.keyword == "RLELossless"
+	assert roundtrip.get_dataelement("PixelData").is_pixel_sequence
+	assert roundtrip.pixel_data(0) == baseline_frame
+	assert (df.transfer_syntax_uid.keyword or df.transfer_syntax_uid.value) == baseline_ts
+	assert df.pixel_data(0) == baseline_frame
+
+	ctx_path = tmp_path / "write_with_transfer_syntax_rle_ctx.dcm"
+	ctx = dicom.create_encoder_context("RLELossless")
+	df.write_with_transfer_syntax(ctx_path, "RLELossless", encoder_context=ctx)
+
+	roundtrip_ctx = dicom.read_file(ctx_path)
+	assert roundtrip_ctx.transfer_syntax_uid.keyword == "RLELossless"
+	assert roundtrip_ctx.get_dataelement("PixelData").is_pixel_sequence
+	assert roundtrip_ctx.pixel_data(0) == baseline_frame
 
 
 def test_binary_memoryviews_keep_dataset_owner_alive():
