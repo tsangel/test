@@ -2,6 +2,11 @@
 
 Minimal DICOM file wrapper with optional Python bindings.
 
+Documentation language entry points:
+[English](README.md) | [Korean](README.ko.md) | [Japanese](README.ja.md) | [Simplified Chinese](README.zh-CN.md)
+
+English is the source of truth for repository docs. The Sphinx docs are stored as per-language source trees under `docs/en`, `docs/ko`, `docs/ja`, and `docs/zh-cn`; see [docs/en/developer/translation_workflow.md](docs/en/developer/translation_workflow.md).
+
 ## Repository Setup
 
 Dependencies are resolved by CMake `FetchContent` during configure.

@@ -1,0 +1,61 @@
+.doc-page-meta {
+  margin: 0 0 1.25rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--color-background-border);
+  border-radius: 0.75rem;
+  background: var(--color-background-secondary);
+  font-size: 0.95rem;
+}
+
+.doc-language-switcher,
+.doc-translation-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+.doc-translation-status {
+  margin-top: 0.4rem;
+}
+
+.doc-meta-label {
+  font-weight: 700;
+  color: var(--color-foreground-secondary);
+  min-width: 4rem;
+}
+
+.doc-meta-links,
+.doc-status-message {
+  color: var(--color-foreground-primary);
+}
+
+.doc-meta-links a {
+  text-decoration: none;
+}
+
+.doc-meta-links a:hover {
+  text-decoration: underline;
+}
+
+.doc-meta-current,
+.doc-status-title {
+  font-weight: 700;
+}
+
+.doc-meta-sep {
+  color: var(--color-foreground-border);
+  margin: 0 0.15rem;
+}
+
+.doc-translation-status-pending .doc-status-title {
+  color: #b45309;
+}
+
+.doc-translation-status-source .doc-status-title {
+  color: #1d4ed8;
+}
+
+.doc-translation-status-localized .doc-status-title {
+  color: #047857;
+}
