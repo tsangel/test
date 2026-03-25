@@ -144,7 +144,7 @@ Behavioral changes that matter when reading old benchmark tables:
   `add_dataelement()`, and `ensure_dataelement()` do not silently load future
   tags. Access beyond `last_tag_loaded_` raises instead of mutating unread
   tail state.
-- DICOM assignment errors raised from Python attribute sugar are no longer
+- DICOM assignment errors raised from Python attribute assignment convenience access are no longer
   swallowed and re-labeled as generic `AttributeError`.
 - Binary `memoryview` results returned from `.value` / `get_value()` now keep
   the owning object alive, so the Python side does not end up with an

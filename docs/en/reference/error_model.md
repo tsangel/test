@@ -22,7 +22,7 @@ Use cases:
 - Pixel decode / encode failures
 - Boundary-level errors where dicomsdl attaches DICOM-specific context such as file path, transfer syntax, frame index, stage, or reason
 
-Typical message shape:
+Typical message format:
 
 ```text
 operation file=<...> ts=<...> frame=<...> stage=<...> reason=<...>
@@ -32,7 +32,7 @@ Not every field is present in every message, but `reason=` should always be pres
 
 ### `std::invalid_argument`
 
-Used for invalid inputs, malformed configuration, or contract violations in low-level helpers and value types.
+Used for invalid inputs, malformed configuration, or argument/precondition violations in low-level helpers and value types.
 
 Common examples:
 
@@ -95,7 +95,7 @@ try {
 
 If your application only uses high-level read / write / decode / encode entrypoints, you may choose to catch only `dicom::diag::DicomException` and let unexpected standard exceptions propagate as bugs or infrastructure failures.
 
-If your application uses low-level layout, span, stream, or transform utilities directly, be prepared for standard exceptions as part of the contract.
+If your application uses low-level layout, span, stream, or transform utilities directly, be prepared for standard exceptions as part of their normal API behavior.
 
 ## Stability expectations
 

@@ -1,10 +1,131 @@
+@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Source+Sans+3:wght@400;500;600;700&display=swap");
+
+:root {
+  --doc-font-sans: "Source Sans 3", "SF Pro Text", "SF Pro Display",
+    "Segoe UI Variable Text", "Segoe UI", "Noto Sans", "Helvetica Neue",
+    sans-serif;
+  --doc-font-headings: "Source Sans 3", "SF Pro Display",
+    "Segoe UI Variable Display", "Segoe UI", "Noto Sans",
+    "Helvetica Neue", sans-serif;
+  --doc-font-mono: "JetBrains Mono", "SF Mono", "Cascadia Code",
+    "IBM Plex Mono", "Menlo", "Consolas", monospace;
+  --font-stack: var(--doc-font-sans);
+  --font-stack--monospace: var(--doc-font-mono);
+}
+
+html {
+  font-size: 16px;
+}
+
+body {
+  font-family: var(--doc-font-sans);
+  line-height: 1.8;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.content {
+  font-size: 1rem;
+}
+
+.content h1,
+.content h2,
+.content h3,
+.content h4,
+.content h5,
+.content h6 {
+  font-family: var(--doc-font-headings);
+  line-height: 1.2;
+  letter-spacing: -0.014em;
+  font-weight: 720;
+}
+
+.content h1 {
+  font-size: 2.2rem;
+  margin-bottom: 0.9rem;
+}
+
+.content h2 {
+  font-size: 1.56rem;
+  margin-top: 2.35rem;
+  margin-bottom: 0.72rem;
+}
+
+.content h3 {
+  font-size: 1.24rem;
+  margin-bottom: 0.48rem;
+}
+
+.content p,
+.content li,
+.content dt,
+.content dd {
+  font-size: 1rem;
+}
+
+.content li + li {
+  margin-top: 0.22rem;
+}
+
+.content code,
+.content kbd,
+.content samp,
+.content pre,
+.highlight pre,
+code.literal {
+  font-family: var(--doc-font-mono);
+  font-variant-ligatures: none;
+}
+
+.highlight pre,
+.content pre {
+  font-size: 0.95rem;
+  line-height: 1.68;
+  padding: 0.82rem 0.95rem;
+  border: 1px solid var(--color-background-border);
+  border-radius: 0.72rem;
+}
+
+.content code,
+code.literal {
+  font-size: 0.88em;
+  padding: 0.1em 0.28em;
+  border-radius: 0.28rem;
+}
+
+.sidebar-brand-text {
+  font-family: var(--doc-font-headings);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.sidebar-brand-text {
+  font-size: 0.96rem;
+}
+
+.sidebar-tree {
+  font-size: 0.95rem;
+}
+
+.toc-tree,
+.toc-title {
+  font-size: 0.93rem;
+}
+
+.content table.docutils,
+.content table.docutils td,
+.content table.docutils th {
+  font-size: 0.95rem;
+}
+
 .doc-page-meta {
   margin: 0 0 1.25rem;
-  padding: 0.85rem 1rem;
+  padding: 0.82rem 0.95rem;
   border: 1px solid var(--color-background-border);
-  border-radius: 0.75rem;
+  border-radius: 0.72rem;
   background: var(--color-background-secondary);
-  font-size: 0.95rem;
+  font-size: 0.93rem;
 }
 
 .doc-language-switcher,

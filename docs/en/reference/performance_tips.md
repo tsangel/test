@@ -2,10 +2,10 @@
 
 This page collects the stable public habits that usually matter most for dicomsdl performance.
 
-## Use the shortest API that returns what you need
+## Use the API that returns exactly what you need
 
-- typed value only: use `get_value(...)`
-- value plus metadata: use `get_dataelement(...)` or `ds[...]`
+- typed read only: use `get_value(...)`
+- typed read plus metadata: use `get_dataelement(...)` or `ds[...]`
 - raw bytes: use `value_span()` when a view is enough
 
 ## Avoid unnecessary full traversal
@@ -16,7 +16,7 @@ This page collects the stable public habits that usually matter most for dicomsd
 ## Reuse decode plans and output buffers
 
 - Build a decode plan once for a stable pixel layout.
-- Reuse a preallocated destination with `decode_into(...)` when decoding many frames of the same shape.
+- Reuse a preallocated destination with `decode_into(...)` when decoding many frames with the same decoded array dimensions.
 - Recompute the plan after changing transfer syntax, rows, columns, samples per pixel, planar configuration, bit depth, or pixel data.
 
 ## Prefer streaming writes for large transcodes

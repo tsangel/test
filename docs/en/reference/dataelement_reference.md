@@ -5,7 +5,7 @@
 ## Core properties
 
 - identity and metadata: `tag`, `vr`, `length`, `offset`, `vm`
-- presence: `is_present()`, `is_missing()`, truthiness
+- presence: `is_present()`, `is_missing()`, boolean checks such as `if (elem)`
 - raw bytes: `value_span()`
 - nested payloads: `sequence` / `pixel_sequence` in Python, `sequence()` / `pixel_sequence()` in C++
 

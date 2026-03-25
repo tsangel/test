@@ -1,6 +1,6 @@
 # Pixel Decode
 
-Use `create_decode_plan()` together with `decode_into()` when you want a validated decode contract before decoding, need to allocate or reuse your own output buffer, need explicit decoded row or frame strides, or want one code path for both single-frame and multi-frame inputs. Use `pixel_buffer()` in C++ and `to_array()` in Python for the simplest paths that return a new decoded result.
+Use `create_decode_plan()` together with `decode_into()` when you want a validated decode layout before decoding, need to allocate or reuse your own output buffer, need explicit decoded row or frame strides, or want one code path for both single-frame and multi-frame inputs. Use `pixel_buffer()` in C++ and `to_array()` in Python for the simplest paths that return a new decoded result.
 
 ## Key Decode APIs
 
@@ -40,7 +40,7 @@ Use `create_decode_plan()` together with `decode_into()` when you want a validat
 auto file = dicom::read_file("single_frame.dcm");
 
 // The plan does not hold decoded pixels.
-// Instead, it validates the current file metadata and tells us what the
+// Instead, it validates the current file metadata and reports what the
 // decoded output must look like before we allocate any destination memory.
 const auto plan = file->create_decode_plan();
 
@@ -168,11 +168,11 @@ import numpy as np
 
 df = dicom.read_file("single_frame.dcm")
 
-# The plan tells us the decoded dtype and shape before any pixels are decoded.
+# The plan gives the decoded dtype and array shape before any pixels are decoded.
 # That is useful when the caller wants to allocate the destination array first.
 plan = df.create_decode_plan()
 
-# Ask the plan for the exact NumPy shape of one decoded frame.
+# Use the plan to get the exact NumPy array shape for one decoded frame.
 # Using the plan keeps this allocation in sync with the later decode_into() call.
 out = np.empty(plan.shape(frame=0), dtype=plan.dtype)
 
@@ -431,7 +431,7 @@ The C++ decode message usually includes `status=...`, `stage=...`, and `reason=.
 ## Notes
 
 - Even for single-frame inputs, `DecodePlan` is useful when you want to inspect the output layout before decoding or reuse a destination buffer across calls.
-- Treat `DecodePlan` as a validated output contract, not as a cache of decoded pixels.
+- Treat `DecodePlan` as a validated output layout, not as a cache of decoded pixels.
 - `DecodeOptions.row_stride` and `DecodeOptions.frame_stride` let you request explicit row and frame strides for decoded output. When either is non-zero, `alignment` is ignored.
 - Explicit decoded strides must still be large enough for the decoded row or frame payload and aligned to the decoded sample size.
 - If you mutate pixel-affecting metadata such as transfer syntax, rows, columns, samples per pixel, bits allocated, pixel representation, planar configuration, number of frames, or pixel data elements, do not reuse old decode layout assumptions.

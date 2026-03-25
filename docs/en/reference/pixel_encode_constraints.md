@@ -163,7 +163,7 @@ Additional JPEG lossy rule:
   - only integral `8/16-bit` inputs are supported
 - `pixel_representation` must be `0` or `1`
 - `target_psnr` / `target_bpp` must be `>= 0`
-- Lossy qstep is derived from options (or default path)
+- Lossy qstep is derived from the requested options or the built-in defaults
 - `threads` is validated at API level; current OpenJPH encode path does not consume it yet
 
 ### JPEG-XL (libjxl)
@@ -237,7 +237,7 @@ Current behavior:
 
 Current behavior:
 
-- seekable output (`std::ofstream`, `std::stringstream`, file-path overload):
+- seekable output (`std::ofstream`, `std::stringstream`, file-path variant):
   - encapsulated streaming write can backpatch `ExtendedOffsetTable` /
     `ExtendedOffsetTableLengths`
   - lossy encapsulated targets can backpatch `LossyImageCompressionRatio`
@@ -252,7 +252,7 @@ Benchmark/stress coverage:
 
 - `benchmarks/streaming_write_stress.cpp`
   - build with `-DDICOM_BUILD_BENCHMARKS=ON`
-  - default workload generates a synthetic large multi-frame multi-fragment
+  - the default benchmark setup generates a synthetic large multi-frame multi-fragment
     encapsulated-uncompressed source (`--fragments-per-frame 4`)
   - multi-frame single-fragment runs use `ExtendedOffsetTable`; multi-frame
     multi-fragment runs use a populated Basic Offset Table

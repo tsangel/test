@@ -10,11 +10,11 @@ Use `get_value()` for one-shot typed reads. Use `ds[...]` when you also need `ta
 
 ## Why does a missing element not always raise?
 
-dicomsdl intentionally keeps `DataElement` access non-throwing in many places so you can inspect truthiness and chain lookups safely.
+dicomsdl intentionally keeps `DataElement` access non-throwing in many places so you can test whether an element is present and chain lookups safely.
 
 ## Why do zero-length values look different from missing values?
 
-Because zero-length means "present but empty", while missing means the element is not there at all.
+Because zero-length means "present with empty stored content", while missing means the element is not there at all.
 
 ## Where should I look for nested sequence path rules?
 
@@ -22,4 +22,4 @@ See [Sequence and Paths](sequence_and_paths.md) and [Tag-path Lookup Semantics](
 
 ## Where should I look for pixel encode limits?
 
-See [Pixel Encode](pixel_encode.md) for the overview and [Pixel Encode Constraints](../reference/pixel_encode_constraints.md) for the exact contract.
+See [Pixel Encode](pixel_encode.md) for the overview and [Pixel Encode Constraints](../reference/pixel_encode_constraints.md) for the exact requirements.

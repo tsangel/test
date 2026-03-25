@@ -32,7 +32,7 @@ For a higher-level guide focused on `DicomFile`, `DataSet`, and `DataElement` ac
 - Use `dataset[tag_or_path].to_xxx().value_or(default)` when you are already working with a `DataElement`.
 - Use `if (auto& e = dataset[tag]; e)` only when element presence itself matters.
 - Use `get_dataelement(...)` when you want the same lookup as `dataset[tag_or_path]` but in named-method form.
-  It returns `DataElement&` and yields the same falsey element (`VR::None`) on miss.
+  It returns `DataElement&` and yields the same `VR::None` element that evaluates to `false` on miss.
 - `get_value(...)` does not implicitly continue partial loading; data elements that have not been parsed yet still behave as missing.
 - `set_value(...)` also does not implicitly continue partial loading; operations on data elements that have not been parsed yet raise.
 - `set_value(...)` returns `false` on encode/assignment failure. The `DataSet` remains valid,
@@ -119,7 +119,7 @@ bool nested_ok =
 - If the element is missing and `vr` is explicit, a new zero-length element is inserted with that VR.
 - If the element is missing and `vr` is omitted, standard tags resolve their dictionary VR, while
   unknown/private tags throw.
-- Dotted tag-path overloads create intermediate sequence elements/items as needed. When
+- Dotted tag-path forms create intermediate sequence elements/items as needed. When
   `ensure_dataelement(...)` has to materialize a nested path under an existing non-sequence
   intermediate element, it can reset that element to `SQ`.
 - `add_dataelement(...)` remains the always-replace API; `ensure_dataelement(...)` only resets

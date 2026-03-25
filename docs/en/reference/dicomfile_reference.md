@@ -36,7 +36,7 @@
 
 - The forwarding APIs act on the root dataset. Use `df.dataset` or `dataset()` when you want that fact to be explicit.
 - If you mutate pixel-affecting metadata or pixel payload, old decode plans and output assumptions are no longer reliable.
-- For large write-only transcodes, prefer `write_with_transfer_syntax(...)` over `set_transfer_syntax(...)` followed by `write_file(...)`. That path now exists in both C++ and Python for file output; C++ also provides stream overloads.
+- For large write-only transcodes, prefer `write_with_transfer_syntax(...)` over `set_transfer_syntax(...)` followed by `write_file(...)`. That path now exists in both C++ and Python for file output; C++ also provides `std::ostream` variants.
 - In Python, `has_error` and `error_message` are the file-level state you check after permissive reads that keep partial data.
 
 ## Related docs

@@ -4,9 +4,9 @@
 
 ## Core lookup APIs
 
-- `operator[]` / `__getitem__`: return a `DataElement`; keyword strings for a single tag and dotted tag paths are accepted where supported, and missing lookups return a falsey sentinel instead of throwing
+- `operator[]` / `__getitem__`: return a `DataElement`; keyword strings for a single tag and dotted tag paths are accepted where supported, and missing lookups return an object that evaluates to `False` instead of throwing
 - `get_dataelement(...)`: same `DataElement` lookup as `operator[]`, but in named-method form for tags, keywords, and dotted tag paths
-- `get_value(...)`: shortest typed value path when you do not need `DataElement` metadata
+- `get_value(...)`: one-shot typed read when you do not need `DataElement` metadata
 - `__contains__` in Python: presence test without fetching the element separately
 - iteration: `begin/end` in C++, `for elem in ds` in Python
 
@@ -20,7 +20,7 @@
 
 ## Path and sequence behavior
 
-- Flat lookups accept tags and keywords such as `Rows` or `(0010,0010)`.
+- Single-tag lookups accept tags and keywords such as `Rows` or `(0010,0010)`.
 - Nested lookups accept dotted tag paths such as `ReferencedStudySequence.0.ReferencedSOPInstanceUID`.
 - `ensure_dataelement(...)` and `set_value(...)` can materialize missing sequence items for dotted paths.
 - When `ensure_dataelement(...)` needs to materialize a dotted path under an existing non-sequence intermediate element, it can reset that intermediate element to `SQ`.

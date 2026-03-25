@@ -5,19 +5,19 @@ This page collects the failure-handling patterns that are spread across the focu
 - Which APIs throw or raise?
 - What should I do next when they fail?
 
-## Failure Shapes
+## Failure Types
 
 dicomsdl public APIs use three different failure styles:
 
 - Throw / raise
   - High-level C++ read, write, decode, encode, and dataset-wide charset mutation APIs usually fail with `dicom::diag::DicomException`.
-  - Python usually sees the same runtime failures as `RuntimeError`, with `TypeError`, `ValueError`, and `IndexError` used for binding-side contract validation.
+  - Python usually sees the same runtime failures as `RuntimeError`, with `TypeError`, `ValueError`, and `IndexError` used for binding-side argument validation.
 - Return-value failure
   - Some element-level charset APIs are normal return-value APIs instead of exception APIs. They report failure with `false`, `None`, or empty `optional`.
 - Partial success with recorded error state
   - `read_file(..., keep_on_error=True)` and `read_bytes(..., keep_on_error=True)` may still return a `DicomFile`, but the file is marked with `has_error` and `error_message`.
 
-## Catch Patterns
+## Exception Handling Patterns
 
 **C++**
 
@@ -27,7 +27,7 @@ try {
 } catch (const dicom::diag::DicomException& ex) {
     // user-facing DICOM, codec, or file-I/O failure
 } catch (const std::exception& ex) {
-    // lower-level contract or platform failure
+    // lower-level argument/usage or platform failure
 }
 ```
 
@@ -43,7 +43,7 @@ except TypeError as exc:
     # wrong argument type or non-buffer/path-like misuse
     ...
 except ValueError as exc:
-    # invalid text option, invalid buffer/layout request, malformed contract
+    # invalid text option, invalid buffer/layout request, malformed call
     ...
 except IndexError as exc:
     # frame or component index out of range
@@ -68,10 +68,10 @@ Use `keep_on_error=False` when any parse problem should reject the file immediat
 - Use this for crawlers, metadata indexing, triage tools, or repair tooling that can still benefit from early tags.
 - After every permissive read, check `has_error` and `error_message` before trusting the result.
 - If `has_error` is true, treat the object as partially read or tainted:
-  - use only the data you intentionally wanted to salvage
+  - use only the metadata you intentionally wanted to recover
   - do not continue blindly into pixel decode, pixel encode, or write-back flows
   - reload strictly after repair when you need a fully trustworthy object
-- `keep_on_error` is not a general "ignore all errors" switch. Path/open failures, invalid Python buffer contracts, and similar boundary errors still raise immediately.
+- `keep_on_error` is not a general "ignore all errors" switch. Path/open failures, invalid Python buffer arguments, and similar boundary errors still raise immediately.
 
 ### Examples
 
@@ -89,7 +89,7 @@ try {
     auto file = dicom::read_file("in.dcm", opts);
     if (file->has_error()) {
         std::cerr << "partial read: " << file->error_message() << '\n';
-        // Keep only the metadata you explicitly wanted to salvage.
+        // Keep only the metadata you explicitly wanted to recover.
         // Do not continue into decode/transcode as if this were a clean file.
     }
 } catch (const dicom::diag::DicomException& ex) {
@@ -127,9 +127,9 @@ The safest decode pattern is:
 
 1. create a `DecodePlan` up front
 2. allocate the destination from that plan
-3. reuse the same validated plan and destination contract across decode calls
+3. reuse the same validated plan and destination layout across decode calls
 
-When decode fails, assume one of three buckets first: bad caller contract, stale layout assumptions, or real backend/runtime decode failure.
+When decode fails, assume one of three buckets first: bad caller arguments, stale layout assumptions, or real backend/runtime decode failure.
 
 ### What to do when decode fails
 
@@ -140,7 +140,7 @@ When decode fails, assume one of three buckets first: bad caller contract, stale
 - If runtime decode fails:
   - log the message and treat it as a file/codec problem, not just a shape problem
 - In Python:
-  - `TypeError`, `ValueError`, and `IndexError` usually mean your call contract is wrong
+  - `TypeError`, `ValueError`, and `IndexError` usually mean your call arguments or requested layout are wrong
   - `RuntimeError` usually means the underlying decode path itself failed
 
 ### Throw / raise capable pixel decode APIs
@@ -203,7 +203,7 @@ That difference is important when you decide whether a failure is just "this one
   - remember that invalid `errors=` text still raises `ValueError` before the normal return-value path is reached
 - For `set_specific_charset()`:
   - use `strict` for validation or fail-fast cleanup
-  - use `replace_unicode_escape` when you want the transcode to finish while leaving visible `(U+XXXX)` markers
+  - use `replace_unicode_escape` when you want the transcode to finish while leaving visible `(U+XXXX)` replacement text
   - if the current dataset may already contain wrongly declared raw bytes, use the troubleshooting flow instead of treating normal transcode as declaration repair
 
 ### Throw / raise capable charset APIs
@@ -226,7 +226,7 @@ That difference is important when you decide whether a failure is just "this one
 
 - A malformed file should stop the workflow immediately
   - Use strict `read_file(...)` / `read_bytes(...)`
-- I want metadata salvage from malformed files
+- I want to recover metadata from malformed files
   - Use `keep_on_error=True`, then always inspect `has_error` and `error_message`
 - I want caller-managed decode buffers or explicit output strides
   - Use `create_decode_plan(...)` plus `decode_into(...)`

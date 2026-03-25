@@ -15,7 +15,7 @@ It covers how the main objects relate, how to spell tags, and the most important
 
 For the object model and DICOM mapping, see [Core Objects](core_objects.md).
 
-There is no Python-style attribute sugar in C++.
+C++ does not provide Python-style attribute convenience access.
 Tags, keywords, and dotted tag paths stay explicit.
 
 ### DicomFile and DataSet
@@ -54,11 +54,11 @@ const auto& patient_name2 = ds["PatientName"_tag];
 
 | API | Returns | Missing behavior | Intended use |
 | --- | --- | --- | --- |
-| `ds.get_value<long>("Rows"_tag)` | `std::optional<long>` | `std::nullopt` | typed value read where `std::nullopt` means missing |
-| `ds.get_value<long>("Rows"_tag, 0L)` | `long` | returns default | one-shot typed value read |
-| `ds["Rows"_tag]`, `ds["Rows"]`, `ds.get_dataelement("Rows")` | `DataElement&` | falsey sentinel (`VR::None`) | value + metadata access |
+| `ds.get_value<long>("Rows"_tag)` | `std::optional<long>` | `std::nullopt` | typed read where `std::nullopt` means missing |
+| `ds.get_value<long>("Rows"_tag, 0L)` | `long` | returns the supplied default value | one-shot typed read |
+| `ds["Rows"_tag]`, `ds["Rows"]`, `ds.get_dataelement("Rows")` | `DataElement&` | returns `VR::None` and evaluates to `false` | typed read plus metadata access |
 | `if (const auto& e = ds["Rows"_tag]; e)` | branch on presence | `false` on miss | presence-sensitive code |
-| `ds.ensure_loaded("(0028,FFFF)"_tag)` | `void` | throws on invalid use | explicitly continue a partial read to a later plain tag boundary |
+| `ds.ensure_loaded("(0028,FFFF)"_tag)` | `void` | throws on invalid use | explicitly continue a partial read to a later tag boundary |
 | `ds.ensure_dataelement("Rows"_tag, dicom::VR::US)` | `DataElement&` | returns existing or inserts | chaining-friendly ensure/create |
 | `ds.set_value("Rows"_tag, 512L)` | `bool` | `false` on encode/assignment failure | one-shot ensure + typed assignment |
 | `ds.add_dataelement("Rows"_tag, dicom::VR::US)` | `DataElement&` | create/replace | explicit leaf insertion |
@@ -67,21 +67,58 @@ const auto& patient_name2 = ds["PatientName"_tag];
 
 The user-defined literal suffix is `"_tag"` in lowercase, not `"_Tag"`.
 
-| Form | Example | Best when | Advantages | Tradeoffs |
-| --- | --- | --- | --- | --- |
-| keyword literal | `"Rows"_tag` | you are writing code against a known standard keyword | short, readable, compile-time checked, no runtime parse | only works with string literals known at compile time |
-| numeric tag literal | `"(0028,0010)"_tag` | the spec or another tool already refers to the numeric tag | unambiguous, compile-time checked, works in Tag-only APIs | noisier than a keyword, easier to mistype |
-| group/element constructor | `dicom::Tag(0x0028, 0x0010)` | group and element are already separate values | explicit, works with runtime values, no text parsing | more verbose than a keyword literal |
-| packed-value constructor | `dicom::Tag(0x00280010)` | the tag already exists as packed `0xGGGGEEEE` data | compact when integrating with generated tables or packed tag values | bare `0x00280010` is not accepted by `DataSet` APIs; wrap it in `Tag(...)` or `Tag::from_value(...)` |
-| runtime text parse | `dicom::Tag("Rows")`, `dicom::Tag("(0028,0010)")` | a keyword or numeric tag arrives as runtime text | accepts either keyword text or numeric tag text | runtime parse, can throw on invalid text |
-| string/path overload | `ds["Rows"]`, `ds.get_value<double>("00540016.0.00181074")`, `ds.set_value("PatientName", "Doe^Jane")`, `ds.ensure_dataelement("ReferencedStudySequence.0.ReferencedSOPInstanceUID", dicom::VR::UI)` | you want keyword lookup, dotted tag-path traversal, or one-shot nested read/write code | no explicit `Tag` construction, supports nested paths across `operator[]`, `get_dataelement(...)`, `get_value(...)`, `set_value(...)`, `ensure_dataelement(...)`, and `add_dataelement(...)` | string parsing happens at runtime |
+| Form | Example | Use first when |
+| --- | --- | --- |
+| keyword literal | `"Rows"_tag` | most standard tags in normal C++ code |
+| numeric tag literal | `"(0028,0010)"_tag` | the numeric tag spelling is the clearest form |
+| group/element constructor | `dicom::Tag(0x0028, 0x0010)` | group and element already exist as separate values |
+| packed-tag constructor | `dicom::Tag(0x00280010)` | the tag already exists as packed `0xGGGGEEEE` data |
+| runtime text parse | `dicom::Tag("Rows")`, `dicom::Tag("(0028,0010)")` | a keyword or numeric tag arrives as runtime text |
+| string/path form | `ds["Rows"]`, `ds.get_value<double>("00540016.0.00181074")` | you want a keyword lookup or one-shot nested read/write path |
+
+### `"Rows"_tag`
+
+- Use this first for most standard tags in everyday C++ code.
+- Advantages: short, readable, compile-time checked, no runtime parse.
+- Tradeoffs: only works with string literals known at compile time.
+
+### `"(0028,0010)"_tag`
+
+- Use this when the numeric tag spelling is more recognizable than the keyword.
+- Advantages: unambiguous, compile-time checked, works in Tag-only APIs.
+- Tradeoffs: more verbose than a keyword, easier to mistype.
+
+### `dicom::Tag(0x0028, 0x0010)`
+
+- Use this when group and element already exist as separate runtime values.
+- Advantages: explicit, works with runtime values, no text parsing.
+- Tradeoffs: more verbose than a keyword literal.
+
+### `dicom::Tag(0x00280010)`
+
+- Use this when the tag already exists as a packed `0xGGGGEEEE` tag value.
+- Advantages: compact when integrating with generated tables or packed tag values.
+- Tradeoffs: bare `0x00280010` is not accepted by `DataSet` APIs; wrap it in `Tag(...)` or `Tag::from_value(...)`.
+
+### `dicom::Tag("Rows")` or `dicom::Tag("(0028,0010)")`
+
+- Use this when a keyword or numeric tag arrives as runtime text.
+- Advantages: accepts either keyword text or numeric tag text.
+- Tradeoffs: parses at runtime and can throw on invalid text.
+
+### String/path forms
+
+- Use this when you want keyword lookup, dotted tag-path traversal, or one-shot nested read/write code.
+- Examples: `ds["Rows"]`, `ds.get_value<double>("00540016.0.00181074")`, `ds.set_value("PatientName", "Doe^Jane")`, `ds.ensure_dataelement("ReferencedStudySequence.0.ReferencedSOPInstanceUID", dicom::VR::UI)`.
+- Advantages: no explicit `Tag` construction, supports nested paths across `operator[]`, `get_dataelement(...)`, `get_value(...)`, `set_value(...)`, `ensure_dataelement(...)`, and `add_dataelement(...)`.
+- Tradeoffs: string parsing happens at runtime.
 
 Practical recommendation:
 
 - use `"Rows"_tag` for usual tag access in most C++ code
 - use `"(0028,0010)"_tag` when the numeric tag is the clearest spelling
 - use `dicom::Tag(...)` when the tag comes from runtime integers or packed values
-- use string overloads when you want a nested lookup or write in one step, for example `ds.get_value<double>("RadiopharmaceuticalInformationSequence.0.RadionuclideTotalDose")`, `ds.get_value<double>("00540016.0.00181074")`, `ds.set_value("ReferencedStudySequence.0.ReferencedSOPInstanceUID", "1.2.3")`, or `ds.ensure_dataelement("ReferencedStudySequence.0.ReferencedSOPInstanceUID", dicom::VR::UI)`
+- use string/path forms when you want a nested lookup or write in one step, for example `ds.get_value<double>("RadiopharmaceuticalInformationSequence.0.RadionuclideTotalDose")`, `ds.get_value<double>("00540016.0.00181074")`, `ds.set_value("ReferencedStudySequence.0.ReferencedSOPInstanceUID", "1.2.3")`, or `ds.ensure_dataelement("ReferencedStudySequence.0.ReferencedSOPInstanceUID", dicom::VR::UI)`
 
 ## Reading values
 
@@ -106,7 +143,7 @@ auto desc = ds.get_value<std::string_view>("StudyDescription"_tag);
 
 - `get_value<T>(tag)` returns `std::optional<T>`. Use this when you want to distinguish "missing" from "present with a real value" in the caller.
 - `get_value<T>(tag, default_value)` returns `T`. Use this when you want an inline fallback and do not need to distinguish an empty result from the fallback path.
-- The default-value overload is effectively `get_value<T>(...).value_or(default_value)`.
+- The default-value form is effectively `get_value<T>(...).value_or(default_value)`.
 - `get_value<std::string_view>(...)` is a zero-copy view. Keep the owning dataset/file alive while you use it.
 
 ### DataElement access: operator[]
@@ -134,7 +171,7 @@ Use `"_tag"` when you want compile-time spelling with no runtime parse.
 
 ### Presence checks
 
-Use truthiness on the returned `DataElement` when presence itself matters:
+Use a boolean check on the returned `DataElement` when element presence itself matters:
 
 ```cpp
 if (const auto& rows_elem = ds["Rows"_tag]; rows_elem) {
@@ -146,7 +183,7 @@ if (const auto& patient_name = ds.get_dataelement("PatientName"); patient_name) 
 }
 ```
 
-Missing lookups return a falsey sentinel with `VR::None` rather than throwing.
+Missing lookups return a `DataElement` with `VR::None` that evaluates to `false` rather than throwing.
 
 ### Same lookup in method form: get_dataelement(...)
 
@@ -174,7 +211,7 @@ long cols = ds.get_value<long>("Columns"_tag, 0L);
 `ensure_loaded(...)` takes a `Tag`, such as `"Rows"_tag`, `"(0028,FFFF)"_tag`, or `dicom::Tag(0x0028, 0x0010)`.
 It does not take keyword strings or dotted tag paths.
 
-### Value types and zero-length behavior
+### Return types and zero-length behavior
 
 The main typed read families are:
 
@@ -243,7 +280,7 @@ auto vr = elem.vr();
 auto length = elem.length();
 ```
 
-### Truthiness and missing sentinel
+### Boolean checks and missing-element objects
 
 ```cpp
 const auto& elem = ds["PatientName"_tag];
@@ -259,7 +296,7 @@ if (!missing && missing.is_missing()) {
 
 For zero-length present elements, `bool(elem)` is still `true`; use `elem.length() == 0` to detect them.
 
-### Value helpers
+### Typed read/write helpers
 
 - `to_long()`, `to_double()`, `to_tag()`, `to_uid_string()`
 - `to_string_view()`, `to_utf8_string()`, `to_utf8_strings()`
@@ -378,7 +415,7 @@ ds.remove_dataelement(dicom::Tag(0x0028, 0x0010));
 bool ok = ds.set_value(dicom::Tag(0x0009, 0x0030), dicom::VR::US, 16L);
 ```
 
-This overload is useful when the tag is private or when you want to override an existing
+This form is useful when the tag is private or when you want to override an existing
 non-sequence element VR before assigning a value.
 
 Rules:
@@ -386,7 +423,7 @@ Rules:
 - if the element is missing, the supplied VR is used to create it
 - if the element exists and already has that VR, the value is updated in place
 - if the element exists with a different non-`SQ`/non-`PX` VR, the binding may replace that VR and then assign the value
-- `VR::None`, `SQ`, and `PX` are not valid override targets for this overload
+- `VR::None`, `SQ`, and `PX` are not valid override targets for this form
 
 ### add_dataelement(...)
 
@@ -472,9 +509,9 @@ TAG	VR	LEN	VM	VALUE	KEYWORD
 
 ### Performance note
 
-- For usual plain-tag access in hot paths, prefer `"_tag"` literals or reused `dicom::Tag` objects over runtime text parsing.
+- For usual single-tag access in hot paths, prefer `"_tag"` literals or reused `dicom::Tag` objects over runtime text parsing.
 - Prefer `get_value<T>(tag, default)` when you only need the typed value and do not need `DataElement` metadata.
-- Use string/path overloads when they make nested access clearer. For repeated hot-loop lookups, cache the tag or split the traversal explicitly.
+- Use string/path forms when they make nested access clearer. For repeated hot-loop lookups, cache the tag or split the traversal explicitly.
 
 ### Runnable examples
 

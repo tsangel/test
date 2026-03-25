@@ -6,7 +6,7 @@ This page covers disk and memory input, partial loading, and the main output pat
 
 - `read_file(...)` and `read_bytes(...)` create a `DicomFile` and parse input up to `load_until` immediately.
 - `write_file(...)` and `write_bytes(...)` serialize a `DicomFile` object to a file or bytes.
-- `write_with_transfer_syntax(...)` is the output-oriented transcode path for writing directly to a file or stream with a different transfer syntax. This is often what you want when changing pixel compression, for example to `HTJ2KLossless`. It does not mutate the source object first. In C++, the same API family also has stream overloads.
+- `write_with_transfer_syntax(...)` is the output-oriented transcode path for writing directly to a file or stream with a different transfer syntax. This is often what you want when changing pixel compression, for example to `HTJ2KLossless`. It does not mutate the source object first. In C++, the same API family also has `std::ostream` variants.
 
 ## Read from disk
 
@@ -129,7 +129,7 @@ bits = ds.get_value<long>("0028,0100"_tag, -1L);  // now available
 Notes:
 - This is useful when the tags you need are clustered near the front of the dataset.
 - It is also a good fit for fast scans across many DICOM files, such as building a metadata index or database without touching the full dataset or pixel payload.
-- Python supports the same `ensure_loaded(...)` continuation pattern for plain tags and keywords.
+- Python supports the same `ensure_loaded(...)` continuation pattern for single tags and keywords.
 
 ## Serialize a `DicomFile` object to a file or bytes
 

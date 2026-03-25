@@ -1,6 +1,6 @@
 # Python DataSet Guide
 
-`dicomsdl` is a thin nanobind wrapper. It loads a native extension at runtime, so docs build with a mock import; install the wheel to run the examples.
+`dicomsdl` is a thin nanobind wrapper. It loads a native extension at runtime, so the docs build with the extension import mocked out; install the wheel to run the examples.
 
 This is the main user-facing guide for Python-side file, dataset, and element access in `dicomsdl`.
 It covers module-level entry points, how dicomsdl objects map to DICOM, and the most important read/write patterns.
@@ -66,28 +66,53 @@ df.dataset.Rows = 512
 | API | Returns | Missing behavior | Intended use |
 | --- | --- | --- | --- |
 | `"Rows" in ds` | `bool` | `False` | presence probe |
-| `ds.get_value("Rows", default=None)` | typed value or `default` | returns `default` | one-shot value read where `None` or another default means missing |
-| `ds["Rows"]`, `ds.get_dataelement("Rows")` | `DataElement` | returns a falsey `NullElement` sentinel, no exception | `DataElement` access |
+| `ds.get_value("Rows", default=None)` | typed value or the supplied default value | returns the supplied default value | one-shot typed read where `None` or another default value means missing |
+| `ds["Rows"]`, `ds.get_dataelement("Rows")` | `DataElement` | returns a `NullElement` that evaluates to `False`, no exception | `DataElement` access |
 | `ds.ensure_loaded("Rows")` | `None` | raises on invalid key | explicitly continue a partial read up to a later tag such as `Rows` |
 | `ds.ensure_dataelement("Rows", vr=None)` | `DataElement` | returns existing or inserts zero-length element | chaining-friendly ensure/create API |
 | `ds.set_value("Rows", 512)` | `bool` | writes or zero-lengths | one-shot typed assignment |
 | `ds.set_value(0x00090030, dicom.VR.US, 16)` | `bool` | creates or overrides by explicit VR | private or ambiguous tags |
-| `ds.Rows` | typed value | `AttributeError` | development / interactive sugar for known/common tags |
-| `ds.Rows = 512` | `None` | raises on assignment failure | development / interactive sugar for standard keyword updates |
+| `ds.Rows` | typed value | `AttributeError` | development / interactive convenience access for known/common tags |
+| `ds.Rows = 512` | `None` | raises on assignment failure | development / interactive convenience assignment for standard keyword updates |
 
 ## Ways to identify a Data Element in Python
 
-| Form | Example | Best when | Advantages | Tradeoffs |
-| --- | --- | --- | --- | --- |
-| packed int | `0x00280010` | tags already come from numeric tables, generated code, or external metadata | fastest and most direct path for a plain tag, no string parse, works in plain-tag APIs including `ensure_loaded(...)` | harder to read than keywords; cannot express nested paths |
-| keyword or Tag string | `"Rows"`, `"(0028,0010)"` | most normal Python code uses a keyword or numeric Tag string directly | short, readable, works across common lookup/write APIs | small runtime keyword/Tag parse cost; nested access needs a dotted path string |
-| dotted tag-path string | `"RadiopharmaceuticalInformationSequence.0.RadionuclideTotalDose"`, `"00540016.0.00181074"` | you want a nested lookup or assignment in one step | readable one-shot access into nested datasets | only APIs that support nested paths accept it; flat-only APIs such as `ensure_loaded(...)` and `remove_dataelement(...)` do not |
-| `Tag` object | `dicom.Tag("Rows")`, `dicom.Tag("(0028,0010)")`, `dicom.Tag(0x0028, 0x0010)` | you want an explicit tag object or want to reuse the same tag across calls | explicit type, reusable, good at API boundaries | for one-off calls this adds Python-level `Tag` object construction; packed ints are more direct when you do not need reuse |
+| Form | Example | Use first when |
+| --- | --- | --- |
+| packed int | `0x00280010` | the tag already comes from numeric tables or external metadata |
+| keyword or Tag string | `"Rows"`, `"(0028,0010)"` | most normal Python code |
+| dotted tag-path string | `"RadiopharmaceuticalInformationSequence.0.RadionuclideTotalDose"` | you want a nested lookup or assignment in one step |
+| `Tag` object | `dicom.Tag("Rows")`, `dicom.Tag(0x0028, 0x0010)` | you want an explicit reusable tag object |
+
+### `0x00280010`
+
+- Use this when the tag already comes from numeric constants, generated tables, or external metadata.
+- Advantages: fastest direct path for a single tag, no string parse, works in single-tag APIs including `ensure_loaded(...)`.
+- Tradeoffs: harder to read than keywords and cannot express nested paths.
+
+### `"Rows"` or `"(0028,0010)"`
+
+- Use this first in most normal Python code.
+- Advantages: short, readable, works across common lookup/write APIs.
+- Tradeoffs: small runtime keyword/Tag parse cost; nested access needs a dotted path string.
+
+### Dotted tag-path strings
+
+- Use this when you want a nested lookup or assignment in one step.
+- Examples: `"RadiopharmaceuticalInformationSequence.0.RadionuclideTotalDose"`, `"00540016.0.00181074"`.
+- Advantages: readable one-shot access into nested datasets.
+- Tradeoffs: only APIs that support nested paths accept it; flat-only APIs such as `ensure_loaded(...)` and `remove_dataelement(...)` do not.
+
+### `dicom.Tag(...)`
+
+- Use this when you want an explicit tag object or want to reuse the same tag across calls.
+- Advantages: explicit type, reusable, good at API boundaries.
+- Tradeoffs: for one-off calls this adds Python-level `Tag` object construction; packed ints are more direct when you do not need reuse.
 
 Practical recommendation:
 
 - use `"Rows"` for usual keyword/Tag-string access in most Python code. This still has a small runtime keyword/Tag parse cost, but dicomsdl uses an optimized runtime keyword path and a lighter direct path for plain keyword strings, so the overhead is usually small.
-- use packed ints when plain tags already come from numeric constants or external metadata, or when you want the fastest path for a plain tag
+- use packed ints when single tags already come from numeric constants or external metadata, or when you want the fastest path for a single tag
 - use dotted tag-path strings when you want a nested value or assignment in one step. In Python, this can also be faster than repeated nested `Sequence` / `DataSet` API calls because the traversal stays inside one C++ path-parse/lookup call.
 - use `dicom.Tag(...)` when you want an explicit reusable tag object
 - `ds.Rows` is convenient during development or interactive exploration, and it also works well with tab completion in many interactive shells because `dir()` exposes present public standard keywords. But it raises `AttributeError` when the keyword is unknown or the element is missing. For production code, string/int/`Tag` keys are usually easier to handle explicitly.
@@ -111,7 +136,7 @@ if elem:
     print(elem.tag, elem.vr, elem.length, elem.value)
 ```
 
-Missing lookups return a falsey sentinel rather than raising:
+Missing lookups return an object that evaluates to `False` rather than raising:
 
 ```python
 missing = ds["NotARealKeyword"]
@@ -149,7 +174,7 @@ if elem:
     print(elem.vr, elem.length, elem.value)
 ```
 
-It uses the same missing-element sentinel behavior as `ds[...]`.
+It uses the same behavior as `ds[...]` for missing elements.
 
 ### Partial-load continuation
 
@@ -184,7 +209,7 @@ If the element is missing, you get the `default` back.
 loaded only up to an earlier tag, querying a later tag returns the currently available
 state. Call `ensure_loaded(...)` first when you need a later tag such as `Rows` after a partial read.
 
-`default` is used only for missing elements. A data element with a zero-length value still returns a typed empty value:
+The supplied default value is used only for missing elements. A data element with a zero-length value still returns a typed empty value:
 
 ```python
 assert ds.get_value("PatientName", default="DEFAULT") == "DEFAULT"  # missing
@@ -202,7 +227,7 @@ if rows_elem:
     print(rows_elem.value)
 ```
 
-### Value types returned by DataElement.value / get_value()
+### Return types from `DataElement.value` and `get_value()`
 
 - `SQ` / `PX` -> `Sequence` / `PixelSequence`
 - numeric-like VRs (`IS`, `DS`, `AT`, `FL`, `FD`, `SS`, `US`, `SL`, `UL`, `SV`, `UV`) -> `int`, `float`, `Tag`, or `list[...]`
@@ -259,7 +284,7 @@ assert ds["WindowCenter"].to_double_vector() == []
 assert ds["FrameIncrementPointer"].to_tag_vector() == []
 ```
 
-At the C++ layer the same contract now applies to the vector accessors:
+At the C++ layer the same rules now apply to the vector accessors:
 
 ```cpp
 auto rows = dataset["Rows"_tag].to_longlong_vector();   // engaged optional, empty vector when zero-length
@@ -321,7 +346,7 @@ print(elem.vr)
 print(elem.length)
 ```
 
-### Truthiness and missing sentinel
+### Boolean checks and missing-element objects
 
 ```python
 elem = ds["PatientName"]
@@ -337,7 +362,7 @@ assert missing.is_missing()
 
 For zero-length present elements, `bool(elem)` is still `True`; use `elem.length == 0` to detect them.
 
-### Value helpers
+### Typed read/write helpers
 
 - `elem.get_value()` mirrors `elem.value`
 - `elem.set_value(value)` mirrors the `value` setter and returns `True`/`False`
@@ -452,26 +477,26 @@ ds.remove_dataelement(dicom.Tag("Rows"))
 assert ds.set_value(0x00090030, dicom.VR.US, 16)
 ```
 
-This overload is useful when the tag is private or when you want to override an existing non-sequence element VR before assigning a value.
+This form is useful when the tag is private or when you want to override an existing non-sequence element VR before assigning a value.
 
 Rules:
 
 - if the element is missing, the supplied VR is used to create it
 - if the element exists and already has that VR, the value is updated in place
 - if the element exists with a different non-`SQ`/non-`PX` VR, the binding may replace that VR and then assign the value
-- `VR.None`, `SQ`, and `PX` are not valid override targets for this overload
+- `VR.None`, `SQ`, and `PX` are not valid override targets for this form
 
-This overload does not provide rollback semantics. If it returns `False`, the dataset
+This form does not provide rollback semantics. If it returns `False`, the dataset
 remains valid but the destination element state is unspecified.
 
-### Attribute assignment sugar
+### Attribute assignment convenience path
 
 ```python
 ds.Rows = 512
 df.PatientName = pn
 ```
 
-Attribute assignment remains value-oriented sugar for standard keyword-based updates.
+Attribute assignment remains a convenience path for standard keyword-based updates.
 It is concise and works on both `DataSet` and forwarded `DicomFile` access.
 Unlike `set_value(...)`, this path raises on assignment failure instead of returning `False`,
 so it is usually better suited to development, notebooks, and interactive use than to

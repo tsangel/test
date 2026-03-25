@@ -1,6 +1,6 @@
 # Troubleshooting
 
-Use this page when the first build, read, decode, or write attempt fails and you need the shortest path to the likely cause.
+Use this page when the first build, read, decode, or write attempt fails and you need the quickest way to the likely cause.
 
 ## Common failure patterns
 
@@ -8,7 +8,7 @@ Use this page when the first build, read, decode, or write attempt fails and you
   check Python, `pip`, `cmake`, compiler toolchain, and the active virtual environment
 - later-tag mutation raises on a partially loaded file:
   load more of the file first, or avoid mutating data elements that have not been parsed yet
-- `decode_into()` complains about shape, dtype, or buffer size:
+- `decode_into()` reports an array shape, dtype, or buffer-size mismatch:
   re-check rows, cols, samples per pixel, frame count, and output itemsize
 - charset rewrite fails or replacement occurs:
   review the declared target charset and encode error policy

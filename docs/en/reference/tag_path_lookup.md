@@ -1,6 +1,6 @@
 # Tag-path lookup semantics
 
-`DataSet::get_dataelement(std::string_view tag_path)` and the string overload of `operator[]` are the low-level path parsers for nested sequence traversal. For regular tag reads, prefer `dataset[tag].to_xxx().value_or(default)` or `dataset["Keyword"].to_xxx().value_or(default)` style access.
+`DataSet::get_dataelement(std::string_view tag_path)` and the `operator[]` form that takes a string are the low-level path parsers for nested sequence traversal. For regular tag reads, prefer `dataset[tag].to_xxx().value_or(default)` or `dataset["Keyword"].to_xxx().value_or(default)` style access.
 
 ## Accepted forms
 - Hex tag, with or without parens/comma: `00100010`, `(0010,0010)`
@@ -14,15 +14,15 @@
 2. Tag tokens accept parentheses/commas and are trimmed; runtime keyword text is resolved via the
    normal runtime dictionary lookup path (`keyword_to_entry_runtime(...)`), which currently uses the
    runtime keyword cache. Compile-time keyword literals still use the constexpr CHD tables.
-3. Private-creator tokens are parsed via `parse_private_creator_tag`; on failure, lookup stops and returns a falsey `DataElement` (`VR::None`).
+3. Private-creator tokens are parsed via `parse_private_creator_tag`; on failure, lookup stops and returns a `DataElement` with `VR::None` that evaluates to `false`.
 4. Sequence indices are parsed with `std::from_chars`; type/VR mismatches raise `diag::error_and_throw`.
-5. If any required element or nested dataset is missing, a falsey `DataElement` (`VR::None`) is returned.
+5. If any required element or nested dataset is missing, a `DataElement` with `VR::None` that evaluates to `false` is returned.
 
 ## Notes
-- Preferred user-facing access pattern for plain tags:
+- Preferred user-facing access pattern for a single tag:
   `long rows = dataset["Rows"_tag].to_long().value_or(0);`
 - Use `if (auto& e = dataset[tag]; e)` only when element presence itself matters.
-- No implicit loading: after a partial read, callers must make the needed plain tag such as `Rows` available first via `ensure_loaded(tag)`.
+- No implicit loading: after a partial read, callers must make the needed single tag such as `Rows` available first via `ensure_loaded(tag)`.
 - The function returns `DataElement&`. If you need to distinguish missing from present, use `if (elem)` or `elem.is_missing()`. If you just need a fallback value, `get_dataelement(...).to_xxx().value_or(default)` is fine.
 - For keyword paths without `.`, the parser now avoids the heavier dotted-path loop and falls
   through the lighter direct token resolution path before lookup.

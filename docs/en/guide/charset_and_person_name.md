@@ -162,7 +162,7 @@ file->set_specific_charset(
     &replaced);
 
 // The rewritten stored bytes are now plain ASCII text, so to_string_view()
-// and to_utf8_string() both expose the same visible escape markers here.
+// and to_utf8_string() both expose the same visible `(U+XXXX)` replacement text here.
 if (auto raw_name = file->dataset()["PatientName"_tag].to_string_view()) {
     std::cout << *raw_name << '\n';
 }
@@ -252,7 +252,7 @@ pn = dicom.PersonName(
 patient_name = df.dataset.add_dataelement(dicom.Tag("PatientName"), dicom.VR.PN)
 ok = patient_name.from_person_name(pn)
 
-# The same PersonName object can also be used with dataset assignment sugar.
+# The same PersonName object can also be used with dataset attribute assignment convenience access.
 df.PatientName = pn
 
 value = df.PatientName
@@ -336,7 +336,7 @@ For example, if the source text is `홍길동` and the target charset is `ISO_IR
 | --- | --- | --- | --- |
 | If some text is not representable | `set_specific_charset()` throws / raises and stops. | The transcode succeeds and substitutes `?`. | The transcode succeeds and substitutes visible `(U+XXXX)` text. |
 | Example result for `홍길동 -> ISO_IR 100` | No transcoded text is produced because the call fails. | `???` | `(U+D64D)(U+AE38)(U+B3D9)` |
-| Dataset commit | No change. | Charset is updated and text VRs are rewritten with `?`. | Charset is updated and text VRs are rewritten with `(U+XXXX)` markers. |
+| Dataset commit | No change. | Charset is updated and text VRs are rewritten with `?`. | Charset is updated and text VRs are rewritten with `(U+XXXX)` replacement text. |
 | `replaced` output | Not applicable because the call fails. | `true` when at least one substitution happens. | `true` when at least one substitution happens. |
 
 The optional `replaced` output is most useful with the lossy modes above:

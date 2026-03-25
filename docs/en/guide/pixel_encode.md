@@ -132,7 +132,7 @@ auto file = dicom::read_file("sample.dcm");
 // target syntax matters only for the serialized result.
 file->write_with_transfer_syntax("out_rle.dcm", "RLELossless"_uid);
 
-// The same API family also has std::ostream overloads in C++.
+// The same API family also has std::ostream variants in C++.
 ```
 
 ### Pass explicit codec options
