@@ -378,10 +378,10 @@ static_assert(
 [[nodiscard]] std::optional<Generated> make_uid_with_suffix(
     std::string_view root, std::uint64_t suffix) noexcept;
 
-// Convenience overload using DICOMSDL UID prefix.
+// Convenience overload using DicomSDL UID prefix.
 [[nodiscard]] std::optional<Generated> make_uid_with_suffix(std::uint64_t suffix) noexcept;
 
-// Generate monotonic UIDs under DICOMSDL prefix.
+// Generate monotonic UIDs under DicomSDL prefix.
 [[nodiscard]] std::optional<Generated> try_generate_uid() noexcept;
 [[nodiscard]] Generated generate_uid();
 [[nodiscard]] Generated generate_sop_instance_uid();
@@ -1563,7 +1563,7 @@ struct DecodeOptions {
 	// false: keep codestream component domain (for example, YBR_* domain for JPEG2000 MCT streams).
 	// Note: currently honored by OpenJPEG-based decode paths; other backends may ignore it.
 	bool decode_mct{true};
-	// DICOMSDL-managed outer worker count used by batch/multi-work-item decode paths.
+	// DicomSDL-managed outer worker count used by batch/multi-work-item decode paths.
 	//  -1: API-specific auto scheduling policy [default], 0/1: disable outer parallelism,
 	//      >1: explicit worker count.
 	// Single-frame decode paths do not currently use this field.
@@ -1839,7 +1839,7 @@ enum class Htj2kDecoderBackend : std::uint8_t {
 /// Register external codec plugin(s) from a shared library.
 /// The library may export decoder and/or encoder plugin API symbols.
 /// External loadable plugins are supported only when shipped with the same
-/// dicomsdl runtime release; mixed-version host/plugin deployment is not supported.
+/// DicomSDL runtime release; mixed-version host/plugin deployment is not supported.
 [[nodiscard]] bool register_external_codec_plugin_from_library(
     std::string_view library_path, std::string* out_error = nullptr);
 

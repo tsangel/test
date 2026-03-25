@@ -1,9 +1,9 @@
-// Source of truth for DICOMSDL-wide compile-time constants.
+// Source of truth for DicomSDL-wide compile-time constants.
 #pragma once
 
 #include <string_view>
 
-#define DICOMSDL_VERSION "0.1.37"
+#define DICOMSDL_VERSION "0.1.38"
 #define DICOM_STANDARD_VERSION "2026a"
 #define DICOMSDL_UID_PREFIX "1.3.6.1.4.1.56559"
 #define DICOMSDL_IMPLEMENTATION_CLASS_UID "1.3.6.1.4.1.56559.1"

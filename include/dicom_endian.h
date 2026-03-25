@@ -18,7 +18,7 @@ namespace dicom {
 namespace endian {
 
 static_assert(std::endian::native == std::endian::little,
-    "dicomsdl currently supports little-endian host architectures only");
+    "DicomSDL currently supports little-endian host architectures only");
 
 namespace detail {
 

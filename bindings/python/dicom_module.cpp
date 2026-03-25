@@ -2869,7 +2869,7 @@ struct PySequenceIterator {
 }  // namespace
 
 NB_MODULE(_dicomsdl, m) {
-	m.doc() = "nanobind bindings for DataSet";
+	m.doc() = "nanobind bindings for DicomSDL";
 
 	m.attr("DICOM_STANDARD_VERSION") = nb::str(DICOM_STANDARD_VERSION);
 	m.attr("DICOMSDL_VERSION") = nb::str(DICOMSDL_VERSION);
@@ -3703,7 +3703,7 @@ NB_MODULE(_dicomsdl, m) {
 		.def_rw("decode_mct", &dicom::pixel::DecodeOptions::decode_mct,
 		    "Apply codestream-level inverse MCT/color transform when supported.")
 		.def_rw("worker_threads", &dicom::pixel::DecodeOptions::worker_threads,
-		    "DICOMSDL-managed outer worker count used by batch decode paths.")
+		    "DicomSDL-managed outer worker count used by batch decode paths.")
 		.def_rw("codec_threads", &dicom::pixel::DecodeOptions::codec_threads,
 		    "Codec/backend internal thread-count hint.")
 		.def("__repr__",
@@ -4588,7 +4588,7 @@ NB_MODULE(_dicomsdl, m) {
 		    "    True by default. Currently honored by OpenJPEG-based decode paths.\n"
 		    "    OpenJPH backend ignores this flag.\n"
 		    "worker_threads : int, optional\n"
-		    "    DICOMSDL-managed outer worker count for batch/multi-frame decode.\n"
+		    "    DicomSDL-managed outer worker count for batch/multi-frame decode.\n"
 		    "    -1 uses the current API-specific auto scheduling policy,\n"
 		    "    0/1 disables outer parallelism,\n"
 		    "    and >1 requests an explicit worker count.\n"
@@ -4636,7 +4636,7 @@ NB_MODULE(_dicomsdl, m) {
 		    "    True by default. Currently honored by OpenJPEG-based decode paths.\n"
 		    "    OpenJPH backend ignores this flag.\n"
 		    "worker_threads : int, optional\n"
-		    "    DICOMSDL-managed outer worker count for batch/multi-frame decode.\n"
+		    "    DicomSDL-managed outer worker count for batch/multi-frame decode.\n"
 		    "    -1 uses the current API-specific auto scheduling policy,\n"
 		    "    0/1 disables outer parallelism,\n"
 		    "    and >1 requests an explicit worker count.\n"
@@ -5310,21 +5310,21 @@ m.def("uid_prefix",
 	    const auto value = dicom::uid::uid_prefix();
 	    return std::string(value.data(), value.size());
     },
-    "Return DICOMSDL UID root prefix.");
+    "Return DicomSDL UID root prefix.");
 
 m.def("implementation_class_uid",
     []() {
 	    const auto value = dicom::uid::implementation_class_uid();
 	    return std::string(value.data(), value.size());
     },
-    "Return default Implementation Class UID used by DICOMSDL.");
+    "Return default Implementation Class UID used by DicomSDL.");
 
 m.def("implementation_version_name",
     []() {
 	    const auto value = dicom::uid::implementation_version_name();
 	    return std::string(value.data(), value.size());
     },
-    "Return default Implementation Version Name used by DICOMSDL.");
+    "Return default Implementation Version Name used by DicomSDL.");
 
 m.def("is_valid_uid_text_strict",
     &dicom::uid::is_valid_uid_text_strict,
@@ -5370,31 +5370,31 @@ m.def("try_generate_uid",
     []() -> nb::object {
 	    return generated_uid_or_none(dicom::uid::try_generate_uid());
     },
-    "Generate a UID under DICOMSDL prefix; returns None on failure.");
+    "Generate a UID under DicomSDL prefix; returns None on failure.");
 
 m.def("generate_uid",
     []() {
 	    return generated_uid_to_string(dicom::uid::generate_uid());
     },
-    "Generate a UID under DICOMSDL prefix. Raises RuntimeError on failure.");
+    "Generate a UID under DicomSDL prefix. Raises RuntimeError on failure.");
 
 m.def("generate_sop_instance_uid",
     []() {
 	    return generated_uid_to_string(dicom::uid::generate_sop_instance_uid());
     },
-    "Generate a SOP Instance UID under DICOMSDL prefix.");
+    "Generate a SOP Instance UID under DicomSDL prefix.");
 
 m.def("generate_series_instance_uid",
     []() {
 	    return generated_uid_to_string(dicom::uid::generate_series_instance_uid());
     },
-    "Generate a Series Instance UID under DICOMSDL prefix.");
+    "Generate a Series Instance UID under DicomSDL prefix.");
 
 m.def("generate_study_instance_uid",
     []() {
 	    return generated_uid_to_string(dicom::uid::generate_study_instance_uid());
     },
-    "Generate a Study Instance UID under DICOMSDL prefix.");
+    "Generate a Study Instance UID under DicomSDL prefix.");
 
 	m.attr("__all__") = nb::make_tuple(
 	    "LogLevel",
