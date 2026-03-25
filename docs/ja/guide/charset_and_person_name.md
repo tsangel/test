@@ -96,13 +96,13 @@ if (auto parsed = patient_name.to_person_name()) {
 }
 ```
 
-最初の `PatientName` 値が `Hong^Gildong=洪^吉洞=홍^길동` の場合の出力例:
+最初の `PatientName` 値が `Yamada^Taro=山田^太郎=やまだ^たろう` の場合の出力例:
 
 ```text
-raw: Hong^Gildong=洪^吉洞=홍^길동
-utf8: Hong^Gildong=洪^吉洞=홍^길동
-Hong
-Gildong
+raw: Yamada^Taro=山田^太郎=やまだ^たろう
+utf8: Yamada^Taro=山田^太郎=やまだ^たろう
+Yamada
+Taro
 ```
 
 ### 構造化された PersonName を構築して保存する
@@ -117,9 +117,9 @@ dicom::DicomFile file;
 file.set_specific_charset(dicom::SpecificCharacterSet::ISO_IR_192);
 
 dicom::PersonName name;
-name.alphabetic = dicom::PersonNameGroup{{"Hong", "Gildong", "", "", ""}};
-name.ideographic = dicom::PersonNameGroup{{"洪", "吉洞", "", "", ""}};
-name.phonetic = dicom::PersonNameGroup{{"홍", "길동", "", "", ""}};
+name.alphabetic = dicom::PersonNameGroup{{"Yamada", "Taro", "", "", ""}};
+name.ideographic = dicom::PersonNameGroup{{"山田", "太郎", "", "", ""}};
+name.phonetic = dicom::PersonNameGroup{{"やまだ", "たろう", "", "", ""}};
 
 auto& patient_name = file.add_dataelement("PatientName"_tag, dicom::VR::PN);
 if (!patient_name.from_person_name(name)) {
@@ -136,9 +136,9 @@ if (auto parsed = patient_name.to_person_name()) {
 期待される出力:
 
 ```text
-Hong
-洪
-홍
+Yamada
+山田
+やまだ
 ```
 
 ### 既存のテキスト値を新しい文字セットにトランスコードします。
@@ -169,7 +169,7 @@ if (auto raw_name = file->dataset()["PatientName"_tag].to_string_view()) {
 std::cout << std::boolalpha << replaced << '\n';
 ```
 
-`utf8_names.dcm` に `홍길동` が含まれる場合の出力例:
+`utf8_names.dcm` に `山田太郎` が含まれる場合の出力例:
 
 ```text
 (U+D64D)(U+AE38)(U+B3D9)
@@ -190,7 +190,7 @@ try {
     file.set_specific_charset(dicom::SpecificCharacterSet::ISO_IR_192);
 
     auto& patient_name = file.add_dataelement("PatientName"_tag, dicom::VR::PN);
-    if (!patient_name.from_utf8_view("홍길동")) {
+    if (!patient_name.from_utf8_view("山田太郎")) {
         std::cerr << "initial UTF-8 assignment failed\n";
     }
 
@@ -228,11 +228,11 @@ if name is not None and name.alphabetic is not None:
     print(name.alphabetic.given_name)
 ```
 
-最初の `PatientName` 値が `Hong^Gildong=洪^吉洞=홍^길동` の場合の出力例:
+最初の `PatientName` 値が `Yamada^Taro=山田^太郎=やまだ^たろう` の場合の出力例:
 
 ```text
-Hong
-Gildong
+Yamada
+Taro
 ```
 
 ### 構造化された PersonName を構築して保存する
@@ -244,9 +244,9 @@ df = dicom.DicomFile()
 df.set_specific_charset("ISO_IR 192")
 
 pn = dicom.PersonName(
-    alphabetic=("Hong", "Gildong"),
-    ideographic=("洪", "吉洞"),
-    phonetic=("홍", "길동"),
+    alphabetic=("Yamada", "Taro"),
+    ideographic=("山田", "太郎"),
+    phonetic=("やまだ", "たろう"),
 )
 
 patient_name = df.dataset.add_dataelement(dicom.Tag("PatientName"), dicom.VR.PN)
@@ -264,9 +264,9 @@ print(value.phonetic.family_name)
 期待される出力:
 
 ```text
-Hong
-洪
-홍
+Yamada
+山田
+やまだ
 ```
 
 ### 既存のテキスト値をトランスコードし、置換を検査する
@@ -288,7 +288,7 @@ print(df.get_dataelement("PatientName").to_string_view())
 print(replaced)
 ```
 
-`utf8_names.dcm` に `홍길동` が含まれる場合に予期される出力:
+`utf8_names.dcm` に `山田太郎` が含まれる場合に予期される出力:
 
 ```text
 (U+D64D)(U+AE38)(U+B3D9)
@@ -305,7 +305,7 @@ df = dicom.DicomFile()
 try:
     df.set_specific_charset("ISO_IR 192")
     patient_name = df.dataset.add_dataelement(dicom.Tag("PatientName"), dicom.VR.PN)
-    ok = patient_name.from_utf8_view("홍길동")
+    ok = patient_name.from_utf8_view("山田太郎")
     print(ok)
 
     # set_specific_charset() は、要求されたトランスコードを実行できない場合に発生します。
@@ -330,12 +330,12 @@ except RuntimeError as exc:
 - C++: `dicom::CharsetEncodeErrorPolicy::strict`、`::replace_qmark`、`::replace_unicode_escape`
 - Python: `errors="strict"`、`"replace_qmark"`、`"replace_unicode_escape"`
 
-たとえば、ソース テキストが `홍길동` で、対象の文字セットが `ISO_IR 100` の場合、その文字セットでは韓国語の文字を直接表現できません。ポリシーごとの結果は次のとおりです。
+たとえば、ソース テキストが `山田太郎` で、対象の文字セットが `ISO_IR 100` の場合、その文字セットでは日本語の文字を直接表現できません。ポリシーごとの結果は次のとおりです。
 
 |比較ポイント | `strict` | `replace_qmark` | `replace_unicode_escape` |
 | --- | --- | --- | --- |
 |一部のテキストを表現できない場合 | `set_specific_charset()` は例外を送出して中断します。 |トランスコードは成功し、`?` に置き換えられます。 |トランスコードは成功し、表示可能な `(U+XXXX)` テキストに置き換えられます。 |
-| `홍길동 -> ISO_IR 100` の結果例 |呼び出しが失敗するため、トランスコード後のテキストは生成されません。 | `???` | `(U+D64D)(U+AE38)(U+B3D9)` |
+| `山田太郎 -> ISO_IR 100` の結果例 |呼び出しが失敗するため、トランスコード後のテキストは生成されません。 | `????` | `(U+5C71)(U+7530)(U+592A)(U+90CE)` |
 |データセットに反映される結果 |変更はありません。 |文字セットが更新され、テキスト VR は `?` で書き換えられます。 |文字セットが更新され、テキスト VR は `(U+XXXX)` の置換テキストで書き換えられます。 |
 | `replaced` 出力 |呼び出しが失敗するため該当しません。 |少なくとも 1 回置換が起きたときに `true`。 |少なくとも 1 回置換が起きたときに `true`。 |
 
@@ -382,12 +382,12 @@ except RuntimeError as exc:
 - C++: `dicom::CharsetEncodeErrorPolicy::strict`、`::replace_qmark`、`::replace_unicode_escape`
 - Python: `errors="strict"`、`"replace_qmark"`、`"replace_unicode_escape"`
 
-たとえば、データセットが `ISO_IR 100` として宣言され、入力テキストが `홍길동` の場合、宣言された文字セットでは韓国語の文字を直接表現できません。このとき `from_utf8_view()` は次のように分岐します。
+たとえば、データセットが `ISO_IR 100` として宣言され、入力テキストが `山田太郎` の場合、宣言された文字セットでは日本語の文字を直接表現できません。このとき `from_utf8_view()` は次のように分岐します。
 
 |比較ポイント | `strict` | `replace_qmark` | `replace_unicode_escape` |
 | --- | --- | --- | --- |
 |入力テキストを宣言された文字セットで表現できない場合 |呼び出しは失敗し、新しい内容は保存されません。 |呼び出しは成功し、`?` に置き換えられます。 |呼び出しは成功し、表示可能な `(U+XXXX)` テキストに置き換えられます。 |
-| `홍길동 -> ISO_IR 100` の保存結果の例 |エンコード後のテキストは生成されません。 | `???` | `(U+D64D)(U+AE38)(U+B3D9)` |
+| `山田太郎 -> ISO_IR 100` の保存結果の例 |エンコード後のテキストは生成されません。 | `????` | `(U+5C71)(U+7530)(U+592A)(U+90CE)` |
 |戻り値 | `false` | `true` | `true` |
 | `replaced` 出力 |書き込みが成功しなかったため `false` |少なくとも 1 回置換が起きたときに `true` |少なくとも 1 回置換が起きたときに `true` |
 

@@ -96,13 +96,13 @@ if (auto parsed = patient_name.to_person_name()) {
 }
 ```
 
-当第一个 `PatientName` 值为 `Hong^Gildong=洪^吉洞=홍^길동` 时的输出示例：
+当第一个 `PatientName` 值为 `Zhang^Wei=张^伟=zhang^wei` 时的输出示例：
 
 ```text
-raw: Hong^Gildong=洪^吉洞=홍^길동
-utf8: Hong^Gildong=洪^吉洞=홍^길동
-Hong
-Gildong
+raw: Zhang^Wei=张^伟=zhang^wei
+utf8: Zhang^Wei=张^伟=zhang^wei
+Zhang
+Wei
 ```
 
 ### 构建并存储结构化的 PersonName
@@ -117,9 +117,9 @@ dicom::DicomFile file;
 file.set_specific_charset(dicom::SpecificCharacterSet::ISO_IR_192);
 
 dicom::PersonName name;
-name.alphabetic = dicom::PersonNameGroup{{"Hong", "Gildong", "", "", ""}};
-name.ideographic = dicom::PersonNameGroup{{"洪", "吉洞", "", "", ""}};
-name.phonetic = dicom::PersonNameGroup{{"홍", "길동", "", "", ""}};
+name.alphabetic = dicom::PersonNameGroup{{"Zhang", "Wei", "", "", ""}};
+name.ideographic = dicom::PersonNameGroup{{"张", "伟", "", "", ""}};
+name.phonetic = dicom::PersonNameGroup{{"zhang", "wei", "", "", ""}};
 
 auto& patient_name = file.add_dataelement("PatientName"_tag, dicom::VR::PN);
 if (!patient_name.from_person_name(name)) {
@@ -136,9 +136,9 @@ if (auto parsed = patient_name.to_person_name()) {
 预期输出：
 
 ```text
-Hong
-洪
-홍
+Zhang
+张
+zhang
 ```
 
 ### 将现有文本值转码为新的字符集
@@ -169,7 +169,7 @@ if (auto raw_name = file->dataset()["PatientName"_tag].to_string_view()) {
 std::cout << std::boolalpha << replaced << '\n';
 ```
 
-`utf8_names.dcm` 包含 `홍길동` 时的输出示例：
+`utf8_names.dcm` 包含 `张伟` 时的输出示例：
 
 ```text
 (U+D64D)(U+AE38)(U+B3D9)
@@ -190,7 +190,7 @@ try {
     file.set_specific_charset(dicom::SpecificCharacterSet::ISO_IR_192);
 
     auto& patient_name = file.add_dataelement("PatientName"_tag, dicom::VR::PN);
-    if (!patient_name.from_utf8_view("홍길동")) {
+    if (!patient_name.from_utf8_view("张伟")) {
         std::cerr << "initial UTF-8 assignment failed\n";
     }
 
@@ -228,11 +228,11 @@ if name is not None and name.alphabetic is not None:
     print(name.alphabetic.given_name)
 ```
 
-当第一个 `PatientName` 值为 `Hong^Gildong=洪^吉洞=홍^길동` 时的输出示例：
+当第一个 `PatientName` 值为 `Zhang^Wei=张^伟=zhang^wei` 时的输出示例：
 
 ```text
-Hong
-Gildong
+Zhang
+Wei
 ```
 
 ### 构建并存储结构化的 PersonName
@@ -244,9 +244,9 @@ df = dicom.DicomFile()
 df.set_specific_charset("ISO_IR 192")
 
 pn = dicom.PersonName(
-    alphabetic=("Hong", "Gildong"),
-    ideographic=("洪", "吉洞"),
-    phonetic=("홍", "길동"),
+    alphabetic=("Zhang", "Wei"),
+    ideographic=("张", "伟"),
+    phonetic=("zhang", "wei"),
 )
 
 patient_name = df.dataset.add_dataelement(dicom.Tag("PatientName"), dicom.VR.PN)
@@ -264,9 +264,9 @@ print(value.phonetic.family_name)
 预期输出：
 
 ```text
-Hong
-洪
-홍
+Zhang
+张
+zhang
 ```
 
 ### 对现有文本值进行转码并检查替换
@@ -288,7 +288,7 @@ print(df.get_dataelement("PatientName").to_string_view())
 print(replaced)
 ```
 
-`utf8_names.dcm` 包含 `홍길동` 时的预期输出：
+`utf8_names.dcm` 包含 `张伟` 时的预期输出：
 
 ```text
 (U+D64D)(U+AE38)(U+B3D9)
@@ -305,7 +305,7 @@ df = dicom.DicomFile()
 try:
     df.set_specific_charset("ISO_IR 192")
     patient_name = df.dataset.add_dataelement(dicom.Tag("PatientName"), dicom.VR.PN)
-    ok = patient_name.from_utf8_view("홍길동")
+    ok = patient_name.from_utf8_view("张伟")
     print(ok)
 
     # 如果无法完成请求的转码，则引发 set_specific_charset()
@@ -330,12 +330,12 @@ except RuntimeError as exc:
 - C++：`dicom::CharsetEncodeErrorPolicy::strict`、`::replace_qmark`、`::replace_unicode_escape`
 - Python：`errors="strict"`、`"replace_qmark"`、`"replace_unicode_escape"`
 
-例如，如果源文本为 `홍길동`，目标字符集为 `ISO_IR 100`，那么这个目标字符集无法直接表示韩文字符。不同策略下的结果如下：
+例如，如果源文本为 `张伟`，目标字符集为 `ISO_IR 100`，那么这个目标字符集无法直接表示中文字符。不同策略下的结果如下：
 
 |对比点| `strict` | `replace_qmark` | `replace_unicode_escape` |
 | --- | --- | --- | --- |
 |如果某些文本无法表示 | `set_specific_charset()` 会抛出异常并停止。 |转码成功，并用 `?` 代替。 |转码成功，并替换为可见的 `(U+XXXX)` 文本。 |
-| `홍길동 -> ISO_IR 100` 的结果示例 |由于调用失败，因此不会生成转码后的文本。 | `???` | `(U+D64D)(U+AE38)(U+B3D9)` |
+| `张伟 -> ISO_IR 100` 的结果示例 |由于调用失败，因此不会生成转码后的文本。 | `??` | `(U+5F20)(U+4F1F)` |
 |提交到数据集后的结果 |没有变化。 |字符集会更新，文本 VR 会被改写为 `?`。 |字符集会更新，文本 VR 会被改写为 `(U+XXXX)` 替换文本。 |
 | `replaced` 输出 |不适用，因为调用失败。 |只要发生至少一次替换就为 `true`。 |只要发生至少一次替换就为 `true`。 |
 
@@ -382,12 +382,12 @@ except RuntimeError as exc:
 - C++：`dicom::CharsetEncodeErrorPolicy::strict`、`::replace_qmark`、`::replace_unicode_escape`
 - Python：`errors="strict"`、`"replace_qmark"`、`"replace_unicode_escape"`
 
-例如，如果数据集声明为 `ISO_IR 100`，输入文本为 `홍길동`，那么声明的字符集无法直接表示韩文字符。此时 `from_utf8_view()` 会出现如下分支：
+例如，如果数据集声明为 `ISO_IR 100`，输入文本为 `张伟`，那么声明的字符集无法直接表示中文字符。此时 `from_utf8_view()` 会出现如下分支：
 
 |对比点| `strict` | `replace_qmark` | `replace_unicode_escape` |
 | --- | --- | --- | --- |
 |如果输入文本无法用声明的字符集表示 |调用失败，不会写入任何新内容。 |调用成功，并替换为 `?`。 |调用成功，并替换为可见的 `(U+XXXX)` 文本。 |
-| `홍길동 -> ISO_IR 100` 的存储文本示例 |不会生成编码后的文本。 | `???` | `(U+D64D)(U+AE38)(U+B3D9)` |
+| `张伟 -> ISO_IR 100` 的存储文本示例 |不会生成编码后的文本。 | `??` | `(U+5F20)(U+4F1F)` |
 |返回值 | `false` | `true` | `true` |
 | `replaced` 输出 |因为写入没有成功，所以为 `false` |只要发生至少一次替换就为 `true` |只要发生至少一次替换就为 `true` |
 
