@@ -20,8 +20,8 @@
 - RTD runs `doxygen Doxyfile` to produce XML, then Sphinx+Breathe consumes it for the C++ API.
 - Content uses Sphinx + MyST Markdown with the `furo` theme.
 - English source pages live under `docs/en`, and localized source trees mirror the same relative paths under `docs/ko`, `docs/ja`, and `docs/zh-cn`.
-- `./build_docs.sh check` verifies that localized trees match the English path set.
-- `./build_docs.sh html` builds the current language (`DICOMSDL_DOC_LANGUAGE`, default `en`) from `docs/<lang>`.
-- `./build_docs.sh html-all` builds English only by default; set `DICOMSDL_BUILD_TRANSLATIONS=1` to also build `ko`, `ja`, and `zh-cn`.
+- `./build-docs.sh check` verifies that localized trees match the English path set.
+- `./build-docs.sh html` builds the current language (`DICOMSDL_DOC_LANGUAGE`, default `en`) from `docs/<lang>`.
+- `./build-docs.sh html-all` builds English only by default; set `DICOMSDL_BUILD_TRANSLATIONS=1` to also build `ko`, `ja`, and `zh-cn`.
 - The public documentation structure is split into `Guide`, `Reference`, and `Developer`; see [Translation Workflow](translation_workflow.md) for the localization process.
 - PDF/ePub outputs are enabled.

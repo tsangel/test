@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build dicomsdl documentation (Doxygen + Sphinx HTML).
-# Usage: ./build_docs.sh [html|html-all|check]
+# Usage: ./build-docs.sh [html|html-all|check]
 
 set -euo pipefail
 
@@ -19,7 +19,7 @@ mkdir -p "$DOXY_DIR" "$HTML_DIR" "$MULTILANG_DIR"
 
 usage() {
   cat <<'EOF'
-Usage: ./build_docs.sh [html|html-all|check]
+Usage: ./build-docs.sh [html|html-all|check]
 
 Targets:
   html            Build one HTML site using DICOMSDL_DOC_LANGUAGE (default: en)

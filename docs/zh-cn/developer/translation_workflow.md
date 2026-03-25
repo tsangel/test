@@ -34,19 +34,19 @@ Then use the wrapper script:
 
 ```bash
 # English HTML (default)
-./build_docs.sh html
+./build-docs.sh html
 
 # Verify that ko / ja / zh-cn mirror docs/en paths
-./build_docs.sh check
+./build-docs.sh check
 
 # Build a single localized site when translation work starts
-DICOMSDL_DOC_LANGUAGE=ko ./build_docs.sh html
+DICOMSDL_DOC_LANGUAGE=ko ./build-docs.sh html
 
 # Build English only into docs/_build/html-multilang/en
-./build_docs.sh html-all
+./build-docs.sh html-all
 
 # Also build ko / ja / zh-cn placeholders or active translations
-DICOMSDL_BUILD_TRANSLATIONS=1 ./build_docs.sh html-all
+DICOMSDL_BUILD_TRANSLATIONS=1 ./build-docs.sh html-all
 ```
 
 While English is still the active writing language, the localized trees may contain placeholder files only.
@@ -57,7 +57,7 @@ The default `html-all` build stays English-only so Sphinx does not emit `toc.not
 1. Update the English page first.
 2. Apply the same path change under `docs/ko`, `docs/ja`, and `docs/zh-cn`.
 3. Translate the whole target document, not isolated message fragments.
-4. Run `./build_docs.sh check` to catch missing or extra files.
+4. Run `./build-docs.sh check` to catch missing or extra files.
 5. Build English and review it first. Build a target language only when localized content exists.
 6. Keep localized README files aligned with the English README when repo-level onboarding changes.
 
