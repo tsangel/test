@@ -196,8 +196,8 @@ plan = df.create_decode_plan()
 frame_out = np.empty(plan.shape(frame=0), dtype=plan.dtype)
 
 for frame in range(plan.frames):
-    # decode_into() は、
-    # 同じ検証済みのプラン。
+    # decode_into() は、同じ検証済みプランを再利用しながら
+    # 毎回同じ出力先を上書きします。
     df.decode_into(frame_out, frame=frame, plan=plan)
 
     # 次の反復の前に、ここで `frame_out` を処理、コピー、または転送します。

@@ -10,7 +10,7 @@ Use `get_value()` for one-shot typed reads. Use `ds[...]` when you also need `ta
 
 ## Why does a missing element not always raise?
 
-dicomsdl intentionally keeps `DataElement` access non-throwing in many places so you can test whether an element is present and chain lookups safely.
+DicomSDL intentionally keeps `DataElement` access non-throwing in many places so you can test whether an element is present and chain lookups safely.
 
 ## Why do zero-length values look different from missing values?
 

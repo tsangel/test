@@ -1,5 +1,9 @@
 # DicomFile Reference
 
+```{note}
+このページ本文はまだ英語の原文です。必要に応じて英語版を基準に参照してください。
+```
+
 `DicomFile` owns the root `DataSet` plus file/session state, serialization, transfer syntax, charset, and pixel decode/encode entrypoints.
 
 ## Use `DicomFile` when

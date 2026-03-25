@@ -1,5 +1,9 @@
 # Windows WG04 Toolchain Benchmark Repro Guide
 
+```{note}
+本页正文目前仍为英文原文。需要时请以英文版为准。
+```
+
 This guide documents how to reproduce WG04 pixel decode benchmarks on Windows for:
 
 - `MSYS2 clang64`
@@ -61,7 +65,7 @@ Example host used for the benchmark runs in this repository session:
 Common settings:
 
 - CMake build type: `Release`
-- Benchmark backend: `dicomsdl`
+- Benchmark backend: DicomSDL
 - Benchmark options: `--warmup 2 --repeat 10`
 
 Compiler selection by toolchain:
@@ -165,7 +169,7 @@ $env:CHERE_INVOKING='1'
   mingw-w64-ucrt-x86_64-lcms2'
 ```
 
-## 6) Build dicomsdl per Toolchain
+## 6) Build DicomSDL per Toolchain
 
 All commands below run from repo root:
 
@@ -302,7 +306,7 @@ $env:PYTHONPATH='C:\Lab\workspace\test.git\bindings\python;C:\Lab\workspace\test
 Most recent run settings:
 
 - Date: `2026-03-09`
-- Backend: `dicomsdl`
+- Backend: DicomSDL
 - WG04 root: `C:\Lab\img\WG04\IMAGES`
 - Warmup / Repeat: `2 / 10`
 - TOTAL row rule: HTJ2K rows excluded by script design

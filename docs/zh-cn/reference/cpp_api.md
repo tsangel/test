@@ -1,5 +1,9 @@
 # C++ API Overview
 
+```{note}
+本页正文目前仍为英文原文。需要时请以英文版为准。
+```
+
 C++ consumers only need `#include <dicom.h>` to access core types and the perfect-hash dictionary lookups. Add `using namespace dicom::literals;` to enable user-defined literals like `"PatientName"_tag`.
 
 ## Minimal example

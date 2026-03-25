@@ -1,5 +1,9 @@
 # Pixel Encode Constraints
 
+```{note}
+このページ本文はまだ英語の原文です。必要に応じて英語版を基準に参照してください。
+```
+
 This document summarizes the current constraints for the pixel encode path:
 
 - `DicomFile::set_pixel_data(...)`

@@ -1,5 +1,9 @@
 # Charset Reference
 
+```{note}
+이 페이지 본문은 아직 영어 원문입니다. 필요하면 영문 페이지를 기준으로 읽어 주세요.
+```
+
 This page summarizes the public charset and person-name APIs used to decode and encode text safely.
 
 ## File and dataset level APIs

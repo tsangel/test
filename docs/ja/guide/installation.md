@@ -1,6 +1,6 @@
 # インストール
 
-再現可能なインストール / ビルド手順が必要なときや、dicomsdl が現在どの環境を対象にしているかを確認したいときに、このページを参照してください。
+再現可能なインストール / ビルド手順が必要なときや、DicomSDL が現在どの環境を対象にしているかを確認したいときに、このページを参照してください。
 
 ## 環境サマリー
 
@@ -43,7 +43,7 @@
 ## 経路を選ぶ
 
 - PyPI install: Python binding を最速で試せる方法
-- checkout からの C++ build: dicomsdl を自分の C++ アプリケーションに組み込むときに最適
+- checkout からの C++ build: DicomSDL を自分の C++ アプリケーションに組み込むときに最適
 - Unix 系 `build.sh`: macOS / Linux build 用の便利なラッパー
 - checkout からの Python source build: [Build Python From Source](../developer/build_python_from_source.md) を参照
 - Windows `build.bat`: 明示的に toolchain を選びたいときの推奨エントリポイント

@@ -7,7 +7,7 @@ This page collects the failure-handling patterns that are spread across the focu
 
 ## Failure Types
 
-dicomsdl public APIs use three different failure styles:
+DicomSDL public APIs use three different failure styles:
 
 - Throw / raise
   - High-level C++ read, write, decode, encode, and dataset-wide charset mutation APIs usually fail with `dicom::diag::DicomException`.

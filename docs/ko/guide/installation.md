@@ -1,6 +1,6 @@
 # 설치
 
-반복 가능한 설치 / 빌드 경로가 필요하거나, dicomsdl이 현재 어떤 환경을 지원하는지 더 분명하게 보고 싶다면 이 페이지를 사용하세요.
+반복 가능한 설치 / 빌드 경로가 필요하거나, DicomSDL이 현재 어떤 환경을 지원하는지 더 분명하게 보고 싶다면 이 페이지를 사용하세요.
 
 ## 환경 요약
 
@@ -43,7 +43,7 @@
 ## 경로 선택
 
 - PyPI install: Python binding을 가장 빨리 써보는 방법
-- checkout에서 C++ build: dicomsdl을 자신의 C++ application에 통합할 때 가장 적합한 경로
+- checkout에서 C++ build: DicomSDL을 자신의 C++ application에 통합할 때 가장 적합한 경로
 - Unix 계열 `build.sh`: macOS / Linux 빌드를 위한 convenience wrapper
 - checkout에서 Python source build: [Build Python From Source](../developer/build_python_from_source.md)에 문서화
 - Windows `build.bat`: 명시적인 toolchain 선택이 필요할 때 권장되는 진입점

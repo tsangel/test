@@ -191,13 +191,13 @@ import numpy as np
 df = dicom.read_file("multiframe.dcm")
 plan = df.create_decode_plan()
 
-# 각 프레임은 하나의 계획에 대해 동일한 디코딩된 모양을 가지므로 재사용 가능한 배열 하나는
-# 프레임별 처리 루프에는 충분합니다.
+# 각 프레임은 하나의 계획에 대해 동일한 디코딩된 배열 shape를 가지므로,
+# 재사용 가능한 배열 하나면 프레임별 처리 루프에 충분합니다.
 frame_out = np.empty(plan.shape(frame=0), dtype=plan.dtype)
 
 for frame in range(plan.frames):
-    # decode_into()는 재사용하는 동안 대응하는 것을 반대합니다.
-    # 동일한 검증된 계획.
+    # decode_into()는 같은 검증된 계획을 재사용하면서
+    # 매번 같은 대상 배열을 덮어씁니다.
     df.decode_into(frame_out, frame=frame, plan=plan)
 
     # 다음 반복 전에 여기에서 `frame_out`를 처리, 복사 또는 전달합니다.
@@ -228,11 +228,11 @@ options = dicom.DecodeOptions(
 # 옵션을 반복하지 말고 `plan`을 다시 사용하세요.
 plan = df.create_decode_plan(options)
 
-# Frame=-1은 "모든 프레임"을 의미합니다. 계획을 통해 전체 볼륨 모양을 알 수 있습니다.
-# 대상 배열을 할당하기 전에.
+# frame=-1은 "모든 프레임"을 의미합니다. 계획을 이용하면
+# 대상 배열을 할당하기 전에 전체 볼륨의 정확한 shape를 알 수 있습니다.
 volume = np.empty(plan.shape(frame=-1), dtype=plan.dtype)
 
-# plan=... 이 제공되는 계획의 옵션이 디코드를 이용합니다.
+# plan=... 이 제공되면, 계획에 캡처된 옵션이 디코드 동작을 결정합니다.
 df.decode_into(volume, frame=-1, plan=plan)
 ```
 
@@ -278,18 +278,18 @@ plan = df.create_decode_plan(
     dicom.DecodeOptions(row_stride=1024)
 )
 
-# decode_into()에는 여전히 유지 가능한 C 끈이 필요합니다.
-# 사용자 정의 스트라이드 제외의 경우 정확히 숫자로 원시 1D 보관을 필요합니다.
-# 계획에 필요한 디코딩된 바이트 수입니다.
+# decode_into()에는 여전히 쓰기 가능한 C-연속 출력 버퍼 객체가 필요합니다.
+# 사용자 정의 stride 레이아웃의 경우에는 계획이 요구하는 디코딩 바이트 수와
+# 정확히 일치하는 원시 1차원 버퍼를 할당하세요.
 raw = np.empty(
     plan.required_bytes(frame=0) // plan.bytes_per_sample,
     dtype=plan.dtype,
 )
 df.decode_into(raw, frame=0, plan=plan)
 
-# 신비한 보폭이 계획과 일치하는 NumPy를 원시적으로 저장합니다.
-# 이 단일 프레임 흑백 예제는 사용자 지정 보폭 2차원 배열 보기가 됩니다.
-# 추가 픽셀 사본.
+# 원시 storage를 계획과 stride가 일치하는 NumPy view로 감쌉니다.
+# 이 단일 프레임 흑백 예제는 추가 픽셀 복사 없이
+# 사용자 정의 stride를 가진 2차원 배열 view가 됩니다.
 arr = np.ndarray(
     shape=plan.shape(frame=0),
     dtype=plan.dtype,
@@ -320,12 +320,12 @@ row_stride = ((packed_row_bytes + 32 + 31) // 32) * 32
 frame_stride = row_stride * rows
 
 # 먼저 일반 1차원 C 연속 NumPy 배열로 백업 스토리지를 준비합니다.
-# decode_into()가 점점 힘들어지고 있습니다.
+# 이것이 decode_into()가 실제로 써 넣을 대상 객체입니다.
 backing = np.empty((frame_stride * frame_count) // itemsize, dtype=dtype)
 
-# 디코딩하기 전에 동일한 스토리지에 애플리케이션 지향 배열 보기를 구축합니다.
-# 이 예에서는 프레임 중심의 단색 레이아웃을 사용합니다.
-#   ( 프레임, 행, 열) 및 스트라이드(frame_stride, row_stride, itemsize).
+# 디코딩하기 전에 같은 storage 위에 애플리케이션용 배열 view를 만듭니다.
+# 이 예제는 프레임 우선 단색 레이아웃을 사용합니다.
+#   (frames, rows, cols), strides=(frame_stride, row_stride, itemsize)
 frames = np.ndarray(
     shape=(frame_count, rows, cols),
     dtype=dtype,
@@ -333,18 +333,18 @@ frames = np.ndarray(
     strides=(frame_stride, row_stride, itemsize),
 )
 
-# 스토리지 레이아웃이 이미 결정된 후 일치하는 계획을 세우십시오.
+# storage 레이아웃을 먼저 정한 뒤, 여기에 맞는 계획을 만듭니다.
 plan = df.create_decode_plan(
     dicom.DecodeOptions(
-        # 인터리브된 출력이 기본값이지만 여기서는 철자법을 명시합니다.
-        # 위의 저장소 레이아웃은 인터리브된 샘플을 위해 준비되었습니다.
+        # 인터리브된 출력이 기본값이지만,
+        # 위 storage 레이아웃이 인터리브된 샘플을 기준으로 준비되었음을 명확히 적습니다.
         planar_out=dicom.Planar.interleaved,
         row_stride=row_stride,
         frame_stride=frame_stride,
     )
 )
 
-# 계획이 수동으로 준비한 NumPy 목록과 일치 여부를 확인하세요.
+# 계획이 수동으로 준비한 NumPy 레이아웃과 일치하는지 확인합니다.
 assert plan.dtype == np.dtype(dtype)
 assert plan.bytes_per_sample == itemsize
 assert plan.shape(frame=-1) == frames.shape
@@ -352,12 +352,12 @@ assert plan.row_stride == row_stride
 assert plan.frame_stride == frame_stride
 assert plan.required_bytes(frame=-1) == backing.nbytes
 
-# decode_into()는 스스로를 실현할 수 있어야 합니다.
-# C 끈. 이것이 바로 여기 '지원'을 전달하는 이유입니다.
+# decode_into()는 대상 객체 자체가 쓰기 가능하고 C-연속이어야 합니다.
+# 그래서 여기서는 `frames`가 아니라 `backing`을 전달합니다.
 df.decode_into(backing, frame=-1, plan=plan)
 
-# '프레임'은 이제 준비한 NumPy를 통해 표시되는 대각선을 따라갑니다.
-# '백킹'은 기본적으로 스토리지를 계속 소유하는 것입니다.
+# 이제 `frames`는 미리 준비한 NumPy 레이아웃을 통해 디코딩된 픽셀을 보여주고,
+# `backing`은 기본 storage를 계속 소유합니다.
 ```
 
 ### C++ 디코드 실패를 명시적으로 처리

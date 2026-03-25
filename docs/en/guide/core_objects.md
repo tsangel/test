@@ -1,20 +1,20 @@
 # Core Objects
 
-This page introduces the objects and supporting types you meet most often in dicomsdl: `DicomFile`, `DataSet`, `DataElement`, `Sequence`, `PixelSequence`, `Uid`, and `PersonName`.
+This page introduces the objects and supporting types you meet most often in DicomSDL: `DicomFile`, `DataSet`, `DataElement`, `Sequence`, `PixelSequence`, `Uid`, and `PersonName`.
 
 ## DicomFile
 
-`DicomFile` is dicomsdl's file/session wrapper. It owns the root dataset together with high-level read, write, decode, and transcode operations. Start here when you care about file/session state, decode, or serialization.
+`DicomFile` is DicomSDL's file/session wrapper. It owns the root dataset together with high-level read, write, decode, and transcode operations. Start here when you care about file/session state, decode, or serialization.
 
 Relevant DICOM sections:
 
-- `DicomFile` itself is a dicomsdl implementation object rather than a named DICOM standard object.
+- `DicomFile` itself is a DicomSDL implementation object rather than a named DICOM standard object.
 - Its closest standard mapping is the file-level encapsulation defined in [DICOM PS3.10 Chapter 7, DICOM File Format](https://dicom.nema.org/medical/dicom/current/output/chtml/part10/chapter_7.html), especially Section 7.1 on File Meta Information.
 - The enclosed root dataset follows [DICOM PS3.5 Chapter 7, The Data Set](https://dicom.nema.org/medical/dicom/current/output/chtml/part05/chapter_7.html).
 
 ## DataSet
 
-`DataSet` is the whole structured collection of fields that make up one DICOM object. In dicomsdl, the `DataSet` class implements that container of DICOM Data Elements. In practice this is the object you use most often when reading or mutating metadata fields, so start here for most metadata access and update flows.
+`DataSet` is the whole structured collection of fields that make up one DICOM object. In DicomSDL, the `DataSet` class implements that container of DICOM Data Elements. In practice this is the object you use most often when reading or mutating metadata fields, so start here for most metadata access and update flows.
 
 Relevant DICOM sections:
 
@@ -22,7 +22,7 @@ Relevant DICOM sections:
 
 ## DataElement
 
-`DataElement` is one field inside a `DataSet`, such as `PatientName` or `Rows`. In dicomsdl, the `DataElement` class implements that single DICOM field together with its tag, VR, value, length, offset, and related metadata. Start here when you need both the value and the structural details of that element.
+`DataElement` is one field inside a `DataSet`, such as `PatientName` or `Rows`. In DicomSDL, the `DataElement` class implements that single DICOM field together with its tag, VR, value, length, offset, and related metadata. Start here when you need both the value and the structural details of that element.
 
 Two supporting concepts are attached to every `DataElement`:
 
@@ -37,7 +37,7 @@ Relevant DICOM sections:
 
 ## Sequence
 
-`Sequence` is a DICOM field whose value is a list of nested items, where each item is itself another `DataSet`. In dicomsdl, the `Sequence` class implements that `SQ` concept. Start here when you are traversing or modifying nested DICOM structures such as `Seq.0.Tag`.
+`Sequence` is a DICOM field whose value is a list of nested items, where each item is itself another `DataSet`. In DicomSDL, the `Sequence` class implements that `SQ` concept. Start here when you are traversing or modifying nested DICOM structures such as `Seq.0.Tag`.
 
 Relevant DICOM sections:
 
@@ -46,7 +46,7 @@ Relevant DICOM sections:
 
 ## PixelSequence
 
-`PixelSequence` is the container used when `PixelData` is stored in encapsulated or compressed form. Unlike `Sequence`, it is not a general nested DICOM field. It is the frame/fragment container behind compressed pixel payloads. In dicomsdl, the `PixelSequence` class implements that specialized pixel-storage object. You usually reach it from `PixelData` as `elem.pixel_sequence` in Python or `as_pixel_sequence()` in C++, and you start here when compressed `PixelData` requires encoded frame bytes or fragment-level access.
+`PixelSequence` is the container used when `PixelData` is stored in encapsulated or compressed form. Unlike `Sequence`, it is not a general nested DICOM field. It is the frame/fragment container behind compressed pixel payloads. In DicomSDL, the `PixelSequence` class implements that specialized pixel-storage object. You usually reach it from `PixelData` as `elem.pixel_sequence` in Python or `as_pixel_sequence()` in C++, and you start here when compressed `PixelData` requires encoded frame bytes or fragment-level access.
 
 Relevant DICOM sections:
 

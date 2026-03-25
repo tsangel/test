@@ -1,6 +1,10 @@
 # Encode-capable Transfer Syntax Families
 
-This page is a compact summary of the transfer-syntax families dicomsdl can target
+```{note}
+このページ本文はまだ英語の原文です。必要に応じて英語版を基準に参照してください。
+```
+
+This page is a compact summary of the transfer-syntax families DicomSDL can target
 on the writer side. The listed families are the encode/transcode targets you can
 use with `set_pixel_data(...)`, `set_transfer_syntax(...)`, and C++
 `write_with_transfer_syntax(...)`.

@@ -1,20 +1,20 @@
 # コアオブジェクト
 
-このページでは、dicomsdl でよく使う主要なオブジェクトと補助型を紹介します: `DicomFile`、`DataSet`、`DataElement`、`Sequence`、`PixelSequence`、`Uid`、`PersonName`。
+このページでは、DicomSDL でよく使う主要なオブジェクトと補助型を紹介します: `DicomFile`、`DataSet`、`DataElement`、`Sequence`、`PixelSequence`、`Uid`、`PersonName`。
 
 ## DicomFile
 
-`DicomFile` は dicomsdl におけるファイル/セッション単位のラッパーです。ルート `DataSet` を保持し、高水準の read / write / decode / transcode 操作もまとめて提供します。ファイル/セッションの状態管理、デコード、シリアライズが重要な場合はここから始めます。
+`DicomFile` は DicomSDL におけるファイル/セッション単位のラッパーです。ルート `DataSet` を保持し、高水準の read / write / decode / transcode 操作もまとめて提供します。ファイル/セッションの状態管理、デコード、シリアライズが重要な場合はここから始めます。
 
 関連する DICOM 標準セクション:
 
-- `DicomFile` 自体は、DICOM 標準で名前の付いたオブジェクトというより dicomsdl の実装オブジェクトです。
+- `DicomFile` 自体は、DICOM 標準で名前の付いたオブジェクトというより DicomSDL の実装オブジェクトです。
 - 最も近い標準上の対応は [DICOM PS3.10 Chapter 7, DICOM File Format](https://dicom.nema.org/medical/dicom/current/output/chtml/part10/chapter_7.html)、特に File Meta Information を扱う Section 7.1 です。
 - 内包する root dataset は [DICOM PS3.5 Chapter 7, The Data Set](https://dicom.nema.org/medical/dicom/current/output/chtml/part05/chapter_7.html) に従います。
 
 ## DataSet
 
-`DataSet` は、1 つの DICOM オブジェクトを構成する構造化されたフィールドの集合です。dicomsdl の `DataSet` クラスは、この DICOM Data Element コンテナを実装します。実際にはメタデータのフィールドを読んだり更新したりするときに最もよく使うオブジェクトなので、多くのメタデータ参照や更新はここから始まります。
+`DataSet` は、1 つの DICOM オブジェクトを構成する構造化されたフィールドの集合です。DicomSDL の `DataSet` クラスは、この DICOM Data Element コンテナを実装します。実際にはメタデータのフィールドを読んだり更新したりするときに最もよく使うオブジェクトなので、多くのメタデータ参照や更新はここから始まります。
 
 関連する DICOM 標準セクション:
 
@@ -22,7 +22,7 @@
 
 ## DataElement
 
-`DataElement` は `DataSet` の中の 1 つのフィールドです。たとえば `PatientName` や `Rows` のような項目です。dicomsdl の `DataElement` クラスは、この単一の DICOM フィールドと、その tag、VR、value、length、offset、関連メタデータを表現します。値だけでなく、その要素の構造情報も必要なときはここから始めます。
+`DataElement` は `DataSet` の中の 1 つのフィールドです。たとえば `PatientName` や `Rows` のような項目です。DicomSDL の `DataElement` クラスは、この単一の DICOM フィールドと、その tag、VR、value、length、offset、関連メタデータを表現します。値だけでなく、その要素の構造情報も必要なときはここから始めます。
 
 各 `DataElement` には 2 つの補助概念が付いています。
 
@@ -37,7 +37,7 @@
 
 ## Sequence
 
-`Sequence` は、その値がネストされた item のリストになっている DICOM フィールドで、各 item はそれ自体が別の `DataSet` です。dicomsdl の `Sequence` クラスは、この `SQ` の概念を実装します。`Seq.0.Tag` のようなネストした DICOM 構造をたどったり変更したりするときはここから始めます。
+`Sequence` は、その値がネストされた item のリストになっている DICOM フィールドで、各 item はそれ自体が別の `DataSet` です。DicomSDL の `Sequence` クラスは、この `SQ` の概念を実装します。`Seq.0.Tag` のようなネストした DICOM 構造をたどったり変更したりするときはここから始めます。
 
 関連する DICOM 標準セクション:
 
@@ -46,7 +46,7 @@
 
 ## PixelSequence
 
-`PixelSequence` は、`PixelData` が encapsulated または compressed 形式で保存されているときに使われるコンテナです。`Sequence` と違って、一般的なネスト DICOM フィールドではありません。compressed pixel payload の背後にある frame / fragment コンテナです。dicomsdl の `PixelSequence` クラスは、この特殊な pixel-storage オブジェクトを実装します。通常は Python では `elem.pixel_sequence`、C++ では `as_pixel_sequence()` から到達し、compressed `PixelData` で encoded frame bytes や fragment レベルのアクセスが必要なときに使います。
+`PixelSequence` は、`PixelData` が encapsulated または compressed 形式で保存されているときに使われるコンテナです。`Sequence` と違って、一般的なネスト DICOM フィールドではありません。compressed pixel payload の背後にある frame / fragment コンテナです。DicomSDL の `PixelSequence` クラスは、この特殊な pixel-storage オブジェクトを実装します。通常は Python では `elem.pixel_sequence`、C++ では `as_pixel_sequence()` から到達し、compressed `PixelData` で encoded frame bytes や fragment レベルのアクセスが必要なときに使います。
 
 関連する DICOM 標準セクション:
 

@@ -1,6 +1,6 @@
 # Guide
 
-Start here if you are trying to install `dicomsdl`, build it, and write code against the public APIs.
+Start here if you are trying to install DicomSDL, build it, and write code against the public APIs.
 
 ```{toctree}
 :maxdepth: 1

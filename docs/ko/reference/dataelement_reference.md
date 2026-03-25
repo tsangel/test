@@ -1,6 +1,10 @@
 # DataElement Reference
 
-`DataElement` is the metadata-bearing leaf object in dicomsdl. It carries `tag`, `vr`, `length`, offset information, presence state, and typed/raw value access.
+```{note}
+이 페이지 본문은 아직 영어 원문입니다. 필요하면 영문 페이지를 기준으로 읽어 주세요.
+```
+
+`DataElement` is the metadata-bearing leaf object in DicomSDL. It carries `tag`, `vr`, `length`, offset information, presence state, and typed/raw value access.
 
 ## Core properties
 

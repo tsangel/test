@@ -1,7 +1,7 @@
 # pydicom Pixel Decoding on WG04 (Benchmark Notes)
 
 This note summarizes how to benchmark WG04 pixel decoding with `pydicom`,
-and how to compare it with `dicomsdl` using the same driver script.
+and how to compare it with DicomSDL using the same driver script.
 
 ## Benchmark script
 
@@ -10,9 +10,9 @@ and how to compare it with `dicomsdl` using the same driver script.
   - CLI argument `root` (if provided)
   - `DICOMSDL_WG04_IMAGES_BASE` environment variable
   - default: `/Users/tsangel/workspace.dev/sample/nema/WG04/IMAGES`
-- HTJ2K backend override for dicomsdl:
+- HTJ2K backend override for DicomSDL:
   - `--dicomsdl-htj2k-decoder auto|openjph|openjpeg`
-  - this is applied once during dicomsdl startup, before the first pixel decode/encode
+  - this is applied once during DicomSDL startup, before the first pixel decode/encode
   - mid-run backend fallback is not supported
 
 Supported codec directories:
@@ -49,7 +49,7 @@ python benchmarks/python/benchmark_wg04_pixel_decode.py \
   --repeat 10
 ```
 
-`dicomsdl`만 대상으로 preallocated output 재사용(`decode_into`) 경로를 측정하려면:
+DicomSDL만 대상으로 preallocated output 재사용(`decode_into`) 경로를 측정하려면:
 
 ```bash
 python benchmarks/python/benchmark_wg04_pixel_decode.py \
@@ -64,9 +64,9 @@ python benchmarks/python/benchmark_wg04_pixel_decode.py \
 ## Measurement method
 
 - Datasets are preloaded once per backend and codec before timed runs.
-- `dicomsdl` path:
+- DicomSDL path:
   - when `--dicomsdl-htj2k-decoder` is provided, the script configures the HTJ2K
-    backend immediately after importing `dicomsdl`, before any decode work starts
+    backend immediately after importing DicomSDL, before any decode work starts
   - default decode call: `df.to_array(frame=-1)`
   - for `J2KR`/`J2KI` in the base table, the driver forces
     `df.decode_into(out, frame=-1, worker_threads=-1, codec_threads=-1)`
@@ -88,7 +88,7 @@ python benchmarks/python/benchmark_wg04_pixel_decode.py \
   - `MiB/s`
   - `CR(ref/x)`: case-matched 평균 `REF 파일크기 / codec 파일크기`
 
-## Snapshot result (`--warmup 1 --repeat 3`, HTJ2K compare target: dicomsdl `openjpeg`)
+## Snapshot result (`--warmup 1 --repeat 3`, HTJ2K compare target: DicomSDL `openjpeg`)
 
 | Codec | dicomsdl ms/decode | pydicom ms/decode | dcm/pyd x | CR(ref/x) |
 | --- | ---: | ---: | ---: | ---: |
@@ -102,7 +102,7 @@ python benchmarks/python/benchmark_wg04_pixel_decode.py \
 | TOTAL | 19.949 | 45.786 | 2.30 | 8.42 |
 
 `dcm/pyd x` means `pydicom_ms_per_decode / dicomsdl_ms_per_decode`.
-Values greater than `1.0` indicate `dicomsdl` is faster for that codec.
+Values greater than `1.0` indicate DicomSDL is faster for that codec.
 `CR(ref/x)` means case-matched average `size(REF_case) / size(codec_case)`.
 `TOTAL` excludes `htj2k*` rows (`htj2kll`, `htj2kly`).
 

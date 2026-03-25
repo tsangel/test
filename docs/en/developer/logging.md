@@ -1,4 +1,4 @@
-# dicomsdl Logging Principles
+# DicomSDL Logging Principles
 
 Short, fielded, single-line messages to aid reproducibility.
 

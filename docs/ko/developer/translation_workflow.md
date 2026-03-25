@@ -1,6 +1,10 @@
 # Translation Workflow
 
-English documentation is the source of truth for `dicomsdl`.
+```{note}
+이 페이지 본문은 아직 영어 원문입니다. 필요하면 영문 페이지를 기준으로 읽어 주세요.
+```
+
+English documentation is the source of truth for DicomSDL.
 Every public English page should have matching document files for Korean (`ko`), Japanese (`ja`), and Simplified Chinese (`zh-cn`).
 
 ## Scope

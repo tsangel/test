@@ -1,5 +1,9 @@
 # Developer
 
+```{note}
+本页正文目前仍为英文原文。需要时请以英文版为准。
+```
+
 This section is for contributors and maintainers working on benchmarks, build workflow, internals, and documentation operations.
 
 ```{toctree}

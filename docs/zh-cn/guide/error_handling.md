@@ -7,7 +7,7 @@
 
 ## 错误类型
 
-`dicomsdl` 的公共 API 大致有三种失败方式：
+DicomSDL 的公共 API 大致有三种失败方式：
 
 - 抛出异常
 - 高层 C++ 读取、写入、解码、编码以及数据集范围的字符集变更 API 失败时，通常会抛出 `dicom::diag::DicomException`。

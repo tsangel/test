@@ -1,20 +1,20 @@
 # 핵심 객체
 
-이 페이지는 dicomsdl에서 가장 자주 만나게 되는 객체와 보조 타입을 소개합니다: `DicomFile`, `DataSet`, `DataElement`, `Sequence`, `PixelSequence`, `Uid`, `PersonName`.
+이 페이지는 DicomSDL에서 가장 자주 만나게 되는 객체와 보조 타입을 소개합니다: `DicomFile`, `DataSet`, `DataElement`, `Sequence`, `PixelSequence`, `Uid`, `PersonName`.
 
 ## DicomFile
 
-`DicomFile`은 dicomsdl의 file/session wrapper입니다. root dataset을 소유하고, 상위 수준의 읽기, 쓰기, decode, transcode 동작을 함께 제공합니다. file/session 상태, decode, serialization이 중요할 때는 여기서 시작하세요.
+`DicomFile`은 DicomSDL의 file/session wrapper입니다. root dataset을 소유하고, 상위 수준의 읽기, 쓰기, decode, transcode 동작을 함께 제공합니다. file/session 상태, decode, serialization이 중요할 때는 여기서 시작하세요.
 
 관련 DICOM 표준 섹션:
 
-- `DicomFile` 자체는 DICOM 표준에 이름이 있는 객체라기보다 dicomsdl의 구현 객체입니다.
+- `DicomFile` 자체는 DICOM 표준에 이름이 있는 객체라기보다 DicomSDL의 구현 객체입니다.
 - 가장 가까운 표준 대응은 [DICOM PS3.10 Chapter 7, DICOM File Format](https://dicom.nema.org/medical/dicom/current/output/chtml/part10/chapter_7.html), 특히 File Meta Information을 다루는 Section 7.1입니다.
 - 내부의 root dataset은 [DICOM PS3.5 Chapter 7, The Data Set](https://dicom.nema.org/medical/dicom/current/output/chtml/part05/chapter_7.html)을 따릅니다.
 
 ## DataSet
 
-`DataSet`은 하나의 DICOM 객체를 이루는 전체 구조화된 field 집합입니다. dicomsdl의 `DataSet` 클래스는 이 DICOM Data Element 컨테이너를 구현합니다. 실제로는 metadata field를 읽거나 수정할 때 가장 자주 쓰는 객체이므로, 대부분의 metadata 접근과 갱신 흐름은 여기서 시작합니다.
+`DataSet`은 하나의 DICOM 객체를 이루는 전체 구조화된 field 집합입니다. DicomSDL의 `DataSet` 클래스는 이 DICOM Data Element 컨테이너를 구현합니다. 실제로는 metadata field를 읽거나 수정할 때 가장 자주 쓰는 객체이므로, 대부분의 metadata 접근과 갱신 흐름은 여기서 시작합니다.
 
 관련 DICOM 표준 섹션:
 
@@ -22,7 +22,7 @@
 
 ## DataElement
 
-`DataElement`는 `DataSet` 안의 하나의 field입니다. 예를 들면 `PatientName`이나 `Rows` 같은 항목입니다. dicomsdl의 `DataElement` 클래스는 이 단일 DICOM field와 함께 그 tag, VR, value, length, offset, 관련 metadata를 구현합니다. 값뿐 아니라 그 element의 구조 정보까지 같이 필요할 때는 여기서 시작하세요.
+`DataElement`는 `DataSet` 안의 하나의 field입니다. 예를 들면 `PatientName`이나 `Rows` 같은 항목입니다. DicomSDL의 `DataElement` 클래스는 이 단일 DICOM field와 함께 그 tag, VR, value, length, offset, 관련 metadata를 구현합니다. 값뿐 아니라 그 element의 구조 정보까지 같이 필요할 때는 여기서 시작하세요.
 
 모든 `DataElement`에는 다음 두 가지 보조 개념이 붙습니다.
 
@@ -37,7 +37,7 @@
 
 ## Sequence
 
-`Sequence`는 값이 nested item 목록으로 이루어진 DICOM field이며, 각 item은 다시 하나의 `DataSet`입니다. dicomsdl의 `Sequence` 클래스는 이 `SQ` 개념을 구현합니다. `Seq.0.Tag` 같은 nested DICOM 구조를 순회하거나 수정할 때는 여기서 시작하세요.
+`Sequence`는 값이 nested item 목록으로 이루어진 DICOM field이며, 각 item은 다시 하나의 `DataSet`입니다. DicomSDL의 `Sequence` 클래스는 이 `SQ` 개념을 구현합니다. `Seq.0.Tag` 같은 nested DICOM 구조를 순회하거나 수정할 때는 여기서 시작하세요.
 
 관련 DICOM 표준 섹션:
 
@@ -46,7 +46,7 @@
 
 ## PixelSequence
 
-`PixelSequence`는 `PixelData`가 encapsulated 또는 compressed 형태로 저장될 때 사용되는 컨테이너입니다. `Sequence`와 달리 일반적인 nested DICOM field는 아닙니다. 이는 compressed pixel payload 뒤에 있는 frame/fragment 컨테이너입니다. dicomsdl의 `PixelSequence` 클래스는 이 특수한 pixel storage 객체를 구현합니다. Python에서는 보통 `elem.pixel_sequence`, C++에서는 `as_pixel_sequence()`로 도달하며, compressed `PixelData`에서 encoded frame bytes나 fragment 수준 접근이 필요할 때 여기서 시작합니다.
+`PixelSequence`는 `PixelData`가 encapsulated 또는 compressed 형태로 저장될 때 사용되는 컨테이너입니다. `Sequence`와 달리 일반적인 nested DICOM field는 아닙니다. 이는 compressed pixel payload 뒤에 있는 frame/fragment 컨테이너입니다. DicomSDL의 `PixelSequence` 클래스는 이 특수한 pixel storage 객체를 구현합니다. Python에서는 보통 `elem.pixel_sequence`, C++에서는 `as_pixel_sequence()`로 도달하며, compressed `PixelData`에서 encoded frame bytes나 fragment 수준 접근이 필요할 때 여기서 시작합니다.
 
 관련 DICOM 표준 섹션:
 

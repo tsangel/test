@@ -1,6 +1,6 @@
 # 安装
 
-如果你需要可重复的安装 / 构建路径，或者希望更清楚地了解 dicomsdl 当前面向哪些环境，请使用本页。
+如果你需要可重复的安装 / 构建路径，或者希望更清楚地了解 DicomSDL 当前面向哪些环境，请使用本页。
 
 ## 环境摘要
 
@@ -43,7 +43,7 @@
 ## 选择路径
 
 - PyPI install: 体验 Python binding 的最快路径
-- 从 checkout 构建 C++: 当你要把 dicomsdl 集成到自己的 C++ application 时最合适
+- 从 checkout 构建 C++: 当你要把 DicomSDL 集成到自己的 C++ application 时最合适
 - Unix-like `build.sh`: macOS / Linux 构建的 convenience wrapper
 - 从 checkout 构建 Python source: 记录在 [Build Python From Source](../developer/build_python_from_source.md)
 - Windows `build.bat`: 当你需要显式选择 toolchain 时的推荐入口

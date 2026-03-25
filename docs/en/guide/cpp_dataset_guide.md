@@ -1,11 +1,11 @@
 # C++ DataSet Guide
 
-This is the main user-facing guide for C++-side dataset and element work in `dicomsdl`.
+This is the main user-facing guide for C++-side dataset and element work in DicomSDL.
 It covers how the main objects relate, how to spell tags, and the most important read/write patterns.
 
-## How dicomsdl maps to DICOM
+## How DicomSDL maps to DICOM
 
-`dicomsdl` exposes a small set of related C++ objects:
+DicomSDL exposes a small set of related C++ objects:
 
 - `DicomFile`: file/session wrapper that owns the root dataset
 - `DataSet`: container of DICOM `DataElement` objects
@@ -234,7 +234,7 @@ For scalar accessors, treat `std::nullopt` as "not available from this accessor"
 
 ### Distinguishing zero-length from missing
 
-In `dicomsdl`, `missing` and `zero-length` are different element states and should be tested at the `DataElement` level:
+In DicomSDL, `missing` and `zero-length` are different element states and should be tested at the `DataElement` level:
 
 ```cpp
 const auto& elem = ds["PatientName"_tag];

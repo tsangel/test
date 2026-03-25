@@ -1,6 +1,10 @@
 # Pixel Reference
 
-dicomsdl keeps pixel decode, pixel encode, and frame-aware pixel metadata on `DicomFile`.
+```{note}
+本页正文目前仍为英文原文。需要时请以英文版为准。
+```
+
+DicomSDL keeps pixel decode, pixel encode, and frame-aware pixel metadata on `DicomFile`.
 
 ## Decode surface
 

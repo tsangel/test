@@ -1,4 +1,8 @@
-# dicomsdl Logging Principles
+# DicomSDL Logging Principles
+
+```{note}
+本页正文目前仍为英文原文。需要时请以英文版为准。
+```
 
 Short, fielded, single-line messages to aid reproducibility.
 

@@ -1,4 +1,4 @@
-# dicomsdl Documentation
+# DicomSDL Documentation
 
 Lightweight DICOM parser/wrapper with a C++ core and a nanobind-based Python module. The docs are written with Python users first, while still covering the C++ API.
 

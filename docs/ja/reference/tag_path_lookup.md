@@ -1,5 +1,9 @@
 # Tag-path lookup semantics
 
+```{note}
+このページ本文はまだ英語の原文です。必要に応じて英語版を基準に参照してください。
+```
+
 `DataSet::get_dataelement(std::string_view tag_path)` and the `operator[]` form that takes a string are the low-level path parsers for nested sequence traversal. For regular tag reads, prefer `dataset[tag].to_xxx().value_or(default)` or `dataset["Keyword"].to_xxx().value_or(default)` style access.
 
 ## Accepted forms

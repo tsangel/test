@@ -1,11 +1,11 @@
 # C++ 데이터세트 가이드
 
-이 문서는 `dicomsdl`에서 C++로 데이터세트와 요소를 다루는 주요 사용자 가이드입니다.
+이 문서는 DicomSDL에서 C++로 데이터세트와 요소를 다루는 주요 사용자 가이드입니다.
 주요 객체의 관계, 태그를 표기하는 방법, 그리고 가장 중요한 읽기/쓰기 패턴을 다룹니다.
 
-## dicomsdl이 DICOM에 매핑되는 방법
+## DicomSDL이 DICOM에 매핑되는 방법
 
-`dicomsdl`는 관련된 C++ 개체의 작은 집합을 노출합니다.
+DicomSDL은 관련된 C++ 개체의 작은 집합을 노출합니다.
 
 - `DicomFile`: 루트 데이터세트를 소유하는 파일/세션 래퍼
 - `DataSet`: DICOM `DataElement` 개체의 컨테이너
@@ -234,7 +234,7 @@ auto at = ds["FrameIncrementPointer"_tag].to_tag_vector();
 
 ### 길이가 0인 것과 누락된 것을 구별하기
 
-`dicomsdl`에서 `missing` 및 `zero-length`는 서로 다른 요소 상태이므로 `DataElement` 수준에서 테스트해야 합니다.
+DicomSDL에서 `missing` 및 `zero-length`는 서로 다른 요소 상태이므로 `DataElement` 수준에서 테스트해야 합니다.
 
 ```cpp
 const auto& elem = ds["PatientName"_tag];

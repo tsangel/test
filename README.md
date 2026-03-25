@@ -1,4 +1,4 @@
-# dicomsdl
+# DicomSDL
 
 Minimal DICOM file wrapper with a C++ core and optional Python bindings.
 

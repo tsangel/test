@@ -1,6 +1,6 @@
-# dicomsdl 문서
+# DicomSDL 문서
 
-dicomsdl은 C++ 코어와 nanobind 기반 Python 모듈을 갖춘 가벼운 DICOM 파서/래퍼입니다. 문서는 Python 사용자를 우선으로 구성했지만, C++ API도 함께 다룹니다.
+DicomSDL은 C++ 코어와 nanobind 기반 Python 모듈을 갖춘 가벼운 DICOM 파서/래퍼입니다. 문서는 Python 사용자를 우선으로 구성했지만, C++ API도 함께 다룹니다.
 
 영문 문서가 기준 원문입니다. 현지화된 사이트는 `docs/ko`, `docs/ja`, `docs/zh-cn` 아래에서 같은 상대 경로를 공유합니다.
 

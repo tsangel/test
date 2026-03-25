@@ -1,5 +1,9 @@
 # JPEG2000/HTJ2K MCT Benchmarks (Auto Encoder Threads)
 
+```{note}
+このページ本文はまだ英語の原文です。必要に応じて英語版を基準に参照してください。
+```
+
 ## Scope
 - Measured date: 2026-02-24
 - Input files:

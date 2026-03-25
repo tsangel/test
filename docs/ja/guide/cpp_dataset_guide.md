@@ -1,11 +1,11 @@
 # C++ データセット ガイド
 
-これは、`dicomsdl` で C++ からデータセットと要素を扱うための主要なガイドです。
+これは、DicomSDL で C++ からデータセットと要素を扱うための主要なガイドです。
 主要なオブジェクトの関係、タグの表記方法、重要な読み書きパターンを説明します。
 
-## dicomsdl と DICOM のマッピング方法
+## DicomSDL と DICOM のマッピング方法
 
-`dicomsdl` は、関連する C++ オブジェクトの小さなセットを公開します。
+DicomSDL は、関連する C++ オブジェクトの小さなセットを公開します。
 
 - `DicomFile`: ルート データセットを所有するファイル/セッション ラッパー
 - `DataSet`: DICOM `DataElement` オブジェクトのコンテナー
@@ -234,7 +234,7 @@ auto at = ds["FrameIncrementPointer"_tag].to_tag_vector();
 
 ### 長さゼロと欠落の区別
 
-`dicomsdl` では、`missing` と `zero-length` は異なる要素の状態であり、`DataElement` レベルでテストする必要があります。
+DicomSDL では、`missing` と `zero-length` は異なる要素の状態であり、`DataElement` レベルでテストする必要があります。
 
 ```cpp
 const auto& elem = ds["PatientName"_tag];

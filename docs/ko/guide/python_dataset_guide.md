@@ -1,9 +1,9 @@
 # Python 데이터세트 가이드
 
-`dicomsdl`는 얇은 nanobind 래퍼입니다. 런타임에 네이티브 확장을 로드하므로 문서는 mock import로 빌드됩니다. 예제를 실행하려면 휠을 설치하세요.
+DicomSDL은 얇은 nanobind 래퍼입니다. 런타임에 네이티브 확장을 로드하므로 문서는 mock import로 빌드됩니다. 예제를 실행하려면 휠을 설치하세요.
 
-이것은 `dicomsdl`의 Python 측 파일, 데이터 세트 및 요소 액세스에 대한 주요 사용자 대상 가이드입니다.
-모듈 수준 진입점, dicomsdl 개체가 DICOM에 매핑되는 방법, 가장 중요한 읽기/쓰기 패턴을 다룹니다.
+이것은 DicomSDL의 Python 측 파일, 데이터 세트 및 요소 액세스에 대한 주요 사용자 대상 가이드입니다.
+모듈 수준 진입점, DicomSDL 개체가 DICOM에 매핑되는 방법, 가장 중요한 읽기/쓰기 패턴을 다룹니다.
 
 ## 가져오기
 
@@ -20,9 +20,9 @@ import dicomsdl as dicom
 - `generate_uid() -> str`: DICOMSDL 접두사 아래에 새 UID를 생성합니다.
 - `append_uid(base_uid: str, component: int) -> str`: 대체 정책이 포함된 하나의 UID 구성 요소를 추가합니다.
 
-## dicomsdl이 DICOM에 매핑되는 방법
+## DicomSDL이 DICOM에 매핑되는 방법
 
-`dicomsdl`는 관련된 Python 개체의 작은 집합을 노출합니다.
+DicomSDL은 관련된 Python 개체의 작은 집합을 노출합니다.
 
 - `DicomFile`: 루트 데이터세트를 소유하는 파일/세션 래퍼
 - `DataSet`: DICOM `DataElement` 개체의 컨테이너
@@ -111,7 +111,7 @@ df.dataset.Rows = 512
 
 실용적인 권장사항:
 
-- 대부분의 Python 코드에서 일반적인 키워드/태그 문자열 액세스에는 `"Rows"`를 사용합니다. 여기에는 여전히 런타임 키워드/태그 구문 분석 비용이 적지만 dicomsdl은 최적화된 런타임 키워드 경로와 일반 키워드 문자열에 대한 더 가벼운 직접 경로를 사용하므로 오버헤드가 일반적으로 작습니다.
+- 대부분의 Python 코드에서 일반적인 키워드/태그 문자열 액세스에는 `"Rows"`를 사용합니다. 여기에는 여전히 런타임 키워드/태그 구문 분석 비용이 적지만 DicomSDL은 최적화된 런타임 키워드 경로와 일반 키워드 문자열에 대한 더 가벼운 직접 경로를 사용하므로 오버헤드가 일반적으로 작습니다.
 - 단일 태그가 이미 숫자 상수 또는 외부 메타데이터에서 나온 경우 또는 단일 태그에 대한 가장 빠른 경로를 원하는 경우 압축된 정수를 사용합니다.
 - 한 단계에서 중첩된 값이나 할당을 원할 경우 점으로 구분된 태그 경로 문자열을 사용합니다. Python에서는 순회가 하나의 C++ 경로 구문 분석/조회 호출 내에 유지되므로 반복적으로 중첩된 `Sequence` / `DataSet` API 호출보다 더 빠를 수도 있습니다.
 - 명시적으로 재사용 가능한 태그 객체를 원할 때 `dicom.Tag(...)`를 사용하세요.
@@ -294,7 +294,7 @@ auto at = dataset["FrameIncrementPointer"_tag].to_tag_vector();
 
 ### 길이가 0인 것과 누락된 것을 구별하기
 
-`dicomsdl`에서 `missing`와 `zero-length`는 서로 다른 요소 상태이므로 `elem.value`만 살펴보는 것이 아니라 `DataElement` 수준에서 테스트해야 합니다.
+DicomSDL에서 `missing`와 `zero-length`는 서로 다른 요소 상태이므로 `elem.value`만 살펴보는 것이 아니라 `DataElement` 수준에서 테스트해야 합니다.
 
 다음 규칙을 사용하세요.
 

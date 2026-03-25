@@ -1,6 +1,6 @@
 # CLI ツール
 
-`dicomsdl` には、ユーザー向けのコマンドラインツールが 3 つあります。
+DicomSDL には、ユーザー向けのコマンドラインツールが 3 つあります。
 
 - `dicomdump`: 読みやすい DICOM dump を出力する
 - `dicomshow`: Pillow を使って 1 フレームをすばやく表示する
@@ -105,7 +105,7 @@ dicomshow [--frame N] <input.dcm>
 
 - `dicomshow` は簡易プレビュー用であり、診断用ビューアではありません。
 - ローカル GUI / viewer の関連付けに依存するため、headless 環境では動かないことがあります。
-- Pillow や NumPy がない場合は `dicomsdl[numpy,pil]` を入れてください。
+- Pillow や NumPy がない場合は `DicomSDL[numpy,pil]` を入れてください。
 
 ### `dicomshow` の例
 

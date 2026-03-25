@@ -1,6 +1,6 @@
 # CLI 工具
 
-`dicomsdl` 提供 3 个面向用户的命令行工具。
+DicomSDL 提供 3 个面向用户的命令行工具。
 
 - `dicomdump`：输出便于阅读的 DICOM dump
 - `dicomshow`：通过 Pillow 快速预览单帧图像
@@ -104,7 +104,7 @@ dicomshow [--frame N] <input.dcm>
 
 - `dicomshow` 是快速预览工具，不是诊断级 viewer。
 - 它依赖本地 GUI / viewer 关联，在 headless 环境中可能无法工作。
-- 如果没有 Pillow 或 NumPy，请安装 `dicomsdl[numpy,pil]`。
+- 如果没有 Pillow 或 NumPy，请安装 `DicomSDL[numpy,pil]`。
 
 ### `dicomshow` 示例
 

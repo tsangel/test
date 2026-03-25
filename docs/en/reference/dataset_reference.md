@@ -1,6 +1,6 @@
 # DataSet Reference
 
-`DataSet` is the metadata container in dicomsdl. A root dataset belongs to a `DicomFile`, and nested datasets appear as sequence items.
+`DataSet` is the metadata container in DicomSDL. A root dataset belongs to a `DicomFile`, and nested datasets appear as sequence items.
 
 ## Core lookup APIs
 

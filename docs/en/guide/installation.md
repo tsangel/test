@@ -1,7 +1,7 @@
 # Installation
 
 Use this page when you want a repeatable install/build path and a clearer view
-of the environments dicomsdl currently targets.
+of the environments DicomSDL currently targets.
 
 ## Environment summary
 
@@ -45,7 +45,7 @@ If `DICOMSDL_WINDOWS_TOOLCHAIN` is not set, `build.bat` auto-selects
 ## Choose a path
 
 - PyPI install: fastest way to try the Python binding
-- C++ build from a checkout: best path when you are integrating dicomsdl into your C++ application
+- C++ build from a checkout: best path when you are integrating DicomSDL into your C++ application
 - Unix-like `build.sh`: convenience wrapper for macOS / Linux builds
 - Python source build from a checkout: documented in [Build Python From Source](../developer/build_python_from_source.md)
 - Windows `build.bat`: preferred entry point when you need explicit toolchain selection

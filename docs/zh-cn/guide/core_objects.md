@@ -1,20 +1,20 @@
 # 核心对象
 
-本页介绍你在 dicomsdl 中最常遇到的对象和辅助类型：`DicomFile`、`DataSet`、`DataElement`、`Sequence`、`PixelSequence`、`Uid`、`PersonName`。
+本页介绍你在 DicomSDL 中最常遇到的对象和辅助类型：`DicomFile`、`DataSet`、`DataElement`、`Sequence`、`PixelSequence`、`Uid`、`PersonName`。
 
 ## DicomFile
 
-`DicomFile` 是 dicomsdl 的 file/session wrapper。它拥有 root dataset，并同时提供高层的 read、write、decode 和 transcode 操作。当你关心 file/session 状态、decode 或 serialization 时，应从这里开始。
+`DicomFile` 是 DicomSDL 的 file/session wrapper。它拥有 root dataset，并同时提供高层的 read、write、decode 和 transcode 操作。当你关心 file/session 状态、decode 或 serialization 时，应从这里开始。
 
 相关 DICOM 标准章节：
 
-- `DicomFile` 本身不是 DICOM 标准中一个有明确名称的对象，而是 dicomsdl 的实现对象。
+- `DicomFile` 本身不是 DICOM 标准中一个有明确名称的对象，而是 DicomSDL 的实现对象。
 - 它最接近的标准对应是 [DICOM PS3.10 Chapter 7, DICOM File Format](https://dicom.nema.org/medical/dicom/current/output/chtml/part10/chapter_7.html)，尤其是处理 File Meta Information 的 Section 7.1。
 - 其中包含的 root dataset 遵循 [DICOM PS3.5 Chapter 7, The Data Set](https://dicom.nema.org/medical/dicom/current/output/chtml/part05/chapter_7.html)。
 
 ## DataSet
 
-`DataSet` 是构成一个 DICOM 对象的完整结构化 field 集合。dicomsdl 的 `DataSet` 类实现了这个 DICOM Data Element 容器。在实践中，它是你读取或修改 metadata field 时最常使用的对象，因此大多数 metadata access 和 update 流程都从这里开始。
+`DataSet` 是构成一个 DICOM 对象的完整结构化 field 集合。DicomSDL 的 `DataSet` 类实现了这个 DICOM Data Element 容器。在实践中，它是你读取或修改 metadata field 时最常使用的对象，因此大多数 metadata access 和 update 流程都从这里开始。
 
 相关 DICOM 标准章节：
 
@@ -22,7 +22,7 @@
 
 ## DataElement
 
-`DataElement` 是 `DataSet` 中的一个 field，例如 `PatientName` 或 `Rows`。dicomsdl 的 `DataElement` 类实现了这个单独的 DICOM field，以及它的 tag、VR、value、length、offset 和相关 metadata。当你不仅需要值本身，还需要该 element 的结构细节时，应从这里开始。
+`DataElement` 是 `DataSet` 中的一个 field，例如 `PatientName` 或 `Rows`。DicomSDL 的 `DataElement` 类实现了这个单独的 DICOM field，以及它的 tag、VR、value、length、offset 和相关 metadata。当你不仅需要值本身，还需要该 element 的结构细节时，应从这里开始。
 
 每个 `DataElement` 都带有两个辅助概念：
 
@@ -37,7 +37,7 @@
 
 ## Sequence
 
-`Sequence` 是一种 DICOM field，它的值是一个 nested item 列表，而每个 item 本身又是另一个 `DataSet`。dicomsdl 的 `Sequence` 类实现了这个 `SQ` 概念。当你要遍历或修改 `Seq.0.Tag` 这样的 nested DICOM 结构时，应从这里开始。
+`Sequence` 是一种 DICOM field，它的值是一个 nested item 列表，而每个 item 本身又是另一个 `DataSet`。DicomSDL 的 `Sequence` 类实现了这个 `SQ` 概念。当你要遍历或修改 `Seq.0.Tag` 这样的 nested DICOM 结构时，应从这里开始。
 
 相关 DICOM 标准章节：
 
@@ -46,7 +46,7 @@
 
 ## PixelSequence
 
-`PixelSequence` 是在 `PixelData` 以 encapsulated 或 compressed 形式存储时使用的容器。它与 `Sequence` 不同，不是通用的 nested DICOM field，而是 compressed pixel payload 背后的 frame / fragment 容器。dicomsdl 的 `PixelSequence` 类实现了这个专门的 pixel-storage 对象。通常你会在 Python 中通过 `elem.pixel_sequence`、在 C++ 中通过 `as_pixel_sequence()` 到达它；当 compressed `PixelData` 需要 encoded frame bytes 或 fragment 级访问时，应从这里开始。
+`PixelSequence` 是在 `PixelData` 以 encapsulated 或 compressed 形式存储时使用的容器。它与 `Sequence` 不同，不是通用的 nested DICOM field，而是 compressed pixel payload 背后的 frame / fragment 容器。DicomSDL 的 `PixelSequence` 类实现了这个专门的 pixel-storage 对象。通常你会在 Python 中通过 `elem.pixel_sequence`、在 C++ 中通过 `as_pixel_sequence()` 到达它；当 compressed `PixelData` 需要 encoded frame bytes 或 fragment 级访问时，应从这里开始。
 
 相关 DICOM 标准章节：
 

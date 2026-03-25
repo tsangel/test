@@ -1,11 +1,11 @@
 # C++ 数据集指南
 
-这是 `dicomsdl` 中面向用户的主要 C++ 数据集指南。
+这是 DicomSDL 中面向用户的主要 C++ 数据集指南。
 它介绍主要对象之间的关系、标签的写法，以及最重要的读写模式。
 
-## dicomsdl 如何映射到 DICOM
+## DicomSDL 如何映射到 DICOM
 
-`dicomsdl` 公开了一小组相关的 C++ 对象：
+DicomSDL 公开了一小组相关的 C++ 对象：
 
 - `DicomFile`：拥有根数据集的文件/会话包装器
 - `DataSet`：DICOM `DataElement` 对象的容器
@@ -234,7 +234,7 @@ auto at = ds["FrameIncrementPointer"_tag].to_tag_vector();
 
 ### 区分零长度和缺失
 
-在 `dicomsdl` 中，`missing` 和 `zero-length` 是不同的元素状态，应在 `DataElement` 级别进行测试：
+在 DicomSDL 中，`missing` 和 `zero-length` 是不同的元素状态，应在 `DataElement` 级别进行测试：
 
 ```cpp
 const auto& elem = ds["PatientName"_tag];

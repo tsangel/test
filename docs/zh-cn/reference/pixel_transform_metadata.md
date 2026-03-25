@@ -1,6 +1,10 @@
 # Pixel Transform Metadata Resolution
 
-`dicomsdl` resolves post-decode pixel transform metadata with frame-aware precedence for
+```{note}
+本页正文目前仍为英文原文。需要时请以英文版为准。
+```
+
+DicomSDL resolves post-decode pixel transform metadata with frame-aware precedence for
 Enhanced multi-frame objects.
 
 ## Resolution order

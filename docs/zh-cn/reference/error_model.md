@@ -1,6 +1,10 @@
 # Error Model
 
-This page describes which exception categories dicomsdl may throw, what they usually mean, and what public API consumers should rely on.
+```{note}
+本页正文目前仍为英文原文。需要时请以英文版为准。
+```
+
+This page describes which exception categories DicomSDL may throw, what they usually mean, and what public API consumers should rely on.
 
 ## Short version
 
@@ -13,14 +17,14 @@ This page describes which exception categories dicomsdl may throw, what they usu
 
 ### `dicom::diag::DicomException`
 
-This is the main dicomsdl domain exception.
+This is the main DicomSDL domain exception.
 
 Use cases:
 
 - DICOM parsing failures
 - DICOM write / transcode failures
 - Pixel decode / encode failures
-- Boundary-level errors where dicomsdl attaches DICOM-specific context such as file path, transfer syntax, frame index, stage, or reason
+- Boundary-level errors where DicomSDL attaches DICOM-specific context such as file path, transfer syntax, frame index, stage, or reason
 
 Typical message format:
 
@@ -81,7 +85,7 @@ Common examples:
 
 ## Public API guidance
 
-For public dicomsdl operations, prefer this pattern:
+For public DicomSDL operations, prefer this pattern:
 
 ```cpp
 try {
@@ -115,6 +119,6 @@ Applications should not parse full exception messages for control flow. If you n
 
 ## Relationship to logging
 
-dicomsdl error messages are designed so that the final exception text and the final log message can match closely.
+DicomSDL error messages are designed so that the final exception text and the final log message can match closely.
 
 See [logging](../developer/logging.md) for logging format and boundary logging principles.

@@ -1,5 +1,9 @@
 # Developer notes
 
+```{note}
+本页正文目前仍为英文原文。需要时请以英文版为准。
+```
+
 ## Build & test
 - C++: `cmake -S . -B build -DDICOM_BUILD_EXAMPLES=ON -DCMAKE_BUILD_TYPE=Release && cmake --build build && ctest --test-dir build`
 - Python: build `_dicomsdl`, `py -3.14 -m pip install -r tests/python/requirements.txt`, then `py -3.14 -m pytest tests/python -q`

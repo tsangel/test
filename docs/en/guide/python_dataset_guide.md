@@ -1,9 +1,9 @@
 # Python DataSet Guide
 
-`dicomsdl` is a thin nanobind wrapper. It loads a native extension at runtime, so the docs build with the extension import mocked out; install the wheel to run the examples.
+DicomSDL is a thin nanobind wrapper. It loads a native extension at runtime, so the docs build with the extension import mocked out; install the wheel to run the examples.
 
-This is the main user-facing guide for Python-side file, dataset, and element access in `dicomsdl`.
-It covers module-level entry points, how dicomsdl objects map to DICOM, and the most important read/write patterns.
+This is the main user-facing guide for Python-side file, dataset, and element access in DicomSDL.
+It covers module-level entry points, how DicomSDL objects map to DICOM, and the most important read/write patterns.
 
 ## Import
 
@@ -20,9 +20,9 @@ import dicomsdl as dicom
 - `generate_uid() -> str`: create a new UID under the DICOMSDL prefix.
 - `append_uid(base_uid: str, component: int) -> str`: append one UID component with fallback policy.
 
-## How dicomsdl maps to DICOM
+## How DicomSDL maps to DICOM
 
-`dicomsdl` exposes a small set of related Python objects:
+DicomSDL exposes a small set of related Python objects:
 
 - `DicomFile`: file/session wrapper that owns the root dataset
 - `DataSet`: container of DICOM `DataElement` objects
@@ -111,7 +111,7 @@ df.dataset.Rows = 512
 
 Practical recommendation:
 
-- use `"Rows"` for usual keyword/Tag-string access in most Python code. This still has a small runtime keyword/Tag parse cost, but dicomsdl uses an optimized runtime keyword path and a lighter direct path for plain keyword strings, so the overhead is usually small.
+- use `"Rows"` for usual keyword/Tag-string access in most Python code. This still has a small runtime keyword/Tag parse cost, but DicomSDL uses an optimized runtime keyword path and a lighter direct path for plain keyword strings, so the overhead is usually small.
 - use packed ints when single tags already come from numeric constants or external metadata, or when you want the fastest path for a single tag
 - use dotted tag-path strings when you want a nested value or assignment in one step. In Python, this can also be faster than repeated nested `Sequence` / `DataSet` API calls because the traversal stays inside one C++ path-parse/lookup call.
 - use `dicom.Tag(...)` when you want an explicit reusable tag object
@@ -294,7 +294,7 @@ auto at = dataset["FrameIncrementPointer"_tag].to_tag_vector();
 
 ### Distinguishing zero-length from missing
 
-In `dicomsdl`, `missing` and `zero-length` are different element states and should be tested at the `DataElement` level, not by looking only at `elem.value`.
+In DicomSDL, `missing` and `zero-length` are different element states and should be tested at the `DataElement` level, not by looking only at `elem.value`.
 
 Use this rule:
 

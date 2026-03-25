@@ -1,6 +1,6 @@
 # Translation Workflow
 
-English documentation is the source of truth for `dicomsdl`.
+English documentation is the source of truth for DicomSDL.
 Every public English page should have matching document files for Korean (`ko`), Japanese (`ja`), and Simplified Chinese (`zh-cn`).
 
 ## Scope

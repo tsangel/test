@@ -1,6 +1,6 @@
-# dicomsdl ドキュメント
+# DicomSDL ドキュメント
 
-dicomsdl は、C++ コアと nanobind ベースの Python モジュールを備えた軽量な DICOM パーサー / ラッパーです。ドキュメントは Python 利用者を優先して構成されていますが、C++ API もあわせて扱います。
+DicomSDL は、C++ コアと nanobind ベースの Python モジュールを備えた軽量な DICOM パーサー / ラッパーです。ドキュメントは Python 利用者を優先して構成されていますが、C++ API もあわせて扱います。
 
 英語版が基準となる原文です。各ローカライズ版サイトは `docs/ko`、`docs/ja`、`docs/zh-cn` の下で同じ相対パスを共有します。
 

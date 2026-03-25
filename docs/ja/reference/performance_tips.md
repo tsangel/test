@@ -1,6 +1,10 @@
 # Performance Tips
 
-This page collects the stable public habits that usually matter most for dicomsdl performance.
+```{note}
+このページ本文はまだ英語の原文です。必要に応じて英語版を基準に参照してください。
+```
+
+This page collects the stable public habits that usually matter most for DicomSDL performance.
 
 ## Use the API that returns exactly what you need
 

@@ -1,6 +1,6 @@
 # CLI 도구
 
-`dicomsdl`은 사용자용 명령줄 도구 세 가지를 제공합니다.
+DicomSDL은 사용자용 명령줄 도구 세 가지를 제공합니다.
 
 - `dicomdump`: 사람이 읽기 쉬운 DICOM dump 출력
 - `dicomshow`: Pillow로 한 프레임 빠르게 미리보기
@@ -105,7 +105,7 @@ dicomshow [--frame N] <input.dcm>
 
 - `dicomshow`는 빠른 미리보기용이지 진단용 뷰어가 아닙니다.
 - 로컬 GUI/viewer 연결에 의존하므로 headless 환경에서는 동작하지 않을 수 있습니다.
-- Pillow나 NumPy가 없으면 `dicomsdl[numpy,pil]`로 설치하세요.
+- Pillow나 NumPy가 없으면 `DicomSDL[numpy,pil]`로 설치하세요.
 
 ### `dicomshow` 예시
 

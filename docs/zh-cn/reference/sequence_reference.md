@@ -1,5 +1,9 @@
 # Sequence Reference
 
+```{note}
+本页正文目前仍为英文原文。需要时请以英文版为准。
+```
+
 `Sequence` represents the value of an `SQ` data element. It is an ordered list of item `DataSet` objects.
 
 ## How you get a `Sequence`

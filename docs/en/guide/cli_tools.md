@@ -1,6 +1,6 @@
 # CLI Tools
 
-`dicomsdl` exposes three user-facing command-line tools:
+DicomSDL exposes three user-facing command-line tools:
 
 - `dicomdump`: print a human-readable DICOM dump
 - `dicomshow`: open one decoded frame through Pillow
@@ -108,7 +108,7 @@ Options:
 - `dicomshow` is a quick preview tool, not a diagnostic viewer.
 - It depends on your local GUI/viewer association and may not work in headless
   environments.
-- Install `dicomsdl[numpy,pil]` if Pillow or NumPy is not already available.
+- Install `DicomSDL[numpy,pil]` if Pillow or NumPy is not already available.
 
 ### `dicomshow` example
 

@@ -1,5 +1,9 @@
 # Python API Reference
 
+```{note}
+このページ本文はまだ英語の原文です。必要に応じて英語版を基準に参照してください。
+```
+
 The user-facing Python guide lives in
 [Python DataSet Guide](../guide/python_dataset_guide.md).
 

@@ -1,5 +1,9 @@
 # Python DataSet access quick notes (0.1.4 vs 0.1.5)
 
+```{note}
+本页正文目前仍为英文原文。需要时请以英文版为准。
+```
+
 Note: these measurements were taken before the Python binding switched
 `DataSet.__getitem__` to return `DataElement`. In the current API,
 `ds["Rows"]` measures element retrieval, while one-shot scalar access is
@@ -71,7 +75,7 @@ Benchmarks (Apple M3 / Python 3.12, sample: `1.2.840.113619.2.99.1234.1210123180
 | 4 | `ds.get_dataelement(0x00540016).sequence[0].get_dataelement(0x00181075).to_long()` | 0.51 |
 | 5 | `ds.RadiopharmaceuticalInformationSequence[0].RadionuclideHalfLife` | 0.63 |
 
-## dicomsdl change summary (0.1.4 -> 0.1.5)
+## DicomSDL change summary (0.1.4 -> 0.1.5)
 
 | Access pattern | v0.1.4 us/call | v0.1.5 us/call | Speedup (x) |
 | --- | --- | --- | --- |
@@ -86,7 +90,7 @@ Benchmarks (Apple M3 / Python 3.12, sample: `1.2.840.113619.2.99.1234.1210123180
 | chained `to_long()` | 2.16 | 0.51 | 4.25 |
 | chained `get_value()` | 2.16 | 0.49 | 4.45 |
 
-Takeaway: this 5-run sample shows clear end-to-end improvement in `dicomsdl` access paths after moving from v0.1.4 to v0.1.5, while `pydicom` stays roughly in the same range across runs.
+Takeaway: this 5-run sample shows clear end-to-end improvement in DicomSDL access paths after moving from v0.1.4 to v0.1.5, while `pydicom` stays roughly in the same range across runs.
 
 ## nanobind build mode A/B (Regular vs STABLE_ABI)
 
@@ -233,7 +237,7 @@ parser/path comparison.
 | 4 | `path set_value` | 0.23 |
 | 5 | `path ensure().value` | 0.32 |
 
-## dicomsdl change summary (0.1.5 -> 0.1.35, current API)
+## DicomSDL change summary (0.1.5 -> 0.1.35, current API)
 
 The table below keeps only directly comparable access patterns. Paths that
 used to rely on `__getitem__` returning a scalar are listed separately in the

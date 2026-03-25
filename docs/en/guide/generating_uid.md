@@ -1,6 +1,6 @@
 # Generating UID
 
-This document explains the current UID generation and append flow in `dicomsdl`.
+This document explains the current UID generation and append flow in DicomSDL.
 
 ## 1. Scope
 

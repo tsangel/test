@@ -1,9 +1,9 @@
 # Python 数据集指南
 
-`dicomsdl` 是一个轻量的 nanobind 包装层。它会在运行时加载原生扩展，因此文档通过 `mock import` 构建；运行示例时请先安装 wheel。
+DicomSDL 是一个轻量的 nanobind 包装层。它会在运行时加载原生扩展，因此文档通过 `mock import` 构建；运行示例时请先安装 wheel。
 
-这是 `dicomsdl` 中 Python 端文件、数据集和元素访问的主要面向用户指南。
-它涵盖了模块级入口点、dicomsdl 对象如何映射到 DICOM 以及最重要的读/写模式。
+这是 DicomSDL 中 Python 端文件、数据集和元素访问的主要面向用户指南。
+它涵盖了模块级入口点、DicomSDL 对象如何映射到 DICOM 以及最重要的读/写模式。
 
 ## 导入
 
@@ -20,9 +20,9 @@ import dicomsdl as dicom
 - `generate_uid() -> str`：在 DICOMSDL 前缀下创建一个新的 UID。
 - `append_uid(base_uid: str, component: int) -> str`：附加一个具有后备策略的 UID 组件。
 
-## dicomsdl 如何映射到 DICOM
+## DicomSDL 如何映射到 DICOM
 
-`dicomsdl` 公开了一小组相关的 Python 对象：
+DicomSDL 公开了一小组相关的 Python 对象：
 
 - `DicomFile`：拥有根数据集的文件/会话包装器
 - `DataSet`：DICOM `DataElement` 对象的容器
@@ -111,7 +111,7 @@ df.dataset.Rows = 512
 
 实用推荐：
 
-- 在大多数 Python 代码中使用 `"Rows"` 进行常用关键字/标签字符串访问。这仍然有一个小的运行时关键字/标签解析成本，但 dicomsdl 使用优化的运行时关键字路径和更轻的直接路径来处理普通关键字字符串，因此开销通常很小。
+- 在大多数 Python 代码中使用 `"Rows"` 进行常用关键字/标签字符串访问。这仍然有一个小的运行时关键字/标签解析成本，但 DicomSDL 使用优化的运行时关键字路径和更轻的直接路径来处理普通关键字字符串，因此开销通常很小。
 - 当普通标签已经来自数字常量或外部元数据时，或者当您想要普通标签的最快路径时，请使用压缩整数
 - 当您想要在一个步骤中完成嵌套取值或赋值时，请使用点分标签路径字符串。在 Python 中，这也可能比重复调用嵌套的 `Sequence` / `DataSet` API 更快，因为遍历保留在一次 C++ 路径解析/查找调用中。
 - 当您想要显式且可重用的标签对象时，请使用 `dicom.Tag(...)`
@@ -294,7 +294,7 @@ auto at = dataset["FrameIncrementPointer"_tag].to_tag_vector();
 
 ### 区分零长度和缺失
 
-在 `dicomsdl` 中，`missing` 和 `zero-length` 是不同的元素状态，应在 `DataElement` 级别进行测试，而不是仅查看 `elem.value`。
+在 DicomSDL 中，`missing` 和 `zero-length` 是不同的元素状态，应在 `DataElement` 级别进行测试，而不是仅查看 `elem.value`。
 
 使用这个规则：
 

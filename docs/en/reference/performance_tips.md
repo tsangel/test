@@ -1,6 +1,6 @@
 # Performance Tips
 
-This page collects the stable public habits that usually matter most for dicomsdl performance.
+This page collects the stable public habits that usually matter most for DicomSDL performance.
 
 ## Use the API that returns exactly what you need
 
