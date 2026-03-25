@@ -1,15 +1,15 @@
 # 픽셀 인코딩
 
-인코딩할 기본 저장 픽셀이 이미 있는 경우 `set_pixel_data()`를 사용하세요. 현재 `DicomFile`에 이미 픽셀 데이터가 있고 이를 메모리에서 트랜스코딩하려는 경우 `set_transfer_syntax()`를 사용합니다. 소스 객체를 먼저 변경하지 않고 목표가 다른 전송 구문으로 출력되는 경우 `write_with_transfer_syntax()`를 사용하십시오. 동일한 전송 구문 및 옵션 세트가 여러 호출에서 재사용되거나 더 긴 인코딩 루프를 시작하기 전에 해당 구성을 검증하려는 경우 `EncoderContext`를 생성하십시오.
+인코딩할 네이티브 픽셀 데이터가 이미 있다면 `set_pixel_data()`를 사용하세요. 현재 `DicomFile`에 픽셀 데이터가 들어 있고 이를 메모리 안에서 트랜스코딩하려면 `set_transfer_syntax()`를 사용합니다. 원본 객체를 먼저 바꾸지 않고 다른 전송 구문으로 바로 출력하고 싶다면 `write_with_transfer_syntax()`를 사용하세요. 같은 전송 구문과 옵션 세트를 여러 번 재사용하거나, 긴 인코딩 루프에 들어가기 전에 그 구성을 미리 검증하고 싶다면 `EncoderContext`를 만들면 됩니다.
 
-## 키 인코딩 API
+## 핵심 인코딩 API
 
 **C++**
 
 - `set_pixel_data(...)`
-  - `pixel::ConstPixelSpan`로 명시적으로 설명하는 레이아웃이 있는 네이티브 소스 버퍼의 픽셀 데이터를 대체합니다.
+  - `pixel::ConstPixelSpan`로 레이아웃을 명시한 네이티브 소스 버퍼의 Pixel Data를 교체합니다.
 - `create_encoder_context(...)` + `set_pixel_data(...)` / `set_transfer_syntax(...)`
-  - 반복되는 인코딩 또는 트랜스코드 루프 외부에 구성된 하나의 전송 구문 및 옵션 세트를 유지합니다.
+  - 반복되는 인코딩 또는 트랜스코드 루프 바깥에서, 미리 구성한 전송 구문과 옵션 세트를 재사용합니다.
 - `write_with_transfer_syntax(...)`
   - 메모리 내 `DicomFile`를 변경하지 않고 파일이나 스트림에 직접 다른 전송 구문을 작성합니다.
 
@@ -18,11 +18,11 @@
 - `set_pixel_data(...)`
   - C 연속 NumPy 배열 또는 기타 연속 숫자 버퍼에서 픽셀 데이터를 바꿉니다.
 - `create_encoder_context(...)` + `set_pixel_data(...)` / `set_transfer_syntax(...)`
-  - 하나의 Python `options` 객체를 먼저 구문 분석하고 검증한 다음 반복 호출에서 결과 컨텍스트를 재사용합니다.
+  - Python `options` 객체 하나를 먼저 파싱하고 검증한 뒤, 반복 호출에서 생성된 컨텍스트를 재사용합니다.
 - `write_with_transfer_syntax(...)`
-  - 소스 객체를 먼저 변경하지 않고 파일에 직접 다른 전송 구문을 작성합니다.
+  - 원본 객체를 먼저 변경하지 않고, 다른 전송 구문으로 파일에 직접 기록합니다.
 - `set_transfer_syntax(...)`
-  - 나중에 동일한 개체에서 읽거나 쓸 때 새 구문을 사용하려면 메모리에서 현재 `DicomFile`를 트랜스코딩하세요.
+  - 같은 객체를 이후에 다시 읽거나 쓸 때 새 전송 구문을 쓰고 싶다면, 메모리에서 현재 `DicomFile`를 트랜스코딩합니다.
 
 ## 관련 DICOM 표준 섹션
 

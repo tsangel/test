@@ -1,8 +1,8 @@
 # ピクセルデコード
 
-デコード前に検証済みのデコード コントラクトが必要な場合、独自の出力バッファを割り当てるか再利用する必要がある場合、明示的にデコードされた行またはフレーム ストライドが必要な場合、または単一フレーム入力とマルチフレーム入力の両方に 1 つのコード パスが必要な場合は、`create_decode_plan()` を `decode_into()` とともに使用します。新しいデコード結果を返す最も単純なパスには、C++ では `pixel_buffer()` を、Python では `to_array()` を使用します。
+デコード前に検証済みの出力レイアウトが必要な場合、自分で出力バッファを確保または再利用したい場合、デコード後の行またはフレーム stride を明示したい場合、あるいは単一フレーム入力とマルチフレーム入力で同じコード パスを使いたい場合は、`create_decode_plan()` と `decode_into()` を組み合わせて使います。新しいデコード結果を最も簡単に得たい場合は、C++ では `pixel_buffer()`、Python では `to_array()` を使います。
 
-## キー デコード API
+## 主要なデコード API
 
 **C++**
 
@@ -16,13 +16,13 @@
 - `create_decode_plan(...)` + `decode_into(...)`
   - 呼び出し元が用意した書き込み可能な配列またはバッファと組み合わせて、検証済みで再利用可能なデコードレイアウトが必要なときに、この 2 つを一緒に使います。単一フレーム入力で出力先を先に準備したい場合や、`DecodeOptions` で明示的な出力 stride を指定したい場合もここに含まれます。
 - `to_array(...)`
-  - デコードして新しい NumPy 配列を返します。最も速く、成功しやすい基本ルートです。
+  - デコードして新しい NumPy 配列を返します。最も手早く結果を得られる基本ルートです。
 - `to_array_view(...)`
 - ソースピクセルデータが非圧縮転送構文を使用している場合、ゼロコピーの NumPy ビューを返します。
 
 ## 関連する DICOM 標準セクション
 
-- 行、列、ピクセルごとのサンプル、測光解釈、ピクセル データを制御するピクセル属性は、[DICOM PS3.3 セクション C.7.6.3、画像ピクセル モジュール](https://dicom.nema.org/medical/dicom/current/output/chtml/part03/sect_C.7.6.3.html) にあります。
+- 行、列、ピクセルごとのサンプル数、測光解釈、Pixel Data を規定するピクセル属性は、[DICOM PS3.3 セクション C.7.6.3、画像ピクセル モジュール](https://dicom.nema.org/medical/dicom/current/output/chtml/part03/sect_C.7.6.3.html) に定義されています。
 - ピクセル データのネイティブ エンコーディングとカプセル化されたピクセル データのエンコーディングは、[DICOM PS3.5 第 8 章、ピクセル、オーバーレイ、および波形データのエンコーディング](https://dicom.nema.org/medical/dicom/current/output/chtml/part05/chapter_8.html) および [セクション 8.2、ネイティブ形式またはカプセル化形式] で定義されています。エンコーディング](https://dicom.nema.org/medical/dicom/current/output/chtml/part05/sect_8.2.html)。
 - カプセル化されたフラグメント/アイテムのレイアウトと転送構文の要件は、[DICOM PS3.5 セクション A.4、エンコードされたピクセル データのカプセル化のための転送構文](https://dicom.nema.org/medical/dicom/current/output/chtml/part05/sect_A.4.html) で定義されています。
 - ファイルベースのワークフローでは、転送構文 UID は、[DICOM PS3.10 第 7 章、DICOM ファイル形式](https://dicom.nema.org/medical/dicom/current/output/chtml/part10/chapter_7.html) で説明されているファイルのメタ情報から取得されます。

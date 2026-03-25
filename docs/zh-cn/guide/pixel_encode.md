@@ -1,15 +1,15 @@
 # 像素编码
 
-当您已经有本机存储的像素进行编码时，请使用 `set_pixel_data()`。当当前 `DicomFile` 已经有像素数据并且您想在内存中对其进行转码时，请使用 `set_transfer_syntax()`。当目标以不同的传输语法输出而不首先改变源对象时，请使用 `write_with_transfer_syntax()`。当在多个调用中重复使用相同的传输语法和选项集时，或者当您想要在开始较长的编码循环之前验证该配置时，请创建 `EncoderContext`。
+当您已经有以原生格式存储、准备编码的像素时，请使用 `set_pixel_data()`。当当前 `DicomFile` 已经包含像素数据，并且您想在内存中对其转码时，请使用 `set_transfer_syntax()`。当您希望直接以另一种传输语法输出、而不先修改源对象时，请使用 `write_with_transfer_syntax()`。如果同一套传输语法和选项会在多次调用中重复使用，或者您想在开始较长的编码循环前先验证配置，请创建 `EncoderContext`。
 
-## 按键编码 API
+## 关键编码 API
 
 **C++**
 
 - `set_pixel_data(...)`
-- 替换来自本机源缓冲区的像素数据，您使用 `pixel::ConstPixelSpan` 显式描述其布局。
+- 替换来自原生源缓冲区的 Pixel Data，并由您通过 `pixel::ConstPixelSpan` 显式描述其布局。
 - `create_encoder_context(...)` + `set_pixel_data(...)` / `set_transfer_syntax(...)`
-- 在重复编码或转码循环之外保留一个配置的传输语法和选项集。
+- 在重复编码或转码循环之外，保留并复用一套已配置好的传输语法和选项。
 - `write_with_transfer_syntax(...)`
 - 将不同的传输语法直接写入文件或流，而不改变内存中的 `DicomFile`。
 
@@ -18,11 +18,11 @@
 - `set_pixel_data(...)`
 - 替换 C 连续 NumPy 数组或其他连续数字缓冲区中的像素数据。
 - `create_encoder_context(...)` + `set_pixel_data(...)` / `set_transfer_syntax(...)`
-- 预先解析并验证一个 Python `options` 对象，然后在重复调用中重用生成的上下文。
+- 先解析并验证一个 Python `options` 对象，然后在重复调用中复用生成的上下文。
 - `write_with_transfer_syntax(...)`
 - 将不同的传输语法直接写入文件，而无需首先改变源对象。
 - `set_transfer_syntax(...)`
-- 当您希望以后从同一对象读取或写入以使用新语法时，对内存中的当前 `DicomFile` 进行转码。
+- 当您希望后续继续从同一个对象读取或写入，并使用新的传输语法时，在内存中对当前 `DicomFile` 进行转码。
 
 ## 相关 DICOM 标准部分
 
@@ -158,7 +158,7 @@ file->write_with_transfer_syntax(
     std::span<const dicom::pixel::CodecOptionTextKv>(lossy_options));
 ```
 
-＃＃ Python
+## Python
 
 ### 替换 NumPy 数组中的像素数据
 

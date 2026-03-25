@@ -1,6 +1,6 @@
 # UIDの生成
 
-このドキュメントでは、`dicomsdl` での現在の UID の生成と追加のフローについて説明します。
+このドキュメントでは、`dicomsdl` における UID の生成と追加の流れを説明します。
 
 ## 1. 範囲
 
@@ -9,7 +9,7 @@
 - `dicom::uid::generate_uid()`
 - `dicom::uid::Generated::try_append(component)`
 - `dicom::uid::Generated::append(component)`
-- パイソン:
+- Python:
 - `dicom.try_generate_uid()`
 - `dicom.generate_uid()`
 - `dicom.try_append_uid(base_uid, component)`
@@ -25,8 +25,8 @@ auto uid = dicom::uid::generate_uid();         // Generated (throws on failure)
 ```
 
 - プレフィックス: `dicom::uid::uid_prefix()`
-- `generate_uid()` は、UID を `<uid_prefix>.<random_numeric_suffix>` として構築します。
-サフィックスは、プロセスレベルのランダムなノンス + 単調シーケンスから生成されます。
+- `generate_uid()` は、UID を `<uid_prefix>.<random_numeric_suffix>` という形で構築します。
+サフィックスは、プロセス単位のランダムな nonce と単調増加シーケンスから生成されます。
 - 出力: 厳密に有効な UID テキスト (最大 64 文字)
 
 ### 2.2 コンポーネントを 1 つ追加する

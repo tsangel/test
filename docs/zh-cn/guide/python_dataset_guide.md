@@ -430,15 +430,15 @@ assert ds.set_value("Rows", None)   # present, zero-length US
 
 ### 创建零长度值与删除元素
 
-`None` 表示零长度现值：
+`None` 表示该元素存在，但值长度为 0：
 
 ```python
 assert ds.set_value("PatientName", None)   # present, zero-length PN
 assert ds.set_value("Rows", None)          # present, zero-length US
 ```
 
-`None` 只是已解析 VR 的适当零长度表示的简写。
-您还可以使用显式的空负载来拼写相同的意图：
+`None` 只是符合已解析 VR 的零长度表示的简写。
+您也可以用显式的空载荷表达同样的意图：
 
 ```python
 ds.add_dataelement(dicom.Tag("PatientName"), dicom.VR.PN)   # present, zero-length
@@ -457,10 +457,10 @@ ds["Rows"].value = None
 ds["Rows"].value = []
 ```
 
-推荐解读：
+建议这样理解：
 
-- `None` -> 保留或创建一个当前的零长度元素
-- 空有效负载（`""`、`[]`、`b""`）-> 保持元素与 `length == 0` 一起存在
+- `None` -> 保留现有元素，或创建一个长度为 0 的元素
+- 空载荷（`""`、`[]`、`b""`）-> 让元素继续存在，并保持 `length == 0`
 
 使用`remove_dataelement()`进行删除：
 
@@ -470,7 +470,7 @@ ds.remove_dataelement(0x00280010)
 ds.remove_dataelement(dicom.Tag("Rows"))
 ```
 
-### 私有或模糊标签的显式 VR 分配
+### 为私有标签或有歧义的标签显式指定 VR
 
 ```python
 assert ds.set_value(0x00090030, dicom.VR.US, 16)
@@ -485,19 +485,19 @@ assert ds.set_value(0x00090030, dicom.VR.US, 16)
 - 如果该元素存在不同的非 `SQ`/非 `PX` VR，则绑定可能会替换该 VR，然后分配值
 - `VR.None`、`SQ` 和 `PX` 不是这种形式的有效覆盖目标
 
-这种形式不提供回滚语义。如果返回`False`，则数据集
+这种形式不提供回滚语义。如果返回 `False`，则数据集
 仍然有效，但目标元素状态未指定。
 
-### 属性赋值语法糖
+### 属性赋值的便捷写法
 
 ```python
 ds.Rows = 512
 df.PatientName = pn
 ```
 
-对于基于关键字的标准更新，属性赋值仍然是面向值的语法糖。
-它很简洁，适用于 `DataSet` 和转发的 `DicomFile` 访问。
-与 `set_value(...)` 不同，此路径在分配失败时引发，而不是返回 `False`，
+对于标准的关键字更新，属性赋值仍然是一种面向值的便捷写法。
+它写起来更简洁，适用于 `DataSet`，也适用于通过 `DicomFile` 转发出来的同类访问。
+与 `set_value(...)` 不同，这条路径在赋值失败时会抛出异常，而不是返回 `False`，
 因此它通常更适合开发、笔记本和交互式使用，而不是
 需要显式错误处理的生产代码。
 
@@ -507,7 +507,7 @@ df.PatientName = pn
 
 `for elem in ds` 迭代该数据集中的当前元素。
 `ds.size()` 返回该数据集的元素计数。
-`len(df)` 从 `DicomFile` 转发根数据集大小。
+`len(df)` 返回 `DicomFile` 根数据集的大小。
 
 ```pycon
 >>> for elem in ds:
@@ -524,9 +524,9 @@ df.PatientName = pn
 当您已经拥有数据集对象时，请使用 `ds.size()`。
 当您仍在使用文件对象时，请使用 `len(df)`。
 
-＃＃＃ 倾倒（）
+### dump()
 
-`dump()` 在 `DicomFile` 和 `DataSet` 上返回制表符分隔的人类可读转储字符串。
+`dump()` 会在 `DicomFile` 和 `DataSet` 上返回一段制表符分隔、便于人阅读的转储字符串。
 
 ```python
 full_text = df.dump(max_print_chars=80, include_offset=True)
@@ -535,7 +535,7 @@ compact_text = ds.dump(max_print_chars=40, include_offset=False)
 
 - `max_print_chars` 截断长 `VALUE` 预览。
 - `include_offset=False` 删除 `OFFSET` 列。
-- 在文件支持的根数据集上，`dump()` 还会在格式化转储之前加载任何未读的剩余元素。
+- 对于基于文件的根数据集，`dump()` 在格式化转储前还会加载尚未读取的剩余元素。
 
 代表性输出如下所示：
 
@@ -546,7 +546,7 @@ TAG	VR	LEN	VM	OFFSET	VALUE	KEYWORD
 '00280010'	US	2	1	702	512	Rows
 ```
 
-使用 `include_offset=False`，标题和列变为：
+使用 `include_offset=False` 时，表头和列会变成：
 
 ```text
 TAG	VR	LEN	VM	VALUE	KEYWORD

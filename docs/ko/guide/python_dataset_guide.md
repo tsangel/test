@@ -429,15 +429,15 @@ assert ds.set_value("Rows", None)   # present, zero-length US
 
 ### 길이가 0인 값 만들기 및 요소 제거
 
-`None`는 길이가 0인 현재 가치를 의미합니다.
+`None`은 현재 요소가 존재하지만 값 길이가 0임을 뜻합니다.
 
 ```python
 assert ds.set_value("PatientName", None)   # present, zero-length PN
 assert ds.set_value("Rows", None)          # present, zero-length US
 ```
 
-`None`는 해결된 VR의 적절한 길이가 0인 표현을 짧게 표현한 것입니다.
-명시적으로 빈 페이로드를 사용하여 동일한 인텐트를 철자할 수도 있습니다.
+`None`은 해석된 VR에 맞는 길이 0 표현을 간단히 적는 방법입니다.
+명시적으로 빈 페이로드를 사용해 같은 의도를 나타낼 수도 있습니다.
 
 ```python
 ds.add_dataelement(dicom.Tag("PatientName"), dicom.VR.PN)   # present, zero-length
@@ -458,8 +458,8 @@ ds["Rows"].value = []
 
 권장 해석:
 
-- `None` -> 현재 길이가 0인 요소를 유지하거나 생성합니다.
-- 빈 페이로드(`""`, `[]`, `b""`) -> `length == 0`를 사용하여 요소를 현재 상태로 유지
+- `None` -> 현재 존재하는 길이 0 요소를 유지하거나 새로 만듭니다.
+- 빈 페이로드(`""`, `[]`, `b""`) -> 요소를 유지하되 `length == 0`인 상태로 둡니다.
 
 삭제하려면 `remove_dataelement()`를 사용하세요.
 
@@ -469,33 +469,33 @@ ds.remove_dataelement(0x00280010)
 ds.remove_dataelement(dicom.Tag("Rows"))
 ```
 
-### 비공개 또는 모호한 태그에 대한 명시적 VR 할당
+### 프라이빗 태그 또는 모호한 태그에 대한 명시적 VR 할당
 
 ```python
 assert ds.set_value(0x00090030, dicom.VR.US, 16)
 ```
 
-이 형식은 태그가 비공개이거나 값을 할당하기 전에 기존 비순차 요소 VR을 재정의하려는 경우에 유용합니다.
+이 형식은 태그가 프라이빗이거나, 값을 할당하기 전에 기존 비시퀀스 요소의 VR을 덮어써야 할 때 유용합니다.
 
 규칙:
 
 - 요소가 누락된 경우 제공된 VR을 사용하여 요소를 생성합니다.
 - 요소가 존재하고 이미 해당 VR이 있는 경우 값이 그 자리에서 업데이트됩니다.
-- 요소가 다른 비`SQ`/비`PX` VR과 함께 존재하는 경우 바인딩은 해당 VR을 대체한 다음 값을 할당할 수 있습니다.
-- `VR.None`, `SQ` 및 `PX`는 이 형식에서 유효한 재정의 대상이 아닙니다.
+- 요소가 다른 비`SQ`/비`PX` VR로 존재하는 경우 바인딩은 그 VR을 교체한 뒤 값을 할당할 수 있습니다.
+- `VR.None`, `SQ`, `PX`는 이 형식에서 유효한 덮어쓰기 대상이 아닙니다.
 
-이 형식은 롤백 의미 체계를 제공하지 않습니다. `False`를 반환하는 경우 데이터세트는
+이 형식은 롤백 동작을 제공하지 않습니다. `False`를 반환하더라도 데이터세트는
 유효한 상태로 유지되지만 대상 요소 상태가 지정되지 않습니다.
 
-### 속성 할당 편의 기능
+### 속성 할당 편의 경로
 
 ```python
 ds.Rows = 512
 df.PatientName = pn
 ```
 
-속성 할당은 표준 키워드 기반 업데이트를 위한 값 지향 편의 기능입니다.
-이는 간결하며 `DataSet` 및 전달된 `DicomFile` 액세스 모두에서 작동합니다.
+속성 할당은 표준 키워드 기반 업데이트를 더 간단하게 쓰는 편의 문법입니다.
+`DataSet`에서도, `DicomFile`을 통해 노출되는 동일한 접근 경로에서도 사용할 수 있습니다.
 `set_value(...)`와 달리 이 경로는 `False`를 반환하지 않고, 할당 실패 시 예외를 발생시킵니다.
 따라서 보통은 개발, 노트북, 대화형 사용에 더 적합하고,
 명시적인 오류 처리가 필요한 프로덕션 코드에는 `set_value(...)`가 더 낫습니다.
@@ -506,7 +506,7 @@ df.PatientName = pn
 
 `for elem in ds`는 해당 데이터세트에 현재 존재하는 요소를 순회합니다.
 `ds.size()`는 해당 데이터세트의 요소 개수를 반환합니다.
-`len(df)`는 `DicomFile`에서 루트 데이터세트 크기를 전달합니다.
+`len(df)`는 `DicomFile`의 루트 데이터세트 크기를 그대로 돌려줍니다.
 
 ```pycon
 >>> for elem in ds:
@@ -520,12 +520,12 @@ df.PatientName = pn
 42
 ```
 
-데이터세트 개체가 이미 있는 경우 `ds.size()`를 사용하세요.
-파일 객체에서 계속 작업하는 경우 `len(df)`를 사용하세요.
+이미 데이터세트 객체를 가지고 있다면 `ds.size()`를 사용하세요.
+아직 파일 객체를 기준으로 작업 중이라면 `len(df)`를 사용하세요.
 
-### 덤프()
+### dump()
 
-`dump()`는 `DicomFile` 및 `DataSet` 모두에서 사람이 읽을 수 있는 탭으로 구분된 덤프 문자열을 반환합니다.
+`dump()`는 `DicomFile`과 `DataSet` 모두에서 사람이 읽기 쉬운 탭 구분 덤프 문자열을 반환합니다.
 
 ```python
 full_text = df.dump(max_print_chars=80, include_offset=True)
@@ -534,7 +534,7 @@ compact_text = ds.dump(max_print_chars=40, include_offset=False)
 
 - `max_print_chars`는 긴 `VALUE` 미리보기를 자릅니다.
 - `include_offset=False`는 `OFFSET` 열을 제거합니다.
-- 파일 지원 루트 데이터 세트에서 `dump()`는 덤프를 포맷하기 전에 읽지 않은 나머지 요소도 로드합니다.
+- 파일 기반 루트 데이터세트에서는 `dump()`가 덤프를 포맷하기 전에 아직 읽지 않은 나머지 요소도 불러옵니다.
 
 대표적인 출력은 다음과 같습니다.
 

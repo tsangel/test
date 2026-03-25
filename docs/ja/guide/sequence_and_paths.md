@@ -26,13 +26,13 @@ half_life = ds.get_value("RadiopharmaceuticalInformationSequence.0.RadionuclideH
 ds.set_value("ReferencedStudySequence.0.ReferencedSOPInstanceUID", "1.2.3")
 ```
 
-## 注意事項
+## 注意
 
 - パスの形式は `SequenceName.item_index.LeafName` です。
-- ワンショットのネストされた検索または割り当てが必要な場合は、このパス形式を使用します。
-- C++ では、`operator[]`、`get_dataelement(...)`、および `get_value(...)` はすべてドット付きタグ パスを受け入れます。
-- `ensure_dataelement(...)` が既存の非シーケンス中間要素の下にネストされたパスを具体化すると、その中間要素を `SQ` にリセットできます。
-- 低レベルのトラバーサルの詳細が必要な場合は、返された `Sequence` / item データセットへの参照を保持し、要素を直接検査します。
+- ネストされた値を一度に検索または代入したい場合は、このパス形式を使います。
+- C++ では、`operator[]`、`get_dataelement(...)`、`get_value(...)` はいずれもドット区切りのタグ パスを受け付けます。
+- `ensure_dataelement(...)` が既存の非シーケンス中間要素の下にネストされたパスを作成すると、その中間要素を `SQ` にリセットすることがあります。
+- 低レベルの走査の詳細が必要な場合は、返された `Sequence` / item データセットへの参照を保持し、要素を直接調べます。
 
 ## 関連ドキュメント
 

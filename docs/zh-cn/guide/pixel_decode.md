@@ -1,22 +1,22 @@
 # 像素解码
 
-当您需要在解码前获得经过验证的解码协定、需要分配或重用自己的输出缓冲区、需要显式解码的行或帧步长，或者需要一个用于单帧和多帧输入的代码路径时，请将 `create_decode_plan()` 与 `decode_into()` 一起使用。在 C++ 中使用 `pixel_buffer()` ，在 Python 中使用 `to_array()` 以获得返回新解码结果的最简单路径。
+当您需要在解码前获得经过验证的解码布局、需要分配或重用自己的输出缓冲区、需要显式指定解码后的行或帧步长，或者希望单帧和多帧输入共用同一套代码路径时，请将 `create_decode_plan()` 与 `decode_into()` 一起使用。在 C++ 中使用 `pixel_buffer()`，在 Python 中使用 `to_array()`，即可走最简单、直接返回新解码结果的路径。
 
-## 按键解码API
+## 关键解码 API
 
 **C++**
 
 - `create_decode_plan(...)` + `decode_into(...)`
-- 当您需要经过验证的可重用解码布局以及调用者提供的输出缓冲区时，请使用此对，包括您想要预先调整大小或重用该缓冲区或通过 `DecodeOptions` 请求显式输出步长的单帧情况。
+- 当您需要经过验证、可重复使用的解码布局，并且要使用调用方自己提供的输出缓冲区时，请使用这组 API。这也包括单帧场景下提前分配或复用缓冲区、或通过 `DecodeOptions` 明确指定输出步长的情况。
 - `pixel_buffer(...)`
 - 解码并返回新的像素缓冲区。
 
 **Python**
 
 - `create_decode_plan(...)` + `decode_into(...)`
-- 当您需要经过验证的可重用解码布局以及调用者提供的可写数组或缓冲区时，请使用此对，包括您想要预先准备目标或通过 `DecodeOptions` 请求显式输出步幅的单帧情况。
+- 当您需要经过验证、可重复使用的解码布局，并且要使用调用方提供的可写数组或缓冲区时，请使用这组 API。这也包括单帧场景下提前准备目标缓冲区，或通过 `DecodeOptions` 明确指定输出步幅的情况。
 - `to_array(...)`
-- 解码并返回一个新的 NumPy 数组。这是最快的首次成功路径。
+- 解码并返回一个新的 NumPy 数组。这是最快、也最容易直接拿到结果的路径。
 - `to_array_view(...)`
 - 当源像素数据使用未压缩的传输语法时，返回零拷贝 NumPy 视图。
 
@@ -158,7 +158,7 @@ file->decode_into(0, std::span<std::uint8_t>(frame_bytes), plan);
 file->decode_all_frames_into(std::span<std::uint8_t>(volume_bytes), plan);
 ```
 
-＃＃ Python
+## Python
 
 ### 在解码一帧之前检查输出布局
 

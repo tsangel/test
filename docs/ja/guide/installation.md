@@ -1,6 +1,6 @@
 # インストール
 
-再現可能な install / build の経路が必要なときや、dicomsdl が現在どの環境を対象にしているかを把握したいときにこのページを使ってください。
+再現可能なインストール / ビルド手順が必要なときや、dicomsdl が現在どの環境を対象にしているかを確認したいときに、このページを参照してください。
 
 ## 環境サマリー
 
@@ -13,8 +13,8 @@
   - macOS `arm64`
   - Windows `AMD64`
 - 現在 `musllinux` wheel はビルドしていません
-- base install だけで metadata access、file I/O、transcode workflow を使えます
-- NumPy ベースの pixel helper と Pillow preview 用の optional extra を用意しています
+- 基本インストールだけで、メタデータ参照、ファイル I/O、トランスコードのワークフローを利用できます
+- NumPy ベースの pixel helper と Pillow プレビュー用の optional extra を用意しています
 
 ### C++ / source build
 
@@ -26,7 +26,7 @@
 
 ### Windows toolchain
 
-`build.bat` は次の source-build 経路を文書化し、サポートしています。
+`build.bat` は、次の source build 手順を文書化し、サポートしています。
 
 - `MSVC` (`cl.exe`)
 - `clang-cl` with `Ninja`
@@ -42,10 +42,10 @@
 
 ## 経路を選ぶ
 
-- PyPI install: Python binding を最速で試せる経路
-- checkout からの C++ build: dicomsdl を自分の C++ application に統合するときに最適
-- Unix 系 `build.sh`: macOS / Linux build 用 convenience wrapper
-- checkout からの Python source build: [Build Python From Source](../developer/build_python_from_source.md) に記載
+- PyPI install: Python binding を最速で試せる方法
+- checkout からの C++ build: dicomsdl を自分の C++ アプリケーションに組み込むときに最適
+- Unix 系 `build.sh`: macOS / Linux build 用の便利なラッパー
+- checkout からの Python source build: [Build Python From Source](../developer/build_python_from_source.md) を参照
 - Windows `build.bat`: 明示的に toolchain を選びたいときの推奨エントリポイント
 
 ## PyPI インストール

@@ -27,7 +27,7 @@ try {
 } catch (const dicom::diag::DicomException& ex) {
     // ユーザー側の DICOM、コーデック、またはファイル I/O エラー
 } catch (const std::exception& ex) {
-    // 下位レベルのコントラクトまたはプラットフォームの障害
+    // 下位レベルの前提条件違反またはプラットフォーム依存の障害
 }
 ```
 
@@ -43,7 +43,7 @@ except TypeError as exc:
     # 間違った引数の型または非バッファ/パスのような誤用
     ...
 except ValueError as exc:
-    # 無効なテキスト オプション、無効なバッファ/レイアウト リクエスト、不正な形式のコントラクト
+    # 無効なテキスト オプション、無効なバッファ/レイアウト指定、または設定の不整合
     ...
 except IndexError as exc:
     # フレームまたはコンポーネントのインデックスが範囲外です

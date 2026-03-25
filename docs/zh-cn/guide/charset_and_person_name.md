@@ -204,7 +204,7 @@ try {
 }
 ```
 
-＃＃ Python
+## Python
 
 ### 将原始存储文本与解码后的 UTF-8 进行比较
 
@@ -330,20 +330,20 @@ except RuntimeError as exc:
 - C++：`dicom::CharsetEncodeErrorPolicy::strict`、`::replace_qmark`、`::replace_unicode_escape`
 - Python：`errors="strict"`、`"replace_qmark"`、`"replace_unicode_escape"`
 
-例如，如果源文本为 `홍길동`，目标字符集为 `ISO_IR 100`，则该目标字符集无法直接表示韩语字符。然后政策就会出现这样的分歧：
+例如，如果源文本为 `홍길동`，目标字符集为 `ISO_IR 100`，那么这个目标字符集无法直接表示韩文字符。不同策略下的结果如下：
 
 |对比点| `strict` | `replace_qmark` | `replace_unicode_escape` |
 | --- | --- | --- | --- |
-|如果某些文本无法表示 | `set_specific_charset()` 抛出/升高并停止。 |转码成功并替换为`?`。 |转码成功并替换可见的 `(U+XXXX)` 文本。 |
-| `홍길동 -> ISO_IR 100` 的结果示例 |由于调用失败，因此不会生成转码文本。 | `???` | `(U+D64D)(U+AE38)(U+B3D9)` |
-|数据集提交 |没有变化。 |字符集已更新，文本 VR 已用 `?` 重写。 |字符集已更新，文本 VR 已用 `(U+XXXX)` 替换文本重写。 |
-| `replaced` 输出 |不适用，因为呼叫失败。 |当至少发生一次替换时为 `true`。 |当至少发生一次替换时为 `true`。 |
+|如果某些文本无法表示 | `set_specific_charset()` 会抛出异常并停止。 |转码成功，并用 `?` 代替。 |转码成功，并替换为可见的 `(U+XXXX)` 文本。 |
+| `홍길동 -> ISO_IR 100` 的结果示例 |由于调用失败，因此不会生成转码后的文本。 | `???` | `(U+D64D)(U+AE38)(U+B3D9)` |
+|提交到数据集后的结果 |没有变化。 |字符集会更新，文本 VR 会被改写为 `?`。 |字符集会更新，文本 VR 会被改写为 `(U+XXXX)` 替换文本。 |
+| `replaced` 输出 |不适用，因为调用失败。 |只要发生至少一次替换就为 `true`。 |只要发生至少一次替换就为 `true`。 |
 
 可选的 `replaced` 输出对于上述有损模式最有用：
 
 - 在 C++ 中，传递 `bool* out_replaced`。
-- 在Python中，使用`return_replaced=True`。
-- 当转码准确时，它保持 `false`，仅当替换策略实际上必须替换字符时，才会翻转到 `true`。
+- 在 Python 中，使用 `return_replaced=True`。
+- 当转码完全准确时，它会保持为 `false`；只有替换策略确实替换了字符时，才会变为 `true`。
 
 转码在目标编码之前还有一个源解码阶段。如果当前数据集已包含无法在当前声明下解码的字节，则同样的策略名称也适用。
 
@@ -351,9 +351,9 @@ except RuntimeError as exc:
 
 |对比点| `strict` | `replace_qmark` | `replace_unicode_escape` |
 | --- | --- | --- | --- |
-|如果当前存储的字节已经不可解码 | `set_specific_charset()` 抛出/升高并停止。 |转码继续并用 `?` 替换不可解码的源字节范围。 |转码继续并替换可见的字节转义。 |
-|原始字节 `b"\xFF"` 的替换示例 |由于调用失败，因此不会生成转码文本。 | `?` | `(0xFF)` |
-|为什么这与目标编码后备不同？没有恢复 Unicode 文本，因此转码无法继续。 |没有恢复 Unicode 代码点，因此回退只是 `?`。 |没有恢复 Unicode 代码点，因此后备是 `(0xNN)` 字节转义而不是 `(U+XXXX)`。 |
+|如果当前存储的字节已经无法解码 | `set_specific_charset()` 会抛出异常并停止。 |转码会继续，并把无法解码的源字节区间替换为 `?`。 |转码会继续，并替换为可见的字节转义。 |
+|原始字节 `b"\xFF"` 的替换示例 |由于调用失败，因此不会生成转码后的文本。 | `?` | `(0xFF)` |
+|为什么这与目标编码回退不同 |没有恢复出 Unicode 文本，因此转码无法继续。 |没有恢复出 Unicode 代码点，因此回退结果只能是 `?`。 |没有恢复出 Unicode 代码点，因此回退结果是 `(0xNN)` 字节转义，而不是 `(U+XXXX)`。 |
 
 ## `to_utf8_string()` 解码策略选项
 
@@ -382,14 +382,14 @@ except RuntimeError as exc:
 - C++：`dicom::CharsetEncodeErrorPolicy::strict`、`::replace_qmark`、`::replace_unicode_escape`
 - Python：`errors="strict"`、`"replace_qmark"`、`"replace_unicode_escape"`
 
-例如，如果数据集声明为 `ISO_IR 100`，输入文本为 `홍길동`，则声明的字符集无法直接表示韩文字符。 `from_utf8_view()` 然后像这样发散：
+例如，如果数据集声明为 `ISO_IR 100`，输入文本为 `홍길동`，那么声明的字符集无法直接表示韩文字符。此时 `from_utf8_view()` 会出现如下分支：
 
 |对比点| `strict` | `replace_qmark` | `replace_unicode_escape` |
 | --- | --- | --- | --- |
-|如果输入文本无法用声明的字符集表示 |调用失败并且不存储任何新内容。 |调用成功并替换为`?`。 |调用成功并替换可见的 `(U+XXXX)` 文本。 |
-| `홍길동 -> ISO_IR 100` 的存储文本示例 |不生成编码文本。 | `???` | `(U+D64D)(U+AE38)(U+B3D9)` |
+|如果输入文本无法用声明的字符集表示 |调用失败，不会写入任何新内容。 |调用成功，并替换为 `?`。 |调用成功，并替换为可见的 `(U+XXXX)` 文本。 |
+| `홍길동 -> ISO_IR 100` 的存储文本示例 |不会生成编码后的文本。 | `???` | `(U+D64D)(U+AE38)(U+B3D9)` |
 |返回值 | `false` | `true` | `true` |
-| `replaced` 输出 | `false` 因为写入没有成功 | `true` 当至少发生一次替换时 | `true` 当至少发生一次替换时 |
+| `replaced` 输出 |因为写入没有成功，所以为 `false` |只要发生至少一次替换就为 `true` |只要发生至少一次替换就为 `true` |
 
 ## 失败模型
 

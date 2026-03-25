@@ -1,10 +1,10 @@
 # コアオブジェクト
 
-このページでは、dicomsdl で最もよく出会うオブジェクトと補助型を紹介します: `DicomFile`、`DataSet`、`DataElement`、`Sequence`、`PixelSequence`、`Uid`、`PersonName`。
+このページでは、dicomsdl でよく使う主要なオブジェクトと補助型を紹介します: `DicomFile`、`DataSet`、`DataElement`、`Sequence`、`PixelSequence`、`Uid`、`PersonName`。
 
 ## DicomFile
 
-`DicomFile` は dicomsdl の file/session wrapper です。root dataset を所有し、上位レベルの read、write、decode、transcode 操作もまとめて提供します。file/session の状態、decode、serialization が重要な場合はここから始めます。
+`DicomFile` は dicomsdl におけるファイル/セッション単位のラッパーです。ルート `DataSet` を保持し、高水準の read / write / decode / transcode 操作もまとめて提供します。ファイル/セッションの状態管理、デコード、シリアライズが重要な場合はここから始めます。
 
 関連する DICOM 標準セクション:
 
@@ -14,7 +14,7 @@
 
 ## DataSet
 
-`DataSet` は、1 つの DICOM オブジェクトを構成する構造化 field 全体です。dicomsdl の `DataSet` クラスは、この DICOM Data Element コンテナを実装します。実際には metadata field を読んだり更新したりするときに最もよく使うオブジェクトなので、多くの metadata access / update の流れはここから始まります。
+`DataSet` は、1 つの DICOM オブジェクトを構成する構造化されたフィールドの集合です。dicomsdl の `DataSet` クラスは、この DICOM Data Element コンテナを実装します。実際にはメタデータのフィールドを読んだり更新したりするときに最もよく使うオブジェクトなので、多くのメタデータ参照や更新はここから始まります。
 
 関連する DICOM 標準セクション:
 
@@ -22,31 +22,31 @@
 
 ## DataElement
 
-`DataElement` は `DataSet` の中の 1 つの field です。たとえば `PatientName` や `Rows` のような項目です。dicomsdl の `DataElement` クラスは、この単一の DICOM field と、その tag、VR、value、length、offset、関連 metadata を実装します。値だけでなく、その element の構造情報も必要なときはここから始めます。
+`DataElement` は `DataSet` の中の 1 つのフィールドです。たとえば `PatientName` や `Rows` のような項目です。dicomsdl の `DataElement` クラスは、この単一の DICOM フィールドと、その tag、VR、value、length、offset、関連メタデータを表現します。値だけでなく、その要素の構造情報も必要なときはここから始めます。
 
 各 `DataElement` には 2 つの補助概念が付いています。
 
-- `Tag`: field の数値識別子です。たとえば Patient Name は `(0010,0010)` です。
-- `VR`: `PN`、`SQ`、`US`、`OB` などの Value Representation です。この値は field がどのようにエンコードされ、解釈されるかを示します。
+- `Tag`: フィールドの数値識別子です。たとえば Patient Name は `(0010,0010)` です。
+- `VR`: `PN`、`SQ`、`US`、`OB` などの Value Representation です。この値はフィールドがどのようにエンコードされ、解釈されるかを示します。
 
 関連する DICOM 標準セクション:
 
 - 主に [DICOM PS3.5 Section 7.1, Data Elements](https://dicom.nema.org/medical/dicom/current/output/chtml/part05/chapter_7.html) に対応します。
-- field と layout の規則は Section 7.1.1 から 7.1.3 に説明されています。
+- フィールドとレイアウトの規則は Section 7.1.1 から 7.1.3 に説明されています。
 - `VR` の規則は主に [DICOM PS3.5 Section 6.2, Value Representation](https://dicom.nema.org/medical/dicom/current/output/chtml/part05/sect_6.2.html) に対応します。
 
 ## Sequence
 
-`Sequence` は、その値が nested item のリストになっている DICOM field で、各 item はそれ自体が別の `DataSet` です。dicomsdl の `Sequence` クラスは、この `SQ` の概念を実装します。`Seq.0.Tag` のような nested DICOM 構造をたどったり変更したりするときはここから始めます。
+`Sequence` は、その値がネストされた item のリストになっている DICOM フィールドで、各 item はそれ自体が別の `DataSet` です。dicomsdl の `Sequence` クラスは、この `SQ` の概念を実装します。`Seq.0.Tag` のようなネストした DICOM 構造をたどったり変更したりするときはここから始めます。
 
 関連する DICOM 標準セクション:
 
 - 主に [DICOM PS3.5 Section 7.5, Nesting of Data Sets](https://dicom.nema.org/medical/dicom/current/output/chtml/part05/sect_7.5.html) に対応します。
-- item エンコーディング規則は Section 7.5.1 に記載されています。
+- item のエンコーディング規則は Section 7.5.1 に記載されています。
 
 ## PixelSequence
 
-`PixelSequence` は、`PixelData` が encapsulated または compressed 形式で保存されているときに使われるコンテナです。`Sequence` と違って、一般的な nested DICOM field ではありません。compressed pixel payload の背後にある frame / fragment コンテナです。dicomsdl の `PixelSequence` クラスは、この特殊な pixel-storage オブジェクトを実装します。通常は Python では `elem.pixel_sequence`、C++ では `as_pixel_sequence()` から到達し、compressed `PixelData` で encoded frame bytes や fragment レベルのアクセスが必要なときにここから始めます。
+`PixelSequence` は、`PixelData` が encapsulated または compressed 形式で保存されているときに使われるコンテナです。`Sequence` と違って、一般的なネスト DICOM フィールドではありません。compressed pixel payload の背後にある frame / fragment コンテナです。dicomsdl の `PixelSequence` クラスは、この特殊な pixel-storage オブジェクトを実装します。通常は Python では `elem.pixel_sequence`、C++ では `as_pixel_sequence()` から到達し、compressed `PixelData` で encoded frame bytes や fragment レベルのアクセスが必要なときに使います。
 
 関連する DICOM 標準セクション:
 
@@ -55,9 +55,9 @@
 
 ## Supporting Types
 
-`Uid` と `PersonName` は最上位コンテナではなく補助的な value type ですが、実際のコードでは頻繁に登場します。
+`Uid` と `PersonName` は最上位コンテナではなく補助的な値型ですが、実際のコードでは頻繁に登場します。
 
-- `Uid`: SOP Class UID、SOP Instance UID、Transfer Syntax UID などの DICOM unique identifier 文字列を包む wrapper
+- `Uid`: SOP Class UID、SOP Instance UID、Transfer Syntax UID などの DICOM unique identifier 文字列を包むラッパー
 - `PersonName`: `PN` 値の構造化表現。Python では `PN` field の `.value` が単なる文字列ではなく `PersonName(...)` オブジェクトとして見えることがあります。
 
 関連する DICOM 標準セクション:

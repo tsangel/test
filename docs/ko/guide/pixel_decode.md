@@ -1,8 +1,8 @@
 # 픽셀 디코드
 
-디코딩하기 전에 검증된 디코드 계약을 원하거나, 자체 출력 버퍼를 할당 또는 재사용해야 하거나, 명시적으로 디코딩된 행 또는 프레임 스트라이드가 필요하거나, 단일 프레임 및 다중 프레임 입력 모두에 대해 하나의 코드 경로를 원하는 경우 `create_decode_plan()`를 `decode_into()`와 함께 사용하세요. 새로운 디코딩된 결과를 반환하는 가장 간단한 경로를 위해 C++에서는 `pixel_buffer()`를 사용하고 Python에서는 `to_array()`를 사용하세요.
+디코딩 전에 검증된 출력 레이아웃이 필요하거나, 출력 버퍼를 직접 할당하거나 재사용해야 하거나, 디코딩된 행 또는 프레임 stride를 명시적으로 지정해야 하거나, 단일 프레임과 다중 프레임 입력에 같은 코드 경로를 쓰고 싶다면 `create_decode_plan()`과 `decode_into()`를 함께 사용하세요. 새 디코딩 결과를 가장 간단하게 얻으려면 C++에서는 `pixel_buffer()`, Python에서는 `to_array()`를 사용하면 됩니다.
 
-## 키 디코드 API
+## 핵심 디코드 API
 
 **C++**
 
@@ -16,13 +16,13 @@
 - `create_decode_plan(...)` + `decode_into(...)`
   - 호출자가 직접 준비한 쓰기 가능한 배열 또는 버퍼와 함께 검증된 재사용 가능 디코드 레이아웃이 필요할 때 이 두 함수를 함께 사용하세요. 단일 프레임 입력에서 대상 버퍼를 미리 준비하거나 `DecodeOptions`로 명시적인 출력 stride를 지정하려는 경우도 여기에 포함됩니다.
 - `to_array(...)`
-  - 새로운 NumPy 배열을 디코드해 반환합니다. 가장 빠르고 쉽게 성공할 수 있는 경로입니다.
+  - 새로운 NumPy 배열을 디코드해 반환합니다. 가장 빠르게 결과를 확인할 수 있는 간단한 경로입니다.
 - `to_array_view(...)`
   - 소스 픽셀 데이터가 압축되지 않은 전송 구문을 사용하는 경우 무복사 NumPy 뷰를 반환합니다.
 
 ## 관련 DICOM 표준 섹션
 
-- 행, 열, 픽셀당 샘플, 측광 해석 및 픽셀 데이터를 제어하는 ​​픽셀 속성은 [DICOM PS3.3 섹션 C.7.6.3, 이미지 픽셀 모듈](https://dicom.nema.org/medical/dicom/current/output/chtml/part03/sect_C.7.6.3.html)에 있습니다.
+- 행, 열, 픽셀당 샘플, 광도 해석, Pixel Data를 규정하는 픽셀 속성은 [DICOM PS3.3 섹션 C.7.6.3, 이미지 픽셀 모듈](https://dicom.nema.org/medical/dicom/current/output/chtml/part03/sect_C.7.6.3.html)에 정의되어 있습니다.
 - 기본 대 캡슐화된 픽셀 데이터 인코딩은 [DICOM PS3.5 8장, 픽셀, 오버레이 및 파형 데이터 인코딩](https://dicom.nema.org/medical/dicom/current/output/chtml/part05/chapter_8.html) 및 [섹션 8.2, 기본 또는 캡슐화된 형식에 정의되어 있습니다. 인코딩](https://dicom.nema.org/medical/dicom/current/output/chtml/part05/sect_8.2.html).
 - 캡슐화된 조각/항목 레이아웃 및 전송 구문 요구 사항은 [DICOM PS3.5 섹션 A.4, 인코딩된 픽셀 데이터 캡슐화를 위한 전송 구문](https://dicom.nema.org/medical/dicom/current/output/chtml/part05/sect_A.4.html)에 정의되어 있습니다.
 - 파일 기반 워크플로에서 전송 구문 UID는 [DICOM PS3.10 7장, DICOM 파일 형식](https://dicom.nema.org/medical/dicom/current/output/chtml/part10/chapter_7.html)에 설명된 파일 메타 정보에서 가져옵니다.
