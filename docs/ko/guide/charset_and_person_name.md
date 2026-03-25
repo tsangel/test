@@ -65,7 +65,7 @@
 
 ## C++
 
-### 저장된 원시 텍스트를 디코딩된 UTF-8과 비교
+### C++: 저장된 원시 텍스트를 디코딩된 UTF-8과 비교
 
 ```cpp
 #include <dicom.h>
@@ -105,7 +105,7 @@ Hong
 Gildong
 ```
 
-### 구조화된 PersonName 구축 및 저장
+### C++: 구조화된 PersonName 구축 및 저장
 
 ```cpp
 #include <dicom.h>
@@ -176,7 +176,7 @@ std::cout << std::boolalpha << replaced << '\n';
 true
 ```
 
-### 선언 및 트랜스코딩 실패를 명시적으로 처리
+### C++: 선언 및 트랜스코딩 실패를 명시적으로 처리
 
 ```cpp
 #include <dicom.h>
@@ -206,7 +206,7 @@ try {
 
 ## 파이썬
 
-### 저장된 원시 텍스트를 디코딩된 UTF-8과 비교
+### Python: 저장된 원시 텍스트를 디코딩된 UTF-8과 비교
 
 ```python
 import dicomsdl as dicom
@@ -235,7 +235,7 @@ Hong
 Gildong
 ```
 
-### 구조화된 PersonName 구축 및 저장
+### Python: 구조화된 PersonName 구축 및 저장
 
 ```python
 import dicomsdl as dicom
@@ -295,7 +295,7 @@ print(replaced)
 True
 ```
 
-### 선언 및 트랜스코딩 실패를 명시적으로 처리
+### Python: 선언 및 트랜스코딩 실패를 명시적으로 처리
 
 ```python
 import dicomsdl as dicom

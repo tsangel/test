@@ -29,7 +29,7 @@ Use `create_decode_plan()` together with `decode_into()` when you want a validat
 
 ## C++
 
-### Inspect the output layout before decoding one frame
+### C++: Inspect the output layout before decoding one frame
 
 ```cpp
 #include <cstdint>
@@ -81,7 +81,7 @@ for (std::size_t frame = 0; frame < plan.output_layout.frames; ++frame) {
 }
 ```
 
-### Build a plan from DecodeOptions
+### C++: Build a plan from DecodeOptions
 
 ```cpp
 #include <cstdint>
@@ -115,7 +115,7 @@ std::vector<std::uint8_t> volume(
 file->decode_all_frames_into(std::span<std::uint8_t>(volume), plan);
 ```
 
-### Request explicit output strides
+### C++: Request explicit output strides
 
 ```cpp
 #include <cstdint>
@@ -160,7 +160,7 @@ file->decode_all_frames_into(std::span<std::uint8_t>(volume_bytes), plan);
 
 ## Python
 
-### Inspect the output layout before decoding one frame
+### Python: Inspect the output layout before decoding one frame
 
 ```python
 import dicomsdl as dicom
@@ -204,7 +204,7 @@ for frame in range(plan.frames):
     # reuses it for the next decoded frame.
 ```
 
-### Build a plan from DecodeOptions
+### Python: Build a plan from DecodeOptions
 
 ```python
 import dicomsdl as dicom
@@ -236,7 +236,7 @@ volume = np.empty(plan.shape(frame=-1), dtype=plan.dtype)
 df.decode_into(volume, frame=-1, plan=plan)
 ```
 
-### Request explicit output strides
+### Python: Request explicit output strides
 
 ```python
 import dicomsdl as dicom

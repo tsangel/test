@@ -65,7 +65,7 @@ Scope note: most of the read/write helpers below are `DataElement` methods. The 
 
 ## C++
 
-### Compare raw stored text with decoded UTF-8
+### C++: Compare raw stored text with decoded UTF-8
 
 ```cpp
 #include <dicom.h>
@@ -105,7 +105,7 @@ Hong
 Gildong
 ```
 
-### Build and store a structured PersonName
+### C++: Build and store a structured PersonName
 
 ```cpp
 #include <dicom.h>
@@ -176,7 +176,7 @@ Example output when `utf8_names.dcm` contains `홍길동`:
 true
 ```
 
-### Handle declaration and transcode failures explicitly
+### C++: Handle declaration and transcode failures explicitly
 
 ```cpp
 #include <dicom.h>
@@ -206,7 +206,7 @@ try {
 
 ## Python
 
-### Compare raw stored text with decoded UTF-8
+### Python: Compare raw stored text with decoded UTF-8
 
 ```python
 import dicomsdl as dicom
@@ -235,7 +235,7 @@ Hong
 Gildong
 ```
 
-### Build and store a structured PersonName
+### Python: Build and store a structured PersonName
 
 ```python
 import dicomsdl as dicom
@@ -295,7 +295,7 @@ Expected output when `utf8_names.dcm` contains `홍길동`:
 True
 ```
 
-### Handle declaration and transcode failures explicitly
+### Python: Handle declaration and transcode failures explicitly
 
 ```python
 import dicomsdl as dicom

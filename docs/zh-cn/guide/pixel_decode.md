@@ -29,7 +29,7 @@
 
 ## C++
 
-### 在解码一帧之前检查输出布局
+### C++: 在解码一帧之前检查输出布局
 
 ```cpp
 #include <cstdint>
@@ -81,7 +81,7 @@ for (std::size_t frame = 0; frame < plan.output_layout.frames; ++frame) {
 }
 ```
 
-### 从 DecodeOptions 制定计划
+### C++: 从 DecodeOptions 制定计划
 
 ```cpp
 #include <cstdint>
@@ -115,7 +115,7 @@ std::vector<std::uint8_t> volume(
 file->decode_all_frames_into(std::span<std::uint8_t>(volume), plan);
 ```
 
-### 请求显式输出步幅
+### C++: 请求显式输出步幅
 
 ```cpp
 #include <cstdint>
@@ -160,7 +160,7 @@ file->decode_all_frames_into(std::span<std::uint8_t>(volume_bytes), plan);
 
 ## Python
 
-### 在解码一帧之前检查输出布局
+### Python: 在解码一帧之前检查输出布局
 
 ```python
 import dicomsdl as dicom
@@ -204,7 +204,7 @@ for frame in range(plan.frames):
     # 将其重新用于下一个解码帧。
 ```
 
-### 从 DecodeOptions 制定计划
+### Python: 从 DecodeOptions 制定计划
 
 ```python
 import dicomsdl as dicom
@@ -236,7 +236,7 @@ volume = np.empty(plan.shape(frame=-1), dtype=plan.dtype)
 df.decode_into(volume, frame=-1, plan=plan)
 ```
 
-### 请求显式输出步幅
+### Python: 请求显式输出步幅
 
 ```python
 import dicomsdl as dicom

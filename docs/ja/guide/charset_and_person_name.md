@@ -65,7 +65,7 @@
 
 ## C++
 
-### 保存された生のテキストとデコードされた UTF-8 を比較します。
+### C++: 保存された生のテキストとデコードされた UTF-8 を比較します。
 
 ```cpp
 #include <dicom.h>
@@ -105,7 +105,7 @@ Yamada
 Taro
 ```
 
-### 構造化された PersonName を構築して保存する
+### C++: 構造化された PersonName を構築して保存する
 
 ```cpp
 #include <dicom.h>
@@ -176,7 +176,7 @@ std::cout << std::boolalpha << replaced << '\n';
 true
 ```
 
-### 宣言とトランスコードの失敗を明示的に処理する
+### C++: 宣言とトランスコードの失敗を明示的に処理する
 
 ```cpp
 #include <dicom.h>
@@ -206,7 +206,7 @@ try {
 
 ## パイソン
 
-### 保存された生のテキストとデコードされた UTF-8 を比較します。
+### Python: 保存された生のテキストとデコードされた UTF-8 を比較します。
 
 ```python
 import dicomsdl as dicom
@@ -235,7 +235,7 @@ Yamada
 Taro
 ```
 
-### 構造化された PersonName を構築して保存する
+### Python: 構造化された PersonName を構築して保存する
 
 ```python
 import dicomsdl as dicom
@@ -295,7 +295,7 @@ print(replaced)
 True
 ```
 
-### 宣言とトランスコードの失敗を明示的に処理する
+### Python: 宣言とトランスコードの失敗を明示的に処理する
 
 ```python
 import dicomsdl as dicom

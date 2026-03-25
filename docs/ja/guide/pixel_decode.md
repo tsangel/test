@@ -29,7 +29,7 @@
 
 ## C++
 
-### 1 フレームをデコードする前に出力レイアウトを検査する
+### C++: 1 フレームをデコードする前に出力レイアウトを検査する
 
 ```cpp
 #include <cstdint>
@@ -81,7 +81,7 @@ for (std::size_t frame = 0; frame < plan.output_layout.frames; ++frame) {
 }
 ```
 
-### DecodeOptions から計画を構築する
+### C++: DecodeOptions から計画を構築する
 
 ```cpp
 #include <cstdint>
@@ -115,7 +115,7 @@ std::vector<std::uint8_t> volume(
 file->decode_all_frames_into(std::span<std::uint8_t>(volume), plan);
 ```
 
-### 明示的な出力ストライドをリクエストする
+### C++: 明示的な出力ストライドをリクエストする
 
 ```cpp
 #include <cstdint>
@@ -160,7 +160,7 @@ file->decode_all_frames_into(std::span<std::uint8_t>(volume_bytes), plan);
 
 ## パイソン
 
-### 1 フレームをデコードする前に出力レイアウトを検査する
+### Python: 1 フレームをデコードする前に出力レイアウトを検査する
 
 ```python
 import dicomsdl as dicom
@@ -204,7 +204,7 @@ for frame in range(plan.frames):
     # 次のデコードされたフレームにそれを再利用します。
 ```
 
-### DecodeOptions から計画を構築する
+### Python: DecodeOptions から計画を構築する
 
 ```python
 import dicomsdl as dicom
@@ -236,7 +236,7 @@ volume = np.empty(plan.shape(frame=-1), dtype=plan.dtype)
 df.decode_into(volume, frame=-1, plan=plan)
 ```
 
-### 明示的な出力ストライドをリクエストする
+### Python: 明示的な出力ストライドをリクエストする
 
 ```python
 import dicomsdl as dicom

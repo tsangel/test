@@ -29,7 +29,7 @@
 
 ## C++
 
-### 한 프레임을 디코딩하기 전에 출력 레이아웃을 검사하세요.
+### C++: 한 프레임을 디코딩하기 전에 출력 레이아웃을 검사하세요.
 
 ```cpp
 #include <cstdint>
@@ -81,7 +81,7 @@ for (std::size_t frame = 0; frame < plan.output_layout.frames; ++frame) {
 }
 ```
 
-### DecodeOptions에서 계획 수립
+### C++: DecodeOptions에서 계획 수립
 
 ```cpp
 #include <cstdint>
@@ -115,7 +115,7 @@ std::vector<std::uint8_t> volume(
 file->decode_all_frames_into(std::span<std::uint8_t>(volume), plan);
 ```
 
-### 명시적인 출력 스트라이드 요청
+### C++: 명시적인 출력 스트라이드 요청
 
 ```cpp
 #include <cstdint>
@@ -160,7 +160,7 @@ file->decode_all_frames_into(std::span<std::uint8_t>(volume_bytes), plan);
 
 ## 파이썬
 
-### 한 프레임을 디코딩하기 전에 출력 레이아웃을 검사하세요.
+### Python: 한 프레임을 디코딩하기 전에 출력 레이아웃을 검사하세요.
 
 ```python
 import dicomsdl as dicom
@@ -204,7 +204,7 @@ for frame in range(plan.frames):
     # 다음 디코딩된 프레임에 이를 재사용합니다.
 ```
 
-### DecodeOptions에서 계획 수립
+### Python: DecodeOptions에서 계획 수립
 
 ```python
 import dicomsdl as dicom
@@ -236,7 +236,7 @@ volume = np.empty(plan.shape(frame=-1), dtype=plan.dtype)
 df.decode_into(volume, frame=-1, plan=plan)
 ```
 
-### 명시적인 출력 스트라이드 요청
+### Python: 명시적인 출력 스트라이드 요청
 
 ```python
 import dicomsdl as dicom

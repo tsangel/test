@@ -65,7 +65,7 @@
 
 ## C++
 
-### 将原始存储文本与解码后的 UTF-8 进行比较
+### C++: 将原始存储文本与解码后的 UTF-8 进行比较
 
 ```cpp
 #include <dicom.h>
@@ -105,7 +105,7 @@ Zhang
 Wei
 ```
 
-### 构建并存储结构化的 PersonName
+### C++: 构建并存储结构化的 PersonName
 
 ```cpp
 #include <dicom.h>
@@ -176,7 +176,7 @@ std::cout << std::boolalpha << replaced << '\n';
 true
 ```
 
-### 显式处理声明和转码失败
+### C++: 显式处理声明和转码失败
 
 ```cpp
 #include <dicom.h>
@@ -206,7 +206,7 @@ try {
 
 ## Python
 
-### 将原始存储文本与解码后的 UTF-8 进行比较
+### Python: 将原始存储文本与解码后的 UTF-8 进行比较
 
 ```python
 import dicomsdl as dicom
@@ -235,7 +235,7 @@ Zhang
 Wei
 ```
 
-### 构建并存储结构化的 PersonName
+### Python: 构建并存储结构化的 PersonName
 
 ```python
 import dicomsdl as dicom
@@ -295,7 +295,7 @@ print(replaced)
 True
 ```
 
-### 显式处理声明和转码失败
+### Python: 显式处理声明和转码失败
 
 ```python
 import dicomsdl as dicom
