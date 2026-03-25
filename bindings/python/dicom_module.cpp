@@ -3611,21 +3611,18 @@ NB_MODULE(_dicomsdl, m) {
 		    [](DataSet& self, const std::string& name) -> nb::object {
 			    // Allow keyword-style attribute access: ds.PatientName -> get_value("PatientName")
 			    if (!name.empty() && name.size() >= 2 && name[0] != '_') {
-				    try {
-					    Tag tag(name);
+				    const auto [tag, _vr] = dicom::lookup::keyword_to_tag_vr(name);
+				    if (static_cast<bool>(tag)) {
 					    DataElement& el = self.get_dataelement(tag);
-					    if (el.is_present()) {
-						    return dataelement_get_value_py(el, nb::cast(&self, nb::rv_policy::reference));
-					    }
-				    } catch (const std::exception&) {
-					    // fall through to AttributeError
+					    return dataelement_get_value_py(el, nb::cast(&self, nb::rv_policy::reference));
 				    }
 			    }
 			    throw nb::attribute_error(("DataSet has no attribute '" + name + "'").c_str());
 		    },
 		    nb::arg("name"),
-		    "Attribute sugar: ds.PatientName -> ds.get_dataelement('PatientName').get_value(); "
-		    "raises AttributeError if no such keyword/tag or element is missing.")
+		    "Attribute sugar: ds.PatientName -> ds.get_value('PatientName'). "
+		    "Valid DICOM keywords return None when the element is missing; unknown keywords "
+		    "raise AttributeError.")
 		.def("__dir__",
 		    [](DataSet& self) {
 			    nb::object self_obj = nb::cast(&self, nb::rv_policy::reference);
@@ -4686,14 +4683,10 @@ NB_MODULE(_dicomsdl, m) {
 		.def("__getattr__",
 		    [](DicomFile& self, const std::string& name) -> nb::object {
 			    if (!name.empty() && name.size() >= 2 && name[0] != '_') {
-				    try {
-					    Tag tag(name);
+				    const auto [tag, _vr] = dicom::lookup::keyword_to_tag_vr(name);
+				    if (static_cast<bool>(tag)) {
 					    DataElement& el = self.get_dataelement(tag);
-					    if (el.is_present()) {
-						    return dataelement_get_value_py(el, nb::cast(&self, nb::rv_policy::reference));
-					    }
-				    } catch (const std::exception&) {
-					    // Fall through to root DataSet attribute forwarding.
+					    return dataelement_get_value_py(el, nb::cast(&self, nb::rv_policy::reference));
 				    }
 			    }
 			    nb::object owner = nb::cast(&self, nb::rv_policy::reference);

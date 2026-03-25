@@ -392,6 +392,18 @@ def test_attribute_assignment_preserves_dicom_errors():
 	assert "Failed to assign value to Rows (US)" in str(excinfo.value)
 
 
+def test_keyword_attribute_access_returns_none_for_missing_elements():
+	ds = dicom.DataSet()
+	assert ds.Rows is None
+	with pytest.raises(AttributeError):
+		_ = ds.NotARealKeyword
+
+	df = dicom.DicomFile()
+	assert df.Rows is None
+	with pytest.raises(AttributeError):
+		_ = df.NotARealKeyword
+
+
 def test_out_of_order_add_dataelement_keeps_sorted_iteration_and_lookup():
 	ds = dicom.DataSet()
 	ds.add_dataelement(dicom.Tag("Rows"), dicom.VR.US).value = 512
