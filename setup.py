@@ -478,6 +478,10 @@ setup(
     url=PROJECT_URL,
     project_urls=PROJECT_URLS,
     python_requires=">=3.9",
+    extras_require={
+        "numpy": ["numpy"],
+        "pil": ["numpy", "Pillow"],
+    },
     classifiers=[
         "Development Status :: 4 - Beta",
         "Intended Audience :: Developers",

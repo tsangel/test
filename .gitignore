@@ -19,6 +19,8 @@ build-stub
 build-wheel-static
 build_*
 docs/_build
+docs/__pycache__/
+docs/locales/
 .vscode
 *.whl
 build-mergeverify

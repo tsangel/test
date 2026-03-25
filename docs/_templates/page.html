@@ -1,0 +1,33 @@
+{% extends "!page.html" %}
+
+{% block content %}
+{% if doc_language_links or doc_translation_status %}
+<div class="doc-page-meta" role="note" aria-label="Document metadata">
+  {% if doc_language_links %}
+  <div class="doc-language-switcher">
+    <span class="doc-meta-label">{{ doc_ui_languages_label }}</span>
+    <span class="doc-meta-links">
+      {% for item in doc_language_links %}
+        {% if item.current %}
+        <strong class="doc-meta-current">{{ item.label }}</strong>
+        {% else %}
+        <a href="{{ item.url }}">{{ item.label }}</a>
+        {% endif %}
+        {% if not loop.last %}
+        <span class="doc-meta-sep">/</span>
+        {% endif %}
+      {% endfor %}
+    </span>
+  </div>
+  {% endif %}
+  {% if doc_translation_status %}
+  <div class="doc-translation-status doc-translation-status-{{ doc_translation_status.kind }}">
+    <span class="doc-meta-label">{{ doc_ui_status_label }}</span>
+    <span class="doc-status-title">{{ doc_translation_status.title }}</span>
+    <span class="doc-status-message">{{ doc_translation_status.message }}</span>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+{{ super() }}
+{% endblock %}
