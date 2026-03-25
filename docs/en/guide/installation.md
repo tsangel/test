@@ -185,5 +185,6 @@ build environment, use [Build Python From Source](../developer/build_python_from
 ## Related docs
 
 - [Quickstart](quickstart.md)
+- [Build C++ From Source](../developer/cpp_build_from_source.md)
 - [Python DataSet Guide](python_dataset_guide.md)
 - [Build Python From Source](../developer/build_python_from_source.md)

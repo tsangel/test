@@ -39,6 +39,22 @@ python benchmarks/python/benchmark_wg04_pixel_decode.py \
   --json build/wg04_pixel_decode_compare_r3_htj2k.json
 ```
 
+Useful command variants:
+
+```bash
+# Compare dicomsdl and pydicom
+python benchmarks/python/benchmark_wg04_pixel_decode.py --backend both --warmup 1 --repeat 5
+
+# dicomsdl with preallocated output reuse
+python benchmarks/python/benchmark_wg04_pixel_decode.py --backend dicomsdl --reuse-output --repeat 10
+
+# pydicom with output reuse
+python benchmarks/python/benchmark_wg04_pixel_decode.py --backend pydicom --reuse-output-pydicom --repeat 10
+
+# Limit the run to selected codecs
+python benchmarks/python/benchmark_wg04_pixel_decode.py --codec JLSL --codec JLSN --repeat 10
+```
+
 `pydicom`에서 출력 버퍼 재사용 모드:
 
 ```bash

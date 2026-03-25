@@ -1,577 +1,98 @@
 # dicomsdl
 
-Minimal DICOM file wrapper with optional Python bindings.
+Minimal DICOM file wrapper with a C++ core and optional Python bindings.
 
 Documentation language entry points:
 [English](README.md) | [Korean](README.ko.md) | [Japanese](README.ja.md) | [Simplified Chinese](README.zh-CN.md)
 
-English is the source of truth for repository docs. The Sphinx docs are stored as per-language source trees under `docs/en`, `docs/ko`, `docs/ja`, and `docs/zh-cn`; see [docs/en/developer/translation_workflow.md](docs/en/developer/translation_workflow.md).
+English is the source of truth for repository docs. The Sphinx docs live under
+`docs/en`, `docs/ko`, `docs/ja`, and `docs/zh-cn`; see
+[docs/en/developer/translation_workflow.md](docs/en/developer/translation_workflow.md).
 
-## Repository Setup
+## Install
 
-Dependencies are resolved by CMake `FetchContent` during configure.
-No `git submodule update` step is required for a normal checkout.
-
-If you need to override a fetched dependency revision, pass the corresponding
-cache variable at configure time (for example
-`-DDICOMSDL_CHARLS_GIT_TAG=<tag>` or `-DDICOMSDL_NANOBIND_GIT_TAG=<tag>`).
+For most Python users:
 
 ```bash
-cmake -S . -B build
+python -m pip install --upgrade pip
+pip install "dicomsdl[numpy,pil]"
 ```
 
-To enable JPEG-XL dependency build in this project:
+For a source checkout:
 
 ```bash
-cmake -S . -B build -DDICOMSDL_ENABLE_JPEGXL=ON
-```
-
-## JPEG (libjpeg-turbo)
-
-`libjpeg-turbo` is built as a static dependency and linked into `dicomsdl`.
-
-- JPEG Lossless SV1 (`1.2.840.10008.1.2.4.70`) is supported in the current decoder path.
-- JPEG Extended 12-bit (Process 2/4, `1.2.840.10008.1.2.4.51`) WG04 codestreams are
-  decoded with a compatibility fix for malformed `SOF1 + SOS(Se=0)` headers.
-
-## C++ Build
-
-```
 cmake -S . -B build -DDICOM_BUILD_EXAMPLES=ON -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
-### Windows `build.bat` toolchain selection
+Need more than the default path?
 
-`build.bat` supports `MSVC`, `clang-cl (MSVC runtime)`, and `MSYS2 clang64` via
-`DICOMSDL_WINDOWS_TOOLCHAIN`.
+- [Installation](docs/en/guide/installation.md)
+- [Build C++ From Source](docs/en/developer/cpp_build_from_source.md)
+- [Build Python From Source](docs/en/developer/build_python_from_source.md)
 
-```cmd
-:: auto (default): prefer MSVC when cl.exe exists, then clang-cl, then clang64
-set DICOMSDL_WINDOWS_TOOLCHAIN=auto
-build
+## Python Quickstart
 
-:: force MSVC (Developer Command Prompt or vcvarsall.bat environment)
-set DICOMSDL_WINDOWS_TOOLCHAIN=msvc
-set BUILD_DIR=build-msvc
-build
+```python
+import dicomsdl as dicom
 
-:: force clang-cl (Developer Command Prompt + Ninja)
-set DICOMSDL_WINDOWS_TOOLCHAIN=clangcl
-set CMAKE_GENERATOR=Ninja
-set BUILD_DIR=build-clangcl
-build
+df = dicom.read_file("sample.dcm")
+print(df["PatientName"].value)
+print(df["Rows"].value, df["Columns"].value)
 
-:: force MSYS2 clang64 (clang/clang++/ninja on PATH)
-set DICOMSDL_WINDOWS_TOOLCHAIN=clang64
-set BUILD_DIR=build-clang64
-build
+arr = df.to_array()
+print(arr.shape, arr.dtype)
 ```
 
-If you switch generator/toolchain while reusing the same `BUILD_DIR`, set:
-
-```cmd
-set RESET_CMAKE_CACHE=1
-```
-
-### MSVC LTCG toggle (`/GL`, `/LTCG`)
-
-`DICOMSDL_MSVC_ENABLE_LTCG` controls MSVC whole-program optimization flags
-for `Release`/`RelWithDebInfo` builds (`ON` by default). This option applies to
-MSVC `cl.exe` builds and is ignored for `clang-cl` and non-MSVC toolchains.
-
-```cmd
-:: Disable /GL and /LTCG for MSVC builds
-set DICOMSDL_MSVC_ENABLE_LTCG=OFF
-build
-```
-
-```bash
-# Disable /GL and /LTCG for MSVC wheel/source builds
-DICOMSDL_MSVC_ENABLE_LTCG=OFF ./build.sh
-```
-
-The same environment variable is honored by wheel builds (`setup.py`) as well.
-
-### MSVC PGO (`OFF|GEN|USE`)
-
-MSVC PGO can be controlled with:
-
-- `DICOMSDL_MSVC_PGO=OFF|GEN|USE` (default: `OFF`)
-- `DICOMSDL_MSVC_PGO_DIR` (default: `build-pgo/msvc`)
-
-`GEN` builds with profile instrumentation and writes profile artifacts
-(`.pgd/.pgc`) under `DICOMSDL_MSVC_PGO_DIR`.  
-`USE` consumes that profile for optimized code generation.
-
-```cmd
-:: 1) Instrumented build
-set DICOMSDL_MSVC_PGO=GEN
-set DICOMSDL_MSVC_PGO_DIR=C:\Lab\workspace\test.git\build-pgo\msvc
-build-wheel-static.bat
-
-:: 2) Run representative workload (WG04 benchmark, app flow, etc.) to produce .pgc/.pgd
-
-:: 3) Profile-use build
-set DICOMSDL_MSVC_PGO=USE
-build-wheel-static.bat
-```
-
-Notes:
-
-- `DICOMSDL_MSVC_PGO=GEN|USE` requires `DICOMSDL_MSVC_ENABLE_LTCG=ON`.
-- `USE` fails fast when `${DICOMSDL_MSVC_PGO_DIR}/dicomsdl.pgd` is missing.
-
-### MSYS2 clang64 prerequisites
-
-Run the following in an `MSYS2 clang64` shell:
-
-```bash
-pacman -Syu
-# reopen the clang64 shell once after the first full upgrade, then:
-pacman -Su --noconfirm
-pacman -S --needed --noconfirm \
-  mingw-w64-clang-x86_64-clang \
-  mingw-w64-clang-x86_64-llvm \
-  mingw-w64-clang-x86_64-cmake \
-  mingw-w64-clang-x86_64-ninja \
-  mingw-w64-clang-x86_64-python \
-  mingw-w64-clang-x86_64-python-pip \
-  mingw-w64-clang-x86_64-pkgconf \
-  mingw-w64-clang-x86_64-zlib \
-  mingw-w64-clang-x86_64-libtiff \
-  mingw-w64-clang-x86_64-lcms2 \
-  git
-```
-
-Then in `cmd.exe` (or PowerShell), put clang64 tool binaries on `PATH` before running
-`build.bat`:
-
-```cmd
-set PATH=C:\msys64\clang64\bin;%PATH%
-set DICOMSDL_WINDOWS_TOOLCHAIN=clang64
-set BUILD_DIR=build-clang64
-build
-```
-
-### Visual Studio clang-cl prerequisites
-
-Install Visual Studio C++ workload and clang-cl tools, then run from a
-Developer Command Prompt (`x64 Native Tools Command Prompt`):
-
-```cmd
-where clang-cl
-where cl
-where link
-
-set DICOMSDL_WINDOWS_TOOLCHAIN=clangcl
-set CMAKE_GENERATOR=Ninja
-set BUILD_DIR=build-clangcl
-build
-```
-
-`clangcl` mode uses `clang-cl` as compiler with the MSVC toolchain/runtime.
-
-### Codec mode overrides (`build.sh` / `build.bat`)
-
-Both scripts support per-codec mode selection with:
-
-- `DICOMSDL_PIXEL_DEFAULT_MODE` (`builtin|shared|none`, default: `builtin`)
-- `DICOMSDL_PIXEL_JPEG_MODE`
-- `DICOMSDL_PIXEL_JPEGLS_MODE`
-- `DICOMSDL_PIXEL_JPEG2K_MODE`
-- `DICOMSDL_PIXEL_HTJ2K_MODE`
-- `DICOMSDL_PIXEL_JPEGXL_MODE`
-
-`DICOMSDL_PIXEL_*_MODE` controls pixel v2 plugin toggles (`DICOMSDL_PIXEL_*`).
-Legacy `DICOMSDL_CODEC_*` CMake options are removed.
-
-When one or more codec modes are set to `shared`, CMake builds per-codec shared
-plugins:
-
-- Windows: `dicomsdl_pixel_*_plugin.dll`
-- Linux: `libdicomsdl_pixel_*_plugin.so`
-- macOS: `libdicomsdl_pixel_*_plugin.dylib`
-
-When wheel build is enabled, `setup.py` bundles the produced shared plugin
-libraries into the `dicomsdl/` package:
-
-- Windows: `dicomsdl_pixel_*_plugin.dll`
-- Linux: `libdicomsdl_pixel_*_plugin.so`
-- macOS: `libdicomsdl_pixel_*_plugin.dylib`
-
-The Python package auto-loads bundled codec plugins at import time by default.
-Set `DICOMSDL_AUTOLOAD_BUNDLED_CODECS=0` to disable auto-loading.
-
-Examples:
-
-```bash
-# build.sh: disable all codecs, then enable JPEG2K as shared plugin only
-DICOMSDL_PIXEL_DEFAULT_MODE=none \
-DICOMSDL_PIXEL_JPEG2K_MODE=shared \
-BUILD_DIR=build-codec-shared \
-BUILD_WHEEL=0 RUN_TESTS=0 \
-./build.sh
-```
-
-```cmd
-:: build.bat: builtin JPEG2K, shared JPEGXL, disable HTJ2K
-set DICOMSDL_PIXEL_JPEG2K_MODE=builtin
-set DICOMSDL_PIXEL_JPEGXL_MODE=shared
-set DICOMSDL_PIXEL_HTJ2K_MODE=none
-set BUILD_DIR=build-codec-mix
-build
-```
-
-Optional extra CMake configure flags can be appended with:
-
-```cmd
-set CMAKE_EXTRA_ARGS=-DDICOMSDL_PIXEL_OPENJPEG_STATIC_PLUGIN=ON -DDICOMSDL_PIXEL_OPENJPEG_PLUGIN=OFF -DDICOMSDL_PIXEL_JPEGXL_STATIC_PLUGIN=OFF -DDICOMSDL_PIXEL_JPEGXL_PLUGIN=ON -DDICOMSDL_ENABLE_JPEGXL=ON
-build
-```
-
-```bash
-CMAKE_EXTRA_ARGS="-DDICOMSDL_PIXEL_OPENJPEG_STATIC_PLUGIN=ON -DDICOMSDL_PIXEL_OPENJPEG_PLUGIN=OFF" ./build.sh
-```
-
-### Run C++ examples
-
-```
-# Keyword -> (Tag, VR)
-./build/keyword_lookup_example PatientName
-
-# Tag -> keyword/name metadata
-./build/tag_lookup_example (0010,0010)
-
-# UID keyword/value -> registry entry
-./build/uid_lookup_example ExplicitVRLittleEndian
-
-# Dump one or more DICOM files
-./build/dicomdump path/to/file.dcm
-./build/dicomdump path/to/a.dcm path/to/b.dcm
-./build/dicomdump --no-offset --max-print-chars 120 path/to/file.dcm
-
-# Change Transfer Syntax UID and write to a new file
-./build/dicomconv input.dcm output.dcm ExplicitVRLittleEndian
-./build/dicomconv input.dcm output.dcm 1.2.840.10008.1.2
-./build/dicomconv input.dcm output.dcm jpeg --quality 92
-./build/dicomconv input.dcm output.dcm jpeg2k --target-psnr 45 --threads -1
-./build/dicomconv input.dcm output.dcm htj2k-lossless --no-color-transform
-./build/dicomconv input.dcm output.dcm jpegxl --distance 1.5 --effort 7 --threads -1
-./build/dicomconv input.dcm output.dcm jpegxl-lossless
-```
-
-### Preferred C++ DataSet access pattern
+## C++ Quickstart
 
 ```cpp
+#include <dicom.h>
+#include <iostream>
 using namespace dicom::literals;
-auto file = dicom::read_file("sample.dcm");
-auto& dataset = file->dataset();
 
-long row_count = dataset["Rows"_tag].to_long().value_or(1);
+int main() {
+  auto file = dicom::read_file("sample.dcm");
+  auto& ds = file->dataset();
+
+  long rows = ds["Rows"_tag].to_long().value_or(0);
+  long cols = ds["Columns"_tag].to_long().value_or(0);
+  std::cout << rows << " x " << cols << '\n';
+}
 ```
 
-- Prefer `dataset[tag].to_xxx().value_or(default)` for user-facing reads with defaults.
-- Use `if (auto& e = dataset[tag]; e)` only when element presence itself matters.
-- Use `get_dataelement(...)` when you want an explicitly named lookup API or tag-path parsing.
-  It returns `DataElement&` and yields a falsey element (`VR::None`) on miss.
+## Command-Line Tools
 
-## Python Wheel
+After `pip install dicomsdl`, these console scripts are available:
 
-Python ≥ 3.9 is required.
+- `dicomdump`
+- `dicomshow`
+- `dicomconv`
 
-```
-python -m pip install --upgrade pip
-pip install cmake
-pip wheel . --no-build-isolation --no-deps -w dist
-```
+See [CLI Tools](docs/en/guide/cli_tools.md) for usage and options.
 
-On macOS, if `MACOSX_DEPLOYMENT_TARGET` is unset, wheel builds default to
-`10.15` for `x86_64` and `11.0` for `arm64`/`universal2`. Export
-`MACOSX_DEPLOYMENT_TARGET=...` first if you need a different minimum target.
+## Documentation
 
-After building, install the wheel:
+Start here:
 
-```
-pip install dist/dicomsdl-*.whl
-```
+- [Docs home](docs/en/index.md)
+- [Quickstart](docs/en/guide/quickstart.md)
+- [Installation](docs/en/guide/installation.md)
+- [CLI Tools](docs/en/guide/cli_tools.md)
+- [Python DataSet Guide](docs/en/guide/python_dataset_guide.md)
+- [C++ DataSet Guide](docs/en/guide/cpp_dataset_guide.md)
+- [Reference index](docs/en/reference/index.md)
+- [Developer index](docs/en/developer/index.md)
 
-### Quick wheel wrappers (`build-wheel-static.*` / `build-wheel-shared.*`)
-
-Use the quick wrapper scripts when you want a fast wheel packaging pass without
-full regression coverage.
+Build the docs locally:
 
 ```bash
-# macOS / Linux: static wheel
-./build-wheel-static.sh
-
-# macOS / Linux: shared-plugin wheel
-./build-wheel-shared.sh
+python -m pip install -r docs/requirements.txt
+./build-docs.sh html-all
 ```
 
-```cmd
-:: Windows (cmd.exe): static wheel
-build-wheel-static.bat
-
-:: Windows (cmd.exe): shared-plugin wheel
-build-wheel-shared.bat
-```
-
-Quick-wrapper behavior:
-
-- Pre-clean old outputs before build:
-  - `${BUILD_DIR}` (default: `build-wheel-static`)
-  - `build/temp.*`, `build/lib.*`, `build/bdist.*`
-  - `${WHEEL_DIR}` (default: `dist-static`)
-- Force wheel build to Release (`FORCE_WHEEL_RELEASE=1`, `BUILD_TYPE=Release`).
-- On macOS, default `MACOSX_DEPLOYMENT_TARGET` to `10.15` for `x86_64` and
-  `11.0` for `arm64`/`universal2` when the variable is unset.
-- Run `build.sh` / `build.bat` to produce a new wheel quickly.
-- Keep regression testing off by default (`BUILD_TESTING=OFF`, `RUN_TESTS=0`).
-
-Useful toggles:
-
-- `STATIC_PRE_CLEAN_OUTPUTS=0`: skip pre-clean stage.
-- `FORCE_WHEEL_RELEASE=0`: allow non-Release wheel builds.
-
-Install the built wheel manually when needed:
-
-```bash
-pip install --force-reinstall --no-deps --no-cache-dir dist-static/dicomsdl-*.whl
-# or: dist-shared/dicomsdl-*.whl
-```
-
-### Wheel Wrapper With Tests (`build-wheel-with-tests.bat` / `build-wheel-with-tests.sh`)
-
-Use this wrapper for release-candidate validation. It reuses the existing static/shared
-wheel wrappers, enables CTest, then runs `pytest -q tests/python` after the wheel build.
-
-```bash
-# static profile (default)
-./build-wheel-with-tests.sh
-
-# shared profile
-DICOMSDL_WHEEL_PROFILE=shared ./build-wheel-with-tests.sh
-```
-
-```cmd
-:: static profile (default)
-build-wheel-with-tests.bat
-
-:: shared profile
-set DICOMSDL_WHEEL_PROFILE=shared
-build-wheel-with-tests.bat
-```
-
-Defaults:
-
-- `DICOMSDL_WHEEL_PROFILE=static`
-- `BUILD_TESTING=ON`
-- `RUN_TESTS=1`
-- `WHEEL_ONLY=0`
-- `DICOM_BUILD_EXAMPLES=OFF`
-- `PIP_WHEEL_VERBOSE=1`
-
-Optional:
-
-- `PYTEST_ARGS="..."` to forward extra arguments to `pytest`
-- `BUILD_DIR` / `WHEEL_DIR` to override regression output locations
-
-Default wheel-with-tests outputs:
-
-- `static`: `dist-static-with-tests`
-- `shared`: `dist-shared-with-tests`
-
-### Run Python examples
-
-```
-python examples/python/keyword_lookup_example.py PatientName Rows
-python examples/python/tag_lookup_example.py 00100010 (0008,0016)
-python examples/python/uid_lookup_example.py ExplicitVRLittleEndian 1.2.840.10008.1.2.1
-python examples/python/dump_dataset_example.py path/to/file.dcm
-python examples/python/dump_dataset_example.py path/to/file.dcm --raw-preview 16
-python examples/python/raw_value_span_example.py path/to/file.dcm PixelData
-python examples/python/pixel_decode_safe_example.py path/to/file.dcm --frame 0
-python examples/python/dicomconv_example.py input.dcm output.dcm ExplicitVRLittleEndian
-python examples/python/dicomconv_example.py input.dcm output.dcm jpeg --quality 92
-```
-
-### Run `dicomdump` CLI
-
-`dicomsdl` wheel 설치 후 `dicomdump` 스크립트를 사용할 수 있습니다.
-
-```bash
-# Basic dump
-dicomdump path/to/file.dcm
-
-# Multiple files (each output line is prefixed with "filename:")
-dicomdump path/to/a.dcm path/to/b.dcm
-dicomdump *.dcm
-
-# Hide OFFSET column
-dicomdump path/to/file.dcm --no-offset
-
-# Control truncation width
-dicomdump path/to/file.dcm --max-print-chars 120
-```
-
-### Run `dicomconv` CLI
-
-`dicomsdl` wheel 설치 후 `dicomconv` 스크립트를 사용할 수 있습니다.
-
-```bash
-# Change transfer syntax by keyword
-dicomconv input.dcm output.dcm ExplicitVRLittleEndian
-
-# Change transfer syntax by dotted UID value
-dicomconv input.dcm output.dcm 1.2.840.10008.1.2
-
-# JPEG (baseline), JPEG2000, HTJ2K shortcuts
-dicomconv input.dcm output.dcm jpeg --quality 92
-dicomconv input.dcm output.dcm jpeg2k --target-psnr 45 --threads -1
-dicomconv input.dcm output.dcm htj2k-lossless --no-color-transform
-dicomconv input.dcm output.dcm jpegxl --distance 1.5 --effort 7 --threads -1
-dicomconv input.dcm output.dcm jpegxl-lossless
-
-# Show full help (all options + examples)
-dicomconv -h
-```
-
-Python 코드에서는 일관되게 `import dicomsdl as dicom` 형식의 alias를 사용합니다.
-
-### Pixel Decode Safety Warning (v0.1.6 policy)
-
-pixel decode 경로는 내부적으로 pixel metadata를 캐시할 수 있습니다.
-아래 항목이 바뀌면 이전 metadata/shape/stride 가정은 무효로 간주해야 합니다.
-
-- `TransferSyntaxUID`
-- `Rows`, `Columns`, `SamplesPerPixel`, `BitsAllocated`
-- `PixelRepresentation`, `PlanarConfiguration`, `NumberOfFrames`
-- `PixelData`, `FloatPixelData`, `DoubleFloatPixelData`
-
-권장 사항:
-
-- 변경 이후에는 반드시 최신 pixel metadata를 다시 조회합니다.
-- 기존 decode 출력 버퍼(`decode_into`의 `out`)는 재사용하지 말고 다시 할당합니다.
-- C++에서는 `pixel_info(true)` 또는 새로 로드한 객체를 사용합니다.
-
-### Run Python Tests
-
-```bash
-python -m venv .venv && source .venv/bin/activate
-python -m pip install --upgrade pip cmake pytest
-pip install -e .
-pytest -q tests/python
-```
-
-Windows에서는 PowerShell/`cmd`에서 가상환경 활성화만 플랫폼에 맞게 바꿔주면 동일합니다.
-
-### Update Python Stub Snapshot
-
-`nanobind` 기반 자동 생성 스텁 스냅샷은 아래 명령으로 갱신합니다.
-
-```bash
-# Build Python extension first (example: default build dir)
-cmake --build build --target _dicomsdl
-
-# Regenerate snapshot
-scripts/update_stub.sh --build-dir build
-
-# Check-only mode (used in CI)
-scripts/update_stub.sh --check --build-dir build
-```
-
-### WG04 Pixel Decode Benchmark
-
-WG04 샘플(`REF`, `RLE`, `J2KR`, `J2KI`, `JLSL`, `JLSN`, `JPLL`, `JPLY`)을 codec별로
-pixel decode 벤치마크할 수 있습니다.
-
-```bash
-export DICOMSDL_WG04_IMAGES_BASE=/Users/tsangel/workspace.dev/sample/nema/WG04/IMAGES
-python benchmarks/python/benchmark_wg04_pixel_decode.py --warmup 1 --repeat 5
-```
-
-기본 `dicomsdl` 경로(`to_array`)는 현재 JPEG 2000 디코드에서
-`decoder_threads=-1`(all CPUs auto)을 사용합니다.
-
-`dicomsdl` vs `pydicom` 비교 테이블:
-
-```bash
-python benchmarks/python/benchmark_wg04_pixel_decode.py --backend both --warmup 1 --repeat 5
-```
-
-`dicomsdl`에서 출력 버퍼 재사용(`decode_into`) 모드:
-
-```bash
-python benchmarks/python/benchmark_wg04_pixel_decode.py --backend dicomsdl --reuse-output --repeat 10
-```
-
-`--reuse-output` 경로도 기본 thread hint는 `threads=-1`입니다.
-
-`pydicom`에서 출력 버퍼 재사용 모드(비압축은 `numpy_handler(read_only)+copyto`,
-압축은 `pixel_array+copyto` fallback):
-
-```bash
-python benchmarks/python/benchmark_wg04_pixel_decode.py --backend pydicom --reuse-output-pydicom --repeat 10
-```
-
-특정 codec만 실행:
-
-```bash
-python benchmarks/python/benchmark_wg04_pixel_decode.py --codec JLSL --codec JLSN --repeat 10
-```
-
-JSON 리포트 저장:
-
-```bash
-python benchmarks/python/benchmark_wg04_pixel_decode.py --backend both --json build/wg04_pixel_decode_bench.json
-```
-
-최신 스냅샷(2026-02-20, `--backend both --warmup 1 --repeat 3`)에서는
-`TOTAL` 기준 `dicomsdl 19.680 ms/decode` vs `pydicom 45.487 ms/decode`로
-약 `2.31x` (`dcm/pyd x`)를 기록했습니다.
-상세 표는 `docs/pydicom_pixel_decoding_wg04.md`, 원본 수치는
-`build/wg04_pixel_decode_compare_r3.json`에서 확인할 수 있습니다.
-
-## Python Wheel Quick Commands
-
-### macOS / Linux
-
-```bash
-python -m venv .venv && source .venv/bin/activate
-python -m pip install --upgrade pip cmake
-pip wheel . --no-build-isolation --no-deps -w dist
-pip install --force-reinstall dist/dicomsdl-*.whl
-python -c "import dicomsdl as dicom; tag, vr = dicom.keyword_to_tag_vr('PatientName'); print(int(tag), vr.str())"
-python -c "import dicomsdl as dicom; df = dicom.read_file('sample.dcm'); print(df.path, type(df.dataset).__name__)"
-python -c "import dicomsdl as dicom; data = b'DICM'; df = dicom.read_bytes(data, name='inline'); print(df.path, len(data))"
-```
-
-On macOS, the local wheel command above uses `10.15` (`x86_64`) or `11.0`
-(`arm64`/`universal2`) when `MACOSX_DEPLOYMENT_TARGET` is not already set.
-
-### Windows (PowerShell)
-
-```powershell
-py -m venv .venv; .\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip cmake
-pip wheel . --no-build-isolation --no-deps -w dist
-pip install --force-reinstall dist\dicomsdl-*.whl
-python -c "import dicomsdl as dicom; tag, vr = dicom.keyword_to_tag_vr('PatientName'); print(int(tag), vr.str())"
-```
-
-### Windows (cmd.exe)
-
-```cmd
-py -m venv .venv && .\.venv\Scripts\activate
-python -m pip install --upgrade pip cmake
-pip wheel . --no-build-isolation --no-deps -w dist
-pip install --force-reinstall dist\dicomsdl-*.whl
-python -c "import dicomsdl as dicom; tag, vr = dicom.keyword_to_tag_vr('PatientName'); print(int(tag), vr.str())"
-```
-
-## Continuous Integration
-
-GitHub Actions builds Python wheels for Linux, macOS (x86_64 & arm64), and Windows
-across CPython 3.9 through 3.14. Generated wheels are published as workflow
-artifacts.
+## Notes
+
+- Third-party dependencies are fetched by CMake `FetchContent` during configure.
+- Example binaries such as `dicomdump` and `dicomconv` are built when `DICOM_BUILD_EXAMPLES=ON`.
+- For pixel decode and encode safety details, see [Pixel Decode](docs/en/guide/pixel_decode.md) and [Pixel Encode](docs/en/guide/pixel_encode.md).

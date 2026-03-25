@@ -7,6 +7,7 @@
 
 quickstart
 installation
+cli_tools
 core_objects
 file_io
 python_dataset_guide

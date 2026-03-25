@@ -7,6 +7,7 @@ Start here if you are trying to install `dicomsdl`, build it, and write code aga
 
 quickstart
 installation
+cli_tools
 core_objects
 file_io
 python_dataset_guide
