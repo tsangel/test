@@ -37,7 +37,7 @@ Use `df.dataset` when you want the dataset boundary to be explicit.
 `PatientName` is a `PN`, so `.value` prints as a `PersonName(...)` object rather
 than a plain Python string.
 Need the object model, metadata lookup rules, or the full decode flow? See
-[Core Objects](core_objects.md), [Reading Data Element Values](reading_data.md), and
+[Core Objects](core_objects.md), [Python DataSet Guide](python_dataset_guide.md), and
 [Pixel Decode](pixel_decode.md).
 
 4. Decode pixels into a NumPy array
@@ -224,4 +224,4 @@ With the intentional `Columns = -1` failure above, the output looks like this.
 - Full runnable example: `examples/batch_assign_with_error_check.cpp`
 - `add_dataelement(...)` returns `DataElement&`, so write helpers chain with `.`.
 Need broader write patterns or failure-handling guidance? See
-[Writing Data Element Values](writing_data.md) and [Error Handling](error_handling.md).
+[C++ DataSet Guide](cpp_dataset_guide.md) and [Error Handling](error_handling.md).

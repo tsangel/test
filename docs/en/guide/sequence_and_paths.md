@@ -37,5 +37,6 @@ ds.set_value("ReferencedStudySequence.0.ReferencedSOPInstanceUID", "1.2.3")
 ## Related docs
 
 - [Core Objects](core_objects.md)
-- [Writing Data Element Values](writing_data.md)
+- [C++ DataSet Guide](cpp_dataset_guide.md)
+- [Python DataSet Guide](python_dataset_guide.md)
 - [Tag-path Lookup Semantics](../reference/tag_path_lookup.md)

@@ -211,8 +211,8 @@ Notes:
 ## Related docs
 
 - [Core Objects](core_objects.md)
-- [Reading Data Element Values](reading_data.md)
-- [Writing Data Element Values](writing_data.md)
+- [C++ DataSet Guide](cpp_dataset_guide.md)
+- [Python DataSet Guide](python_dataset_guide.md)
 - [Pixel Decode](pixel_decode.md)
 - [Pixel Encode](pixel_encode.md)
 - [C++ API Overview](../reference/cpp_api.md)

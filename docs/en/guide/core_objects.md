@@ -67,7 +67,6 @@ Relevant DICOM sections:
 
 ## Related docs
 
-- [Reading Data Element Values](reading_data.md)
 - [Sequence and Paths](sequence_and_paths.md)
 - [DataElement Reference](../reference/dataelement_reference.md)
 - [Sequence Reference](../reference/sequence_reference.md)

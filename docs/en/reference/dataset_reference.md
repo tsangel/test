@@ -46,5 +46,4 @@
 - [Sequence Reference](sequence_reference.md)
 - [Tag-path lookup semantics](tag_path_lookup.md)
 - [C++ DataSet Guide](../guide/cpp_dataset_guide.md)
-- [Reading Data Element Values](../guide/reading_data.md)
-- [Writing Data Element Values](../guide/writing_data.md)
+- [Python DataSet Guide](../guide/python_dataset_guide.md)
