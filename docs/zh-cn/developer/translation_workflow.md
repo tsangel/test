@@ -42,15 +42,11 @@ Then use the wrapper script:
 # Build a single localized site when translation work starts
 DICOMSDL_DOC_LANGUAGE=ko ./build-docs.sh html
 
-# Build English only into docs/_build/html-multilang/en
+# Build en / ko / ja / zh-cn into docs/_build/html-multilang/
 ./build-docs.sh html-all
-
-# Also build ko / ja / zh-cn placeholders or active translations
-DICOMSDL_BUILD_TRANSLATIONS=1 ./build-docs.sh html-all
 ```
 
-While English is still the active writing language, the localized trees may contain placeholder files only.
-The default `html-all` build stays English-only so Sphinx does not emit `toc.not_included` warnings for empty localized pages.
+`html-all` now builds all supported languages by default.
 
 ## Editing workflow
 

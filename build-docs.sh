@@ -23,7 +23,7 @@ Usage: ./build-docs.sh [html|html-all|check]
 
 Targets:
   html            Build one HTML site using DICOMSDL_DOC_LANGUAGE (default: en)
-  html-all        Build English HTML by default; set DICOMSDL_BUILD_TRANSLATIONS=1 to also build ko, ja, zh-cn
+  html-all        Build HTML for en, ko, ja, and zh-cn
   check           Verify that ko / ja / zh-cn mirror docs/en paths
 EOF
 }
@@ -60,12 +60,8 @@ active_doc_languages_for_single_build() {
 }
 
 active_doc_languages_for_html_all() {
-  if [[ "${DICOMSDL_BUILD_TRANSLATIONS:-0}" == "1" ]]; then
-    local joined="${SUPPORTED_LANGUAGES[*]}"
-    printf '%s\n' "${joined// /,}"
-  else
-    printf '%s\n' "en"
-  fi
+  local joined="${SUPPORTED_LANGUAGES[*]}"
+  printf '%s\n' "${joined// /,}"
 }
 
 build_html() {
@@ -97,13 +93,9 @@ case "$TARGET" in
     run_doxygen
     ACTIVE_LANGUAGES="$(active_doc_languages_for_html_all)"
     build_html "en" "$MULTILANG_DIR/en" "$ACTIVE_LANGUAGES"
-    if [[ "${DICOMSDL_BUILD_TRANSLATIONS:-0}" == "1" ]]; then
-      for lang in "${TRANSLATION_LANGUAGES[@]}"; do
-        build_html "$lang" "$MULTILANG_DIR/$lang" "$ACTIVE_LANGUAGES"
-      done
-    else
-      echo "==> Skipping ko / ja / zh-cn HTML builds (set DICOMSDL_BUILD_TRANSLATIONS=1 to include them)"
-    fi
+    for lang in "${TRANSLATION_LANGUAGES[@]}"; do
+      build_html "$lang" "$MULTILANG_DIR/$lang" "$ACTIVE_LANGUAGES"
+    done
     ;;
   check)
     check_doc_trees
