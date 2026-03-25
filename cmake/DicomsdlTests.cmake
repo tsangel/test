@@ -151,6 +151,13 @@ if(BUILD_TESTING)
     add_test(NAME decode_thread_policy_smoke COMMAND dicomsdl_decode_thread_policy_smoke)
     set_tests_properties(decode_thread_policy_smoke PROPERTIES LABELS "dicomsdl")
 
+    add_executable(dicomsdl_decode_stride_options_smoke
+        tests/decode_stride_options_smoke.cpp
+    )
+    target_link_libraries(dicomsdl_decode_stride_options_smoke PRIVATE dicomsdl)
+    add_test(NAME decode_stride_options_smoke COMMAND dicomsdl_decode_stride_options_smoke)
+    set_tests_properties(decode_stride_options_smoke PROPERTIES LABELS "dicomsdl")
+
     add_executable(dicomsdl_pixel_transform_smoke
         tests/pixel_transform_smoke.cpp
     )

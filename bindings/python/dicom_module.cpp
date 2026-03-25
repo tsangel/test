@@ -3672,10 +3672,13 @@ NB_MODULE(_dicomsdl, m) {
 	    "Decode option set used to build a reusable DecodePlan.")
 		.def("__init__",
 		    [](dicom::pixel::DecodeOptions* self, std::uint16_t alignment,
+		        std::size_t row_stride, std::size_t frame_stride,
 		        dicom::pixel::Planar planar_out, bool decode_mct,
 		        int worker_threads, int codec_threads) {
 			    new (self) dicom::pixel::DecodeOptions{};
 			    self->alignment = alignment;
+			    self->row_stride = row_stride;
+			    self->frame_stride = frame_stride;
 			    self->planar_out = planar_out;
 			    self->decode_mct = decode_mct;
 			    self->worker_threads = worker_threads;
@@ -3683,12 +3686,18 @@ NB_MODULE(_dicomsdl, m) {
 		    },
 		    nb::kw_only(),
 		    nb::arg("alignment") = static_cast<std::uint16_t>(1),
+		    nb::arg("row_stride") = static_cast<std::size_t>(0),
+		    nb::arg("frame_stride") = static_cast<std::size_t>(0),
 		    nb::arg("planar_out") = dicom::pixel::Planar::interleaved,
 		    nb::arg("decode_mct") = true,
 		    nb::arg("worker_threads") = -1,
 		    nb::arg("codec_threads") = -1)
 		.def_rw("alignment", &dicom::pixel::DecodeOptions::alignment,
-		    "Requested output row/frame alignment in bytes.")
+		    "Requested output row/frame alignment in bytes. Ignored when an explicit stride is set.")
+		.def_rw("row_stride", &dicom::pixel::DecodeOptions::row_stride,
+		    "Explicit output row stride in bytes. Zero means auto-compute.")
+		.def_rw("frame_stride", &dicom::pixel::DecodeOptions::frame_stride,
+		    "Explicit output frame stride in bytes. Zero means auto-compute.")
 		.def_rw("planar_out", &dicom::pixel::DecodeOptions::planar_out,
 		    "Requested output sample layout.")
 		.def_rw("decode_mct", &dicom::pixel::DecodeOptions::decode_mct,
@@ -3701,6 +3710,8 @@ NB_MODULE(_dicomsdl, m) {
 		    [](const dicom::pixel::DecodeOptions& self) {
 			    std::ostringstream oss;
 			    oss << "DecodeOptions(alignment=" << self.alignment
+			        << ", row_stride=" << self.row_stride
+			        << ", frame_stride=" << self.frame_stride
 			        << ", planar_out="
 			        << (self.planar_out == dicom::pixel::Planar::planar ? "Planar.planar"
 			                                                            : "Planar.interleaved")

@@ -1552,6 +1552,12 @@ private:
 
 struct DecodeOptions {
 	std::uint16_t alignment{1};  // 0/1: packed, power-of-two aligned (<= 4096)
+	// 0: auto-compute from decoded geometry.
+	// >0: explicit output row stride in bytes; when set, alignment is ignored.
+	std::size_t row_stride{0};
+	// 0: auto-compute from row_stride/geometry.
+	// >0: explicit output frame stride in bytes; when set, alignment is ignored.
+	std::size_t frame_stride{0};
 	Planar planar_out{Planar::interleaved};
 	// true: apply codestream-level MCT/color transform inverse when decoder supports it.
 	// false: keep codestream component domain (for example, YBR_* domain for JPEG2000 MCT streams).

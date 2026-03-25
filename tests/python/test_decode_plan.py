@@ -32,6 +32,80 @@ def test_create_decode_plan_exposes_shape_dtype_and_strides():
     assert plan.options.codec_threads == -1
 
 
+def test_create_decode_plan_accepts_explicit_row_stride_and_ignores_alignment():
+    dicom_file = dicom.read_file(_test_file())
+    options = dicom.DecodeOptions(alignment=3, row_stride=16)
+
+    plan = dicom_file.create_decode_plan(options)
+
+    assert plan.row_stride == 16
+    assert plan.frame_stride == 64
+    assert plan.required_bytes(frame=0) == 64
+
+    arr = dicom_file.to_array(frame=0, plan=plan)
+    expected = dicom_file.to_array(frame=0)
+
+    assert arr.shape == (4, 4)
+    assert arr.strides == (16, 2)
+    assert arr.flags.c_contiguous is False
+    assert np.array_equal(arr, expected)
+
+
+def test_create_decode_plan_accepts_explicit_frame_stride_with_packed_rows():
+    dicom_file = dicom.read_file(_test_file())
+    frame0 = np.arange(16, dtype=np.int16).reshape(4, 4)
+    frame1 = (np.arange(16, dtype=np.int16) + 100).reshape(4, 4)
+    source = np.stack([frame0, frame1], axis=0)
+    dicom_file.set_pixel_data("ExplicitVRLittleEndian", source)
+
+    options = dicom.DecodeOptions(alignment=3, frame_stride=48)
+    plan = dicom_file.create_decode_plan(options)
+
+    assert plan.row_stride == 8
+    assert plan.frame_stride == 48
+    assert plan.required_bytes(frame=-1) == 96
+
+    arr = dicom_file.to_array(frame=-1, plan=plan)
+
+    assert arr.shape == (2, 4, 4)
+    assert arr.strides == (48, 8, 2)
+    assert arr.flags.c_contiguous is False
+    assert np.array_equal(arr, source)
+
+
+def test_decode_into_accepts_raw_buffer_for_custom_stride_plan():
+    dicom_file = dicom.read_file(_test_file())
+    options = dicom.DecodeOptions(row_stride=16)
+    plan = dicom_file.create_decode_plan(options)
+
+    out = np.empty(
+        plan.required_bytes(frame=0) // plan.bytes_per_sample,
+        dtype=plan.dtype,
+    )
+    returned = dicom_file.decode_into(out, frame=0, plan=plan)
+
+    view = np.ndarray(
+        shape=plan.shape(frame=0),
+        dtype=plan.dtype,
+        buffer=out,
+        strides=(plan.row_stride, plan.bytes_per_sample),
+    )
+    expected = dicom_file.to_array(frame=0)
+
+    assert returned is out
+    assert np.array_equal(view, expected)
+
+
+def test_create_decode_plan_rejects_explicit_stride_smaller_than_payload():
+    dicom_file = dicom.read_file(_test_file())
+
+    with pytest.raises(RuntimeError, match="row_stride is smaller than row payload"):
+        dicom_file.create_decode_plan(dicom.DecodeOptions(row_stride=6))
+
+    with pytest.raises(RuntimeError, match="frame_stride is smaller than frame payload"):
+        dicom_file.create_decode_plan(dicom.DecodeOptions(frame_stride=16))
+
+
 def test_to_array_accepts_reusable_decode_plan():
     dicom_file = dicom.read_file(_test_file())
     options = dicom.DecodeOptions()

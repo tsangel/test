@@ -149,6 +149,8 @@ class DecodeOptions:
         self,
         *,
         alignment: int = ...,
+        row_stride: int = ...,
+        frame_stride: int = ...,
         planar_out: Planar = ...,
         decode_mct: bool = ...,
         worker_threads: int = ...,
@@ -159,6 +161,16 @@ class DecodeOptions:
     def alignment(self) -> int: ...
     @alignment.setter
     def alignment(self, value: int) -> None: ...
+
+    @property
+    def row_stride(self) -> int: ...
+    @row_stride.setter
+    def row_stride(self, value: int) -> None: ...
+
+    @property
+    def frame_stride(self) -> int: ...
+    @frame_stride.setter
+    def frame_stride(self, value: int) -> None: ...
 
     @property
     def planar_out(self) -> Planar: ...
