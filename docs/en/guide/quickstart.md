@@ -25,17 +25,21 @@ Need platform-specific install details? See [Installation](installation.md).
 ```pycon
 >>> import dicomsdl as dicom
 >>> df = dicom.read_file("sample.dcm")
->>> df["PatientName"].value
+>>> df.PatientName
 PersonName(Doe^Jane)
->>> df["Rows"].value, df["Columns"].value
+>>> df.Rows, df.Columns
 (512, 512)
 ```
 
-`DicomFile` forwards the root `DataSet` access helpers, so `df["Rows"]`,
-`df.get_value(...)`, and `df.get_dataelement(...)` work directly in Python.
+`DicomFile` forwards the root `DataSet` access helpers, so ordinary top-level
+keywords such as `df.Rows` and `df.PatientName` are usually the shortest
+recommended metadata reads in Python. Use `df.get_value("Seq.0.Tag")` for
+nested leaf lookups, and use `df["Rows"]` / `df.get_dataelement(...)` when
+you need `DataElement` metadata instead of just the typed value. Known missing
+keywords return `None`; unknown keywords still raise `AttributeError`.
 Use `df.dataset` when you want the dataset boundary to be explicit.
-`PatientName` is a `PN`, so `.value` prints as a `PersonName(...)` object rather
-than a plain Python string.
+`PatientName` is a `PN`, so `df.PatientName` prints as a `PersonName(...)`
+object rather than a plain Python string.
 Need the object model, metadata lookup rules, or the full decode flow? See
 [Core Objects](core_objects.md), [Python DataSet Guide](python_dataset_guide.md), and
 [Pixel Decode](pixel_decode.md).

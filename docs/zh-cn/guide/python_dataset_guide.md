@@ -34,16 +34,17 @@ DicomSDL 公开了一小组相关的 Python 对象：
 
 该绑定有意使用拆分模型：
 
-- 属性访问是面向值的：`ds.Rows`
-- 索引访问返回`DataElement`：`ds["Rows"]`
+- 属性访问是普通顶层 keyword 取值的主路径：`ds.Rows`、`df.PatientName`
+- 索引访问返回 `DataElement`：`ds["Rows"]`
+- `get_value(...)` 是面向动态键、点分 tag path 和自定义默认值的显式取值路径
 
-这使得常见的读取变得简短，同时仍然使 VR/长度/标签元数据易于检查。
+这样既能让常见读取保持简洁，也仍然便于检查嵌套遍历以及 VR / 长度 / 标签元数据。
 
 ### DicomFile 和数据集
 
 大多数数据元素访问 API 都是在 `DataSet` 上实现的。
 `DicomFile` 拥有根 `DataSet` 并处理面向文件的工作，例如加载、保存和转码。
-为了方便起见，`DicomFile` 转发根数据集访问，因此 `df.Rows`、`df["Rows"]`、`df.get_value(...)` 和 `df.Rows = 512` 均委托给 `df.dataset`。
+为了方便起见，`DicomFile` 转发根数据集访问，因此 `df.Rows`、`df.PatientName`、`df["Rows"]`、`df.get_value(...)` 和 `df.Rows = 512` 均委托给 `df.dataset`。
 如果绑定 `ds = df.dataset`，则直接使用相同的数据集 API，无需转发。
 
 这些模式是等效的：
@@ -66,13 +67,13 @@ df.dataset.Rows = 512
 |应用程序接口 |返回|缺失行为 |预期用途 |
 | --- | --- | --- | --- |
 | `"Rows" in ds` | `bool` | `False` |存在探针|
-| `ds.get_value("Rows", default=None)` |类型化值或传入的默认值 |返回传入的默认值 |一次性类型化读取；`None` 或其他默认值表示元素缺失 |
+| `ds.Rows` | 类型化值或 `None` | 有效的 DICOM keyword 缺失时返回 `None`；未知 keyword 抛出 `AttributeError` | 在 `DataSet` / `DicomFile` 上读取标准 DICOM keyword 的推荐顶层路径 |
+| `ds.get_value("Rows", default=None)` |类型化值或传入的默认值 |返回传入的默认值 |用于动态键、点分 tag path 或自定义默认值的显式一次性类型化读取 |
 | `ds["Rows"]`、`ds.get_dataelement("Rows")` | `DataElement` |返回会被判定为 `False` 的 `NullElement`，不抛异常 | `DataElement` 访问 |
 | `ds.ensure_loaded("Rows")` | `None` |因无效键而引发 |显式继续部分读取直到后面的标签，例如 `Rows` |
 | `ds.ensure_dataelement("Rows", vr=None)` | `DataElement` |返回现有或插入零长度元素 |链接友好的确保/创建 API |
 | `ds.set_value("Rows", 512)` | `bool` |写入或零长度|一次性类型化写入 |
 | `ds.set_value(0x00090030, dicom.VR.US, 16)` | `bool` |通过显式 VR 创建或覆盖 |私人或不明确的标签 |
-| `ds.Rows` |类型化值 | `AttributeError` |面向开发/交互环境、用于已知常用标签的便捷访问 |
 | `ds.Rows = 512` | `None` |赋值失败时引发异常 |面向开发/交互环境、用于标准关键字更新的便捷赋值 |
 
 ## 在 Python 中识别数据元素的方法
@@ -80,7 +81,7 @@ df.dataset.Rows = 512
 | 形式 | 示例 | 优先考虑的场景 |
 | --- | --- | --- |
 | 打包整数 | `0x00280010` | 标签已经来自数字表或外部元数据时 |
-| 关键字或标签字符串 | `"Rows"`, `"(0028,0010)"` | 大多数普通 Python 代码 |
+| 关键字或标签字符串 | `"Rows"`, `"(0028,0010)"` | 想使用显式字符串键，或该键不适合写成 Python 属性时 |
 | 点分标签路径字符串 | `"RadiopharmaceuticalInformationSequence.0.RadionuclideTotalDose"` | 想一步完成嵌套查找或赋值时 |
 | `Tag` 对象 | `dicom.Tag("Rows")`, `dicom.Tag(0x0028, 0x0010)` | 想要显式且可复用的标签对象时 |
 
@@ -92,7 +93,7 @@ df.dataset.Rows = 512
 
 ### `"Rows"` 或 `"(0028,0010)"`
 
-- 在大多数普通 Python 代码里，优先用它。
+- 当你想用显式字符串键而不是属性访问时，优先用它。
 - 优点: 简短、可读，适用于常见的查找 / 写入 API。
 - 权衡: 运行时会有一点关键字/标签字符串解析成本；嵌套访问需要点分路径字符串。
 
@@ -111,22 +112,27 @@ df.dataset.Rows = 512
 
 实用推荐：
 
-- 在大多数 Python 代码中使用 `"Rows"` 进行常用关键字/标签字符串访问。这仍然有一个小的运行时关键字/标签解析成本，但 DicomSDL 使用优化的运行时关键字路径和更轻的直接路径来处理普通关键字字符串，因此开销通常很小。
-- 当普通标签已经来自数字常量或外部元数据时，或者当您想要普通标签的最快路径时，请使用压缩整数
-- 当您想要在一个步骤中完成嵌套取值或赋值时，请使用点分标签路径字符串。在 Python 中，这也可能比重复调用嵌套的 `Sequence` / `DataSet` API 更快，因为遍历保留在一次 C++ 路径解析/查找调用中。
-- 当您想要显式且可重用的标签对象时，请使用 `dicom.Tag(...)`
-- `ds.Rows` 在开发或交互式探索过程中很方便，并且它也可以很好地在许多交互式 shell 中使用制表符补全，因为 `dir()` 公开了当前的公共标准关键字。但当关键字未知或元素丢失时，它会引发 `AttributeError`。对于生产代码， string/int/`Tag` 键通常更容易显式处理。
+- 对普通顶层标准 DICOM keyword 读取，优先使用 `ds.Rows` / `df.PatientName`。这样常见代码更短，在当前绑定上性能也不错；如果已知 keyword 只是缺失，会返回 `None`，而未知 keyword 或普通拼写错误仍然会抛出 `AttributeError`。
+- 当键是动态的、需要自定义默认值，或者要读取 `"Seq.0.Tag"` 这样的点分 tag path 时，请使用 `get_value(...)`。
+- 当单个标签已经来自数值常量或外部元数据，或者你想要单标签的最快路径时，请使用 packed int。
+- 当你想一步完成嵌套值读取或赋值时，请使用点分 tag path 字符串。在 Python 中，这也可能比反复调用嵌套 `Sequence` / `DataSet` API 更快，因为遍历保持在一次 C++ 路径解析 / 查找调用中。
+- 当你需要显式且可复用的标签对象时，请使用 `dicom.Tag(...)`。
+- 当你需要 VR、长度、标签、sequence、raw byte 等 `DataElement` 本身的元数据时，请使用 `ds["Rows"]` 或 `get_dataelement(...)`。
 
 ## 读取值
 
-### 属性访问返回键入的值
+### 属性访问返回类型化值
 
 ```python
-rows = ds.Rows
+rows = df.Rows
 patient_name = ds.PatientName
+window_center = ds.WindowCenter  # 如果 keyword 有效但当前缺失，则为 None
 ```
 
-当您期望元素存在并且需要实际值而不是元数据时，请使用此选项。
+当你在 `DataSet` 或 `DicomFile` 上读取普通顶层标准 DICOM keyword，并且需要实际值而不是 `DataElement` 元数据时，优先使用这一条路径。
+
+如果有效的 DICOM keyword 当前缺失，结果就是 `None`。
+未知属性名仍然会抛出 `AttributeError`，因此普通拼写错误不会被悄悄吞掉。
 
 ### 索引访问返回一个 DataElement
 
@@ -193,17 +199,22 @@ df.dataset.ensure_loaded(dicom.Tag("Columns"))
 
 `ensure_loaded(...)` 不支持嵌套的点分标签路径字符串。
 
-### 快速路径：get_value()
+### 显式取值路径：get_value()
 
-使用 `get_value()` 进行一次性值读取，其中 `None` 等默认值表示缺少元素：
+当键是动态的、需要显式默认值，或者要读取点分 tag path 时，请使用 `get_value()`：
 
 ```python
-rows = ds.get_value("Rows")
+keyword = "Rows"
+rows = ds.get_value(keyword)
 window_center = ds.get_value("WindowCenter", default=None)
+total_dose = ds.get_value(
+    "RadiopharmaceuticalInformationSequence.0.RadionuclideTotalDose",
+    default=None,
+)
 ```
 
-当您不需要 `DataElement` 对象时，这是最直接、最简单的不抛异常取值路径。
-如果该元素丢失，您将得到 `default`。
+当你不需要 `DataElement` 对象时，这是最显式的不抛异常取值路径。
+如果元素缺失，你会得到传入的 `default`。
 
 `get_value()` 不会隐式继续部分加载。如果文件支持的数据集是
 仅加载到较早的标签，查询较晚的标签将返回当前可用的标签

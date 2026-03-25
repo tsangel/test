@@ -34,16 +34,20 @@ For the object model and DICOM mapping, see [Core Objects](core_objects.md).
 
 The binding uses a split model on purpose:
 
-- attribute access is value-oriented: `ds.Rows`
+- attribute access is the main top-level keyword value path: `ds.Rows`, `df.PatientName`
 - index access returns a `DataElement`: `ds["Rows"]`
+- `get_value(...)` is the explicit value path for dynamic keys, dotted tag paths, and custom defaults
 
-That keeps common reads short, while still making VR/length/tag metadata easy to inspect.
+That keeps common reads short, while still making nested traversal and
+VR/length/tag metadata easy to inspect.
 
 ### DicomFile and DataSet
 
 Most data element access APIs are implemented on `DataSet`.
 `DicomFile` owns the root `DataSet` and handles file-oriented work such as load, save, and transcode.
-For convenience, `DicomFile` forwards root-dataset access, so `df.Rows`, `df["Rows"]`, `df.get_value(...)`, and `df.Rows = 512` all delegate to `df.dataset`.
+For convenience, `DicomFile` forwards root-dataset access, so `df.Rows`,
+`df.PatientName`, `df["Rows"]`, `df.get_value(...)`, and `df.Rows = 512`
+all delegate to `df.dataset`.
 If you bind `ds = df.dataset`, you are using the same dataset APIs directly, without forwarding.
 
 These patterns are equivalent:
@@ -66,13 +70,13 @@ df.dataset.Rows = 512
 | API | Returns | Missing behavior | Intended use |
 | --- | --- | --- | --- |
 | `"Rows" in ds` | `bool` | `False` | presence probe |
-| `ds.get_value("Rows", default=None)` | typed value or the supplied default value | returns the supplied default value | one-shot typed read where `None` or another default value means missing |
+| `ds.Rows` | typed value or `None` | valid DICOM keywords return `None` when missing; unknown keywords raise `AttributeError` | recommended top-level read path for standard DICOM keywords on `DataSet` / `DicomFile` |
+| `ds.get_value("Rows", default=None)` | typed value or the supplied default value | returns the supplied default value | explicit one-shot typed read for dynamic keys, dotted tag paths, or custom defaults |
 | `ds["Rows"]`, `ds.get_dataelement("Rows")` | `DataElement` | returns a `NullElement` that evaluates to `False`, no exception | `DataElement` access |
 | `ds.ensure_loaded("Rows")` | `None` | raises on invalid key | explicitly continue a partial read up to a later tag such as `Rows` |
 | `ds.ensure_dataelement("Rows", vr=None)` | `DataElement` | returns existing or inserts zero-length element | chaining-friendly ensure/create API |
 | `ds.set_value("Rows", 512)` | `bool` | writes or zero-lengths | one-shot typed assignment |
 | `ds.set_value(0x00090030, dicom.VR.US, 16)` | `bool` | creates or overrides by explicit VR | private or ambiguous tags |
-| `ds.Rows` | typed value | `AttributeError` | development / interactive convenience access for known/common tags |
 | `ds.Rows = 512` | `None` | raises on assignment failure | development / interactive convenience assignment for standard keyword updates |
 
 ## Ways to identify a Data Element in Python
@@ -80,7 +84,7 @@ df.dataset.Rows = 512
 | Form | Example | Use first when |
 | --- | --- | --- |
 | packed int | `0x00280010` | the tag already comes from numeric tables or external metadata |
-| keyword or Tag string | `"Rows"`, `"(0028,0010)"` | most normal Python code |
+| keyword or Tag string | `"Rows"`, `"(0028,0010)"` | you want an explicit string key, or the key is not naturally expressed as a Python attribute |
 | dotted tag-path string | `"RadiopharmaceuticalInformationSequence.0.RadionuclideTotalDose"` | you want a nested lookup or assignment in one step |
 | `Tag` object | `dicom.Tag("Rows")`, `dicom.Tag(0x0028, 0x0010)` | you want an explicit reusable tag object |
 
@@ -92,7 +96,7 @@ df.dataset.Rows = 512
 
 ### `"Rows"` or `"(0028,0010)"`
 
-- Use this first in most normal Python code.
+- Use this when you want an explicit string key rather than attribute access.
 - Advantages: short, readable, works across common lookup/write APIs.
 - Tradeoffs: small runtime keyword/Tag parse cost; nested access needs a dotted path string.
 
@@ -101,7 +105,7 @@ df.dataset.Rows = 512
 - Use this when you want a nested lookup or assignment in one step.
 - Examples: `"RadiopharmaceuticalInformationSequence.0.RadionuclideTotalDose"`, `"00540016.0.00181074"`.
 - Advantages: readable one-shot access into nested datasets.
-- Tradeoffs: only APIs that support nested paths accept it; flat-only APIs such as `ensure_loaded(...)` and `remove_dataelement(...)` do not.
+- Tradeoffs: only APIs that support nested paths accept it; single-tag-only APIs such as `ensure_loaded(...)` and `remove_dataelement(...)` do not.
 
 ### `dicom.Tag(...)`
 
@@ -111,22 +115,28 @@ df.dataset.Rows = 512
 
 Practical recommendation:
 
-- use `"Rows"` for usual keyword/Tag-string access in most Python code. This still has a small runtime keyword/Tag parse cost, but DicomSDL uses an optimized runtime keyword path and a lighter direct path for plain keyword strings, so the overhead is usually small.
+- use `ds.Rows` / `df.PatientName` first for ordinary top-level reads by standard DICOM keyword. This keeps common code short, stays performance-friendly on the current binding, returns `None` when a known keyword is simply missing, and still raises `AttributeError` for unknown keywords or ordinary typos in the keyword.
+- use `get_value(...)` when the key is dynamic, when you want a custom default, or when the lookup is a dotted tag path such as `"Seq.0.Tag"`.
 - use packed ints when single tags already come from numeric constants or external metadata, or when you want the fastest path for a single tag
 - use dotted tag-path strings when you want a nested value or assignment in one step. In Python, this can also be faster than repeated nested `Sequence` / `DataSet` API calls because the traversal stays inside one C++ path-parse/lookup call.
 - use `dicom.Tag(...)` when you want an explicit reusable tag object
-- `ds.Rows` is convenient during development or interactive exploration, and it also works well with tab completion in many interactive shells because `dir()` exposes present public standard keywords. But it raises `AttributeError` when the keyword is unknown or the element is missing. For production code, string/int/`Tag` keys are usually easier to handle explicitly.
+- use `ds["Rows"]` or `get_dataelement(...)` when you need the `DataElement` object itself for VR, length, tag, sequence, or raw-byte inspection.
 
 ## Reading values
 
 ### Attribute access returns the typed value
 
 ```python
-rows = ds.Rows
+rows = df.Rows
 patient_name = ds.PatientName
+window_center = ds.WindowCenter  # None if the keyword is valid but currently missing
 ```
 
-Use this when you expect the element to be present and you want the actual value, not metadata.
+Use this first for ordinary top-level reads by standard DICOM keyword on `DataSet` or `DicomFile` when
+you want the actual value, not `DataElement` metadata.
+
+For a valid DICOM keyword that is currently missing, the result is `None`.
+Unknown attribute names still raise `AttributeError`, so ordinary typos remain visible.
 
 ### Index access returns a DataElement
 
@@ -193,17 +203,22 @@ Accepted key types are:
 
 Nested dotted tag-path strings are not supported by `ensure_loaded(...)`.
 
-### Fast path: get_value()
+### Explicit value path: get_value()
 
-Use `get_value()` for one-shot value reads where a default such as `None` represents a missing element:
+Use `get_value()` when the key is dynamic, when you want an explicit default, or when the lookup is a dotted tag path:
 
 ```python
-rows = ds.get_value("Rows")
+keyword = "Rows"
+rows = ds.get_value(keyword)
 window_center = ds.get_value("WindowCenter", default=None)
+total_dose = ds.get_value(
+    "RadiopharmaceuticalInformationSequence.0.RadionuclideTotalDose",
+    default=None,
+)
 ```
 
-This is the shortest non-raising value path when you do not need the `DataElement` object.
-If the element is missing, you get the `default` back.
+This is the most explicit non-raising value path when you do not need the
+`DataElement` object. If the element is missing, you get the `default` back.
 
 `get_value()` does not implicitly continue partial loading. If a file-backed dataset was
 loaded only up to an earlier tag, querying a later tag returns the currently available

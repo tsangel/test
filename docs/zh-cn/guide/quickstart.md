@@ -25,15 +25,17 @@ pip install "dicomsdl[numpy,pil]"
 ```pycon
 >>> import dicomsdl as dicom
 >>> df = dicom.read_file("sample.dcm")
->>> df["PatientName"].value
+>>> df.PatientName
 PersonName(Doe^Jane)
->>> df["Rows"].value, df["Columns"].value
+>>> df.Rows, df.Columns
 (512, 512)
 ```
 
-`DicomFile` 会转发 root `DataSet` 的 access helper，因此在 Python 中可以直接使用 `df["Rows"]`、`df.get_value(...)` 和 `df.get_dataelement(...)`。
+`DicomFile` 会转发 root `DataSet` 的 access helper，因此在 Python 中，`df.Rows`、`df.PatientName` 这样的普通顶层 keyword 读取通常是最短、也最推荐的 metadata read 路径。
+嵌套 leaf lookup 请使用 `df.get_value("Seq.0.Tag")`；如果你需要的是 `DataElement` 元数据而不是类型化值，请使用 `df["Rows"]` / `df.get_dataelement(...)`。
+已知 keyword 只是缺失时会返回 `None`，未知 keyword 仍然会抛出 `AttributeError`。
 如果你希望 dataset 边界更明确，请使用 `df.dataset`。
-`PatientName` 是 `PN`，所以 `.value` 显示的是 `PersonName(...)` 对象，而不是普通 Python 字符串。
+`PatientName` 是 `PN`，因此 `df.PatientName` 显示的是 `PersonName(...)` 对象，而不是普通 Python 字符串。
 如果你需要对象模型、metadata lookup 规则或完整 decode 流程，请参见 [Core Objects](core_objects.md)、[Python DataSet Guide](python_dataset_guide.md) 和 [Pixel Decode](pixel_decode.md)。
 
 4. 将像素 decode 到 NumPy 数组

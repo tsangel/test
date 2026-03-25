@@ -34,16 +34,17 @@ DicomSDL은 관련된 Python 개체의 작은 집합을 노출합니다.
 
 바인딩은 의도적으로 분할 모델을 사용합니다.
 
-- 속성 액세스는 값 지향적입니다: `ds.Rows`
-- 인덱스 액세스는 `DataElement`: `ds["Rows"]`를 반환합니다.
+- 속성 액세스는 일반적인 top-level keyword 값 읽기의 주 경로입니다: `ds.Rows`, `df.PatientName`
+- 인덱스 액세스는 `DataElement`를 반환합니다: `ds["Rows"]`
+- `get_value(...)`는 동적인 키, 점으로 구분된 tag path, 사용자 지정 기본값을 위한 명시적 값 경로입니다
 
-이를 통해 일반적인 읽기를 짧게 유지하면서 VR/길이/태그 메타데이터를 쉽게 검사할 수 있습니다.
+이렇게 하면 흔한 읽기 코드는 짧게 유지하면서도, 중첩 순회와 VR/길이/태그 메타데이터는 여전히 쉽게 확인할 수 있습니다.
 
 ### DicomFile 및 데이터세트
 
 대부분의 데이터 요소 액세스 API는 `DataSet`에서 구현됩니다.
 `DicomFile`는 루트 `DataSet`를 소유하고 로드, 저장, 트랜스코드와 같은 파일 지향 작업을 처리합니다.
-편의상 `DicomFile`는 루트 데이터 세트 액세스를 전달하므로 `df.Rows`, `df["Rows"]`, `df.get_value(...)` 및 `df.Rows = 512`는 모두 `df.dataset`에 위임됩니다.
+편의상 `DicomFile`는 루트 데이터 세트 액세스를 전달하므로 `df.Rows`, `df.PatientName`, `df["Rows"]`, `df.get_value(...)`, `df.Rows = 512`는 모두 `df.dataset`에 위임됩니다.
 `ds = df.dataset`를 바인딩하면 전달하지 않고 동일한 데이터세트 API를 직접 사용하게 됩니다.
 
 다음 패턴은 동일합니다.
@@ -66,13 +67,13 @@ df.dataset.Rows = 512
 | API | 반환값 | 누락 시 동작 | 용도 |
 | --- | --- | --- | --- |
 | `"Rows" in ds` | `bool` | `False` | 존재 여부 확인 |
-| `ds.get_value("Rows", default=None)` | 타입이 지정된 값 또는 전달한 기본값 | 전달한 기본값을 반환 | `None` 또는 다른 기본값으로 누락을 표현하는 일회성 타입 읽기 |
+| `ds.Rows` | 타입 값 또는 `None` | 유효한 DICOM keyword가 누락되면 `None`; 알 수 없는 keyword는 `AttributeError` | `DataSet` / `DicomFile`에서 표준 DICOM keyword를 읽는 추천 top-level 경로 |
+| `ds.get_value("Rows", default=None)` | 타입 값 또는 전달한 기본값 | 전달한 기본값을 반환 | 동적인 키, 점으로 구분된 tag path, 사용자 지정 기본값을 위한 명시적 one-shot 타입 읽기 |
 | `ds["Rows"]`, `ds.get_dataelement("Rows")` | `DataElement` | `False`로 평가되는 `NullElement`를 반환, 예외는 없음 | `DataElement` 접근 |
 | `ds.ensure_loaded("Rows")` | `None` | 잘못된 키면 예외 발생 | `Rows` 같은 이후 태그까지 부분 읽기를 명시적으로 진행 |
 | `ds.ensure_dataelement("Rows", vr=None)` | `DataElement` | 기존 요소를 반환하거나 길이가 0인 요소를 삽입 | 체인에 친화적인 ensure/create API |
 | `ds.set_value("Rows", 512)` | `bool` | 쓰기 실패 시 `False`, `None`으로 길이 0 값 설정 가능 | 일회성 할당 |
 | `ds.set_value(0x00090030, dicom.VR.US, 16)` | `bool` | 명시적 VR로 생성 또는 재정의 | 비공개 또는 모호한 태그 |
-| `ds.Rows` | 타입이 지정된 값 | `AttributeError` | 알려진/자주 쓰는 태그를 위한 개발/대화형 편의 접근 |
 | `ds.Rows = 512` | `None` | 할당 실패 시 예외 발생 | 표준 키워드 업데이트를 위한 개발/대화형 편의 할당 |
 
 ## Python에서 데이터 요소를 식별하는 방법
@@ -80,7 +81,7 @@ df.dataset.Rows = 512
 | 형식 | 예시 | 먼저 고려할 상황 |
 | --- | --- | --- |
 | 압축된 정수 | `0x00280010` | 태그가 숫자 테이블이나 외부 메타데이터에서 올 때 |
-| 키워드 또는 태그 문자열 | `"Rows"`, `"(0028,0010)"` | 대부분의 일반적인 Python 코드 |
+| 키워드 또는 태그 문자열 | `"Rows"`, `"(0028,0010)"` | 명시적인 문자열 키를 쓰고 싶거나, 키를 Python 속성으로 표현하기 자연스럽지 않을 때 |
 | 점으로 구분된 태그 경로 문자열 | `"RadiopharmaceuticalInformationSequence.0.RadionuclideTotalDose"` | 한 단계에서 중첩 조회나 할당을 하고 싶을 때 |
 | `Tag` 객체 | `dicom.Tag("Rows")`, `dicom.Tag(0x0028, 0x0010)` | 명시적으로 재사용 가능한 태그 객체가 필요할 때 |
 
@@ -92,7 +93,7 @@ df.dataset.Rows = 512
 
 ### `"Rows"` 또는 `"(0028,0010)"`
 
-- 대부분의 일반적인 Python 코드에서 먼저 쓰기 좋습니다.
+- 속성 액세스 대신 명시적인 문자열 키를 쓰고 싶을 때 적합합니다.
 - 장점: 짧고 읽기 쉬우며 일반적인 조회/쓰기 API 전반에서 잘 동작합니다.
 - 트레이드오프: 키워드/태그 문자열을 런타임에 해석하는 비용이 조금 있고, 중첩 접근에는 점으로 구분된 경로 문자열이 필요합니다.
 
@@ -111,22 +112,27 @@ df.dataset.Rows = 512
 
 실용적인 권장사항:
 
-- 대부분의 Python 코드에서 일반적인 키워드/태그 문자열 액세스에는 `"Rows"`를 사용합니다. 여기에는 여전히 런타임 키워드/태그 구문 분석 비용이 적지만 DicomSDL은 최적화된 런타임 키워드 경로와 일반 키워드 문자열에 대한 더 가벼운 직접 경로를 사용하므로 오버헤드가 일반적으로 작습니다.
-- 단일 태그가 이미 숫자 상수 또는 외부 메타데이터에서 나온 경우 또는 단일 태그에 대한 가장 빠른 경로를 원하는 경우 압축된 정수를 사용합니다.
-- 한 단계에서 중첩된 값이나 할당을 원할 경우 점으로 구분된 태그 경로 문자열을 사용합니다. Python에서는 순회가 하나의 C++ 경로 구문 분석/조회 호출 내에 유지되므로 반복적으로 중첩된 `Sequence` / `DataSet` API 호출보다 더 빠를 수도 있습니다.
-- 명시적으로 재사용 가능한 태그 객체를 원할 때 `dicom.Tag(...)`를 사용하세요.
-- `ds.Rows`는 개발 또는 대화형 탐색에서 편리하며, `dir()`가 현재 존재하는 공개 표준 키워드를 노출하므로 많은 대화형 셸에서 탭 완성과도 잘 맞습니다. 다만 키워드가 잘못되었거나 요소가 누락되면 `AttributeError`가 발생합니다. 프로덕션 코드에서는 string/int/`Tag` 키가 보통 더 명시적이고 다루기 쉽습니다.
+- 일반적인 top-level 표준 DICOM keyword 읽기에는 먼저 `ds.Rows` / `df.PatientName`를 사용하세요. 흔한 코드가 짧고, 현재 바인딩에서 성능도 좋은 편이며, 알려진 keyword가 단순히 누락된 경우에는 `None`을 반환하고, 알 수 없는 keyword나 보통의 오타는 여전히 `AttributeError`로 드러납니다.
+- 키가 동적일 때, 사용자 지정 기본값이 필요할 때, 또는 `"Seq.0.Tag"` 같은 점으로 구분된 tag path를 조회할 때는 `get_value(...)`를 사용하세요.
+- 단일 태그가 이미 숫자 상수나 외부 메타데이터에서 온 경우, 또는 단일 태그에 대한 가장 빠른 경로가 필요할 때는 packed int를 사용하세요.
+- 한 단계에서 중첩 값 조회나 할당을 하고 싶을 때는 점으로 구분된 tag path 문자열을 사용하세요. Python에서는 순회가 하나의 C++ 경로 파싱/조회 호출 안에 머물기 때문에, 중첩된 `Sequence` / `DataSet` API 호출을 반복하는 것보다 더 빠를 수도 있습니다.
+- 명시적으로 재사용 가능한 태그 객체가 필요할 때는 `dicom.Tag(...)`를 사용하세요.
+- VR, 길이, 태그, sequence, raw byte 같은 `DataElement` 자체 메타데이터가 필요할 때는 `ds["Rows"]` 또는 `get_dataelement(...)`를 사용하세요.
 
 ## 값 읽기
 
-### 속성 액세스는 입력된 값을 반환합니다.
+### 속성 액세스는 타입 값을 반환합니다.
 
 ```python
-rows = ds.Rows
+rows = df.Rows
 patient_name = ds.PatientName
+window_center = ds.WindowCenter  # 유효한 keyword지만 현재 없으면 None
 ```
 
-요소가 존재할 것으로 예상하고 메타데이터가 아닌 실제 값을 원할 때 이를 사용하십시오.
+`DataSet` 또는 `DicomFile`에서 일반적인 top-level 표준 DICOM keyword를 읽을 때, `DataElement` 메타데이터가 아니라 실제 값이 필요하다면 먼저 이 경로를 사용하세요.
+
+유효한 DICOM keyword가 현재 없으면 결과는 `None`입니다.
+알 수 없는 속성 이름은 여전히 `AttributeError`를 발생시키므로 일반적인 오타는 눈에 띄게 남습니다.
 
 ### 인덱스 액세스는 DataElement를 반환합니다.
 
@@ -193,17 +199,22 @@ df.dataset.ensure_loaded(dicom.Tag("Columns"))
 
 중첩된 점 태그 경로 문자열은 `ensure_loaded(...)`에서 지원되지 않습니다.
 
-### 빠른 경로: get_value()
+### 명시적 값 경로: get_value()
 
-`None`와 같은 기본값이 누락된 요소를 나타내는 일회성 값 읽기에는 `get_value()`를 사용합니다.
+키가 동적이거나, 명시적인 기본값이 필요하거나, 점으로 구분된 tag path를 조회할 때는 `get_value()`를 사용하세요.
 
 ```python
-rows = ds.get_value("Rows")
+keyword = "Rows"
+rows = ds.get_value(keyword)
 window_center = ds.get_value("WindowCenter", default=None)
+total_dose = ds.get_value(
+    "RadiopharmaceuticalInformationSequence.0.RadionuclideTotalDose",
+    default=None,
+)
 ```
 
-이는 `DataElement` 개체가 필요하지 않은 경우 가장 짧은 비상승 값 경로입니다.
-요소가 누락된 경우 `default`를 다시 가져옵니다.
+`DataElement` 객체가 필요하지 않을 때 가장 명시적인 non-raising 값 경로입니다.
+요소가 없으면 전달한 `default`를 돌려받습니다.
 
 `get_value()`는 암시적으로 부분 로딩을 계속하지 않습니다. 파일 기반 데이터세트가
 이전 태그까지만 로드되었으며 이후 태그를 쿼리하면 현재 사용 가능한 태그가 반환됩니다.

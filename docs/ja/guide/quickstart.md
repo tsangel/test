@@ -25,15 +25,17 @@ source build、custom wheel、テストのワークフローが必要なら [Bui
 ```pycon
 >>> import dicomsdl as dicom
 >>> df = dicom.read_file("sample.dcm")
->>> df["PatientName"].value
+>>> df.PatientName
 PersonName(Doe^Jane)
->>> df["Rows"].value, df["Columns"].value
+>>> df.Rows, df.Columns
 (512, 512)
 ```
 
-`DicomFile` はルート `DataSet` へのアクセスをそのまま転送するので、Python では `df["Rows"]`、`df.get_value(...)`、`df.get_dataelement(...)` を直接使えます。
+`DicomFile` はルート `DataSet` へのアクセスをそのまま転送するので、Python では `df.Rows` や `df.PatientName` のようなふつうのトップレベル keyword 読み取りが、たいてい最短で推奨される metadata read 経路です。
+ネストした leaf lookup には `df.get_value("Seq.0.Tag")` を使い、型付き値ではなく `DataElement` メタデータが必要なときは `df["Rows"]` / `df.get_dataelement(...)` を使ってください。
+既知の keyword が単に欠落している場合は `None` を返し、不明な keyword は引き続き `AttributeError` を送出します。
 データセット境界を明示したいときは `df.dataset` を使ってください。
-`PatientName` は `PN` なので、`.value` は通常の Python 文字列ではなく `PersonName(...)` オブジェクトとして表示されます。
+`PatientName` は `PN` なので、`df.PatientName` は通常の Python 文字列ではなく `PersonName(...)` オブジェクトとして表示されます。
 オブジェクトモデル、メタデータ検索の規則、デコード全体の流れについては [Core Objects](core_objects.md)、[Python DataSet Guide](python_dataset_guide.md)、[Pixel Decode](pixel_decode.md) を参照してください。
 
 4. ピクセルを NumPy 配列にデコードする

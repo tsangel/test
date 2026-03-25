@@ -9,6 +9,7 @@
 ## Core lookup APIs
 
 - `operator[]` / `__getitem__`: return a `DataElement`; keyword strings for a single tag and dotted tag paths are accepted where supported, and missing lookups return an object that evaluates to `False` instead of throwing
+- Python keyword attributes such as `ds.Rows` / `df.PatientName`: top-level typed reads for standard DICOM keywords; valid missing keywords return `None`, while unknown keywords raise `AttributeError`
 - `get_dataelement(...)`: same `DataElement` lookup as `operator[]`, but in named-method form for tags, keywords, and dotted tag paths
 - `get_value(...)`: one-shot typed read when you do not need `DataElement` metadata
 - `__contains__` in Python: presence test without fetching the element separately
@@ -41,6 +42,7 @@
 - Missing and zero-length are different states. Check the returned `DataElement` when presence matters.
 - On partially loaded datasets, reads do not implicitly continue into data elements that have not been parsed yet.
 - On partially loaded datasets, `add_dataelement(...)`, `ensure_dataelement(...)`, and `set_value(...)` throw when the target data element has not been parsed yet.
+- In Python, attribute access is the main recommendation for ordinary top-level reads by standard DICOM keyword. Use `get_value(...)` or explicit string/int/`Tag` keys when the key is dynamic, nested, private, or not a valid Python identifier.
 - In Python, most user code reaches a dataset through `df.dataset` or a sequence item rather than constructing a detached `DataSet` directly.
 
 ## Related docs

@@ -16,6 +16,11 @@ Relevant DICOM sections:
 
 `DataSet` is the whole structured collection of fields that make up one DICOM object. In DicomSDL, the `DataSet` class implements that container of DICOM Data Elements. In practice this is the object you use most often when reading or mutating metadata fields, so start here for most metadata access and update flows.
 
+In Python, the main top-level metadata read path is usually `df.Rows` or
+`ds.PatientName`. Reach for `get_value("Seq.0.Tag")` when the key is dynamic
+or nested, and use `ds["Rows"]` when you need `DataElement` metadata instead
+of just the typed value.
+
 Relevant DICOM sections:
 
 - Mainly maps to [DICOM PS3.5 Chapter 7, The Data Set](https://dicom.nema.org/medical/dicom/current/output/chtml/part05/chapter_7.html).

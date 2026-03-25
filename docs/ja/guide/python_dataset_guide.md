@@ -34,16 +34,17 @@ DicomSDL は、関連する Python オブジェクトの小さなセットを公
 
 バインディングは意図的に分割モデルを使用します。
 
-- 属性アクセスは値指向です: `ds.Rows`
+- 属性アクセスは、ふつうのトップレベル keyword 値読み取りの主経路です: `ds.Rows`、`df.PatientName`
 - インデックス アクセスは `DataElement` を返します: `ds["Rows"]`
+- `get_value(...)` は、動的キー、ドット区切りの tag path、カスタム既定値向けの明示的な値経路です
 
-これにより、一般的な読み取りが短くなり、同時に VR/長さ/タグのメタデータの検査が容易になります。
+これにより、よくある読み取りを短く保ちながら、ネストしたたどり方や VR / 長さ / タグのメタデータも引き続き確認しやすくなります。
 
 ### DicomFile と DataSet
 
 ほとんどのデータ要素アクセス API は `DataSet` に実装されています。
 `DicomFile` はルート `DataSet` を所有し、ロード、保存、トランスコードなどのファイル指向の作業を処理します。
-便宜上、`DicomFile` はルート データセット アクセスを転送するため、`df.Rows`、`df["Rows"]`、`df.get_value(...)`、および `df.Rows = 512` はすべて `df.dataset` に委任されます。
+便宜上、`DicomFile` はルート データセット アクセスを転送するため、`df.Rows`、`df.PatientName`、`df["Rows"]`、`df.get_value(...)`、`df.Rows = 512` はすべて `df.dataset` に委任されます。
 `ds = df.dataset` をバインドすると、同じデータセット API を転送せずに直接使用することになります。
 
 これらのパターンは同等です。
@@ -66,13 +67,13 @@ df.dataset.Rows = 512
 | API | 戻り値 | 欠落時の動作 | 用途 |
 | --- | --- | --- | --- |
 | `"Rows" in ds` | `bool` | `False` |存在プローブ |
-| `ds.get_value("Rows", default=None)` |型付きの値または指定したデフォルト値 | 指定したデフォルト値を返します | `None` または別のデフォルト値で欠落を表すワンショットの型付き読み取り |
+| `ds.Rows` | 型付き値または `None` | 有効な DICOM keyword が欠落していると `None`、不明な keyword は `AttributeError` | `DataSet` / `DicomFile` で標準 DICOM keyword を読むための推奨トップレベル経路 |
+| `ds.get_value("Rows", default=None)` |型付きの値または指定したデフォルト値 | 指定したデフォルト値を返します | 動的キー、ドット区切り tag path、カスタム既定値向けの明示的なワンショット型付き読み取り |
 | `ds["Rows"]`、`ds.get_dataelement("Rows")` | `DataElement` | `False` と評価される `NullElement` を返し、例外は出ません | `DataElement` アクセス |
 | `ds.ensure_loaded("Rows")` | `None` |無効なキーで発生します | `Rows` などの後のタグまで部分読み取りを明示的に続行します。
 | `ds.ensure_dataelement("Rows", vr=None)` | `DataElement` |既存の要素を返すか、長さゼロの要素を挿入します。チェーンに適した API の確保/作成 |
 | `ds.set_value("Rows", 512)` | `bool` |書き込みまたは長さゼロ |ワンショット型の代入 |
 | `ds.set_value(0x00090030, dicom.VR.US, 16)` | `bool` |明示的な VR によって作成またはオーバーライドされます。プライベートまたは曖昧なタグ |
-| `ds.Rows` | 型付き値 | `AttributeError` | 既知のタグ向けの開発・対話環境用の簡便なアクセス |
 | `ds.Rows = 512` | `None` | 割り当て失敗時に例外送出 | 標準キーワード更新向けの開発・対話環境用の簡便な代入 |
 
 ## Python でデータ要素を識別する方法
@@ -80,7 +81,7 @@ df.dataset.Rows = 512
 | 形式 | 例 | まず使う場面 |
 | --- | --- | --- |
 | パック整数 | `0x00280010` | タグが数値テーブルや外部メタデータからすでに来ているとき |
-| キーワードまたはタグ文字列 | `"Rows"`, `"(0028,0010)"` | ふつうの Python コードの大半 |
+| キーワードまたはタグ文字列 | `"Rows"`, `"(0028,0010)"` | 明示的な文字列キーを使いたいとき、または Python 属性として表しにくいキーのとき |
 | ドット区切りのタグパス文字列 | `"RadiopharmaceuticalInformationSequence.0.RadionuclideTotalDose"` | 一度でネストされた検索や代入を済ませたいとき |
 | `Tag` オブジェクト | `dicom.Tag("Rows")`, `dicom.Tag(0x0028, 0x0010)` | 明示的で再利用可能なタグオブジェクトがほしいとき |
 
@@ -92,7 +93,7 @@ df.dataset.Rows = 512
 
 ### `"Rows"` または `"(0028,0010)"`
 
-- ふつうの Python コードでは、まずこれを使います。
+- 属性アクセスの代わりに明示的な文字列キーを使いたいときに向いています。
 - 利点: 短く読みやすく、一般的な検索 / 書き込み API で広く使えます。
 - トレードオフ: キーワード/タグ文字列の解析コストが少しあり、ネストアクセスにはドット区切りのパス文字列が必要です。
 
@@ -111,22 +112,27 @@ df.dataset.Rows = 512
 
 実際的な推奨事項:
 
-- ほとんどの Python コードで通常のキーワード/タグ文字列にアクセスするには、`"Rows"` を使用します。これには依然として実行時のキーワード/タグ解析コストが若干かかりますが、DicomSDL は最適化された実行時のキーワード パスとプレーンなキーワード文字列の軽量の直接パスを使用するため、通常はオーバーヘッドが小さくなります。
-- プレーンタグが既に数値定数または外部メタデータから取得されている場合、またはプレーンタグの最速パスが必要な場合は、パック整数を使用します。
-- ネストされた値または代入を 1 ステップで行う場合は、ドット区切りのタグパス文字列を使用します。 Python では、走査が 1 つの C++ パス解析/検索呼び出し内に留まるため、ネストされた `Sequence` / `DataSet` API 呼び出しを繰り返すよりも高速になる可能性があります。
-- 明示的に再利用可能なタグオブジェクトが必要な場合は、`dicom.Tag(...)` を使用します。
-- `ds.Rows` は、開発中またはインタラクティブな探索中に便利です。また、`dir()` は現在のパブリック標準キーワードを公開しているため、多くのインタラクティブ シェルでのタブ補完ともうまく機能します。ただし、キーワードが不明な場合、または要素が欠落している場合は、`AttributeError` が発生します。製品コードの場合、通常、string/int/`Tag` キーを明示的に処理する方が簡単です。
+- ふつうのトップレベル標準 DICOM keyword 読み取りでは、まず `ds.Rows` / `df.PatientName` を使います。よくあるコードを短く保てて、現在のバインディングでも十分高速であり、既知の keyword が単に欠落しているだけなら `None` を返し、不明な keyword や通常のタイプミスは引き続き `AttributeError` で表に出ます。
+- キーが動的なとき、カスタム既定値が必要なとき、または `"Seq.0.Tag"` のようなドット区切り tag path を読むときは `get_value(...)` を使います。
+- 単一タグがすでに数値定数や外部メタデータから来ているとき、または単一タグの最速経路が必要なときは packed int を使います。
+- ネストされた値や代入を 1 ステップで行いたいときは、ドット区切り tag path 文字列を使います。Python では、走査が 1 回の C++ パス解析 / 検索呼び出しに収まるため、ネストした `Sequence` / `DataSet` API 呼び出しを繰り返すより速いことがあります。
+- 明示的で再利用可能なタグオブジェクトが必要なときは `dicom.Tag(...)` を使います。
+- VR、長さ、タグ、sequence、raw byte など `DataElement` 自体のメタデータが必要なときは `ds["Rows"]` または `get_dataelement(...)` を使います。
 
 ## 値の読み取り
 
-### 属性アクセスは型指定された値を返します
+### 属性アクセスは型付き値を返します
 
 ```python
-rows = ds.Rows
+rows = df.Rows
 patient_name = ds.PatientName
+window_center = ds.WindowCenter  # 有効な keyword だが現在なければ None
 ```
 
-要素が存在することが予想され、メタデータではなく実際の値が必要な場合にこれを使用します。
+`DataSet` または `DicomFile` で、ふつうのトップレベル標準 DICOM keyword を読むときに、`DataElement` メタデータではなく実際の値が欲しいなら、まずこの経路を使います。
+
+有効な DICOM keyword が現在欠けている場合、結果は `None` です。
+不明な属性名は引き続き `AttributeError` を送出するので、ふつうのタイプミスは見逃されません。
 
 ### インデックスアクセスは DataElement を返します
 
@@ -193,17 +199,22 @@ df.dataset.ensure_loaded(dicom.Tag("Columns"))
 
 ネストされたドット区切りのタグパス文字列は、`ensure_loaded(...)` ではサポートされていません。
 
-### 高速パス: get_value()
+### 明示的な値経路: get_value()
 
-`None` などのデフォルトが欠落要素を表す場合、ワンショット値の読み取りには `get_value()` を使用します。
+キーが動的なとき、明示的な既定値が欲しいとき、またはドット区切りの tag path を読むときは `get_value()` を使います。
 
 ```python
-rows = ds.get_value("Rows")
+keyword = "Rows"
+rows = ds.get_value(keyword)
 window_center = ds.get_value("WindowCenter", default=None)
+total_dose = ds.get_value(
+    "RadiopharmaceuticalInformationSequence.0.RadionuclideTotalDose",
+    default=None,
+)
 ```
 
-これは、`DataElement` オブジェクトが不要な場合に、最も直接的に値を読む方法です。
-要素が欠落している場合は、`default` が返されます。
+`DataElement` オブジェクトが不要なときの、最も明示的な non-raising 値経路です。
+要素が欠落している場合は、指定した `default` が返ります。
 
 `get_value()` は暗黙的に部分ロードを継続しません。ファイルにバックアップされたデータセットが
 前のタグまでのみロードされ、後のタグをクエリすると、現在利用可能なタグが返されます。

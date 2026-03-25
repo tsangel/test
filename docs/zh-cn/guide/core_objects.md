@@ -16,6 +16,8 @@
 
 `DataSet` 是构成一个 DICOM 对象的完整结构化 field 集合。DicomSDL 的 `DataSet` 类实现了这个 DICOM Data Element 容器。在实践中，它是你读取或修改 metadata field 时最常使用的对象，因此大多数 metadata access 和 update 流程都从这里开始。
 
+在 Python 中，普通顶层 metadata 读取通常优先使用 `df.Rows` 或 `ds.PatientName`。当键是动态的或带有嵌套路径时，请使用 `get_value("Seq.0.Tag")`；当你需要的不只是类型化值，而是 `DataElement` 元数据时，请使用 `ds["Rows"]`。
+
 相关 DICOM 标准章节：
 
 - 主要对应 [DICOM PS3.5 Chapter 7, The Data Set](https://dicom.nema.org/medical/dicom/current/output/chtml/part05/chapter_7.html)。

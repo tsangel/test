@@ -6,8 +6,10 @@
 
 Note: these measurements were taken before the Python binding switched
 `DataSet.__getitem__` to return `DataElement`. In the current API,
-`ds["Rows"]` measures element retrieval, while one-shot scalar access is
-represented by `ds.get_value("Rows")` or `ds["Rows"].value`.
+`ds["Rows"]` measures element retrieval, while ordinary one-shot scalar keyword
+access is usually represented by `ds.Rows`. `ds.get_value("Rows")` remains the
+explicit value path for dynamic keys or defaults, and
+`ds["Rows"].value` is the scalar form when you already need the `DataElement`.
 
 Benchmarks (Apple M3 / Python 3.12, sample: `1.2.840.113619.2.99.1234.1210123180.675655_0000_000034_121066021209fb.dcm`)
 
@@ -127,14 +129,15 @@ full set of current `DataSet` access patterns.
 
 Key updates closely related to Python `DataSet` access:
 
-- `DataSet.__getitem__` still returns `DataElement`, so one-shot scalar access
-  should be read as `ds.get_value("Rows")` or `ds["Rows"].value`.
+- `DataSet.__getitem__` still returns `DataElement`. For ordinary top-level
+  reads, the main user-facing scalar path is now `ds.Rows`. Use
+  `get_value(...)` for dynamic keys, explicit defaults, or dotted string paths.
 - String tag-path writes are now first-class operations:
   - `ds.ensure_dataelement("Seq.0.Tag", vr)`
   - `ds.add_dataelement("Seq.0.Tag", vr)`
   - `ds.set_value("Seq.0.Tag", value)`
 - Path traversal code was refactored so read/write paths share the same parsing
-  model, and flat string paths avoid the heavier dotted-path loop when no `.`
+  model, and single-tag string paths avoid the heavier dotted-path loop when no `.`
   is present.
 - Runtime keyword/tag lookup is substantially faster than the versions measured
   above because the CHD lookup path now has dedicated runtime fast paths and
@@ -156,8 +159,9 @@ Behavioral changes that matter when reading old benchmark tables:
 
 Practical takeaway for the current version:
 
-- If readability matters, `ds["Rows"].value`, `ds.get_value("Rows")`, and
-  dotted string paths are now a reasonable default.
+- For most ordinary Python metadata reads, `ds.Rows` is now the clearest
+  recommended default. Use `get_value(...)` for dynamic or path-based reads, and
+  use `ds["Rows"].value` when you already need the `DataElement`.
 - If a call site is extremely hot, direct `Tag` / integer access is still the
   lowest-overhead form.
 - The historical tables above should be interpreted as transition-era numbers,
@@ -256,7 +260,9 @@ next table using their current best equivalents.
 
 `v0.1.5` measured `ds[tag]` and `ds["keyword"]` as one-shot scalar access.
 In the current API, `__getitem__` returns `DataElement`, so the nearest scalar
-equivalents are `get_value(...)` or `.value`.
+equivalents depend on the access shape: `ds.Rows` for ordinary top-level standard keywords,
+`get_value(...)` for dynamic keys, or `.value` when you already have a
+`DataElement`.
 
 | Historical v0.1.5 pattern | v0.1.5 us/call | Current equivalent | v0.1.35 us/call |
 | --- | --- | --- | --- |
