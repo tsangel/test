@@ -2,13 +2,6 @@
 
 Minimal DICOM file wrapper with a C++ core and optional Python bindings.
 
-Documentation language entry points:
-[English](README.md) | [Korean](README.ko.md) | [Japanese](README.ja.md) | [Simplified Chinese](README.zh-CN.md)
-
-English is the source of truth for repository docs. The Sphinx docs live under
-`docs/en`, `docs/ko`, `docs/ja`, and `docs/zh-cn`; see
-[docs/en/developer/translation_workflow.md](docs/en/developer/translation_workflow.md).
-
 ## Install
 
 For most Python users:
@@ -60,16 +53,6 @@ int main() {
   std::cout << rows << " x " << cols << '\n';
 }
 ```
-
-## Command-Line Tools
-
-After `pip install dicomsdl`, these console scripts are available:
-
-- `dicomdump`
-- `dicomshow`
-- `dicomconv`
-
-See [CLI Tools](docs/en/guide/cli_tools.md) for usage and options.
 
 ## Documentation
 
