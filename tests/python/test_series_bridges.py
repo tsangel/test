@@ -32,6 +32,55 @@ def _require_series_dir(series_name: str) -> Path:
     return series_dir
 
 
+def _write_test_slice(
+    path: Path,
+    *,
+    series_instance_uid: str,
+    sop_instance_uid: str,
+    instance_number: int,
+    image_position: tuple[float, float, float],
+    pixel_value: int,
+) -> None:
+    pydicom = pytest.importorskip("pydicom")
+    from pydicom.dataset import FileDataset, FileMetaDataset
+    from pydicom.filewriter import dcmwrite
+    from pydicom.uid import ExplicitVRLittleEndian
+
+    file_meta = FileMetaDataset()
+    file_meta.FileMetaInformationVersion = b"\x00\x01"
+    file_meta.MediaStorageSOPClassUID = "1.2.840.10008.5.1.4.1.1.2"
+    file_meta.MediaStorageSOPInstanceUID = sop_instance_uid
+    file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+    file_meta.ImplementationClassUID = "1.2.826.0.1.3680043.10.54321.1"
+
+    ds = FileDataset(str(path), {}, file_meta=file_meta, preamble=b"\x00" * 128)
+    ds.SOPClassUID = file_meta.MediaStorageSOPClassUID
+    ds.SOPInstanceUID = sop_instance_uid
+    ds.StudyInstanceUID = "1.2.826.0.1.3680043.10.54321.2"
+    ds.FrameOfReferenceUID = "1.2.826.0.1.3680043.10.54321.3"
+    ds.SeriesInstanceUID = series_instance_uid
+    ds.SeriesDescription = "bridge-test"
+    ds.Modality = "CT"
+    ds.PatientName = "Bridge^Test"
+    ds.PatientID = "bridge-test"
+    ds.InstanceNumber = instance_number
+    ds.ImagePositionPatient = [float(value) for value in image_position]
+    ds.ImageOrientationPatient = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+    ds.PixelSpacing = [1.0, 1.0]
+    ds.SliceThickness = 1.0
+    ds.Rows = 2
+    ds.Columns = 2
+    ds.SamplesPerPixel = 1
+    ds.PhotometricInterpretation = "MONOCHROME2"
+    ds.BitsAllocated = 16
+    ds.BitsStored = 16
+    ds.HighBit = 15
+    ds.PixelRepresentation = 0
+    pixels = np.full((2, 2), pixel_value, dtype=np.uint16)
+    ds.PixelData = pixels.tobytes()
+    dcmwrite(path, ds, enforce_file_format=True, little_endian=True, implicit_vr=False)
+
+
 def _load_simpleitk_reference(series_dir: Path):
     sitk = pytest.importorskip("SimpleITK")
 
@@ -284,3 +333,68 @@ def test_processed_series_excludes_orientation_outlier_before_canonical_sort() -
         atol=GEOM_ATOL,
     )
     np.testing.assert_allclose(volume.spacing[2], 3.020001, rtol=0.0, atol=1e-3)
+
+
+def test_mixed_series_directory_is_rejected(tmp_path: Path) -> None:
+    from dicomsdl.simpleitk_bridge import read_series_volume
+
+    mixed_dir = tmp_path / "mixed-series"
+    mixed_dir.mkdir()
+
+    for series_index, series_uid in enumerate(
+        (
+            "1.2.826.0.1.3680043.10.54321.100",
+            "1.2.826.0.1.3680043.10.54321.200",
+        ),
+        start=1,
+    ):
+        for slice_index in range(2):
+            file_name = f"series{series_index}_{slice_index + 1:06d}.dcm"
+            _write_test_slice(
+                mixed_dir / file_name,
+                series_instance_uid=series_uid,
+                sop_instance_uid=f"{series_uid}.{slice_index + 1}",
+                instance_number=slice_index + 1,
+                image_position=(0.0, 0.0, float(slice_index)),
+                pixel_value=series_index * 100 + slice_index,
+            )
+
+    with pytest.raises(ValueError, match="SeriesInstanceUID"):
+        read_series_volume(mixed_dir, to_modality_value=True)
+
+
+def test_extensionless_directory_series_is_supported(tmp_path: Path) -> None:
+    from dicomsdl.simpleitk_bridge import read_series_volume
+
+    preserved_dir = tmp_path / "with-extension"
+    extensionless_dir = tmp_path / "without-extension"
+    preserved_dir.mkdir()
+    extensionless_dir.mkdir()
+
+    series_uid = "1.2.826.0.1.3680043.10.54321.300"
+    for index in range(3):
+        source_name = f"{index + 1:06d}.dcm"
+        extensionless_name = f"{index + 1:06d}"
+        kwargs = dict(
+            series_instance_uid=series_uid,
+            sop_instance_uid=f"{series_uid}.{index + 1}",
+            instance_number=index + 1,
+            image_position=(0.0, 0.0, float(index)),
+            pixel_value=10 + index,
+        )
+        _write_test_slice(preserved_dir / source_name, **kwargs)
+        _write_test_slice(extensionless_dir / extensionless_name, **kwargs)
+
+    with_extension = read_series_volume(preserved_dir, to_modality_value=True)
+    without_extension = read_series_volume(extensionless_dir, to_modality_value=True)
+
+    np.testing.assert_array_equal(without_extension.array, with_extension.array)
+    np.testing.assert_allclose(without_extension.spacing, with_extension.spacing, rtol=0.0, atol=GEOM_ATOL)
+    np.testing.assert_allclose(without_extension.origin, with_extension.origin, rtol=0.0, atol=GEOM_ATOL)
+    np.testing.assert_allclose(
+        without_extension.direction,
+        with_extension.direction,
+        rtol=0.0,
+        atol=GEOM_ATOL,
+    )
+    assert len(without_extension.source_paths) == len(with_extension.source_paths) == 3

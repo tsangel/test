@@ -46,15 +46,23 @@ ensure_python_test_requirements() {
 	if "$py_bin" - <<'PY' >/dev/null 2>&1
 import importlib.util
 import sys
-missing = [m for m in ("pytest",) if importlib.util.find_spec(m) is None]
+required = {
+    "pytest": "pytest",
+    "numpy": "numpy",
+    "Pillow": "PIL",
+    "pydicom": "pydicom",
+    "SimpleITK": "SimpleITK",
+    "vtk": "vtk",
+}
+missing = [pkg for pkg, module in required.items() if importlib.util.find_spec(module) is None]
 raise SystemExit(0 if not missing else 1)
 PY
 	then
 		return 0
 	fi
 
-	echo "Error: pytest is required for wheel-with-tests validation with ${py_bin}." >&2
-	echo "Run: ${py_bin} -m pip install --upgrade pytest" >&2
+	echo "Error: Python test dependencies are missing for wheel-with-tests validation with ${py_bin}." >&2
+	echo "Run: ${py_bin} -m pip install --upgrade -r tests/python/requirements.txt" >&2
 	exit 1
 }
 

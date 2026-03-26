@@ -53,6 +53,11 @@ pip install "dicomsdl[numpy]" vtk
 このガイドと例は、単一ファイルの 2D 画像、stack として扱える multiframe grayscale volume、file-per-slice シリーズを中心にしています。
 non-stack の multiframe localizer や、より複雑な enhanced multi-frame レイアウトが重要なワークフローでは、別途検証してください。
 
+ディレクトリに sidecar ファイルや DICOM ではないファイルが混在して
+いる場合、ブリッジは DICOM ではない項目を無視します。複数の
+`SeriesInstanceUID` が含まれている場合は、黙って結合せずにエラーを
+返します。
+
 ### Geometry
 
 ブリッジは次の geometry 情報を保持します。

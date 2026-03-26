@@ -53,6 +53,10 @@ pip install "dicomsdl[numpy]" vtk
 本指南和示例主要针对单文件 2D 图像、可按 stack 处理的 multiframe grayscale volume，以及 file-per-slice 序列。
 如果你的工作流依赖非 stack 型 multiframe localizer，或更复杂的 enhanced multi-frame 布局，建议单独验证。
 
+如果目录中混有 sidecar 文件或非 DICOM 文件，bridge 会忽略非 DICOM
+项目。如果目录中包含多个 `SeriesInstanceUID`，则不会静默合并，而是直
+接报错。
+
 ### Geometry
 
 桥接模块会保留以下 geometry 信息：

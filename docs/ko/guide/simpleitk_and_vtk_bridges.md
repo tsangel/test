@@ -53,6 +53,10 @@ pip install "dicomsdl[numpy]" vtk
 현재 예제와 가이드는 단일 파일 2D 이미지, stack 형태의 multiframe grayscale volume, file-per-slice 시리즈를 중심으로 설명합니다.
 non-stack multiframe localizer나 더 복잡한 enhanced multi-frame 레이아웃이 중요한 워크플로라면 별도로 검증하는 것이 좋습니다.
 
+디렉터리에 sidecar 파일이나 DICOM이 아닌 파일이 섞여 있으면, 브리지는
+DICOM이 아닌 항목을 무시합니다. 디렉터리에 여러 `SeriesInstanceUID`가
+있으면, 조용히 합치지 않고 오류를 발생시킵니다.
+
 ### Geometry
 
 브리지는 다음 geometry 정보를 보존합니다.

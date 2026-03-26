@@ -55,6 +55,10 @@ volumes, and file-per-slice series.
 If your workflow depends on non-stack multiframe localizers or more complex
 enhanced multi-frame layouts, validate that path separately.
 
+When a directory contains sidecar or non-DICOM files, the bridges ignore the
+non-DICOM entries. If the directory contains multiple `SeriesInstanceUID`
+values, the bridges raise an error instead of silently merging them.
+
 ### Geometry
 
 The bridges preserve:

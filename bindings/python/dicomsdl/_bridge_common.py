@@ -381,6 +381,49 @@ def _normalize_series_dir(path: str | Path) -> Path:
     return series_path
 
 
+def _series_instance_uid(dicom_file: Any) -> str | None:
+    return _optional_text(getattr(dicom_file, "SeriesInstanceUID", None))
+
+
+def _single_series_directory_paths(source_path: Path, candidate_paths: tuple[Path, ...]) -> tuple[Path, ...]:
+    if len(candidate_paths) <= 1:
+        return candidate_paths
+
+    series_groups: dict[str | None, list[Path]] = {}
+    for candidate_path in candidate_paths:
+        dicom_file = _read_bridge_file(candidate_path)
+        series_groups.setdefault(_series_instance_uid(dicom_file), []).append(candidate_path)
+
+    if len(series_groups) <= 1:
+        return candidate_paths
+
+    details = ", ".join(
+        f"{uid if uid is not None else '<missing>'} ({len(paths)} files)"
+        for uid, paths in sorted(
+            series_groups.items(),
+            key=lambda item: (
+                item[0] is None,
+                item[0] if item[0] is not None else "",
+            ),
+        )
+    )
+    raise ValueError(
+        "Directory input must contain exactly one SeriesInstanceUID "
+        f"(found {len(series_groups)} under {source_path}: {details})"
+    )
+
+
+def _discover_dicom_paths(source_path: Path, candidate_paths: tuple[Path, ...]) -> tuple[Path, ...]:
+    dicom_paths: list[Path] = []
+    for candidate_path in candidate_paths:
+        try:
+            _read_bridge_file(candidate_path)
+        except Exception:
+            continue
+        dicom_paths.append(candidate_path)
+    return tuple(dicom_paths)
+
+
 def _resolve_source_paths(path: str | Path) -> tuple[Path, tuple[Path, ...]]:
     source_path = Path(path).expanduser().resolve()
     if not source_path.exists():
@@ -398,11 +441,12 @@ def _resolve_source_paths(path: str | Path) -> tuple[Path, tuple[Path, ...]]:
         )
     )
     if dcm_files:
-        return (source_path, dcm_files)
+        return (source_path, _single_series_directory_paths(source_path, dcm_files))
 
     all_files = tuple(sorted(child for child in source_path.iterdir() if child.is_file()))
-    if len(all_files) == 1:
-        return (source_path, all_files)
+    dicom_files = _discover_dicom_paths(source_path, all_files)
+    if dicom_files:
+        return (source_path, _single_series_directory_paths(source_path, dicom_files))
 
     raise FileNotFoundError(f"No DICOM files found under: {source_path}")
 
