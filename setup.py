@@ -309,6 +309,44 @@ def find_dynamic_library(build_root: pathlib.Path, stem: str) -> pathlib.Path:
     return candidates[0]
 
 
+def resolve_extension_artifact(
+    extdir: pathlib.Path,
+    expected_path: pathlib.Path,
+    module_stem: str,
+) -> pathlib.Path:
+    if expected_path.exists():
+        return expected_path
+
+    candidates: list[pathlib.Path] = []
+    seen: set[pathlib.Path] = set()
+    for suffix in python_extension_suffixes():
+        for path in extdir.glob(f"{module_stem}*{suffix}"):
+            if not path.is_file():
+                continue
+            resolved = path.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            candidates.append(resolved)
+
+    if not candidates:
+        raise RuntimeError(f"Expected extension at {expected_path} not found")
+
+    preferred = [path for path in candidates if path.name == expected_path.name]
+    if preferred:
+        return preferred[0]
+
+    candidates.sort(
+        key=lambda path: (
+            path.stat().st_mtime_ns,
+            ".abi3." in path.name,
+            len(path.name),
+        ),
+        reverse=True,
+    )
+    return candidates[0]
+
+
 def remove_stale_shared_artifacts(extdir: pathlib.Path) -> None:
     suffix_pattern_groups = [
         (
@@ -503,10 +541,13 @@ class CMakeBuild(build_ext):
                 shutil.copy2(plugin_src, plugin_dst)
                 strip_targets.append(plugin_dst)
 
-        if not ext_full_path.exists():
-            raise RuntimeError(f"Expected extension at {ext_full_path} not found")
+        built_extension = resolve_extension_artifact(
+            extdir=extdir,
+            expected_path=ext_full_path,
+            module_stem=ext.name.rsplit(".", 1)[-1],
+        )
 
-        strip_targets.append(ext_full_path)
+        strip_targets.append(built_extension)
         maybe_strip_binary_artifacts(strip_targets)
         remove_windows_debug_sidecars(extdir)
 
