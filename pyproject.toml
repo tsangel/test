@@ -3,7 +3,12 @@ requires = ["setuptools>=42", "wheel", "cmake>=3.16"]
 build-backend = "setuptools.build_meta"
 
 [tool.cibuildwheel]
-build = "cp39-* cp310-* cp311-* cp312-* cp313-* cp314-*"
-skip = "*-musllinux*"
-test-requires = ["pytest", "numpy", "Pillow", "pydicom", "SimpleITK", "vtk"]
+build = "cp39-* cp310-* cp311-* cp312-*"
+test-requires = ["pytest", "numpy", "Pillow", "pydicom"]
 test-command = "pytest -q {project}/tests/python"
+
+[[tool.cibuildwheel.overrides]]
+select = "cp312-*"
+inherit.environment = "append"
+environment.DICOMSDL_PYTHON_STABLE_ABI = "1"
+environment.DICOMSDL_CMAKE_ARGS = "-DDICOM_PYTHON_STABLE_ABI=ON"

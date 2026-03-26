@@ -1,6 +1,7 @@
+# Base Python test dependencies used by the default test path and wheel CI.
+# Keep this set aligned with server/container installs where optional bridge
+# reference readers are not expected to be present.
 pytest
 numpy
 Pillow
 pydicom
-SimpleITK
-vtk

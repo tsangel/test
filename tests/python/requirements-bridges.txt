@@ -1,0 +1,4 @@
+# Optional bridge/reference-reader dependencies for bridge-specific tests.
+-r requirements.txt
+SimpleITK
+vtk
