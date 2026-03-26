@@ -11,6 +11,7 @@ cli_tools
 core_objects
 file_io
 python_dataset_guide
+simpleitk_and_vtk_bridges
 cpp_dataset_guide
 sequence_and_paths
 charset_and_person_name
