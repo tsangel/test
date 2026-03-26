@@ -2595,7 +2595,15 @@ void readonly_span_exporter_dealloc(PyObject* exporter) {
 	auto* self = reinterpret_cast<ReadonlySpanExporter*>(exporter);
 	Py_XDECREF(self->owner);
 #if defined(Py_LIMITED_API)
-	PyObject_Free(exporter);
+	PyTypeObject* type = Py_TYPE(exporter);
+	auto* tp_free = reinterpret_cast<freefunc>(PyType_GetSlot(type, Py_tp_free));
+	if (tp_free == nullptr) {
+		PyObject_Free(exporter);
+	}
+	else {
+		tp_free(exporter);
+	}
+	Py_DECREF(reinterpret_cast<PyObject*>(type));
 #else
 	Py_TYPE(exporter)->tp_free(exporter);
 #endif
