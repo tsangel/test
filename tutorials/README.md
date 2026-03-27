@@ -12,6 +12,10 @@ Included notebooks:
 
 - `basic1.ipynb`
   - metadata access, pixel decode, quick image preview, and dataset dump
+- `basic_itk3d.ipynb`
+  - load a 3D series directory or a single multiframe file with `SimpleITK`
+    and `dicomsdl.simpleitk_bridge`, then compare geometry, dtype, and array
+    layout
 - `basic_vtk3d.ipynb`
   - load a 3D series directory or a single multiframe file with `vtk`,
     `vtkgdcm`, and `dicomsdl.vtk_bridge`, then compare geometry and array layout
@@ -43,7 +47,7 @@ pip install vtk "dicomsdl[numpy]"
 To run the `vtkgdcm` cells, use a Python environment that already has
 `vtkgdcm` available, such as the local `dicom-bench` conda environment.
 
-For the ITK timing notebook, install:
+For the ITK notebooks, install:
 
 ```bash
 pip install SimpleITK "dicomsdl[numpy]"
