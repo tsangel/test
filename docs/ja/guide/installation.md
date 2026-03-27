@@ -8,11 +8,11 @@
 
 - CPython `3.9` to `3.14`
 - 現在の wheel CI 対象:
-  - Linux `x86_64`
+  - Linux `x86_64` (`manylinux`, `musllinux`)
+  - Linux `aarch64` (`manylinux`, `musllinux`)
   - macOS `x86_64`
   - macOS `arm64`
   - Windows `AMD64`
-- 現在 `musllinux` wheel はビルドしていません
 - 基本インストールだけで、メタデータ参照、ファイル I/O、トランスコードのワークフローを利用できます
 - NumPy ベースの pixel helper と Pillow プレビュー用の optional extra を用意しています
 

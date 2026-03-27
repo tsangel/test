@@ -46,10 +46,11 @@ Need more than the default path?
 
 CI regularly builds and checks DicomSDL on:
 
-- Linux x86_64 (`ubuntu-latest`), Python 3.9-3.14
-- macOS x86_64 (`macos-15-intel`), Python 3.9-3.14
-- macOS arm64 (`macos-14`), Python 3.9-3.14
-- Windows AMD64 (`windows-latest`), Python 3.9-3.14
+- Linux x86_64 (`ubuntu-latest`, `manylinux` and `musllinux`), Python 3.9-3.12
+- Linux aarch64 (`ubuntu-24.04-arm`, `manylinux` and `musllinux`), Python 3.9-3.12
+- macOS x86_64 (`macos-15-intel`), Python 3.9-3.12
+- macOS arm64 (`macos-14`), Python 3.9-3.12
+- Windows AMD64 (`windows-latest`), Python 3.9-3.12
 
 Additional CI jobs cover Ubuntu stub checks and Windows toolchain builds with
 MSVC and MSYS2 `clang64`.

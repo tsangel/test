@@ -8,11 +8,11 @@
 
 - CPython `3.9` to `3.14`
 - 当前 wheel CI 目标：
-  - Linux `x86_64`
+  - Linux `x86_64` (`manylinux`, `musllinux`)
+  - Linux `aarch64` (`manylinux`, `musllinux`)
   - macOS `x86_64`
   - macOS `arm64`
   - Windows `AMD64`
-- 当前不构建 `musllinux` wheel
 - base install 足以支持 metadata access、file I/O 和 transcode workflow
 - 为 NumPy 支持的 pixel helper 和 Pillow 预览提供 optional extra
 

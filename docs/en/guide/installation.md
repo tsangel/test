@@ -9,11 +9,11 @@ of the environments DicomSDL currently targets.
 
 - CPython `3.9` to `3.14`
 - Current wheel CI targets:
-  - Linux `x86_64`
+  - Linux `x86_64` (`manylinux`, `musllinux`)
+  - Linux `aarch64` (`manylinux`, `musllinux`)
   - macOS `x86_64`
   - macOS `arm64`
   - Windows `AMD64`
-- `musllinux` wheels are not currently built
 - Base install is enough for metadata access, file I/O, and transcode workflows
 - Optional extras are available for NumPy-backed pixel helpers and Pillow preview
 

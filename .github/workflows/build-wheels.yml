@@ -13,22 +13,37 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
+          - runner: ubuntu-latest
             archs: x86_64
-            cibw_skip: ""
-            setup_qemu: false
+            cibw_build: >-
+              cp39-manylinux_x86_64 cp310-manylinux_x86_64
+              cp311-manylinux_x86_64 cp312-manylinux_x86_64
             macos_env: ""
             artifact_suffix: linux-x86_64
-          - os: ubuntu-latest
-            archs: aarch64
-            cibw_skip: ""
-            setup_qemu: true
-            macos_env: ""
-            artifact_suffix: linux-aarch64
-          - os: macos-15-intel
+          - runner: ubuntu-latest
             archs: x86_64
-            cibw_skip: ""
-            setup_qemu: false
+            cibw_build: >-
+              cp39-musllinux_x86_64 cp310-musllinux_x86_64
+              cp311-musllinux_x86_64 cp312-musllinux_x86_64
+            macos_env: ""
+            artifact_suffix: linux-x86_64-musllinux
+          - runner: ubuntu-24.04-arm
+            archs: aarch64
+            cibw_build: >-
+              cp39-manylinux_aarch64 cp310-manylinux_aarch64
+              cp311-manylinux_aarch64 cp312-manylinux_aarch64
+            macos_env: ""
+            artifact_suffix: linux-aarch64-manylinux
+          - runner: ubuntu-24.04-arm
+            archs: aarch64
+            cibw_build: >-
+              cp39-musllinux_aarch64 cp310-musllinux_aarch64
+              cp311-musllinux_aarch64 cp312-musllinux_aarch64
+            macos_env: ""
+            artifact_suffix: linux-aarch64-musllinux
+          - runner: macos-15-intel
+            archs: x86_64
+            cibw_build: cp39-* cp310-* cp311-* cp312-*
             macos_env: >-
               MACOSX_DEPLOYMENT_TARGET=10.15
               CC=/usr/bin/cc
@@ -40,10 +55,9 @@ jobs:
               LIBRARY_PATH=
               DYLD_LIBRARY_PATH=
             artifact_suffix: macos-x86_64
-          - os: macos-14
+          - runner: macos-14
             archs: arm64
-            cibw_skip: ""
-            setup_qemu: false
+            cibw_build: cp39-* cp310-* cp311-* cp312-*
             macos_env: >-
               MACOSX_DEPLOYMENT_TARGET=11.0
               CC=/usr/bin/cc
@@ -55,20 +69,22 @@ jobs:
               LIBRARY_PATH=
               DYLD_LIBRARY_PATH=
             artifact_suffix: macos-arm64
-          - os: windows-latest
+          - runner: windows-latest
             archs: AMD64
-            cibw_skip: ""
-            setup_qemu: false
+            cibw_build: cp39-* cp310-* cp311-* cp312-*
             macos_env: ""
             artifact_suffix: windows-amd64
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.runner }}
     env:
-      CIBW_BUILD: cp39-* cp310-* cp311-* cp312-*
-      CIBW_SKIP: ${{ matrix.cibw_skip }}
+      CIBW_BUILD: ${{ matrix.cibw_build }}
       CIBW_ARCHS: ${{ matrix.archs }}
       CIBW_PRERELEASE_PYTHONS: "1"
       CIBW_BEFORE_BUILD: python -m pip install --upgrade pip cmake ninja
       CIBW_ENVIRONMENT_MACOS: ${{ matrix.macos_env }}
+      CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
+      CIBW_MANYLINUX_AARCH64_IMAGE: manylinux_2_28
+      CIBW_MUSLLINUX_X86_64_IMAGE: musllinux_1_2
+      CIBW_MUSLLINUX_AARCH64_IMAGE: musllinux_1_2
       CIBW_REPAIR_WHEEL_COMMAND_MACOS: >-
         bash {project}/scripts/repair_macos_wheel.sh {wheel} {dest_dir} {delocate_archs}
     steps:
@@ -81,12 +97,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-
-      - name: Set up QEMU
-        if: ${{ matrix.setup_qemu }}
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
 
       - name: Install cibuildwheel
         run: python -m pip install --upgrade pip cibuildwheel
