@@ -97,7 +97,7 @@ if [[ ! -f "$STUBGEN_SCRIPT" ]]; then
 	exit 1
 fi
 
-TMP_STUB="$(mktemp "${TMPDIR:-/tmp}/dicomsdl_stubgen.XXXXXX.pyi")"
+TMP_STUB="$(mktemp "${TMPDIR:-/tmp}/dicomsdl_stubgen.XXXXXX")"
 TMP_PYTHON_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/dicomsdl_stubgen_pkg.XXXXXX")"
 trap 'rm -f "$TMP_STUB"; rm -rf "$TMP_PYTHON_ROOT"' EXIT
 
@@ -115,7 +115,16 @@ while IFS= read -r candidate; do
 	break
 done < <(find "${BUILD_DIR}" \( -type f -o -type l \) \
 	\( -name '_dicomsdl*.so' -o -name '_dicomsdl*.pyd' -o -name '_dicomsdl*.dylib' \) \
-	| sort)
+	| sort | rg '/lib\.[^/]+/dicomsdl/_dicomsdl')
+
+if [[ -z "${NATIVE_MODULE_PATH}" ]]; then
+	while IFS= read -r candidate; do
+		NATIVE_MODULE_PATH="$candidate"
+		break
+	done < <(find "${BUILD_DIR}" \( -type f -o -type l \) \
+		\( -name '_dicomsdl*.so' -o -name '_dicomsdl*.pyd' -o -name '_dicomsdl*.dylib' \) \
+		| sort)
+fi
 
 if [[ -z "${NATIVE_MODULE_PATH}" ]]; then
 	echo "Error: native module '_dicomsdl' was not found under build dir: ${BUILD_DIR}" >&2

@@ -32,6 +32,7 @@ stack order:
 
 from dataclasses import dataclass
 from pathlib import Path
+import sys
 from typing import Any
 
 import numpy as np
@@ -42,9 +43,9 @@ _FLOAT_TOL = 1e-6
 _ORIENTATION_TOL = 1e-4
 _OFF_AXIS_TOL = 1e-2
 _METADATA_LOAD_UNTIL = Tag("0028,1053")
+_DATACLASS_KWARGS = {"slots": True} if sys.version_info >= (3, 10) else {}
 
-
-@dataclass(slots=True)
+@dataclass(**_DATACLASS_KWARGS)
 class _SliceEntry:
     path: Path
     dicom_file: Any
@@ -57,8 +58,7 @@ class _SliceEntry:
     axis_y: np.ndarray
     axis_z: np.ndarray
 
-
-@dataclass(slots=True)
+@dataclass(**_DATACLASS_KWARGS)
 class SeriesVolume:
     series_dir: Path
     source_paths: tuple[Path, ...]
