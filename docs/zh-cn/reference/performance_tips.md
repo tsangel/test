@@ -10,7 +10,8 @@ This page collects the stable public habits that usually matter most for DicomSD
 
 - typed read only: use `get_value(...)`
 - typed read plus metadata: use `get_dataelement(...)` or `ds[...]`
-- raw bytes: use `value_span()` when a view is enough
+- raw bytes: use `value_span()` when a view is enough; use copied bytes (`value_bytes()`) when you need ownership or know the payload is small
+- Python rough guide: copied bytes are often competitive or faster up to about `2 KiB`, `value_span()` usually wins from about `4 KiB`, and `64 KiB+` strongly favors `value_span()`
 
 ## Avoid unnecessary full traversal
 

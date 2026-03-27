@@ -10,7 +10,7 @@
 
 - identity and metadata: `tag`, `vr`, `length`, `offset`, `vm`
 - presence: `is_present()`, `is_missing()`, boolean checks such as `if (elem)`
-- raw bytes: `value_span()`
+- raw bytes: zero-copy の `value_span()` と、コピーされた bytes を返す `value_bytes()`
 - nested payloads: `sequence` / `pixel_sequence` in Python, `sequence()` / `pixel_sequence()` in C++
 
 ## Container access
@@ -46,6 +46,7 @@
 
 - A missing element and a present zero-length element are not the same thing.
 - `value_span()` and `to_string_view()` style accessors are view-based. Their results become invalid if the element is replaced or mutated.
+- In Python, copied bytes are often a better fit for ownership-sensitive code or very small payloads. A rough guide from current binding benchmarks is copied bytes up to about `2 KiB`, `value_span()` from about `4 KiB`, and a strong preference for `value_span()` at `64 KiB+`.
 - `to_string_views()` can fail for multibyte declared charsets where splitting raw bytes on `\\` would be unsafe.
 - Sequence and pixel-sequence elements are container values. Treat them as `Sequence` / `PixelSequence`, not as scalar strings or numbers.
 

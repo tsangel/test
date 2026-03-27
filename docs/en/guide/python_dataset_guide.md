@@ -393,6 +393,37 @@ raw = ds.get_dataelement("PixelData").value_span()
 print(raw.nbytes)
 ```
 
+If you need owned Python `bytes`, use `value_bytes()`. If you already have a
+`memoryview`, `bytes(view)` creates the same kind of copied result, but it is
+less direct than calling `value_bytes()` up front.
+
+```python
+elem = ds.get_dataelement("PixelData")
+
+view = elem.value_span()      # zero-copy read-only memoryview
+blob = elem.value_bytes()     # copied bytes
+```
+
+Use `value_span()` when:
+
+- the next consumer accepts the buffer protocol (`memoryview`, NumPy, `struct`, slicing)
+- the payload may be large
+- you want to avoid an eager copy
+
+Use copied bytes (`value_bytes()`) when:
+
+- the next API explicitly wants `bytes`
+- you need an owned immutable copy with an independent lifetime
+- the payload is small and copy cost is negligible
+
+Performance note for Python bindings:
+
+- copied bytes can be faster for very small payloads because `memoryview` / exporter setup is not free
+- rough guide: copied bytes are often competitive or faster up to about `2 KiB`
+- `value_span()` usually wins from about `4 KiB` upward
+- `64 KiB+` strongly favors `value_span()`
+- these size thresholds are empirical guidance from current Python-binding benchmarks, not a hard ABI guarantee
+
 ## Writing values
 
 ### Ensure-or-create lookup

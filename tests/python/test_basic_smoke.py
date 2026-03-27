@@ -624,6 +624,7 @@ def test_binary_memoryviews_keep_dataset_owner_alive():
 	assert isinstance(raw_span, memoryview)
 	assert raw_span.obj is not None
 	assert sys.getrefcount(pixel_elem) == elem_refcount + 1
+	assert pixel_elem.value_bytes() == bytes(raw_span)
 
 
 def test_set_transfer_syntax_encapsulated_to_encapsulated_cycle():

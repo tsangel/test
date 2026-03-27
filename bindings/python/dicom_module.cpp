@@ -3481,8 +3481,18 @@ NB_MODULE(_dicomsdl, m) {
 			    nb::object owner = nb::cast(&element, nb::rv_policy::reference);
 			    return readonly_memoryview_from_span(span.data(), span.size(), owner);
 		    },
-		    "Return the raw value bytes as a read-only memoryview. The owning DataElement is kept alive, "
-		    "but the view is still invalidated if the underlying value bytes are replaced.")
+		    "Return the raw value bytes as a read-only zero-copy memoryview. The owning "
+		    "DataElement is kept alive, but the view is still invalidated if the underlying "
+		    "value bytes are replaced. Prefer this for large payloads or buffer-protocol "
+		    "consumers such as NumPy.")
+		.def("value_bytes",
+		    [](const DataElement& element) {
+			    auto span = element.value_span();
+			    return nb::bytes(reinterpret_cast<const char*>(span.data()), span.size());
+		    },
+		    "Return the raw value bytes as an owned Python bytes object. This always copies "
+		    "the payload. Prefer this when the next API explicitly wants bytes, when you need "
+		    "an independent immutable copy, or when payloads are small enough that copy cost is negligible.")
 		.def("__repr__", &dataelement_repr);
 
 	nb::class_<PySequenceIterator>(m, "SequenceIterator")

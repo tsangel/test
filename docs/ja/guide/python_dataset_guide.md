@@ -389,6 +389,37 @@ raw = ds.get_dataelement("PixelData").value_span()
 print(raw.nbytes)
 ```
 
+所有された Python `bytes` が必要なら `value_bytes()` を使ってください。
+すでに `memoryview` を持っている場合は `bytes(view)` でも同種のコピー結果を作れますが、
+最初から `value_bytes()` を呼ぶ方がより直接的です。
+
+```python
+elem = ds.get_dataelement("PixelData")
+
+view = elem.value_span()      # zero-copy の読み取り専用 memoryview
+blob = elem.value_bytes()     # コピーされた bytes
+```
+
+次のような場合は `value_span()` を優先してください。
+
+- 次の利用先が buffer protocol を直接受け取る場合 (`memoryview`、NumPy、`struct`、slicing)
+- payload が大きくなりうる場合
+- 即時コピーを避けたい場合
+
+次のような場合はコピーされた bytes (`value_bytes()`) を優先してください。
+
+- 次の API が明示的に `bytes` を要求する場合
+- 独立した寿命を持つ不変コピーが必要な場合
+- payload が小さく、コピーコストがほぼ無視できる場合
+
+Python バインディングに関する経験的な性能ガイド:
+
+- 非常に小さい payload では、`memoryview` / exporter の生成コストのため copied bytes の方が速いことがあります
+- おおよそ `2 KiB` 以下では copied bytes がより速いか、少なくとも十分競合しやすいです
+- おおよそ `4 KiB` 以上では通常 `value_span()` の方が有利です
+- `64 KiB+` では `value_span()` がかなり有利です
+- これらの閾値は現在の Python binding benchmark に基づく経験則であり、固定 ABI 契約ではありません
+
 ## 値の書き込み
 
 ### 参照の確保または作成
