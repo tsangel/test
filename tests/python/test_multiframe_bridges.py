@@ -3,6 +3,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+import dicomsdl as dicom
 import numpy as np
 import pytest
 
@@ -29,32 +30,35 @@ def _load_simpleitk_reference(path: Path):
 
 
 def _canonical_multiframe_reference(path: Path, reference_array: np.ndarray):
-    pydicom = pytest.importorskip("pydicom")
-    ds = pydicom.dcmread(str(path), stop_before_pixels=True)
+    dicom_file = dicom.read_file(path)
 
     def _unit(vec: np.ndarray) -> np.ndarray:
         return vec / np.linalg.norm(vec)
 
     def _fg_value(frame_index: int, sequence_name: str, value_name: str):
-        per_frame = getattr(ds, "PerFrameFunctionalGroupsSequence", None)
-        if per_frame is not None and frame_index < len(per_frame):
-            sequence = getattr(per_frame[frame_index], sequence_name, None)
-            if sequence:
-                value = getattr(sequence[0], value_name, None)
-                if value is not None:
-                    return value
+        try:
+            value = dicom_file.get_value(
+                f"PerFrameFunctionalGroupsSequence.{frame_index}.{sequence_name}.0.{value_name}",
+                default=None,
+            )
+        except Exception:
+            value = None
+        if value is not None:
+            return value
 
-        shared = getattr(ds, "SharedFunctionalGroupsSequence", None)
-        if shared:
-            sequence = getattr(shared[0], sequence_name, None)
-            if sequence:
-                value = getattr(sequence[0], value_name, None)
-                if value is not None:
-                    return value
+        try:
+            value = dicom_file.get_value(
+                f"SharedFunctionalGroupsSequence.0.{sequence_name}.0.{value_name}",
+                default=None,
+            )
+        except Exception:
+            value = None
+        if value is not None:
+            return value
 
-        return getattr(ds, value_name, None)
+        return dicom_file.get_value(value_name, default=None)
 
-    frame_count = int(ds.NumberOfFrames)
+    frame_count = int(dicom_file.get_value("NumberOfFrames"))
     orientation = [float(value) for value in _fg_value(0, "PlaneOrientationSequence", "ImageOrientationPatient")]
     row = _unit(np.asarray(orientation[:3], dtype=np.float64))
     col = _unit(np.asarray(orientation[3:], dtype=np.float64))

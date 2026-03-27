@@ -50,7 +50,6 @@ required = {
     "pytest": "pytest",
     "numpy": "numpy",
     "Pillow": "PIL",
-    "pydicom": "pydicom",
     "SimpleITK": "SimpleITK",
     "vtk": "vtk",
 }

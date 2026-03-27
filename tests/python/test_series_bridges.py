@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import dicomsdl as dicom
 import numpy as np
 import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SAMPLE_PT_ROOT = REPO_ROOT.parent / "sample" / "PT"
+TEST_FILES_ROOT = Path(__file__).resolve().parent.parent
 VOXEL_RTOL = 1e-5
 VOXEL_ATOL = 1e-3
 GEOM_ATOL = 1e-4
@@ -41,44 +43,33 @@ def _write_test_slice(
     image_position: tuple[float, float, float],
     pixel_value: int,
 ) -> None:
-    pydicom = pytest.importorskip("pydicom")
-    from pydicom.dataset import FileDataset, FileMetaDataset
-    from pydicom.filewriter import dcmwrite
-    from pydicom.uid import ExplicitVRLittleEndian
-
-    file_meta = FileMetaDataset()
-    file_meta.FileMetaInformationVersion = b"\x00\x01"
-    file_meta.MediaStorageSOPClassUID = "1.2.840.10008.5.1.4.1.1.2"
-    file_meta.MediaStorageSOPInstanceUID = sop_instance_uid
-    file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
-    file_meta.ImplementationClassUID = "1.2.826.0.1.3680043.10.54321.1"
-
-    ds = FileDataset(str(path), {}, file_meta=file_meta, preamble=b"\x00" * 128)
-    ds.SOPClassUID = file_meta.MediaStorageSOPClassUID
-    ds.SOPInstanceUID = sop_instance_uid
-    ds.StudyInstanceUID = "1.2.826.0.1.3680043.10.54321.2"
-    ds.FrameOfReferenceUID = "1.2.826.0.1.3680043.10.54321.3"
-    ds.SeriesInstanceUID = series_instance_uid
-    ds.SeriesDescription = "bridge-test"
-    ds.Modality = "CT"
-    ds.PatientName = "Bridge^Test"
-    ds.PatientID = "bridge-test"
-    ds.InstanceNumber = instance_number
-    ds.ImagePositionPatient = [float(value) for value in image_position]
-    ds.ImageOrientationPatient = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
-    ds.PixelSpacing = [1.0, 1.0]
-    ds.SliceThickness = 1.0
-    ds.Rows = 2
-    ds.Columns = 2
-    ds.SamplesPerPixel = 1
-    ds.PhotometricInterpretation = "MONOCHROME2"
-    ds.BitsAllocated = 16
-    ds.BitsStored = 16
-    ds.HighBit = 15
-    ds.PixelRepresentation = 0
-    pixels = np.full((2, 2), pixel_value, dtype=np.uint16)
-    ds.PixelData = pixels.tobytes()
-    dcmwrite(path, ds, enforce_file_format=True, little_endian=True, implicit_vr=False)
+    dicom_file = dicom.read_file(TEST_FILES_ROOT / "test_le.dcm")
+    dicom_file.set_value("StudyInstanceUID", "1.2.826.0.1.3680043.10.54321.2")
+    dicom_file.set_value("FrameOfReferenceUID", "1.2.826.0.1.3680043.10.54321.3")
+    dicom_file.set_value("SeriesInstanceUID", series_instance_uid)
+    dicom_file.set_value("SOPInstanceUID", sop_instance_uid)
+    dicom_file.set_value("SeriesDescription", "bridge-test")
+    dicom_file.set_value("Modality", "CT")
+    dicom_file.set_value("PatientName", "Bridge^Test")
+    dicom_file.set_value("PatientID", "bridge-test")
+    dicom_file.set_value("InstanceNumber", instance_number)
+    dicom_file.set_value("ImagePositionPatient", [float(value) for value in image_position])
+    dicom_file.set_value("ImageOrientationPatient", [1.0, 0.0, 0.0, 0.0, 1.0, 0.0])
+    dicom_file.set_value("PixelSpacing", [1.0, 1.0])
+    dicom_file.set_value("SliceThickness", 1.0)
+    dicom_file.set_value("Rows", 2)
+    dicom_file.set_value("Columns", 2)
+    dicom_file.set_value("SamplesPerPixel", 1)
+    dicom_file.set_value("PhotometricInterpretation", "MONOCHROME2")
+    dicom_file.set_value("BitsAllocated", 16)
+    dicom_file.set_value("BitsStored", 16)
+    dicom_file.set_value("HighBit", 15)
+    dicom_file.set_value("PixelRepresentation", 0)
+    dicom_file.set_pixel_data(
+        "ExplicitVRLittleEndian",
+        np.full((2, 2), pixel_value, dtype=np.uint16),
+    )
+    dicom_file.write_file(path, keep_existing_meta=False)
 
 
 def _load_simpleitk_reference(series_dir: Path):
@@ -104,7 +95,6 @@ def _load_simpleitk_reference(series_dir: Path):
 
 
 def _series_geometry_from_metadata(source_paths: tuple[Path, ...]):
-    pydicom = pytest.importorskip("pydicom")
     if not source_paths:
         raise RuntimeError("No source paths were provided")
 
@@ -113,13 +103,16 @@ def _series_geometry_from_metadata(source_paths: tuple[Path, ...]):
 
     infos = []
     for path in source_paths:
-        ds = pydicom.dcmread(str(path), stop_before_pixels=True)
-        ipp = np.array([float(value) for value in ds.ImagePositionPatient], dtype=np.float64)
-        iop = [float(value) for value in ds.ImageOrientationPatient]
+        dicom_file = dicom.read_file(path)
+        ipp = np.array(
+            [float(value) for value in dicom_file.get_value("ImagePositionPatient")],
+            dtype=np.float64,
+        )
+        iop = [float(value) for value in dicom_file.get_value("ImageOrientationPatient")]
         row = _unit(np.asarray(iop[:3], dtype=np.float64))
         col = _unit(np.asarray(iop[3:], dtype=np.float64))
         normal = _unit(np.cross(row, col))
-        pixel_spacing = tuple(float(value) for value in ds.PixelSpacing)
+        pixel_spacing = tuple(float(value) for value in dicom_file.get_value("PixelSpacing"))
         infos.append((ipp, row, col, normal, pixel_spacing))
 
     first_origin, row, col, normal, pixel_spacing = infos[0]
@@ -313,12 +306,11 @@ def test_to_vtk_image_data_copy_flag_controls_buffer_sharing() -> None:
 def test_processed_series_excludes_orientation_outlier_before_canonical_sort() -> None:
     from dicomsdl.simpleitk_bridge import read_series_volume
 
-    pydicom = pytest.importorskip("pydicom")
     series_dir = _require_series_dir("01000 Processed Images")
     volume = read_series_volume(series_dir, to_modality_value=True)
 
     instance_numbers = [
-        int(pydicom.dcmread(str(path), stop_before_pixels=True).InstanceNumber)
+        int(dicom.read_file(path).get_value("InstanceNumber"))
         for path in volume.source_paths
     ]
 

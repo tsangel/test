@@ -52,7 +52,7 @@ if errorlevel 1 exit /b %errorlevel%
 exit /b 0
 
 :ensure_python_test_requirements
-%PYTHON_BIN% -c "import importlib.util, sys; required={'pytest':'pytest','numpy':'numpy','Pillow':'PIL','pydicom':'pydicom','SimpleITK':'SimpleITK','vtk':'vtk'}; raise SystemExit(0 if all(importlib.util.find_spec(module) for module in required.values()) else 1)" >nul 2>&1
+%PYTHON_BIN% -c "import importlib.util, sys; required={'pytest':'pytest','numpy':'numpy','Pillow':'PIL','SimpleITK':'SimpleITK','vtk':'vtk'}; raise SystemExit(0 if all(importlib.util.find_spec(module) for module in required.values()) else 1)" >nul 2>&1
 if not errorlevel 1 exit /b 0
 
 echo Error: Python test dependencies are missing for wheel-with-tests validation with %PYTHON_BIN%.>&2
