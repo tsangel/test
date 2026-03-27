@@ -49,6 +49,8 @@ CODEC_PIXEL_PLUGIN_OPTIONS = {
 }
 VALID_CODEC_MODES = {"builtin", "shared", "none"}
 TRUTHY_ENV_VALUES = {"1", "true", "yes", "on"}
+FALSY_ENV_VALUES = {"0", "false", "no", "off"}
+STABLE_ABI_WHEEL_TAG = "cp312"
 PROJECT_URL = "https://github.com/tsangel/dicomsdl"
 PYPI_URL = "https://pypi.org/project/dicomsdl/"
 PROJECT_URLS = {
@@ -179,11 +181,58 @@ def dynamic_library_suffixes() -> tuple[str, ...]:
     return (".so",)
 
 
+def python_extension_suffixes() -> tuple[str, ...]:
+    suffixes = {
+        suffix
+        for suffix in (
+            sysconfig.get_config_var("EXT_SUFFIX"),
+            ".pyd" if sys.platform == "win32" else None,
+            ".dylib" if sys.platform == "darwin" else None,
+            ".so" if sys.platform != "win32" else None,
+        )
+        if suffix
+    }
+    return tuple(sorted(suffixes))
+
+
 def parse_env_bool(var_name: str, default: bool) -> bool:
     raw = os.environ.get(var_name)
     if raw is None:
         return default
     return raw.strip().lower() in TRUTHY_ENV_VALUES
+
+
+def parse_cmake_bool_arg(var_name: str) -> Optional[bool]:
+    raw_args = os.environ.get("DICOMSDL_CMAKE_ARGS") or os.environ.get("CMAKE_ARGS")
+    if not raw_args:
+        return None
+
+    result: Optional[bool] = None
+    for token in shlex.split(raw_args):
+        prefix = f"-D{var_name}="
+        if not token.startswith(prefix):
+            continue
+        value = token[len(prefix):].strip().lower()
+        if value in TRUTHY_ENV_VALUES:
+            result = True
+        elif value in FALSY_ENV_VALUES:
+            result = False
+    return result
+
+
+def stable_abi_enabled() -> bool:
+    explicit = os.environ.get("DICOMSDL_PYTHON_STABLE_ABI")
+    if explicit is not None:
+        return explicit.strip().lower() in TRUTHY_ENV_VALUES
+
+    cmake_flag = parse_cmake_bool_arg("DICOM_PYTHON_STABLE_ABI")
+    if cmake_flag is not None:
+        return cmake_flag
+
+    return False
+
+
+STABLE_ABI_ENABLED = stable_abi_enabled()
 
 
 def resolve_strip_command() -> Optional[list[str]]:
@@ -260,9 +309,48 @@ def find_dynamic_library(build_root: pathlib.Path, stem: str) -> pathlib.Path:
     return candidates[0]
 
 
+def resolve_extension_artifact(
+    extdir: pathlib.Path,
+    expected_path: pathlib.Path,
+    module_stem: str,
+) -> pathlib.Path:
+    if expected_path.exists():
+        return expected_path
+
+    candidates: list[pathlib.Path] = []
+    seen: set[pathlib.Path] = set()
+    for suffix in python_extension_suffixes():
+        for path in extdir.glob(f"{module_stem}*{suffix}"):
+            if not path.is_file():
+                continue
+            resolved = path.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            candidates.append(resolved)
+
+    if not candidates:
+        raise RuntimeError(f"Expected extension at {expected_path} not found")
+
+    preferred = [path for path in candidates if path.name == expected_path.name]
+    if preferred:
+        return preferred[0]
+
+    candidates.sort(
+        key=lambda path: (
+            path.stat().st_mtime_ns,
+            ".abi3." in path.name,
+            len(path.name),
+        ),
+        reverse=True,
+    )
+    return candidates[0]
+
+
 def remove_stale_shared_artifacts(extdir: pathlib.Path) -> None:
-    for suffix in dynamic_library_suffixes():
-        patterns = (
+    suffix_pattern_groups = [
+        (
+            f"_dicomsdl*{suffix}",
             f"dicomsdl_codec_runtime*{suffix}",
             f"libdicomsdl_codec_runtime*{suffix}",
             f"dicomsdl_codec_*_plugin*{suffix}",
@@ -270,10 +358,17 @@ def remove_stale_shared_artifacts(extdir: pathlib.Path) -> None:
             f"dicomsdl_pixel_*_plugin*{suffix}",
             f"libdicomsdl_pixel_*_plugin*{suffix}",
         )
+        for suffix in {*dynamic_library_suffixes(), *python_extension_suffixes()}
+    ]
+    for patterns in suffix_pattern_groups:
         for pattern in patterns:
             for path in extdir.glob(pattern):
                 if path.is_file():
                     path.unlink()
+
+    pycache_dir = extdir / "__pycache__"
+    if pycache_dir.is_dir():
+        shutil.rmtree(pycache_dir)
 
 
 def remove_windows_debug_sidecars(extdir: pathlib.Path) -> None:
@@ -286,8 +381,8 @@ def remove_windows_debug_sidecars(extdir: pathlib.Path) -> None:
 
 
 class CMakeExtension(Extension):
-    def __init__(self, name: str, sourcedir: str = "") -> None:
-        super().__init__(name, sources=[])
+    def __init__(self, name: str, sourcedir: str = "", **kwargs) -> None:
+        super().__init__(name, sources=[], **kwargs)
         self.sourcedir = os.path.abspath(sourcedir) if sourcedir else str(ROOT_DIR)
 
 
@@ -446,10 +541,13 @@ class CMakeBuild(build_ext):
                 shutil.copy2(plugin_src, plugin_dst)
                 strip_targets.append(plugin_dst)
 
-        if not ext_full_path.exists():
-            raise RuntimeError(f"Expected extension at {ext_full_path} not found")
+        built_extension = resolve_extension_artifact(
+            extdir=extdir,
+            expected_path=ext_full_path,
+            module_stem=ext.name.rsplit(".", 1)[-1],
+        )
 
-        strip_targets.append(ext_full_path)
+        strip_targets.append(built_extension)
         maybe_strip_binary_artifacts(strip_targets)
         remove_windows_debug_sidecars(extdir)
 
@@ -459,6 +557,12 @@ cmdclass = {"build_ext": CMakeBuild}
 if bdist_wheel is not None:
     class DicomSdlBdistWheel(bdist_wheel):
         def finalize_options(self) -> None:
+            if STABLE_ABI_ENABLED:
+                if sys.version_info < (3, 12):
+                    raise RuntimeError(
+                        "DICOM_PYTHON_STABLE_ABI requires building with Python 3.12 or newer"
+                    )
+                self.py_limited_api = STABLE_ABI_WHEEL_TAG
             configure_macos_deployment_target(getattr(self, "plat_name", None))
             super().finalize_options()
             configure_macos_deployment_target(getattr(self, "plat_name", None))
@@ -505,7 +609,15 @@ setup(
     packages=["dicomsdl"],
     package_dir={"dicomsdl": "bindings/python/dicomsdl"},
     package_data={"dicomsdl": ["py.typed", "*.pyi", "*.dll", "*.so", "*.dylib"]},
-    ext_modules=[CMakeExtension("dicomsdl._dicomsdl")],
+    exclude_package_data={
+        "dicomsdl": ["_dicomsdl*.pyd", "_dicomsdl*.so", "_dicomsdl*.dylib"]
+    },
+    ext_modules=[
+        CMakeExtension(
+            "dicomsdl._dicomsdl",
+            py_limited_api=STABLE_ABI_ENABLED,
+        )
+    ],
     cmdclass=cmdclass,
     entry_points={
         "console_scripts": [
@@ -514,6 +626,6 @@ setup(
             "dicomshow=dicomsdl.dicomshow:main",
         ],
     },
-    include_package_data=True,
+    include_package_data=False,
     zip_safe=False,
 )

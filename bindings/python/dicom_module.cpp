@@ -240,8 +240,14 @@ nb::object uid_to_object(Uid uid) {
 nb::tuple shape_tuple_from_layout(const DecodedArrayLayout& layout) {
 	nb::tuple shape = nb::steal<nb::tuple>(PyTuple_New(static_cast<Py_ssize_t>(layout.ndim)));
 	for (std::size_t i = 0; i < layout.ndim; ++i) {
-		PyTuple_SET_ITEM(shape.ptr(), static_cast<Py_ssize_t>(i),
-		    PyLong_FromSize_t(layout.shape[i]));
+		PyObject* item = PyLong_FromSize_t(layout.shape[i]);
+		if (item == nullptr) {
+			throw nb::python_error();
+		}
+		if (PyTuple_SetItem(shape.ptr(), static_cast<Py_ssize_t>(i), item) < 0) {
+			Py_DECREF(item);
+			throw nb::python_error();
+		}
 	}
 	return shape;
 }
@@ -2588,9 +2594,46 @@ int readonly_span_exporter_getbuffer(PyObject* exporter, Py_buffer* view, int fl
 void readonly_span_exporter_dealloc(PyObject* exporter) {
 	auto* self = reinterpret_cast<ReadonlySpanExporter*>(exporter);
 	Py_XDECREF(self->owner);
+#if defined(Py_LIMITED_API)
+	PyTypeObject* type = Py_TYPE(exporter);
+	auto* tp_free = reinterpret_cast<freefunc>(PyType_GetSlot(type, Py_tp_free));
+	if (tp_free == nullptr) {
+		PyObject_Free(exporter);
+	}
+	else {
+		tp_free(exporter);
+	}
+	Py_DECREF(reinterpret_cast<PyObject*>(type));
+#else
 	Py_TYPE(exporter)->tp_free(exporter);
+#endif
 }
 
+#if defined(Py_LIMITED_API)
+PyObject* readonly_span_exporter_type() {
+	static PyType_Slot slots[] = {
+	    {Py_tp_dealloc, reinterpret_cast<void*>(readonly_span_exporter_dealloc)},
+	    {Py_bf_getbuffer, reinterpret_cast<void*>(readonly_span_exporter_getbuffer)},
+	    {Py_tp_new, reinterpret_cast<void*>(PyType_GenericNew)},
+	    {0, nullptr},
+	};
+	static PyType_Spec spec = {
+	    "dicomsdl._ReadonlySpanExporter",
+	    static_cast<int>(sizeof(ReadonlySpanExporter)),
+	    0,
+	    Py_TPFLAGS_DEFAULT,
+	    slots,
+	};
+	static PyObject* type = []() -> PyObject* {
+		PyObject* result = PyType_FromSpec(&spec);
+		if (result == nullptr) {
+			throw nb::python_error();
+		}
+		return result;
+	}();
+	return type;
+}
+#else
 PyTypeObject* readonly_span_exporter_type() {
 	static PyBufferProcs buffer_procs = {
 	    .bf_getbuffer = readonly_span_exporter_getbuffer,
@@ -2613,19 +2656,33 @@ PyTypeObject* readonly_span_exporter_type() {
 	}
 	return &type;
 }
+#endif
 
 nb::object readonly_memoryview_from_span(
     const void* data, std::size_t size, nb::handle owner) {
+#if defined(Py_LIMITED_API)
+	PyObject* type = readonly_span_exporter_type();
+	PyObject* exporter_raw = PyObject_CallNoArgs(type);
+	if (exporter_raw == nullptr) {
+		throw nb::python_error();
+	}
+	auto* exporter = reinterpret_cast<ReadonlySpanExporter*>(exporter_raw);
+#else
 	auto* type = readonly_span_exporter_type();
 	auto* exporter = PyObject_New(ReadonlySpanExporter, type);
 	if (exporter == nullptr) {
 		throw nb::python_error();
 	}
+#endif
 	exporter->data = reinterpret_cast<const char*>(data);
 	exporter->size = static_cast<Py_ssize_t>(size);
 	exporter->owner =
 	    (!owner.is_valid() || owner.is_none()) ? nullptr : new_reference_or_null(owner.ptr());
+#if defined(Py_LIMITED_API)
+	nb::object exporter_obj = nb::steal<nb::object>(exporter_raw);
+#else
 	nb::object exporter_obj = nb::steal<nb::object>(reinterpret_cast<PyObject*>(exporter));
+#endif
 	PyObject* memoryview = PyMemoryView_FromObject(exporter_obj.ptr());
 	if (memoryview == nullptr) {
 		throw nb::python_error();
