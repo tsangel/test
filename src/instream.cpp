@@ -269,7 +269,7 @@ void InFileStream::attach_file(const std::string& file_path) {
 	offset_ = 0;
 	endoffset_ = filesize;
 	root_stream_ = this;
-	filename_ = file_path;
+	filename_ = detail::normalize_stream_identifier_path(std::string_view(file_path));
 	identifier_ = filename_;
 #else
 	fd_ = ::open(file_path.c_str(), O_RDONLY);
@@ -298,7 +298,7 @@ void InFileStream::attach_file(const std::string& file_path) {
 	offset_ = 0;
 	endoffset_ = filesize;
 	root_stream_ = this;
-	filename_ = file_path;
+	filename_ = detail::normalize_stream_identifier_path(std::string_view(file_path));
 	identifier_ = filename_;
 	own_data_ = filesize > 0;
 #endif

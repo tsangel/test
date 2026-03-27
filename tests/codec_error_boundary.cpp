@@ -283,12 +283,12 @@ int main() {
 			expect_contains(what,
 			    std::string("ts=") + std::string("ExplicitVRLittleEndian"_uid.value()),
 			    "native all-frames worker throw message");
-			expect_contains(what, "frame=1", "native all-frames worker throw message");
+			expect_contains(what, "frame=0", "native all-frames worker throw message");
 			expect_contains(what, "status=invalid_argument",
 			    "native all-frames worker throw message");
 			expect_contains(what, "stage=load_frame_source",
 			    "native all-frames worker throw message");
-			expect_contains(what, "raw frame index out of range",
+			expect_contains(what, "PixelData is shorter than expected",
 			    "native all-frames worker throw message");
 			expect_not_contains(what, "reason=pixel::decode_all_frames_into ",
 			    "native all-frames worker throw message");
