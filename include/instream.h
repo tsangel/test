@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
 #include <memory>
 #include <span>
 #include <stdexcept>
@@ -92,7 +93,7 @@ public:
 	InFileStream();
 	~InFileStream() override;
 
-	void attach_file(const std::string& file_path);
+	void attach_file(const std::filesystem::path& file_path);
 	void detach_file();
 
 protected:

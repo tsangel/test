@@ -1,5 +1,6 @@
 #include "writing/detail/write_metadata.hpp"
 #include "writing/transcoded_write.hpp"
+#include "../stream_path_detail.hpp"
 
 #include <filesystem>
 #include <fstream>
@@ -130,7 +131,8 @@ template <typename Fn>
 void with_output_file_stream(const fs::path& raw_path, const char* operation_name, Fn&& fn) {
 	const fs::path normalized_path = normalize_output_path(raw_path);
 	const std::string path_text =
-	    normalized_path.empty() ? raw_path.string() : normalized_path.string();
+	    detail::normalize_stream_identifier_path(
+	        normalized_path.empty() ? raw_path : normalized_path);
 
 	std::ofstream os(normalized_path, std::ios::binary | std::ios::trunc);
 	if (!os) {

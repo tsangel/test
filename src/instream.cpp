@@ -230,13 +230,14 @@ void InFileStream::release_storage() {
 #endif
 }
 
-void InFileStream::attach_file(const std::string& file_path) {
+void InFileStream::attach_file(const std::filesystem::path& file_path) {
 	detach_file();
 	if (file_path.empty()) {
 		throw std::invalid_argument("file_path cannot be empty");
 	}
 #if defined(_WIN32)
-	file_handle_ = CreateFileA(file_path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+	file_handle_ = CreateFileW(file_path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+	    OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
 	if (file_handle_ == INVALID_HANDLE_VALUE) {
 		throw std::system_error(static_cast<int>(GetLastError()), std::system_category(), "Failed to open file");
 	}
@@ -269,10 +270,11 @@ void InFileStream::attach_file(const std::string& file_path) {
 	offset_ = 0;
 	endoffset_ = filesize;
 	root_stream_ = this;
-	filename_ = detail::normalize_stream_identifier_path(std::string_view(file_path));
+	filename_ = detail::normalize_stream_identifier_path(file_path);
 	identifier_ = filename_;
 #else
-	fd_ = ::open(file_path.c_str(), O_RDONLY);
+	const auto native_path = file_path.native();
+	fd_ = ::open(native_path.c_str(), O_RDONLY);
 	if (fd_ < 0) {
 		throw std::system_error(errno, std::generic_category(), "Failed to open file");
 	}
@@ -298,7 +300,7 @@ void InFileStream::attach_file(const std::string& file_path) {
 	offset_ = 0;
 	endoffset_ = filesize;
 	root_stream_ = this;
-	filename_ = detail::normalize_stream_identifier_path(std::string_view(file_path));
+	filename_ = detail::normalize_stream_identifier_path(file_path);
 	identifier_ = filename_;
 	own_data_ = filesize > 0;
 #endif

@@ -404,11 +404,12 @@ void DataSet::set_specific_charset(std::span<const SpecificCharacterSet> charset
 }
 
 void DataSet::attach_to_file(const std::filesystem::path& path) {
-	const auto normalized_path = detail::normalize_stream_identifier_path(path);
-	// Use the same normalized path for both the stream attachment and dataset identifier.
+	const auto stream_identifier = detail::normalize_stream_identifier_path(path);
+	// Open the file with the original filesystem path, but keep a normalized
+	// UTF-8 identifier string for diagnostics and DataSet::path().
 	auto stream = std::make_unique<InFileStream>();
-	stream->attach_file(normalized_path);
-	attach_to_stream(normalized_path, std::move(stream));
+	stream->attach_file(path);
+	attach_to_stream(stream_identifier, std::move(stream));
 }
 
 void DataSet::attach_to_memory(const std::uint8_t* data, std::size_t size, bool copy) {

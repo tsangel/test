@@ -5,15 +5,29 @@ import sys
 from pathlib import Path
 
 
+def _find_native_module(root: Path) -> Path | None:
+    candidates: list[Path] = []
+    for build_dir in root.glob("build*"):
+        if not build_dir.is_dir():
+            continue
+        candidates.extend(build_dir.rglob("_dicomsdl*.pyd"))
+        candidates.extend(build_dir.rglob("_dicomsdl*.so"))
+        candidates.extend(build_dir.rglob("_dicomsdl*.dylib"))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda path: (path.stat().st_mtime_ns, len(str(path))), reverse=True)
+    return candidates[0]
+
+
 def test_import_and_transcode_surface_available_without_numpy():
     root = Path(__file__).resolve().parents[2]
     python_paths = []
     repo_package_dir = root / "bindings/python"
-    repo_build_dir = root / "build/_deps/dicomsdl_openjpeg-build/bin"
+    native_module = _find_native_module(root)
     if repo_package_dir.is_dir():
         python_paths.append(str(repo_package_dir))
-    if repo_build_dir.is_dir():
-        python_paths.append(str(repo_build_dir))
+    if native_module is not None:
+        python_paths.append(str(native_module.parent))
 
     env = None
     if python_paths:
@@ -22,6 +36,8 @@ def test_import_and_transcode_surface_available_without_numpy():
         env["PYTHONPATH"] = (
             __import__("os").pathsep.join([*python_paths, existing]) if existing else __import__("os").pathsep.join(python_paths)
         )
+        if native_module is not None:
+            env["DICOMSDL_NATIVE_MODULE_PATH"] = str(native_module)
 
     code = r"""
 import builtins
@@ -39,6 +55,7 @@ import dicomsdl as dicom
 from dicomsdl import dicomconv
 
 assert hasattr(dicom, "read_file")
+assert hasattr(dicom, "is_dicom_file")
 assert hasattr(dicom.DicomFile, "set_transfer_syntax")
 assert hasattr(dicom.DicomFile, "write_file")
 assert callable(dicomconv.build_parser)

@@ -33,15 +33,20 @@ def _codec_plugin_library_suffix():
     return ".so"
 
 
-def _discover_native_module_path():
+def _explicit_native_module_path():
     explicit_path = _os.environ.get("DICOMSDL_NATIVE_MODULE_PATH", "").strip()
-    if explicit_path:
-        candidate = _pathlib.Path(explicit_path).expanduser().resolve()
-        if candidate.is_file():
-            return str(candidate)
-        raise ModuleNotFoundError(
-            f"DICOMSDL_NATIVE_MODULE_PATH does not point to a file: {candidate}"
-        )
+    if not explicit_path:
+        return None
+
+    candidate = _pathlib.Path(explicit_path).expanduser().resolve()
+    if candidate.is_file():
+        return str(candidate)
+    raise ModuleNotFoundError(
+        f"DICOMSDL_NATIVE_MODULE_PATH does not point to a file: {candidate}"
+    )
+
+
+def _discover_native_module_path():
 
     search_roots = []
     seen_roots = set()
@@ -106,18 +111,20 @@ def _load_native_module():
     if cached is not None:
         return cached
 
-    # Normal installed layout: dicomsdl/_dicomsdl.* lives under this package.
-    if _importlib_util.find_spec(native_module_name) is not None:
-        return _importlib.import_module("._dicomsdl", __name__)
+    native_module_path = _explicit_native_module_path()
+    if native_module_path is None:
+        # Normal installed layout: dicomsdl/_dicomsdl.* lives under this package.
+        if _importlib_util.find_spec(native_module_name) is not None:
+            return _importlib.import_module("._dicomsdl", __name__)
 
-    # Dev/CI fallback: extension exists only as top-level _dicomsdl.* in build dir.
-    top_level_spec = _importlib_util.find_spec("_dicomsdl")
-    if top_level_spec is not None and top_level_spec.origin is not None:
-        native_module_path = top_level_spec.origin
-    else:
-        native_module_path = _discover_native_module_path()
-        if native_module_path is None:
-            raise ModuleNotFoundError("Cannot find native module '_dicomsdl'")
+        # Dev/CI fallback: extension exists only as top-level _dicomsdl.* in build dir.
+        top_level_spec = _importlib_util.find_spec("_dicomsdl")
+        if top_level_spec is not None and top_level_spec.origin is not None:
+            native_module_path = top_level_spec.origin
+        else:
+            native_module_path = _discover_native_module_path()
+            if native_module_path is None:
+                raise ModuleNotFoundError("Cannot find native module '_dicomsdl'")
 
     alias_spec = _importlib_util.spec_from_file_location(
         native_module_name, native_module_path

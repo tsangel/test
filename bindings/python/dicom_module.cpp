@@ -64,7 +64,7 @@ PyObject* new_reference_or_null(PyObject* obj) noexcept {
 #endif
 }
 
-std::string python_path_to_string(nb::handle value, const char* arg_name) {
+std::filesystem::path python_path_to_filesystem_path(nb::handle value, const char* arg_name) {
 	PyObject* fs_path = PyOS_FSPath(value.ptr());
 	if (fs_path == nullptr) {
 		throw nb::python_error();
@@ -72,7 +72,18 @@ std::string python_path_to_string(nb::handle value, const char* arg_name) {
 
 	nb::object path_obj = nb::steal<nb::object>(fs_path);
 	if (PyUnicode_Check(path_obj.ptr())) {
-		return nb::cast<std::string>(path_obj);
+#if defined(_WIN32)
+		Py_ssize_t size = 0;
+		wchar_t* data = PyUnicode_AsWideCharString(path_obj.ptr(), &size);
+		if (data == nullptr) {
+			throw nb::python_error();
+		}
+		std::filesystem::path path(std::wstring(data, static_cast<std::size_t>(size)));
+		PyMem_Free(data);
+		return path;
+#else
+		return std::filesystem::path(nb::cast<std::string>(path_obj));
+#endif
 	}
 
 	if (PyBytes_Check(path_obj.ptr())) {
@@ -81,7 +92,7 @@ std::string python_path_to_string(nb::handle value, const char* arg_name) {
 		if (PyBytes_AsStringAndSize(path_obj.ptr(), &data, &size) != 0) {
 			throw nb::python_error();
 		}
-		return std::string(data, static_cast<std::size_t>(size));
+		return std::filesystem::path(std::string(data, static_cast<std::size_t>(size)));
 	}
 
 	std::string message = arg_name;
@@ -1241,7 +1252,7 @@ void write_with_transfer_syntax_with_options(DicomFile& self, nb::handle path,
 	write_options.write_file_meta = write_file_meta;
 	write_options.keep_existing_meta = keep_existing_meta;
 
-	const auto output_path = python_path_to_string(path, "path");
+	const auto output_path = python_path_to_filesystem_path(path, "path");
 	const auto text_options =
 	    parse_encoder_options_to_text_storage(options, transfer_syntax);
 	if (text_options.auto_mode) {
@@ -1259,7 +1270,7 @@ void write_with_transfer_syntax_with_encoder_context(DicomFile& self, nb::handle
 	write_options.include_preamble = include_preamble;
 	write_options.write_file_meta = write_file_meta;
 	write_options.keep_existing_meta = keep_existing_meta;
-	self.write_with_transfer_syntax(python_path_to_string(path, "path"),
+	self.write_with_transfer_syntax(python_path_to_filesystem_path(path, "path"),
 	    transfer_syntax, encoder_context, write_options);
 }
 
@@ -2964,7 +2975,7 @@ NB_MODULE(_dicomsdl, m) {
 	    m, "FileReporter")
 			.def("__init__",
 			    [](diag::FileReporter* self, nb::handle path) {
-				    new (self) diag::FileReporter(python_path_to_string(path, "path"));
+				    new (self) diag::FileReporter(python_path_to_filesystem_path(path, "path"));
 			    },
 			    nb::arg("path"),
 			    "Append log lines to the given file path");
@@ -4529,7 +4540,7 @@ NB_MODULE(_dicomsdl, m) {
 		.def("write_file",
 		    [](DicomFile& self, nb::handle path, bool include_preamble,
 		        bool write_file_meta, bool keep_existing_meta) {
-			    self.write_file(python_path_to_string(path, "path"),
+			    self.write_file(python_path_to_filesystem_path(path, "path"),
 			        make_write_options(include_preamble, write_file_meta, keep_existing_meta));
 		    },
 		    nb::arg("path"),
@@ -4883,7 +4894,7 @@ NB_MODULE(_dicomsdl, m) {
 	    if (keep_on_error) {
 		    opts.keep_on_error = *keep_on_error;
 	    }
-	    return dicom::read_file(python_path_to_string(path, "path"), opts);
+	    return dicom::read_file(python_path_to_filesystem_path(path, "path"), opts);
     },
     nb::arg("path"),
     nb::arg("load_until") = nb::none(),
@@ -4899,6 +4910,25 @@ NB_MODULE(_dicomsdl, m) {
     "keep_on_error : bool | None, optional\n"
     "    When True, keep partially read data instead of raising on parse errors.\n"
     "    Inspect DicomFile.has_error and DicomFile.error_message after reading.\n");
+
+m.def("is_dicom_file",
+    [](nb::handle path) {
+	    return dicom::is_dicom_file(python_path_to_filesystem_path(path, "path"));
+    },
+    nb::arg("path"),
+    "Fast 1 KiB prefix probe for file filtering.\n"
+    "\n"
+    "Parameters\n"
+    "----------\n"
+    "path : str | os.PathLike\n"
+    "    Filesystem path to probe.\n"
+    "\n"
+    "Returns\n"
+    "-------\n"
+    "bool\n"
+    "    True when the file prefix looks like a DICOM Part 10 stream or a raw\n"
+    "    little-endian DICOM dataset. This is a sniffing heuristic, not a full\n"
+    "    validation pass.\n");
 
 m.def("read_bytes",
     [] (nb::object buffer, const std::string& name, std::optional<Tag> load_until,
@@ -5035,7 +5065,7 @@ m.def("register_external_codec_plugin",
     [](nb::handle library_path) {
 	    std::string error{};
 	    if (!dicom::pixel::register_external_codec_plugin_from_library(
-	            python_path_to_string(library_path, "library_path"), &error)) {
+	            python_path_to_filesystem_path(library_path, "library_path"), &error)) {
 		    if (error.empty()) {
 			    error = "failed to register external codec plugin";
 		    }
@@ -5506,6 +5536,7 @@ m.def("generate_study_instance_uid",
 	    "VR",
 	    "Uid",
 	    "read_file",
+	    "is_dicom_file",
 	    "read_bytes",
 	    "load_root_elements_reserve_hint",
 	    "reset_root_elements_reserve_hint",

@@ -21,6 +21,7 @@
 
 int main() {
 	using dicom::DataSet;
+	using dicom::is_dicom_file;
 	using dicom::read_bytes;
 	using dicom::read_file;
 	using namespace dicom::literals;
@@ -100,6 +101,9 @@ int main() {
 		std::ofstream os(file_path, std::ios::binary);
 		os << "DICM";
 	}
+	if (is_dicom_file(file_path_text)) {
+		fail("is_dicom_file should reject short DICM-only input");
+	}
 	{
 		const auto file = read_file(file_path_text);
 		if (!file) fail("read_file returned null");
@@ -135,6 +139,100 @@ int main() {
 		manual.attach_to_file(file_path_text);
 		if (manual.path() != file_path_text) fail("manual path mismatch");
 		if (manual.stream().attached_size() != 4) fail("manual data_size mismatch");
+	}
+
+	{
+		const auto append_le16 = [](std::vector<std::uint8_t>& bytes, std::uint16_t value) {
+			bytes.push_back(static_cast<std::uint8_t>(value & 0xFFu));
+			bytes.push_back(static_cast<std::uint8_t>((value >> 8u) & 0xFFu));
+		};
+		const auto append_even_ascii = [](std::vector<std::uint8_t>& bytes, std::string_view text) {
+			bytes.insert(bytes.end(), text.begin(), text.end());
+			if ((text.size() & 0x1u) != 0u) {
+				bytes.push_back(0);
+			}
+		};
+		const auto append_explicit_le_text =
+		    [&](std::vector<std::uint8_t>& bytes, std::uint16_t group, std::uint16_t element,
+		        char vr0, char vr1, std::string_view text) {
+			    append_le16(bytes, group);
+			    append_le16(bytes, element);
+			    bytes.push_back(static_cast<std::uint8_t>(vr0));
+			    bytes.push_back(static_cast<std::uint8_t>(vr1));
+			    const std::size_t padded_size = text.size() + (text.size() & 0x1u);
+			    append_le16(bytes, static_cast<std::uint16_t>(padded_size));
+			    append_even_ascii(bytes, text);
+		    };
+
+		dicom::DicomFile probe_source;
+		if (!probe_source.set_value("PatientName"_tag, std::string_view("Probe^Dicom"))) {
+			fail("probe source should set PatientName");
+		}
+		if (!probe_source.set_value("PatientID"_tag, std::string_view("12345"))) {
+			fail("probe source should set PatientID");
+		}
+		if (!probe_source.set_value("Rows"_tag, 1L)) {
+			fail("probe source should set Rows");
+		}
+		if (!probe_source.set_value("Columns"_tag, 1L)) {
+			fail("probe source should set Columns");
+		}
+
+		const fs::path part10_probe_path =
+		    (tmp_dir / "dicomsdl_probe_part10.dcm").lexically_normal();
+		dicom::WriteOptions part10_probe_opts;
+		part10_probe_opts.keep_existing_meta = false;
+		probe_source.write_file(part10_probe_path, part10_probe_opts);
+		if (!is_dicom_file(part10_probe_path)) {
+			fail("is_dicom_file should accept generated Part 10 files");
+		}
+		remove_file_or_fail(part10_probe_path, "part10 probe file");
+
+		const fs::path raw_probe_path =
+		    (tmp_dir / "dicomsdl_probe_raw.dcm").lexically_normal();
+		dicom::WriteOptions raw_probe_opts;
+		raw_probe_opts.include_preamble = false;
+		raw_probe_opts.write_file_meta = false;
+		probe_source.write_file(raw_probe_path, raw_probe_opts);
+		if (!is_dicom_file(raw_probe_path)) {
+			fail("is_dicom_file should accept raw no-preamble DICOM datasets");
+		}
+		remove_file_or_fail(raw_probe_path, "raw probe file");
+
+		std::vector<std::uint8_t> raw_three_probe_bytes;
+		append_explicit_le_text(raw_three_probe_bytes, 0x0008u, 0x0016u, 'U', 'I',
+		    "1.2.840.10008.5.1.4.1.1.7");
+		append_explicit_le_text(raw_three_probe_bytes, 0x0008u, 0x0018u, 'U', 'I',
+		    "1.2.3.4.5.6.7.8.9");
+		append_explicit_le_text(raw_three_probe_bytes, 0x0010u, 0x0010u, 'P', 'N',
+		    "Probe^Three");
+
+		const fs::path raw_three_probe_path =
+		    (tmp_dir / "dicomsdl_probe_raw_three.dcm").lexically_normal();
+		{
+			std::ofstream os(raw_three_probe_path, std::ios::binary);
+			os.write(reinterpret_cast<const char*>(raw_three_probe_bytes.data()),
+			    static_cast<std::streamsize>(raw_three_probe_bytes.size()));
+		}
+		if (!is_dicom_file(raw_three_probe_path)) {
+			fail("is_dicom_file should accept raw three-element DICOM datasets");
+		}
+		remove_file_or_fail(raw_three_probe_path, "raw three-element probe file");
+
+		const fs::path dicm_without_meta_probe_path =
+		    (tmp_dir / "dicomsdl_probe_dicm_without_meta.dcm").lexically_normal();
+		{
+			std::ofstream os(dicm_without_meta_probe_path, std::ios::binary);
+			const std::array<char, 128> preamble{};
+			os.write(preamble.data(), static_cast<std::streamsize>(preamble.size()));
+			os.write("DICM", 4);
+			os.write(reinterpret_cast<const char*>(raw_three_probe_bytes.data()),
+			    static_cast<std::streamsize>(raw_three_probe_bytes.size()));
+		}
+		if (!is_dicom_file(dicm_without_meta_probe_path)) {
+			fail("is_dicom_file should accept DICM-prefixed datasets without file meta");
+		}
+		remove_file_or_fail(dicm_without_meta_probe_path, "dicm-without-meta probe file");
 	}
 
 	const std::vector<std::uint8_t> buffer{0x01, 0x02, 0x03, 0x04};

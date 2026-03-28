@@ -130,7 +130,7 @@ Htj2kDecoderBackendPreference get_htj2k_decoder_backend_preference() {
 }
 
 bool register_external_codec_plugin_from_library(
-    std::string_view library_path, std::string* out_error) {
+    const std::filesystem::path& library_path, std::string* out_error) {
   if (library_path.empty()) {
     set_optional_error(out_error, "library path is empty");
     return false;
@@ -140,16 +140,18 @@ bool register_external_codec_plugin_from_library(
   std::lock_guard<std::mutex> lock(state.mutex);
   ensure_initialized_locked(state);
 
-  std::string library_path_text{};
+  std::filesystem::path resolved_library_path{};
   if (!detail::resolve_shared_library_path(
-          library_path, &library_path_text, out_error)) {
+          library_path, &resolved_library_path, out_error)) {
     return false;
   }
+  const std::string library_path_text =
+      detail::filesystem_path_to_utf8(resolved_library_path);
 
   ExternalPluginEntry entry{};
   entry.owns_shared_library = true;
   const auto load_status =
-      load_shared_plugin(library_path_text.c_str(), &entry.shared_plugin);
+      load_shared_plugin(resolved_library_path, &entry.shared_plugin);
   if (load_status != SharedPluginLoadStatus::kOk) {
     std::string status_message;
     switch (load_status) {

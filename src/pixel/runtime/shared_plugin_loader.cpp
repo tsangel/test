@@ -18,11 +18,11 @@ using get_encoder_api_fn = int (*)(pixel_encoder_plugin_api* out_api);
 constexpr std::size_t kEncoderApiRequiredPrefixSize =
     offsetof(pixel_encoder_plugin_api, encode_frame_to_context_buffer);
 
-void* open_shared_library(const char* library_path) noexcept {
+void* open_shared_library(const std::filesystem::path& library_path) noexcept {
 #if defined(_WIN32)
-  return reinterpret_cast<void*>(LoadLibraryA(library_path));
+  return reinterpret_cast<void*>(LoadLibraryW(library_path.c_str()));
 #else
-  return dlopen(library_path, RTLD_NOW | RTLD_LOCAL);
+  return dlopen(library_path.c_str(), RTLD_NOW | RTLD_LOCAL);
 #endif
 }
 
@@ -139,8 +139,8 @@ SharedPluginLoadStatus load_encoder_api(void* native_handle,
 }  // namespace
 
 SharedPluginLoadStatus load_shared_plugin(
-    const char* library_path, LoadedSharedPlugin* out_plugin) {
-  if (library_path == nullptr || library_path[0] == '\0' || out_plugin == nullptr) {
+    const std::filesystem::path& library_path, LoadedSharedPlugin* out_plugin) {
+  if (library_path.empty() || out_plugin == nullptr) {
     return SharedPluginLoadStatus::kInvalidArgument;
   }
 
