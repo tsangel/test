@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <filesystem>
 
 #include "plugin_registry.hpp"
 
@@ -24,7 +25,7 @@ struct LoadedSharedPlugin {
 };
 
 SharedPluginLoadStatus load_shared_plugin(
-    const char* library_path, LoadedSharedPlugin* out_plugin);
+    const std::filesystem::path& library_path, LoadedSharedPlugin* out_plugin);
 
 void unload_shared_plugin(LoadedSharedPlugin* plugin) noexcept;
 

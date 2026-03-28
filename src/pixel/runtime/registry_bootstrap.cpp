@@ -47,26 +47,28 @@ RegistryBootstrapResult initialize_once_impl(
   loaded_library_paths.reserve(plugin_paths.size());
 
   for (const std::string& plugin_path : plugin_paths) {
-    std::string resolved_plugin_path{};
+    std::filesystem::path resolved_plugin_path{};
     std::string resolve_error{};
     if (!detail::resolve_shared_library_path(
-            plugin_path, &resolved_plugin_path, &resolve_error)) {
+            std::string_view(plugin_path), &resolved_plugin_path, &resolve_error)) {
       write_registry_bootstrap_warning(
           "path", plugin_path, "reason",
           resolve_error.empty() ? "failed to resolve shared library path"
                                 : resolve_error);
       continue;
     }
-    if (!loaded_library_paths.insert(resolved_plugin_path).second) {
+    const std::string resolved_plugin_path_text =
+        detail::filesystem_path_to_utf8(resolved_plugin_path);
+    if (!loaded_library_paths.insert(resolved_plugin_path_text).second) {
       continue;
     }
 
     LoadedSharedPlugin loaded{};
     const SharedPluginLoadStatus load_status =
-        load_shared_plugin(resolved_plugin_path.c_str(), &loaded);
+        load_shared_plugin(resolved_plugin_path, &loaded);
     if (load_status != SharedPluginLoadStatus::kOk) {
       write_registry_bootstrap_warning(
-          "path", resolved_plugin_path, "status",
+          "path", resolved_plugin_path_text, "status",
           describe_shared_plugin_load_status(load_status));
       continue;
     }

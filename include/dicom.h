@@ -1841,7 +1841,7 @@ enum class Htj2kDecoderBackend : std::uint8_t {
 /// External loadable plugins are supported only when shipped with the same
 /// DicomSDL runtime release; mixed-version host/plugin deployment is not supported.
 [[nodiscard]] bool register_external_codec_plugin_from_library(
-    std::string_view library_path, std::string* out_error = nullptr);
+    const std::filesystem::path& library_path, std::string* out_error = nullptr);
 
 /// Remove every externally registered codec plugin and restore builtin dispatch.
 [[nodiscard]] bool clear_external_codec_plugins(std::string* out_error = nullptr);

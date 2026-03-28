@@ -1,6 +1,8 @@
+import os
 import pathlib
-import sys
+import shutil
 import struct
+import sys
 
 import dicomsdl as dicom
 import pytest
@@ -146,15 +148,16 @@ def test_is_dicom_file(tmp_path):
 
 
 def test_python_pathlike_support(tmp_path):
+	unicode_label = "\ud55c\uae00"
 	source = dicom.read_file(pathlib.Path(_test_file()))
-	out_path = tmp_path / "pathlike-한글-roundtrip.dcm"
+	out_path = tmp_path / f"pathlike-{unicode_label}-roundtrip.dcm"
 	source.write_file(out_path)
 	roundtrip = dicom.read_file(out_path)
 	assert pathlib.Path(roundtrip.path).resolve() == out_path.resolve()
 	assert roundtrip.has_error is False
 	assert dicom.is_dicom_file(out_path)
 
-	log_path = tmp_path / "dicomsdl-한글.log"
+	log_path = tmp_path / f"dicomsdl-{unicode_label}.log"
 	reporter = dicom.FileReporter(log_path)
 	dicom.set_thread_reporter(reporter)
 	try:
@@ -164,7 +167,15 @@ def test_python_pathlike_support(tmp_path):
 	assert "python-pathlike-smoke" in log_path.read_text()
 
 	with pytest.raises(ValueError):
-		dicom.register_external_codec_plugin(tmp_path / "missing.plugin")
+		dicom.register_external_codec_plugin(tmp_path / f"missing-{unicode_label}.plugin")
+
+	native_module = pathlib.Path(os.environ["DICOMSDL_NATIVE_MODULE_PATH"])
+	plugin_copy = tmp_path / f"plugin-{unicode_label}{native_module.suffix}"
+	shutil.copy2(native_module, plugin_copy)
+	with pytest.raises(ValueError) as excinfo:
+		dicom.register_external_codec_plugin(plugin_copy)
+	assert "No mapping for the Unicode character" not in str(excinfo.value)
+	assert plugin_copy.name in str(excinfo.value)
 
 
 def test_keep_on_error_records_parse_failure():

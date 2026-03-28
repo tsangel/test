@@ -53,7 +53,7 @@ bool use_openjpeg_for_htj2k_decoding(std::string* out_error) {
 }
 
 bool register_external_codec_plugin_from_library(
-    std::string_view library_path, std::string* out_error) {
+    const std::filesystem::path& library_path, std::string* out_error) {
   return ::pixel::runtime::register_external_codec_plugin_from_library(
       library_path, out_error);
 }

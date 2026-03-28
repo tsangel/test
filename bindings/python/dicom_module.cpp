@@ -64,31 +64,6 @@ PyObject* new_reference_or_null(PyObject* obj) noexcept {
 #endif
 }
 
-std::string python_path_to_string(nb::handle value, const char* arg_name) {
-	PyObject* fs_path = PyOS_FSPath(value.ptr());
-	if (fs_path == nullptr) {
-		throw nb::python_error();
-	}
-
-	nb::object path_obj = nb::steal<nb::object>(fs_path);
-	if (PyUnicode_Check(path_obj.ptr())) {
-		return nb::cast<std::string>(path_obj);
-	}
-
-	if (PyBytes_Check(path_obj.ptr())) {
-		char* data = nullptr;
-		Py_ssize_t size = 0;
-		if (PyBytes_AsStringAndSize(path_obj.ptr(), &data, &size) != 0) {
-			throw nb::python_error();
-		}
-		return std::string(data, static_cast<std::size_t>(size));
-	}
-
-	std::string message = arg_name;
-	message += " must be str, bytes, or os.PathLike";
-	throw nb::type_error(message.c_str());
-}
-
 std::filesystem::path python_path_to_filesystem_path(nb::handle value, const char* arg_name) {
 	PyObject* fs_path = PyOS_FSPath(value.ptr());
 	if (fs_path == nullptr) {
@@ -5090,7 +5065,7 @@ m.def("register_external_codec_plugin",
     [](nb::handle library_path) {
 	    std::string error{};
 	    if (!dicom::pixel::register_external_codec_plugin_from_library(
-	            python_path_to_string(library_path, "library_path"), &error)) {
+	            python_path_to_filesystem_path(library_path, "library_path"), &error)) {
 		    if (error.empty()) {
 			    error = "failed to register external codec plugin";
 		    }
