@@ -63,6 +63,25 @@ def _build_malformed_sample() -> bytes:
 	return b"\x00" * 128 + b"DICM" + malformed_elem
 
 
+def _build_no_preamble_explicit_sample() -> bytes:
+	sop_class = _pack_explicit_le(0x0008, 0x0016, "UI", _pad_ui("1.2.840.10008.5.1.4.1.1.7"))
+	sop_instance = _pack_explicit_le(0x0008, 0x0018, "UI", _pad_ui("1.2.3.4.5.6.7.8.9"))
+	patient_name = _pack_explicit_le(0x0010, 0x0010, "PN", b"PROBE^RAW")
+	rows = _pack_explicit_le(0x0028, 0x0010, "US", struct.pack("<H", 1))
+	return sop_class + sop_instance + patient_name + rows
+
+
+def _build_no_preamble_three_element_sample() -> bytes:
+	sop_class = _pack_explicit_le(0x0008, 0x0016, "UI", _pad_ui("1.2.840.10008.5.1.4.1.1.7"))
+	sop_instance = _pack_explicit_le(0x0008, 0x0018, "UI", _pad_ui("1.2.3.4.5.6.7.8.9"))
+	patient_name = _pack_explicit_le(0x0010, 0x0010, "PN", b"PROBE^THREE")
+	return sop_class + sop_instance + patient_name
+
+
+def _build_dicom_marker_without_meta_sample() -> bytes:
+	return b"\x00" * 128 + b"DICM" + _build_no_preamble_three_element_sample()
+
+
 def test_keyword_roundtrip():
 	tag, vr = dicom.keyword_to_tag_vr("PatientName")
 	assert int(tag) == 0x00100010
@@ -105,15 +124,37 @@ def test_literal_and_file(tmp_path):
 	assert mem.path == "memory-buffer"
 
 
+def test_is_dicom_file(tmp_path):
+	fixture_path = pathlib.Path(_test_file())
+	assert dicom.is_dicom_file(fixture_path)
+
+	short_dcm = tmp_path / "short-dicm.dcm"
+	short_dcm.write_bytes(b"DICM")
+	assert dicom.is_dicom_file(short_dcm) is False
+
+	raw_path = tmp_path / "raw-explicit.dcm"
+	raw_path.write_bytes(_build_no_preamble_explicit_sample())
+	assert dicom.is_dicom_file(raw_path)
+
+	raw_three_path = tmp_path / "raw-three-explicit.dcm"
+	raw_three_path.write_bytes(_build_no_preamble_three_element_sample())
+	assert dicom.is_dicom_file(raw_three_path)
+
+	dicm_without_meta = tmp_path / "dicm-no-meta.dcm"
+	dicm_without_meta.write_bytes(_build_dicom_marker_without_meta_sample())
+	assert dicom.is_dicom_file(dicm_without_meta)
+
+
 def test_python_pathlike_support(tmp_path):
 	source = dicom.read_file(pathlib.Path(_test_file()))
-	out_path = tmp_path / "pathlike-roundtrip.dcm"
+	out_path = tmp_path / "pathlike-한글-roundtrip.dcm"
 	source.write_file(out_path)
 	roundtrip = dicom.read_file(out_path)
 	assert pathlib.Path(roundtrip.path).resolve() == out_path.resolve()
 	assert roundtrip.has_error is False
+	assert dicom.is_dicom_file(out_path)
 
-	log_path = tmp_path / "dicomsdl.log"
+	log_path = tmp_path / "dicomsdl-한글.log"
 	reporter = dicom.FileReporter(log_path)
 	dicom.set_thread_reporter(reporter)
 	try:

@@ -61,6 +61,7 @@ __all__ = [
     "VR",
     "Uid",
     "read_file",
+    "is_dicom_file",
     "read_bytes",
     "load_root_elements_reserve_hint",
     "reset_root_elements_reserve_hint",
@@ -1146,6 +1147,8 @@ def read_file(
     load_until: Tag | None = ...,
     keep_on_error: bool | None = ...,
 ) -> DicomFile: ...
+
+def is_dicom_file(path: str | os.PathLike[str], /) -> bool: ...
 
 
 def read_bytes(

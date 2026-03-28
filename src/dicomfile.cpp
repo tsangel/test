@@ -7,6 +7,7 @@
 #include "pixel/host/encode/encode_set_pixel_data_runner.hpp"
 #include "pixel/host/support/dicom_pixel_support.hpp"
 
+#include <array>
 #include <cmath>
 #include <exception>
 #include <cstddef>

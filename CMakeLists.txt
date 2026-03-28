@@ -125,6 +125,7 @@ add_library(dicomsdl STATIC
     src/charset/charset_codec.cpp
     src/dumpdataset.cpp
     src/dicomfile.cpp
+    src/dicom_file_probe.cpp
     src/dicomfile_pixel_encode.cpp
     src/writing/direct_write.cpp
     src/writing/transcoded_write.cpp

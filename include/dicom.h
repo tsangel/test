@@ -3175,6 +3175,10 @@ inline const PixelSequence* DataElement::as_pixel_sequence() const {
 	return storage_kind_ == StorageKind::pixel_sequence ? storage_.pixseq : nullptr;
 }
 
+/// Fast 1 KiB prefix probe for file filtering.
+/// Returns true when the file prefix looks like a Part 10 stream or a raw little-endian
+/// DICOM dataset. This is a sniffing heuristic, not a full validation pass.
+[[nodiscard]] bool is_dicom_file(const std::filesystem::path& path);
 /// Read a DICOM file/session from disk (eager up to options.load_until).
 /// When options.keep_on_error is true, parse errors are captured in DicomFile::error_message().
 std::unique_ptr<DicomFile> read_file(const std::filesystem::path& path, ReadOptions options = {});
