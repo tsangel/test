@@ -5,6 +5,7 @@ import importlib.util as _importlib_util
 import os as _os
 import pathlib as _pathlib
 import sys as _sys
+import sysconfig as _sysconfig
 import warnings as _warnings
 
 _PACKAGE_DIR = _pathlib.Path(__file__).resolve().parent
@@ -44,6 +45,16 @@ def _explicit_native_module_path():
     raise ModuleNotFoundError(
         f"DICOMSDL_NATIVE_MODULE_PATH does not point to a file: {candidate}"
     )
+
+
+def _current_extension_suffix():
+    return (_sysconfig.get_config_var("EXT_SUFFIX") or "").strip()
+
+
+def _candidate_priority(path):
+    current_suffix = _current_extension_suffix()
+    suffix_matches = bool(current_suffix) and path.name.endswith(current_suffix)
+    return (suffix_matches, path.stat().st_mtime_ns, len(str(path)))
 
 
 def _discover_native_module_path():
@@ -97,10 +108,7 @@ def _discover_native_module_path():
     if not candidates:
         return None
 
-    candidates.sort(
-        key=lambda path: (path.stat().st_mtime_ns, len(str(path))),
-        reverse=True,
-    )
+    candidates.sort(key=_candidate_priority, reverse=True)
     return str(candidates[0])
 
 
@@ -119,7 +127,14 @@ def _load_native_module():
 
         # Dev/CI fallback: extension exists only as top-level _dicomsdl.* in build dir.
         top_level_spec = _importlib_util.find_spec("_dicomsdl")
-        if top_level_spec is not None and top_level_spec.origin is not None:
+        if (
+            top_level_spec is not None
+            and top_level_spec.origin is not None
+            and (
+                not _current_extension_suffix()
+                or top_level_spec.origin.endswith(_current_extension_suffix())
+            )
+        ):
             native_module_path = top_level_spec.origin
         else:
             native_module_path = _discover_native_module_path()

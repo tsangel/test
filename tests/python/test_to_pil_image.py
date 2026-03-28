@@ -11,6 +11,19 @@ def _test_file(name: str = "test_le.dcm") -> str:
     return str(Path(__file__).resolve().parent.parent / name)
 
 
+_GDCM_PALETTE_SAMPLE = (
+    Path(__file__).resolve().parents[2]
+    .parent
+    / "sample"
+    / "gdcm"
+    / "www.creatis.insa-lyon.fr"
+    / "gdcmSampleData"
+    / "ImagesPapyrus"
+    / "TestImages"
+    / "US0001"
+)
+
+
 def test_to_pil_image_method_exists():
     assert hasattr(dicom.DicomFile, "to_pil_image")
     assert not hasattr(dicom.DataSet, "to_pil_image")
@@ -115,6 +128,20 @@ def test_to_pil_image_supports_classic_palette_color():
     assert image.mode == "RGB"
     assert arr.dtype == np.uint8
     assert np.array_equal(arr, expected)
+
+
+def test_to_pil_image_supports_rle_palette_color_sample():
+    if not _GDCM_PALETTE_SAMPLE.exists():
+        pytest.skip(f"GDCM palette sample is not available: {_GDCM_PALETTE_SAMPLE}")
+
+    dicom_file = dicom.read_file(str(_GDCM_PALETTE_SAMPLE))
+    image = dicom_file.to_pil_image(frame=0, auto_window=True)
+
+    arr = np.asarray(image)
+    assert image.mode == "RGB"
+    assert image.size == (600, 430)
+    assert arr.shape == (430, 600, 3)
+    assert arr.dtype == np.uint8
 
 
 def test_to_pil_image_supports_supplemental_palette_display():

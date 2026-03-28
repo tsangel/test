@@ -1,10 +1,11 @@
 # CLI Tools
 
-DicomSDL exposes three user-facing command-line tools:
+DicomSDL exposes four user-facing command-line tools:
 
 - `dicomdump`: print a human-readable DICOM dump
 - `dicomshow`: open one decoded frame through Pillow
 - `dicomconv`: change transfer syntax and write a new file
+- `dicomview`: browse folders, images, and dumps through a Qt UI
 
 ## How to install the commands
 
@@ -14,12 +15,24 @@ DicomSDL exposes three user-facing command-line tools:
 pip install dicomsdl
 ```
 
-This installs the console scripts `dicomdump`, `dicomconv`, and `dicomshow`.
+This installs the console scripts `dicomdump`, `dicomconv`, `dicomshow`, and `dicomview`.
 
 `dicomshow` depends on the Pillow preview path, so in practice you usually want:
 
 ```bash
 pip install "dicomsdl[numpy,pil]"
+```
+
+If you also want the Qt browser, install the viewer extra:
+
+```bash
+pip install "dicomsdl[viewer]"
+```
+
+If you want both the Pillow preview path and the Qt viewer, you can install:
+
+```bash
+pip install "dicomsdl[numpy,pil,viewer]"
 ```
 
 ### From a source build
@@ -35,8 +48,8 @@ cmake --build build
 ./build/dicomconv in.dcm out.dcm ExplicitVRLittleEndian
 ```
 
-There is no separate C++ build-tree `dicomshow` executable. `dicomshow` is the
-Python console script entry point.
+There is no separate C++ build-tree `dicomshow` or `dicomview` executable. Both
+are Python console script entry points.
 
 ## `dicomdump`
 
@@ -177,15 +190,50 @@ dicomconv in.dcm out.dcm htj2k-lossless --no-color-transform
 dicomconv in.dcm out.dcm jpegxl --distance 1.5 --effort 7 --threads -1
 ```
 
+## `dicomview`
+
+Use `dicomview` as a lightweight developer-oriented DICOM browser. Unlike
+`dicomshow`, which previews one decoded frame, `dicomview` lets you open a
+folder and inspect the file list, basic metadata, image preview, and dump in a
+single window.
+
+### `dicomview` usage
+
+```bash
+dicomview [<input>]
+```
+
+`<input>` may be a single DICOM file or a directory. If omitted, `dicomview`
+first tries to restore the last opened path, then falls back to the current
+working directory.
+
+### `dicomview` notes
+
+- `dicomview` is a lightweight developer browser, not a diagnostic viewer.
+- It requires `PySide6`. Install `pip install "dicomsdl[viewer]"`.
+- Layout state such as column visibility, column widths, last path, and window
+  geometry is stored through `QSettings`.
+- Set `DICOMVIEW_SETTINGS_PATH=/path/to/dicomview.ini` to override the default
+  settings location.
+- It may not run in headless CI or server environments without a GUI backend.
+
+### `dicomview` examples
+
+```bash
+dicomview
+dicomview sample.dcm
+dicomview sample_folder/
+```
+
 ## Exit status
 
-All three commands return:
+All four commands return:
 
 - `0` on success
 - `1` if an input, parse, decode, encode, or write step fails
 
 Errors are printed to standard error with a tool-specific prefix such as
-`dicomdump:`, `dicomshow:`, or `dicomconv:`.
+`dicomdump:`, `dicomshow:`, `dicomconv:`, or `dicomview:`.
 
 ## Related docs
 

@@ -1,10 +1,11 @@
 # CLI 工具
 
-DicomSDL 提供 3 个面向用户的命令行工具。
+DicomSDL 提供 4 个面向用户的命令行工具。
 
 - `dicomdump`：输出便于阅读的 DICOM dump
 - `dicomshow`：通过 Pillow 快速预览单帧图像
 - `dicomconv`：修改 transfer syntax 并写出新文件
+- `dicomview`：通过 Qt UI 浏览文件夹、图像和 dump
 
 ## 如何安装这些命令
 
@@ -14,12 +15,24 @@ DicomSDL 提供 3 个面向用户的命令行工具。
 pip install dicomsdl
 ```
 
-这会安装 `dicomdump`、`dicomconv`、`dicomshow` 三个控制台脚本。
+这会安装 `dicomdump`、`dicomconv`、`dicomshow`、`dicomview` 四个控制台脚本。
 
 `dicomshow` 走的是 Pillow 预览路径，所以实际使用中通常更适合安装：
 
 ```bash
 pip install "dicomsdl[numpy,pil]"
+```
+
+如果还要使用 Qt 浏览器，需要安装 viewer extra：
+
+```bash
+pip install "dicomsdl[viewer]"
+```
+
+如果既要 Pillow 预览路径，也要 Qt viewer，可以这样安装：
+
+```bash
+pip install "dicomsdl[numpy,pil,viewer]"
 ```
 
 ### 从源码构建后使用
@@ -35,7 +48,7 @@ cmake --build build
 ./build/dicomconv in.dcm out.dcm ExplicitVRLittleEndian
 ```
 
-没有单独的 C++ 版 `dicomshow` 可执行文件。`dicomshow` 是 Python 控制台脚本 entry point。
+没有单独的 C++ 版 `dicomshow` 或 `dicomview` 可执行文件。二者都是 Python 控制台脚本 entry point。
 
 ## `dicomdump`
 
@@ -170,14 +183,44 @@ dicomconv in.dcm out.dcm htj2k-lossless --no-color-transform
 dicomconv in.dcm out.dcm jpegxl --distance 1.5 --effort 7 --threads -1
 ```
 
+## `dicomview`
+
+`dicomview` 是一个轻量级、面向开发者的 DICOM 浏览器。和只预览单帧图像的
+`dicomshow` 不同，`dicomview` 可以打开文件夹，并在一个窗口中同时查看文件列表、
+基础元数据、图像预览和 dump。
+
+### `dicomview` 用法
+
+```bash
+dicomview [<input>]
+```
+
+`<input>` 可以是单个 DICOM 文件，也可以是一个目录。如果省略，`dicomview` 会先尝试恢复上次打开的路径；如果没有，则从当前工作目录开始。
+
+### `dicomview` 说明
+
+- `dicomview` 是轻量级的开发者浏览器，不是诊断级 viewer。
+- 它依赖 `PySide6`。推荐安装 `pip install "dicomsdl[viewer]"`。
+- 列显示状态、列宽、最后路径、窗口大小等布局状态会通过 `QSettings` 保存。
+- 可以设置 `DICOMVIEW_SETTINGS_PATH=/path/to/dicomview.ini` 来覆盖默认设置文件位置。
+- 在没有 GUI backend 的 headless CI 或服务器环境中，可能无法运行。
+
+### `dicomview` 示例
+
+```bash
+dicomview
+dicomview sample.dcm
+dicomview sample_folder/
+```
+
 ## 退出码
 
-这三个命令都遵循同样的规则：
+这四个命令都遵循同样的规则：
 
 - 成功时返回 `0`
 - 输入、parse、decode、encode、write 任一步失败时返回 `1`
 
-错误会带着 `dicomdump:`、`dicomshow:`、`dicomconv:` 这样的前缀输出到标准错误。
+错误会带着 `dicomdump:`、`dicomshow:`、`dicomconv:`、`dicomview:` 这样的前缀输出到标准错误。
 
 ## 相关文档
 

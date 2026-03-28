@@ -585,6 +585,7 @@ setup(
     extras_require={
         "numpy": ["numpy"],
         "pil": ["numpy", "Pillow"],
+        "viewer": ["numpy", "PySide6>=6.8"],
     },
     classifiers=[
         "Development Status :: 4 - Beta",
@@ -624,6 +625,7 @@ setup(
             "dicomdump=dicomsdl.dicomdump:main",
             "dicomconv=dicomsdl.dicomconv:main",
             "dicomshow=dicomsdl.dicomshow:main",
+            "dicomview=dicomsdl.dicomview:main",
         ],
     },
     include_package_data=False,

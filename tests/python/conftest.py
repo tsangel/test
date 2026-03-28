@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import pathlib
 import sys
+import sysconfig
 
 import pytest
 
@@ -13,7 +14,31 @@ BUILD_GLOBS = ("build*",)
 NATIVE_PATTERNS = ("_dicomsdl*.pyd", "_dicomsdl*.so", "_dicomsdl*.dylib")
 
 
+def _explicit_native_module() -> pathlib.Path | None:
+    raw = os.environ.get("DICOMSDL_NATIVE_MODULE_PATH", "").strip()
+    if not raw:
+        return None
+    candidate = pathlib.Path(raw).expanduser().resolve()
+    if candidate.is_file():
+        return candidate
+    return None
+
+
+def _current_extension_suffix() -> str:
+    return (sysconfig.get_config_var("EXT_SUFFIX") or "").strip()
+
+
+def _candidate_priority(path: pathlib.Path) -> tuple[bool, int, int]:
+    current_suffix = _current_extension_suffix()
+    suffix_matches = bool(current_suffix) and path.name.endswith(current_suffix)
+    return (suffix_matches, path.stat().st_mtime_ns, len(str(path)))
+
+
 def _find_native_module() -> pathlib.Path | None:
+    explicit = _explicit_native_module()
+    if explicit is not None:
+        return explicit
+
     candidates: list[pathlib.Path] = []
     for build_glob in BUILD_GLOBS:
         for build_dir in ROOT.glob(build_glob):
@@ -23,7 +48,7 @@ def _find_native_module() -> pathlib.Path | None:
                 candidates.extend(build_dir.rglob(pattern))
     if not candidates:
         return None
-    candidates.sort(key=lambda path: (path.stat().st_mtime_ns, len(str(path))), reverse=True)
+    candidates.sort(key=_candidate_priority, reverse=True)
     return candidates[0]
 
 

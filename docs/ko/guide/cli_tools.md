@@ -1,10 +1,11 @@
 # CLI 도구
 
-DicomSDL은 사용자용 명령줄 도구 세 가지를 제공합니다.
+DicomSDL은 사용자용 명령줄 도구 네 가지를 제공합니다.
 
 - `dicomdump`: 사람이 읽기 쉬운 DICOM dump 출력
 - `dicomshow`: Pillow로 한 프레임 빠르게 미리보기
 - `dicomconv`: transfer syntax를 바꾸어 새 파일로 저장
+- `dicomview`: 폴더를 훑으며 파일과 dump를 같이 보는 Qt 기반 브라우저
 
 ## 명령 설치 방법
 
@@ -14,12 +15,24 @@ DicomSDL은 사용자용 명령줄 도구 세 가지를 제공합니다.
 pip install dicomsdl
 ```
 
-이 명령은 `dicomdump`, `dicomconv`, `dicomshow` 콘솔 스크립트를 설치합니다.
+이 명령은 `dicomdump`, `dicomconv`, `dicomshow`, `dicomview` 콘솔 스크립트를 설치합니다.
 
 `dicomshow`는 Pillow 기반 미리보기 경로를 쓰므로, 실제로는 보통 아래 설치가 더 편합니다.
 
 ```bash
 pip install "dicomsdl[numpy,pil]"
+```
+
+`dicomview`까지 쓰려면 Qt viewer extra가 필요합니다.
+
+```bash
+pip install "dicomsdl[viewer]"
+```
+
+이미지 미리보기와 Qt viewer를 둘 다 쓰려면 예를 들어 아래처럼 설치할 수 있습니다.
+
+```bash
+pip install "dicomsdl[numpy,pil,viewer]"
 ```
 
 ### 소스 빌드에서 사용
@@ -35,7 +48,7 @@ cmake --build build
 ./build/dicomconv in.dcm out.dcm ExplicitVRLittleEndian
 ```
 
-별도의 C++용 `dicomshow` 실행 파일은 없습니다. `dicomshow`는 Python 콘솔
+별도의 C++용 `dicomshow`, `dicomview` 실행 파일은 없습니다. 둘 다 Python 콘솔
 스크립트 entry point입니다.
 
 ## `dicomdump`
@@ -171,15 +184,46 @@ dicomconv in.dcm out.dcm htj2k-lossless --no-color-transform
 dicomconv in.dcm out.dcm jpegxl --distance 1.5 --effort 7 --threads -1
 ```
 
+## `dicomview`
+
+`dicomview`는 개발자용 DICOM 브라우저입니다. 파일 하나만 빠르게 띄우는
+`dicomshow`와 달리, 폴더를 열고 파일 목록, 기본 메타데이터, 이미지, dump를 한
+창에서 같이 훑을 수 있습니다.
+
+### `dicomview` 사용법
+
+```bash
+dicomview [<input>]
+```
+
+`<input>`은 DICOM 파일 하나 또는 폴더 하나입니다. 생략하면 마지막으로 열었던 경로를
+우선 복원하고, 없으면 현재 작업 디렉터리에서 시작합니다.
+
+### `dicomview` 참고
+
+- `dicomview`는 가벼운 개발자용 브라우저이지 진단용 뷰어가 아닙니다.
+- `PySide6`가 필요합니다. 설치는 `pip install "dicomsdl[viewer]"`를 권장합니다.
+- 현재 컬럼 레이아웃, 마지막 경로, 창 크기 같은 설정은 `QSettings`에 저장합니다.
+- `DICOMVIEW_SETTINGS_PATH=/path/to/dicomview.ini`를 주면 별도 설정 파일을 쓸 수 있습니다.
+- headless CI나 서버에서는 GUI backend가 없어 실행이 제한될 수 있습니다.
+
+### `dicomview` 예시
+
+```bash
+dicomview
+dicomview sample.dcm
+dicomview sample_folder/
+```
+
 ## 종료 코드
 
-세 명령 모두 다음 규칙을 따릅니다.
+네 명령 모두 다음 규칙을 따릅니다.
 
 - 성공 시 `0`
 - 입력, parse, decode, encode, write 단계 중 하나라도 실패하면 `1`
 
-오류 메시지는 `dicomdump:`, `dicomshow:`, `dicomconv:` 같은 도구 이름 접두사와 함께
-표준 오류로 출력됩니다.
+오류 메시지는 `dicomdump:`, `dicomshow:`, `dicomconv:`, `dicomview:` 같은 도구 이름
+접두사와 함께 표준 오류로 출력됩니다.
 
 ## 관련 문서
 
