@@ -134,8 +134,9 @@ Head: [34, 12, 40, 12, 36, 12, 39, 12]
 The exact first bytes depend on the file. This direct `value_span()` view is for
 native / uncompressed `PixelData`. For compressed encapsulated transfer syntaxes,
 `PixelData` is stored as a `PixelSequence`, so `elem.value_span()` is empty and
-you should use `elem.pixel_sequence.frame_encoded_memoryview(0)` or
-`elem.pixel_sequence.frame_encoded_bytes(0)` instead.
+you should usually use `df.encoded_pixel_frame_view(0)` instead. Use
+`df.encoded_pixel_frame_bytes(0)` when you want a detached copy rather than a
+borrowed view.
 Keep `df` alive while you use `raw`: the memoryview points at bytes owned by the
 loaded DICOM object and becomes invalid if those bytes are replaced.
 Need raw-byte semantics or encapsulated `PixelData` details? See

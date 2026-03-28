@@ -1954,6 +1954,44 @@ void DicomFile::reset_encapsulated_pixel_data(std::size_t frame_count) {
 	}
 }
 
+std::span<const std::uint8_t> DicomFile::encoded_pixel_frame_view(std::size_t frame_index) {
+	root_dataset_.ensure_loaded("PixelData"_tag);
+	auto& pixel_data = root_dataset_.get_dataelement("PixelData"_tag);
+	if (pixel_data.is_missing()) {
+		diag::error_and_throw(
+		    "DicomFile::encoded_pixel_frame_view file={} frame_index={} reason=PixelData is missing",
+		    path(), frame_index);
+	}
+	if (!pixel_data.vr().is_pixel_sequence()) {
+		diag::error_and_throw(
+		    "DicomFile::encoded_pixel_frame_view file={} frame_index={} reason=PixelData is not an encapsulated sequence",
+		    path(), frame_index);
+	}
+	auto* pixel_sequence = pixel_data.as_pixel_sequence();
+	if (!pixel_sequence) {
+		diag::error_and_throw(
+		    "DicomFile::encoded_pixel_frame_view file={} frame_index={} reason=PixelData is not an encapsulated sequence",
+		    path(), frame_index);
+	}
+	if (frame_index >= pixel_sequence->number_of_frames()) {
+		diag::error_and_throw(
+		    "DicomFile::encoded_pixel_frame_view file={} frame_index={} frame_count={} reason=frame index out of range",
+		    path(), frame_index, pixel_sequence->number_of_frames());
+	}
+	return pixel_sequence->frame_encoded_span(frame_index);
+}
+
+std::vector<std::uint8_t> DicomFile::encoded_pixel_frame_bytes(std::size_t frame_index) {
+	const auto span = encoded_pixel_frame_view(frame_index);
+	return std::vector<std::uint8_t>(span.begin(), span.end());
+}
+
+void DicomFile::set_encoded_pixel_frame(std::size_t frame_index,
+    std::span<const std::uint8_t> encoded_frame) {
+	std::vector<std::uint8_t> bytes(encoded_frame.begin(), encoded_frame.end());
+	set_encoded_pixel_frame(frame_index, std::move(bytes));
+}
+
 void DicomFile::set_encoded_pixel_frame(std::size_t frame_index,
     std::vector<std::uint8_t>&& encoded_frame) {
 	auto& pixel_data = root_dataset_.get_dataelement("PixelData"_tag);
@@ -1977,6 +2015,11 @@ void DicomFile::set_encoded_pixel_frame(std::size_t frame_index,
 
 	frame->set_fragments({});
 	frame->set_encoded_data(std::move(encoded_frame));
+}
+
+PixelFrame* DicomFile::add_encoded_pixel_frame(std::span<const std::uint8_t> encoded_frame) {
+	std::vector<std::uint8_t> bytes(encoded_frame.begin(), encoded_frame.end());
+	return add_encoded_pixel_frame(std::move(bytes));
 }
 
 PixelFrame* DicomFile::add_encoded_pixel_frame(std::vector<std::uint8_t>&& encoded_frame) {

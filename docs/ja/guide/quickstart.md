@@ -118,7 +118,7 @@ Raw bytes: 524288
 Head: [34, 12, 40, 12, 36, 12, 39, 12]
 ```
 
-先頭の bytes はファイルによって変わります。この `value_span()` view は native / uncompressed `PixelData` 向けです。圧縮された encapsulated transfer syntax では `PixelData` は `PixelSequence` として保存されるため、`elem.value_span()` は空になり、代わりに `elem.pixel_sequence.frame_encoded_memoryview(0)` または `elem.pixel_sequence.frame_encoded_bytes(0)` を使う必要があります。
+先頭の bytes はファイルによって変わります。この `value_span()` view は native / uncompressed `PixelData` 向けです。圧縮された encapsulated transfer syntax では `PixelData` は `PixelSequence` として保存されるため、`elem.value_span()` は空になり、通常は `df.encoded_pixel_frame_view(0)` を使います。borrowed view ではなく切り離された copy が必要な場合は `df.encoded_pixel_frame_bytes(0)` を使ってください。
 `raw` を使っている間は `df` を生かしておいてください。この memoryview は読み込まれた DICOM オブジェクトが所有する bytes を参照しており、その bytes が置き換えられると無効になります。
 raw byte の意味や encapsulated `PixelData` の詳細は [DataElement Reference](../reference/dataelement_reference.md) と [Pixel Reference](../reference/pixel_reference.md) を参照してください。
 

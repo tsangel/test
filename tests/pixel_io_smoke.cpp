@@ -549,6 +549,14 @@ int main() {
 		const std::vector<std::uint8_t> expected_frame1{
 		    0x11u, 0x00u, 0x12u, 0x00u, 0x13u, 0x00u,
 		    0x14u, 0x00u, 0x15u, 0x00u, 0x16u, 0x00u};
+		const auto frame0_view = encap_file.encoded_pixel_frame_view(0);
+		const auto frame1_bytes = encap_file.encoded_pixel_frame_bytes(1);
+		if (!std::equal(frame0_view.begin(), frame0_view.end(), expected_frame0.begin(), expected_frame0.end())) {
+			fail("EncapsulatedUncompressed encoded_pixel_frame_view mismatch");
+		}
+		if (frame1_bytes != expected_frame1) {
+			fail("EncapsulatedUncompressed encoded_pixel_frame_bytes mismatch");
+		}
 		if (encap_file.pixel_data(0) != expected_frame0 || encap_file.pixel_data(1) != expected_frame1) {
 			fail("EncapsulatedUncompressed roundtrip mismatch");
 		}
@@ -979,9 +987,15 @@ int main() {
 		referenced_uid.set_value_bytes(uid_value);
 
 		generated.reset_encapsulated_pixel_data(1);
-		generated.set_encoded_pixel_frame(0, std::vector<std::uint8_t>{0x01, 0x02, 0x03, 0x04});
+		const std::array<std::uint8_t, 4> initial_frame{{0x01, 0x02, 0x03, 0x04}};
+		generated.set_encoded_pixel_frame(
+		    0, std::span<const std::uint8_t>(initial_frame.data(), initial_frame.size()));
 		if (generated["NumberOfFrames"_tag].to_long().value_or(0) != 1) {
 			fail("reset_encapsulated_pixel_data(1) should set NumberOfFrames");
+		}
+		generated.add_encoded_pixel_frame(std::span<const std::uint8_t>(initial_frame.data(), 2));
+		if (generated["NumberOfFrames"_tag].to_long().value_or(0) != 2) {
+			fail("add_encoded_pixel_frame(span) should update NumberOfFrames");
 		}
 
 		dicom::WriteOptions write_opts;
@@ -1000,12 +1014,16 @@ int main() {
 			fail("roundtrip pixel data should be pixel sequence");
 		}
 		auto* pix_value = pix_roundtrip.as_pixel_sequence();
-		if (!pix_value || pix_value->number_of_frames() != 1) fail("roundtrip pixel frame count mismatch");
+		if (!pix_value || pix_value->number_of_frames() != 2) fail("roundtrip pixel frame count mismatch");
 		const auto encoded_span = pix_value->frame_encoded_span(0);
 		if (encoded_span.size() != 4 ||
 		    encoded_span[0] != 0x01 || encoded_span[1] != 0x02 ||
 		    encoded_span[2] != 0x03 || encoded_span[3] != 0x04) {
 			fail("roundtrip pixel payload mismatch");
+		}
+		const auto encoded_span_1 = pix_value->frame_encoded_span(1);
+		if (encoded_span_1.size() != 2 || encoded_span_1[0] != 0x01 || encoded_span_1[1] != 0x02) {
+			fail("roundtrip appended pixel payload mismatch");
 		}
 
 		const fs::path roundtrip_path =

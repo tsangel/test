@@ -4644,6 +4644,41 @@ NB_MODULE(_dicomsdl, m) {
 		    },
 		    nb::arg("frame_index") = 0,
 		    "Decode one frame with default options and return decoded bytes.")
+		.def("encoded_pixel_frame_bytes",
+		    [](DicomFile& self, std::size_t frame_index) {
+			    const auto encoded = self.encoded_pixel_frame_bytes(frame_index);
+			    if (encoded.empty()) {
+				    return nb::bytes("", 0);
+			    }
+			    return nb::bytes(reinterpret_cast<const char*>(encoded.data()), encoded.size());
+		    },
+		    nb::arg("frame_index"),
+		    "Return one encapsulated PixelData frame as detached bytes.")
+		.def("encoded_pixel_frame_view",
+		    [](DicomFile& self, std::size_t frame_index) {
+			    const auto span = self.encoded_pixel_frame_view(frame_index);
+			    return readonly_memoryview_from_span(
+			        span.data(), span.size(), nb::cast(&self, nb::rv_policy::reference));
+		    },
+		    nb::arg("frame_index"),
+		    "Return a read-only memoryview over one encapsulated PixelData frame.")
+		.def("set_encoded_pixel_frame",
+		    [](DicomFile& self, std::size_t frame_index, nb::handle source) {
+			    auto bytes = pybuffer_to_bytes(source);
+			    self.set_encoded_pixel_frame(
+			        frame_index, std::span<const std::uint8_t>(bytes.data(), bytes.size()));
+		    },
+		    nb::arg("frame_index"),
+		    nb::arg("source"),
+		    "Replace one encapsulated PixelData frame from a contiguous buffer object.")
+		.def("add_encoded_pixel_frame",
+		    [](DicomFile& self, nb::handle source) {
+			    auto bytes = pybuffer_to_bytes(source);
+			    static_cast<void>(self.add_encoded_pixel_frame(
+			        std::span<const std::uint8_t>(bytes.data(), bytes.size())));
+		    },
+		    nb::arg("source"),
+		    "Append one encapsulated PixelData frame from a contiguous buffer object.")
 		.def("to_array",
 		    &dicomfile_to_array,
 		    nb::arg("frame") = -1,

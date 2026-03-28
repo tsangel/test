@@ -118,7 +118,7 @@ Raw bytes: 524288
 Head: [34, 12, 40, 12, 36, 12, 39, 12]
 ```
 
-前几个字节的内容会因文件而异。这个直接的 `value_span()` view 适用于 native / uncompressed `PixelData`。对于压缩的 encapsulated transfer syntax，`PixelData` 会存成 `PixelSequence`，因此 `elem.value_span()` 为空，这时应使用 `elem.pixel_sequence.frame_encoded_memoryview(0)` 或 `elem.pixel_sequence.frame_encoded_bytes(0)`。
+前几个字节的内容会因文件而异。这个直接的 `value_span()` view 适用于 native / uncompressed `PixelData`。对于压缩的 encapsulated transfer syntax，`PixelData` 会存成 `PixelSequence`，因此 `elem.value_span()` 为空，通常应使用 `df.encoded_pixel_frame_view(0)`。如果需要分离出来的 copy，而不是 borrowed view，则使用 `df.encoded_pixel_frame_bytes(0)`。
 在使用 `raw` 期间请保持 `df` 存活。这个 memoryview 指向的是已加载 DICOM 对象拥有的字节，如果这些字节被替换，它就会失效。
 如果需要 raw byte 语义或 encapsulated `PixelData` 的细节，请参见 [DataElement Reference](../reference/dataelement_reference.md) 和 [Pixel Reference](../reference/pixel_reference.md)。
 

@@ -2861,9 +2861,24 @@ public:
 	/// If `frame_count` is non-zero, preallocate that many frame slots and set NumberOfFrames.
 	/// This also clears FloatPixelData/DoubleFloatPixelData and invalidates pixel cache.
 	void reset_encapsulated_pixel_data(std::size_t frame_count = 0);
+	/// Return one encoded PixelData frame as a borrowed byte view.
+	/// This may be zero-copy when the source frame is already contiguous, and may
+	/// materialize/coalesce frame data when needed. The returned span remains valid
+	/// only while the owning DicomFile/PixelSequence backing storage remains valid.
+	[[nodiscard]] std::span<const std::uint8_t> encoded_pixel_frame_view(std::size_t frame_index);
+	/// Return one encoded PixelData frame as detached owned bytes.
+	[[nodiscard]] std::vector<std::uint8_t> encoded_pixel_frame_bytes(std::size_t frame_index);
+	/// Copy one encoded frame payload into a preallocated encapsulated frame slot.
+	/// This convenience overload copies from a borrowed byte span and forwards to
+	/// the existing move-based setter.
+	void set_encoded_pixel_frame(std::size_t frame_index, std::span<const std::uint8_t> encoded_frame);
 	/// Move one encoded frame payload into a preallocated encapsulated frame slot.
 	/// Intended for deterministic frame-index writes (e.g. multi-threaded encoders).
 	void set_encoded_pixel_frame(std::size_t frame_index, std::vector<std::uint8_t>&& encoded_frame);
+	/// Append one encoded frame payload into encapsulated PixelData (VR::PX).
+	/// This convenience overload copies from a borrowed byte span and forwards to
+	/// the existing move-based append path.
+	[[nodiscard]] PixelFrame* add_encoded_pixel_frame(std::span<const std::uint8_t> encoded_frame);
 	/// Append one encoded frame payload into encapsulated PixelData (VR::PX).
 	/// Ownership of `encoded_frame` is moved without byte copy.
 	/// NumberOfFrames is updated to match the appended frame count.

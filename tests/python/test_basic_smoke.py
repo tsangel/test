@@ -147,6 +147,25 @@ def test_is_dicom_file(tmp_path):
 	assert dicom.is_dicom_file(dicm_without_meta)
 
 
+def test_encoded_pixel_frame_access(tmp_path):
+	encap_path = tmp_path / "encap-frame-access.dcm"
+	encap_path.write_bytes(_build_sequence_pixel_sample())
+	obj = dicom.read_file(encap_path)
+
+	assert obj.encoded_pixel_frame_bytes(0) == b"\x01\x02\x03\x04"
+	assert obj.encoded_pixel_frame_view(0).tobytes() == b"\x01\x02\x03\x04"
+
+	obj.set_encoded_pixel_frame(0, memoryview(b"\x0A\x0B\x0C\x0D"))
+	assert obj.encoded_pixel_frame_bytes(0) == b"\x0A\x0B\x0C\x0D"
+
+	obj.add_encoded_pixel_frame(bytearray(b"\xAA\xBB"))
+	assert int(obj.get_value("NumberOfFrames")) == 2
+	assert obj.encoded_pixel_frame_bytes(1) == b"\xAA\xBB"
+
+	with pytest.raises(Exception):
+		dicom.read_file(pathlib.Path(_test_file())).encoded_pixel_frame_bytes(0)
+
+
 def test_python_pathlike_support(tmp_path):
 	unicode_label = "\ud55c\uae00"
 	source = dicom.read_file(pathlib.Path(_test_file()))

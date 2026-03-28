@@ -118,7 +118,7 @@ Raw bytes: 524288
 Head: [34, 12, 40, 12, 36, 12, 39, 12]
 ```
 
-앞부분 바이트는 파일마다 달라집니다. 이 직접적인 `value_span()` view는 native / uncompressed `PixelData`용입니다. 압축된 encapsulated transfer syntax에서는 `PixelData`가 `PixelSequence`로 저장되므로 `elem.value_span()`은 비어 있고, 대신 `elem.pixel_sequence.frame_encoded_memoryview(0)` 또는 `elem.pixel_sequence.frame_encoded_bytes(0)`를 사용해야 합니다.
+앞부분 바이트는 파일마다 달라집니다. 이 직접적인 `value_span()` view는 native / uncompressed `PixelData`용입니다. 압축된 encapsulated transfer syntax에서는 `PixelData`가 `PixelSequence`로 저장되므로 `elem.value_span()`은 비어 있고, 보통은 `df.encoded_pixel_frame_view(0)`를 사용하면 됩니다. borrowed view가 아니라 분리된 복사본이 필요할 때는 `df.encoded_pixel_frame_bytes(0)`를 사용하세요.
 `raw`를 사용하는 동안에는 `df`를 살아 있게 두세요. 이 memoryview는 로드된 DICOM 객체가 소유한 바이트를 가리키며, 그 바이트가 교체되면 더 이상 유효하지 않습니다.
 raw byte 의미나 encapsulated `PixelData`의 세부 사항이 필요하면 [DataElement Reference](../reference/dataelement_reference.md)와 [Pixel Reference](../reference/pixel_reference.md)를 보세요.
 
