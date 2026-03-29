@@ -145,6 +145,131 @@ int main() {
 	if (!dicom::uid::is_valid_uid_text_strict(generated_uid_nothrow->value())) {
 		fail("try_generate_uid should return strict-valid UID text");
 	}
+	const auto generated_custom_root =
+	    dicom::uid::generate_uid("1.2.826.0.1.3680043.10.543");
+	if (!generated_custom_root.value().starts_with(
+	        "1.2.826.0.1.3680043.10.543.")) {
+		fail("generate_uid(root) should use the requested root");
+	}
+	if (!dicom::uid::is_valid_uid_text_strict(generated_custom_root.value())) {
+		fail("generate_uid(root) should remain strict-valid");
+	}
+	const auto from_uid_a = dicom::uid::generate_uid_from(
+	    "same-key", "1.2.826.0.1.3680043.10.543");
+	const auto from_uid_b = dicom::uid::generate_uid_from(
+	    "same-key", "1.2.826.0.1.3680043.10.543");
+	const auto from_uid_c = dicom::uid::generate_uid_from(
+	    "different-key", "1.2.826.0.1.3680043.10.543");
+	if (from_uid_a.value() != from_uid_b.value()) {
+		fail("generate_uid_from(key, root) should be deterministic for the same key");
+	}
+	if (from_uid_a.value() == from_uid_c.value()) {
+		fail("generate_uid_from(key, root) should vary across different keys");
+	}
+	if (!dicom::uid::is_valid_uid_text_strict(from_uid_a.value())) {
+		fail("generate_uid_from(key, root) should remain strict-valid");
+	}
+
+	{
+		const auto temp_root =
+		    std::filesystem::temp_directory_path() / "dicomsdl_uid_remapper_smoke";
+		const auto default_journal = temp_root / "default.tsv";
+		const auto buffered_journal = temp_root / "buffered.tsv";
+		const auto custom_journal = temp_root / "custom.tsv";
+		std::error_code cleanup_ec;
+		std::filesystem::remove_all(temp_root, cleanup_ec);
+		std::filesystem::create_directories(temp_root, cleanup_ec);
+		if (cleanup_ec) {
+			fail("UidRemapper smoke setup should create temporary journal directory");
+		}
+
+		const std::string source_uid_a = "1.2.840.113619.2.55.3.604688435.123.456";
+		const std::string source_uid_b = "1.2.840.113619.2.55.3.604688435.123.457";
+		std::string mapped_a;
+		std::string mapped_b;
+
+		{
+			auto remapper = dicom::UidRemapper::in_memory(default_journal);
+			if (!remapper.is_valid()) {
+				fail("UidRemapper::in_memory should create a valid remapper");
+			}
+			bool threw_duplicate_open = false;
+			try {
+				auto duplicate = dicom::UidRemapper::in_memory(default_journal);
+				(void)duplicate;
+			} catch (const std::exception&) {
+				threw_duplicate_open = true;
+			}
+			if (!threw_duplicate_open) {
+				fail("UidRemapper should reject opening the same journal twice at once");
+			}
+			mapped_a = remapper.map_uid(source_uid_a);
+			if (mapped_a.rfind(dicom::uid::uid_prefix(), 0) != 0) {
+				fail("UidRemapper default root should use dicomsdl uid prefix");
+			}
+			if (!dicom::uid::is_valid_uid_text_strict(mapped_a)) {
+				fail("UidRemapper mapped UID should be strict-valid");
+			}
+			if (remapper.map_uid(source_uid_a) != mapped_a) {
+				fail("UidRemapper should reuse existing mapping for same source UID");
+			}
+			mapped_b = remapper.map_uid(source_uid_b);
+			if (mapped_b == mapped_a) {
+				fail("UidRemapper should create different mappings for different source UIDs");
+			}
+		}
+
+		{
+			auto replayed = dicom::UidRemapper::in_memory(default_journal);
+			if (replayed.map_uid(source_uid_a) != mapped_a) {
+				fail("UidRemapper should replay existing mapping from journal");
+			}
+			if (replayed.map_uid(source_uid_b) != mapped_b) {
+				fail("UidRemapper should replay second mapping from journal");
+			}
+		}
+
+		{
+			auto buffered = dicom::UidRemapper::in_memory(
+			    buffered_journal, dicom::uid::uid_prefix(), false);
+			const auto buffered_target = buffered.map_uid(source_uid_a);
+			buffered.close();
+			auto replayed = dicom::UidRemapper::in_memory(buffered_journal);
+			if (replayed.map_uid(source_uid_a) != buffered_target) {
+				fail("UidRemapper buffered mode should persist mappings after explicit close");
+			}
+		}
+
+		{
+			auto remapper = dicom::UidRemapper::in_memory(
+			    custom_journal, "1.2.826.0.1.3680043.10.543");
+			const auto custom_target = remapper.map_uid(source_uid_a);
+			if (!custom_target.starts_with("1.2.826.0.1.3680043.10.543.")) {
+				fail("UidRemapper custom root should use requested root");
+			}
+			if (!dicom::uid::is_valid_uid_text_strict(custom_target)) {
+				fail("UidRemapper custom root mapping should be strict-valid");
+			}
+			remapper.close();
+			if (remapper.is_valid()) {
+				fail("UidRemapper should become invalid after close");
+			}
+			bool threw_after_close = false;
+			try {
+				(void)remapper.map_uid(source_uid_b);
+			} catch (const std::exception&) {
+				threw_after_close = true;
+			}
+			if (!threw_after_close) {
+				fail("UidRemapper should reject map_uid after close");
+			}
+		}
+
+		std::filesystem::remove_all(temp_root, cleanup_ec);
+		if (cleanup_ec) {
+			fail("UidRemapper smoke cleanup should remove temporary journal files");
+		}
+	}
 
 	const auto sop_uid = dicom::uid::generate_sop_instance_uid();
 	if (!dicom::uid::is_valid_uid_text_strict(sop_uid.value())) {

@@ -272,7 +272,49 @@ Generated Generated::append(std::uint64_t component) const {
 	return *extended;
 }
 
-std::optional<Generated> try_generate_uid() noexcept {
+std::optional<Generated> detail::try_generate_uid_validated_root_from(
+    std::string_view root,
+    std::string_view key) noexcept {
+	Generated uid{};
+	constexpr std::size_t kCapacity = Generated::max_str_length;
+	std::size_t pos = 0;
+
+	if (root.size() > kCapacity) {
+		return std::nullopt;
+	}
+	std::memcpy(uid.buffer.data(), root.data(), root.size());
+	pos += root.size();
+
+	// Deterministically derive a 96-bit decimal suffix from `(root, key)`.
+	std::uint64_t hi = splitmix64(0x243F6A8885A308D3ULL ^ static_cast<std::uint64_t>(root.size()));
+	std::uint64_t lo = splitmix64(0x13198A2E03707344ULL ^ static_cast<std::uint64_t>(key.size()));
+	for (const char ch : root) {
+		hi = splitmix64(hi ^ static_cast<std::uint8_t>(ch));
+		lo = splitmix64(lo ^ (static_cast<std::uint64_t>(static_cast<std::uint8_t>(ch)) + 0x100ULL));
+	}
+	for (const char ch : key) {
+		hi = splitmix64(hi ^ static_cast<std::uint8_t>(ch));
+		lo = splitmix64(lo ^ (static_cast<std::uint64_t>(static_cast<std::uint8_t>(ch)) + 0x200ULL));
+	}
+	const std::uint32_t lo32 = static_cast<std::uint32_t>(
+	    splitmix64(lo ^ hi ^ static_cast<std::uint64_t>(root.size() + key.size())));
+
+	if (!append_char(uid.buffer.data(), kCapacity, pos, '.') ||
+	    !append_u96_decimal(uid.buffer.data(), kCapacity, pos, hi, lo32)) {
+		return std::nullopt;
+	}
+
+	uid.buffer[pos] = '\0';
+	uid.length = static_cast<Generated::size_type>(pos);
+
+	if (!is_valid_uid_text_strict(uid.value())) {
+		return std::nullopt;
+	}
+	return uid;
+}
+
+std::optional<Generated> detail::try_generate_uid_validated_root(
+    std::string_view root) noexcept {
 	static const std::uint64_t process_nonce = make_process_nonce();
 	static std::atomic<std::uint64_t> counter{0};
 
@@ -284,11 +326,11 @@ std::optional<Generated> try_generate_uid() noexcept {
 	constexpr std::size_t kCapacity = Generated::max_str_length;
 	std::size_t pos = 0;
 
-	if (kUidPrefix.size() > kCapacity) {
+	if (root.size() > kCapacity) {
 		return std::nullopt;
 	}
-	std::memcpy(uid.buffer.data(), kUidPrefix.data(), kUidPrefix.size());
-	pos += kUidPrefix.size();
+	std::memcpy(uid.buffer.data(), root.data(), root.size());
+	pos += root.size();
 
 	if (!append_char(uid.buffer.data(), kCapacity, pos, '.') ||
 	    !append_u96_decimal(uid.buffer.data(), kCapacity, pos, nonce_component, sequence)) {
@@ -304,10 +346,37 @@ std::optional<Generated> try_generate_uid() noexcept {
 	return uid;
 }
 
-Generated generate_uid() {
-	auto generated = try_generate_uid();
+std::optional<Generated> try_generate_uid(
+    std::string_view root) noexcept {
+	if (!is_valid_uid_text_strict(root)) {
+		return std::nullopt;
+	}
+	return detail::try_generate_uid_validated_root(root);
+}
+
+std::optional<Generated> try_generate_uid_from(
+    std::string_view key,
+    std::string_view root) noexcept {
+	if (!is_valid_uid_text_strict(root)) {
+		return std::nullopt;
+	}
+	return detail::try_generate_uid_validated_root_from(root, key);
+}
+
+Generated generate_uid(std::string_view root) {
+	auto generated = try_generate_uid(root);
 	if (!generated) {
 		throw std::runtime_error("Failed to build generated UID");
+	}
+	return *generated;
+}
+
+Generated generate_uid_from(
+    std::string_view key,
+    std::string_view root) {
+	auto generated = try_generate_uid_from(key, root);
+	if (!generated) {
+		throw std::runtime_error("Failed to build generated UID from key");
 	}
 	return *generated;
 }

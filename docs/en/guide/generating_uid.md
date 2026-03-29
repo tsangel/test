@@ -7,6 +7,8 @@ This document explains the current UID generation and append flow in DicomSDL.
 - C++:
   - `dicom::uid::try_generate_uid()`
   - `dicom::uid::generate_uid()`
+  - `dicom::uid::try_generate_uid_from(key, root)`
+  - `dicom::uid::generate_uid_from(key, root)`
   - `dicom::uid::Generated::try_append(component)`
   - `dicom::uid::Generated::append(component)`
 - Python:
@@ -40,7 +42,23 @@ auto inst = series.append(34);
 - `try_append(component)` returns `std::optional<Generated>`
 - `append(component)` throws `std::runtime_error` on failure
 
-### 2.3 Existing UID text to `Generated`
+### 2.3 Generate deterministic UID from key
+
+```cpp
+auto uid_opt = dicom::uid::try_generate_uid_from(
+    "source-uid-or-other-stable-key",
+    "1.2.826.0.1.3680043.10.543");
+auto uid = dicom::uid::generate_uid_from(
+    "source-uid-or-other-stable-key",
+    "1.2.826.0.1.3680043.10.543");
+```
+
+- `generate_uid_from(key, root)` returns the same UID for the same `(key, root)` pair.
+- This is a deterministic helper. It does not check collisions against external storage.
+- `UidRemapper` may still choose a different journal-local UID policy when persistence and collision handling matter.
+- Python does not expose a `generate_uid_from(...)` binding at this time.
+
+### 2.4 Existing UID text to `Generated`
 
 ```cpp
 auto base = dicom::uid::make_generated("1.2.840.10008");
@@ -92,6 +110,10 @@ So for the same `(base_uid, component)`, fallback suffix can differ across calls
 - `generate_uid()`:
   - throws on failure
 - `try_generate_uid()`:
+  - returns `None` / `std::nullopt` on failure
+- `generate_uid_from()`:
+  - throws on failure
+- `try_generate_uid_from()`:
   - returns `None` / `std::nullopt` on failure
 - `append_uid()` / `Generated::append()`:
   - throws on failure

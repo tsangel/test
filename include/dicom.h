@@ -199,6 +199,8 @@ inline Tag load_tag_le(const void* ptr) noexcept {
 
 namespace uid {
 
+struct Generated;
+
 namespace detail {
 constexpr bool is_valid_uid_char(char ch) noexcept {
 	return (ch >= '0' && ch <= '9') || ch == '.';
@@ -215,6 +217,15 @@ constexpr bool is_valid_uid_text(std::string_view text) noexcept {
 	}
 	return true;
 }
+
+// Internal fast path for callers that already hold a strict-valid root.
+[[nodiscard]] std::optional<Generated> try_generate_uid_validated_root(
+    std::string_view root) noexcept;
+// Internal deterministic candidate generator for callers that already hold a
+// strict-valid root. Same `(root, key)` yields the same candidate UID.
+[[nodiscard]] std::optional<Generated> try_generate_uid_validated_root_from(
+    std::string_view root,
+    std::string_view key) noexcept;
 }  // namespace detail
 
 struct WellKnown {
@@ -382,13 +393,62 @@ static_assert(
 [[nodiscard]] std::optional<Generated> make_uid_with_suffix(std::uint64_t suffix) noexcept;
 
 // Generate monotonic UIDs under DicomSDL prefix.
-[[nodiscard]] std::optional<Generated> try_generate_uid() noexcept;
-[[nodiscard]] Generated generate_uid();
+[[nodiscard]] std::optional<Generated> try_generate_uid(
+    std::string_view root = uid_prefix()) noexcept;
+[[nodiscard]] std::optional<Generated> try_generate_uid_from(
+    std::string_view key,
+    std::string_view root = uid_prefix()) noexcept;
+[[nodiscard]] Generated generate_uid(
+    std::string_view root = uid_prefix());
+[[nodiscard]] Generated generate_uid_from(
+    std::string_view key,
+    std::string_view root = uid_prefix());
 [[nodiscard]] Generated generate_sop_instance_uid();
 [[nodiscard]] Generated generate_series_instance_uid();
 [[nodiscard]] Generated generate_study_instance_uid();
 
 }  // namespace uid
+
+class UidRemapper {
+public:
+	/// Open a journal-backed in-memory UID remapper.
+	///
+	/// New mappings are appended to `journal_path`, and reopening the same journal
+	/// replays prior `source_uid -> target_uid` pairs so later processes can reuse
+	/// the same anonymized UIDs. When `flush_on_each_insert` is true, each new
+	/// mapping is flushed immediately after append. Disabling per-insert flush can
+	/// improve miss-path performance, but callers should then catch exceptions and
+	/// prefer an explicit `close()` during orderly shutdown so buffered mappings
+	/// are pushed to disk before process exit.
+	[[nodiscard]] static UidRemapper in_memory(
+	    const std::filesystem::path& journal_path,
+	    std::string_view uid_root = uid::uid_prefix(),
+	    bool flush_on_each_insert = true);
+
+	UidRemapper() = default;
+
+	/// Return the existing mapping for `source_uid`, or create and persist a new one.
+	[[nodiscard]] std::string map_uid(std::string_view source_uid);
+
+	/// Flush pending journal state and release the underlying journal handle.
+	///
+	/// Callers should prefer an explicit `close()` during orderly shutdown so I/O
+	/// errors surface before process exit and any file/db handle is released
+	/// deterministically. Abnormal termination can still lose the most recent
+	/// writes. This is especially important when per-insert flush is disabled,
+	/// because the most recent buffered mappings may not yet be visible in the
+	/// journal unless `close()` (or an equivalent normal stream shutdown path)
+	/// completes successfully.
+	void close();
+
+	[[nodiscard]] bool is_valid() const noexcept;
+
+private:
+	class Impl;
+	explicit UidRemapper(std::shared_ptr<Impl> impl) : impl_(std::move(impl)) {}
+
+	std::shared_ptr<Impl> impl_;
+};
 
 static_assert(uid::Generated::max_str_length <= std::numeric_limits<uid::Generated::size_type>::max(),
 	"uid::Generated::size_type must fit max_str_length");

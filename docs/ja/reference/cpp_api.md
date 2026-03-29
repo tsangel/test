@@ -149,8 +149,17 @@ Note: These attachment calls are intended for the root `DataSet` (the object ret
 ## UID generation helpers
 
 - `dicom::uid::generate_uid()`: create a base generated UID.
+- `dicom::uid::generate_uid_from(key, root)`: create a deterministic UID from a stable key and root.
 - `dicom::uid::Generated::append(component)`: append one UID component with fallback policy.
 - Full behavior and Python equivalents: [Generating UID](../guide/generating_uid.md)
+
+## UID remapping
+
+- `dicom::UidRemapper::in_memory(journal_path, uid_root, flush_on_each_insert)`: open a journal-backed single-process remapper.
+- `map_uid(source_uid)`: reuse an existing persisted mapping or create and persist a new one.
+- `close()`: flush pending journal state and release the single-writer lock explicitly.
+- `flush_on_each_insert = true` is the safer default. `false` can improve miss-path performance, but callers should catch exceptions and call `close()` during orderly shutdown.
+- `UidRemapper` is currently a C++-only API. There is no Python binding yet.
 
 ## Pixel transform metadata
 

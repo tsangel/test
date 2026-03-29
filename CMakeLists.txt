@@ -131,6 +131,7 @@ add_library(dicomsdl STATIC
     src/writing/transcoded_write.cpp
     src/person_name.cpp
     src/uid_utils.cpp
+    src/uid_remapper.cpp
     src/sequence.cpp
     src/dataelement.cpp
     src/instream.cpp
