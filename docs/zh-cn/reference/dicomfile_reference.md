@@ -15,7 +15,7 @@
 
 ## Python surface
 
-- constructors and loaders: `read_file(...)`, `read_bytes(...)`
+- constructors and loaders: `read_file(...)`, `read_bytes(...)`, `read_file_selected(...)`, `read_bytes_selected(...)`
 - root dataset access: `df.dataset`
 - forwarded dataset operations: `add_dataelement`, `ensure_dataelement`, `ensure_loaded`, `remove_dataelement`, `get_dataelement`, `get_value`, `set_value`, `__getitem__`, `__contains__`, iteration
 - file/session state: `path`, `transfer_syntax_uid`, `has_error`, `error_message`
@@ -45,9 +45,14 @@
 - `set_encoded_pixel_frame(..., std::span<const uint8_t>)` and `add_encoded_pixel_frame(..., std::span<const uint8_t>)` copy from the caller buffer before `DicomFile` takes ownership. The `std::vector<uint8_t>&&` overloads are the move-based no-extra-copy path.
 - For large write-only transcodes, prefer `write_with_transfer_syntax(...)` over `set_transfer_syntax(...)` followed by `write_file(...)`. That path now exists in both C++ and Python for file output; C++ also provides `std::ostream` variants.
 - In Python, `has_error` and `error_message` are the file-level state you check after permissive reads that keep partial data.
+- `read_file_selected(...)` 和 `read_bytes_selected(...)` 会返回只保留所选 tag 和嵌套 sequence child 的 `DicomFile`。
+- selected read 会始终考虑 root `TransferSyntaxUID` 和 `SpecificCharacterSet`，忽略 `ReadOptions.load_until`，并允许 selection tree 中出现 private/unknown tag，以及 `"70531000"` 这样的 explicit tag string。
+- 即使 selected read 只选择了 `SQ` 本身，也会保留 present 的 sequence 和 item count。
+- 选择/访问区域之外的 malformed data 可能完全不会被看到，因此 selected-read `has_error` / `error_message` 只描述实际访问到的区域。
 
 ## Related docs
 
+- [Selected Read](../guide/selected_read.md)
 - [DataSet Reference](dataset_reference.md)
 - [Pixel Reference](pixel_reference.md)
 - [Pixel Encode Constraints](pixel_encode_constraints.md)

@@ -1117,11 +1117,53 @@ class DataSet;
 class DataElement;
 class DataSetWalker;
 class DataSetWalkIterator;
+class SelectedReadParser;
 /// Options controlling how a DataSet is read from a stream.
 struct ReadOptions {
 	Tag load_until{Tag(0xFFFFu, 0xFFFFu)};
 	bool keep_on_error{false};
 	bool copy{true};
+};
+
+/// One node in a nested dataset selection tree.
+/// A node with empty `children` selects only `tag` itself.
+/// A node with non-empty `children` selects `tag` itself and, when it resolves
+/// to an SQ element, applies the child selection to every item dataset.
+struct DataSetSelectionNode {
+	Tag tag{};
+	std::vector<DataSetSelectionNode> children{};
+
+	DataSetSelectionNode() = default;
+	DataSetSelectionNode(Tag selection_tag) : tag(selection_tag) {}
+	DataSetSelectionNode(
+	    Tag selection_tag, std::initializer_list<DataSetSelectionNode> nested)
+	    : tag(selection_tag), children(nested) {}
+	DataSetSelectionNode(Tag selection_tag, std::vector<DataSetSelectionNode> nested)
+	    : tag(selection_tag), children(std::move(nested)) {}
+
+	[[nodiscard]] bool is_nested() const noexcept { return !children.empty(); }
+};
+
+/// Canonicalized nested dataset selection used by selected-read APIs.
+/// Construction validates tags, injects root-level TransferSyntaxUID and
+/// SpecificCharacterSet when absent, sorts nodes in ascending tag order, and
+/// merges duplicate nodes (including duplicate nested sequence selections).
+/// Selected-read APIs only parse and materialize the selected tags and nested
+/// sequence children,
+/// so malformed data outside that visited region may remain unseen.
+class DataSetSelection {
+public:
+	DataSetSelection();
+	DataSetSelection(std::initializer_list<DataSetSelectionNode> init);
+	explicit DataSetSelection(std::vector<DataSetSelectionNode> nodes);
+
+	[[nodiscard]] bool empty() const noexcept { return nodes_.empty(); }
+	[[nodiscard]] std::span<const DataSetSelectionNode> nodes() const noexcept {
+		return nodes_;
+	}
+
+private:
+	std::vector<DataSetSelectionNode> nodes_{};
 };
 
 class WalkPathRef {
@@ -2231,6 +2273,7 @@ private:
 	DataSet* parent_{nullptr};
 
 	friend class DataSet;
+	friend class SelectedReadParser;
 	friend bool charset::detail::apply_declared_charset(
 	    DataSet& dataset, const charset::detail::ParsedSpecificCharacterSet& parsed,
 	    std::string* out_error);
@@ -2688,6 +2731,7 @@ public:
 	[[nodiscard]] bool set_value(std::string_view key, VR vr, std::span<const PersonName> values);
 
 private:
+	friend class SelectedReadParser;
 	struct TagPathParent {
 		DataSet* parent{nullptr};
 		Tag leaf_tag{};
@@ -3059,6 +3103,7 @@ public:
 	}
 
 private:
+	friend class SelectedReadParser;
 	friend class DataSet;
 	friend void pixel::set_pixel_data(
 	    DicomFile& file, pixel::ConstPixelSpan source,
@@ -3124,6 +3169,7 @@ public:
 	std::vector<std::unique_ptr<DataSet>>::const_iterator cend() const;
 
 private:
+	friend class SelectedReadParser;
 	DataSet* owner_dataset_{nullptr};
 	DataSet* root_dataset_{nullptr};
 	std::size_t value_offset_{0};
@@ -3411,6 +3457,29 @@ std::unique_ptr<DicomFile> read_bytes(const std::string& name, const std::uint8_
 /// Read from an owning buffer moved into the dataset.
 std::unique_ptr<DicomFile> read_bytes(std::string name, std::vector<std::uint8_t>&& buffer,
     ReadOptions options = {});
+/// Read from disk while materializing only the selected tags and nested sequence children.
+/// Selected-read APIs reuse ReadOptions.keep_on_error and, for memory overloads,
+/// ReadOptions.copy. ReadOptions.load_until is ignored and replaced by a frontier
+/// derived from `selection`. Malformed data outside the selected/visited region
+/// may not surface as read errors.
+std::unique_ptr<DicomFile> read_file_selected(
+    const std::filesystem::path& path, const DataSetSelection& selection,
+    ReadOptions options = {});
+/// Read from a raw memory buffer while materializing only the selected tags and nested sequence children.
+/// Malformed data outside the selected/visited region may not surface as read errors.
+std::unique_ptr<DicomFile> read_bytes_selected(
+    const std::uint8_t* data, std::size_t size, const DataSetSelection& selection,
+    ReadOptions options = {});
+/// Read from a named raw memory buffer while materializing only the selected tags and nested sequence children.
+/// Malformed data outside the selected/visited region may not surface as read errors.
+std::unique_ptr<DicomFile> read_bytes_selected(
+    const std::string& name, const std::uint8_t* data, std::size_t size,
+    const DataSetSelection& selection, ReadOptions options = {});
+/// Read from an owning buffer while materializing only the selected tags and nested sequence children.
+/// Malformed data outside the selected/visited region may not surface as read errors.
+std::unique_ptr<DicomFile> read_bytes_selected(
+    std::string name, std::vector<std::uint8_t>&& buffer,
+    const DataSetSelection& selection, ReadOptions options = {});
 /// Return the current adaptive reserve hint used by root DataSet::read_attached_stream().
 [[nodiscard]] std::size_t load_root_elements_reserve_hint() noexcept;
 /// Reset the adaptive reserve hint used by root DataSet::read_attached_stream().

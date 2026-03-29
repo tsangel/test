@@ -11,7 +11,7 @@
 
 ## Python surface
 
-- constructors and loaders: `read_file(...)`, `read_bytes(...)`
+- constructors and loaders: `read_file(...)`, `read_bytes(...)`, `read_file_selected(...)`, `read_bytes_selected(...)`
 - root dataset access: `df.dataset`
 - forwarded dataset operations: `add_dataelement`, `ensure_dataelement`, `ensure_loaded`, `remove_dataelement`, `get_dataelement`, `get_value`, `set_value`, `__getitem__`, `__contains__`, iteration
 - file/session state: `path`, `transfer_syntax_uid`, `has_error`, `error_message`
@@ -41,9 +41,14 @@
 - `set_encoded_pixel_frame(..., std::span<const uint8_t>)` and `add_encoded_pixel_frame(..., std::span<const uint8_t>)` copy from the caller buffer before `DicomFile` takes ownership. The `std::vector<uint8_t>&&` overloads are the move-based no-extra-copy path.
 - For large write-only transcodes, prefer `write_with_transfer_syntax(...)` over `set_transfer_syntax(...)` followed by `write_file(...)`. That path now exists in both C++ and Python for file output; C++ also provides `std::ostream` variants.
 - In Python, `has_error` and `error_message` are the file-level state you check after permissive reads that keep partial data.
+- `read_file_selected(...)` and `read_bytes_selected(...)` return `DicomFile` objects that keep only the selected tags and nested sequence children.
+- Selected read always considers root `TransferSyntaxUID` and `SpecificCharacterSet`, ignores `ReadOptions.load_until`, and allows private/unknown tags in the selection tree, including explicit tag strings such as `"70531000"`.
+- If a selected read only names an `SQ`, that present sequence and its item count are still preserved.
+- Malformed data outside the selected/visited region may remain unseen, so selected-read `has_error` / `error_message` only describe the region that was actually visited.
 
 ## Related docs
 
+- [Selected Read](../guide/selected_read.md)
 - [DataSet Reference](dataset_reference.md)
 - [Pixel Reference](pixel_reference.md)
 - [Pixel Encode Constraints](pixel_encode_constraints.md)

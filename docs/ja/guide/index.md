@@ -10,6 +10,7 @@ installation
 cli_tools
 core_objects
 file_io
+selected_read
 python_dataset_guide
 simpleitk_and_vtk_bridges
 cpp_dataset_guide

@@ -100,6 +100,98 @@ std::filesystem::path python_path_to_filesystem_path(nb::handle value, const cha
 	throw nb::type_error(message.c_str());
 }
 
+bool is_selection_tag_like_py(nb::handle value) {
+	return nb::isinstance<Tag>(value) || nb::isinstance<nb::int_>(value) ||
+	       nb::isinstance<nb::str>(value);
+}
+
+bool is_non_string_sequence_like_py(nb::handle value) {
+	if (PyUnicode_Check(value.ptr()) || PyBytes_Check(value.ptr()) ||
+	    PyByteArray_Check(value.ptr()) || PyMemoryView_Check(value.ptr())) {
+		return false;
+	}
+	return PySequence_Check(value.ptr()) != 0;
+}
+
+Tag selection_tag_from_py(nb::handle value, const char* context) {
+	if (nb::isinstance<Tag>(value)) {
+		return nb::cast<Tag>(value);
+	}
+	if (nb::isinstance<nb::int_>(value)) {
+		return Tag(nb::cast<std::uint32_t>(value));
+	}
+	if (nb::isinstance<nb::str>(value)) {
+		return Tag(nb::cast<std::string>(value));
+	}
+	std::string message = context;
+	message += " tags must be Tag, int (0xGGGGEEEE), or str";
+	throw nb::type_error(message.c_str());
+}
+
+dicom::DataSetSelectionNode selection_node_from_py(nb::handle value, const char* context);
+
+std::vector<dicom::DataSetSelectionNode> selection_nodes_from_py(
+    nb::handle value, const char* context) {
+	if (!is_non_string_sequence_like_py(value)) {
+		std::string message = context;
+		message += " must be a sequence of selection nodes";
+		throw nb::type_error(message.c_str());
+	}
+
+	nb::sequence seq = nb::borrow<nb::sequence>(value);
+	const std::size_t size = static_cast<std::size_t>(PySequence_Size(seq.ptr()));
+	std::vector<dicom::DataSetSelectionNode> nodes;
+	nodes.reserve(size);
+	for (std::size_t index = 0; index < size; ++index) {
+		nodes.push_back(selection_node_from_py(seq[index], context));
+	}
+	return nodes;
+}
+
+dicom::DataSetSelectionNode selection_node_from_py(nb::handle value, const char* context) {
+	if (is_selection_tag_like_py(value)) {
+		return dicom::DataSetSelectionNode(selection_tag_from_py(value, context));
+	}
+
+	if (!is_non_string_sequence_like_py(value)) {
+		std::string message = context;
+		message += " nodes must be Tag/int/str leaves or (tag, children) pairs";
+		throw nb::type_error(message.c_str());
+	}
+
+	nb::sequence seq = nb::borrow<nb::sequence>(value);
+	const auto size = static_cast<std::size_t>(PySequence_Size(seq.ptr()));
+	if (size != 2) {
+		std::string message = context;
+		message += " nested nodes must be 2-item sequences: (tag, children)";
+		throw nb::type_error(message.c_str());
+	}
+
+	nb::handle tag_value = seq[0];
+	nb::handle children_value = seq[1];
+	if (!is_selection_tag_like_py(tag_value)) {
+		std::string message = context;
+		message += " nested node tag must be Tag, int (0xGGGGEEEE), or str";
+		throw nb::type_error(message.c_str());
+	}
+	if (!is_non_string_sequence_like_py(children_value)) {
+		std::string message = context;
+		message += " nested node children must be a sequence of selection nodes";
+		throw nb::type_error(message.c_str());
+	}
+
+	return dicom::DataSetSelectionNode(
+	    selection_tag_from_py(tag_value, context),
+	    selection_nodes_from_py(children_value, context));
+}
+
+dicom::DataSetSelection selection_from_py(nb::handle value, const char* context) {
+	if (nb::isinstance<dicom::DataSetSelection>(value)) {
+		return nb::cast<const dicom::DataSetSelection&>(value);
+	}
+	return dicom::DataSetSelection(selection_nodes_from_py(value, context));
+}
+
 bool transfer_syntax_has_runtime_encode_support(Uid uid) noexcept {
 	if (!uid.valid() || uid.uid_type() != dicom::UidType::TransferSyntax) {
 		return false;
@@ -5134,6 +5226,27 @@ NB_MODULE(_dicomsdl, m) {
 			    return oss.str();
 		    });
 
+	nb::class_<dicom::DataSetSelection>(m, "DataSetSelection",
+	    "Canonicalized nested dataset selection used by selected-read APIs.\n"
+	    "\n"
+	    "Construct from a sequence of selection nodes. Leaf nodes may be Tag, packed\n"
+	    "int (0xGGGGEEEE), or str. Nested nodes use a 2-item pair: (tag, children).\n"
+	    "Example: ['StudyInstanceUID', ('ReferencedSeriesSequence', ['SeriesInstanceUID'])].")
+		.def(nb::init<>())
+		.def("__init__",
+		    [](dicom::DataSetSelection* self, nb::handle nodes) {
+			    new (self) dicom::DataSetSelection(selection_nodes_from_py(nodes, "selection"));
+		    },
+		    nb::arg("nodes"))
+		.def("__len__", [](const dicom::DataSetSelection& self) { return self.nodes().size(); })
+		.def("__bool__", [](const dicom::DataSetSelection& self) { return !self.empty(); })
+		.def("__repr__",
+		    [](const dicom::DataSetSelection& self) {
+			    std::ostringstream oss;
+			    oss << "DataSetSelection(size=" << self.nodes().size() << ")";
+			    return oss.str();
+		    });
+
 	m.def("create_encoder_context",
 	    [](const Uid& transfer_syntax, nb::handle options) {
 		    return create_encoder_context_with_options(
@@ -5215,7 +5328,7 @@ NB_MODULE(_dicomsdl, m) {
 	    nb::arg("window"),
 	    "Apply a WindowTransform and return a NumPy array backed by owned output storage.");
 
-	m.def("read_file",
+m.def("read_file",
     [](nb::handle path, std::optional<Tag> load_until, std::optional<bool> keep_on_error) {
 	    dicom::ReadOptions opts;
 	    if (load_until) {
@@ -5240,6 +5353,39 @@ NB_MODULE(_dicomsdl, m) {
     "keep_on_error : bool | None, optional\n"
     "    When True, keep partially read data instead of raising on parse errors.\n"
     "    Inspect DicomFile.has_error and DicomFile.error_message after reading.\n");
+
+	m.def("read_file_selected",
+	    [](nb::handle path, nb::handle selection_value, std::optional<bool> keep_on_error) {
+		    const auto selection = selection_from_py(selection_value, "selection");
+		    dicom::ReadOptions opts;
+		    if (keep_on_error) {
+			    opts.keep_on_error = *keep_on_error;
+		    }
+		    return dicom::read_file_selected(
+		        python_path_to_filesystem_path(path, "path"), selection, opts);
+	    },
+	    nb::arg("path"),
+	    nb::arg("selection"),
+	    nb::arg("keep_on_error") = nb::none(),
+	    "Read a DICOM file from disk using a nested DataSetSelection.\n"
+	    "\n"
+	    "The returned DicomFile keeps only the selected elements and nested\n"
+	    "sequence children. TransferSyntaxUID and\n"
+	    "SpecificCharacterSet are always considered at the root level. Malformed\n"
+	    "data outside the selected region may remain unseen and therefore may not\n"
+	    "set has_error or error_message.\n"
+	    "\n"
+	    "Parameters\n"
+	    "----------\n"
+	    "path : str | os.PathLike\n"
+	    "    Filesystem path to the DICOM Part 10 file.\n"
+	    "selection : DataSetSelection | sequence\n"
+	    "    A DataSetSelection instance, or a raw nested selection tree built from\n"
+	    "    leaf tags and (tag, children) pairs. Use DataSetSelection(...) when you\n"
+	    "    want to validate/canonicalize once and reuse the same selection.\n"
+	    "keep_on_error : bool | None, optional\n"
+	    "    When True, keep partially read selected data instead of raising on parse errors.\n"
+	    "    Inspect DicomFile.has_error and DicomFile.error_message after reading.\n");
 
 m.def("is_dicom_file",
     [](nb::handle path) {
@@ -5332,6 +5478,80 @@ m.def("read_bytes",
     "When copy=False, the source buffer must remain alive for as long as the returned DicomFile;\n"
     "the binding keeps a Python reference, but mutating or freeing the underlying memory can\n"
     "still corrupt the dataset.");
+
+	m.def("read_bytes_selected",
+	    [](nb::object buffer, nb::handle selection_value, const std::string& name,
+	        std::optional<bool> keep_on_error, bool copy) {
+		    const auto selection = selection_from_py(selection_value, "selection");
+		    PyBufferView view(buffer);
+		    const Py_buffer& info = view.view();
+		    if (info.ndim != 1) {
+			    throw std::invalid_argument("read_bytes_selected expects a 1-D bytes-like object");
+		    }
+		    if (!PyBuffer_IsContiguous(&info, 'C')) {
+			    throw std::invalid_argument(
+			        "read_bytes_selected expects a contiguous bytes-like object");
+		    }
+
+		    const std::size_t elem_size =
+		        static_cast<std::size_t>(info.itemsize <= 0 ? 1 : info.itemsize);
+		    const std::size_t total = static_cast<std::size_t>(info.len);
+
+		    dicom::ReadOptions opts;
+		    if (keep_on_error) {
+			    opts.keep_on_error = *keep_on_error;
+		    }
+		    opts.copy = copy;
+
+		    std::unique_ptr<dicom::DicomFile> file;
+		    if (copy || total == 0) {
+			    std::vector<std::uint8_t> owned(total);
+			    if (total > 0) {
+				    std::memcpy(owned.data(), info.buf, total);
+			    }
+			    file = dicom::read_bytes_selected(std::string{name}, std::move(owned), selection, opts);
+		    } else {
+			    if (elem_size != 1) {
+				    throw std::invalid_argument(
+				        "read_bytes_selected(copy=False) requires a byte-oriented buffer");
+			    }
+			    file = dicom::read_bytes_selected(
+			        std::string{name}, static_cast<const std::uint8_t*>(info.buf), total, selection, opts);
+		    }
+
+		    nb::object py_file = nb::cast(std::move(file));
+		    if (!copy && total > 0) {
+			    py_file.attr("_buffer_owner") = buffer;
+		    }
+		    return py_file;
+	    },
+	    nb::arg("data"),
+	    nb::arg("selection"),
+	    nb::arg("name") = std::string{"<memory>"},
+	    nb::arg("keep_on_error") = nb::none(),
+	    nb::arg("copy") = true,
+	    "Read a DicomFile from a bytes-like object while keeping only the selected tags\n"
+	    "and nested sequence children.\n"
+	    "\n"
+	    "Malformed data outside the selected region may remain unseen and therefore\n"
+	    "may not set has_error or error_message.\n"
+	    "\n"
+	    "Parameters\n"
+	    "----------\n"
+	    "data : buffer\n"
+	    "    1-D bytes-like object containing the Part 10 stream (or raw stream).\n"
+	    "selection : DataSetSelection | sequence\n"
+	    "    A DataSetSelection instance, or a raw nested selection tree built from\n"
+	    "    leaf tags and (tag, children) pairs. Use DataSetSelection(...) when you\n"
+	    "    want to validate/canonicalize once and reuse the same selection.\n"
+	    "name : str, optional\n"
+	    "    Identifier reported by DicomFile.path() and diagnostics. Default '<memory>'.\n"
+	    "keep_on_error : bool | None, optional\n"
+	    "    When True, keep partially read selected data instead of raising on parse errors.\n"
+	    "    Inspect DicomFile.has_error and DicomFile.error_message after reading.\n"
+	    "copy : bool, optional\n"
+	    "    When False, avoid copying and reference the caller's buffer; caller must keep\n"
+	    "    the buffer alive while the returned DicomFile exists.\n");
 
 m.def("load_root_elements_reserve_hint",
     []() {
@@ -5860,14 +6080,17 @@ m.def("generate_study_instance_uid",
 	    "DicomFile",
 	    "DataElement",
 	    "DataSet",
+	    "DataSetSelection",
 	    "PersonName",
 	    "PersonNameGroup",
 	    "Tag",
 	    "VR",
 	    "Uid",
 	    "read_file",
+	    "read_file_selected",
 	    "is_dicom_file",
 	    "read_bytes",
+	    "read_bytes_selected",
 	    "load_root_elements_reserve_hint",
 	    "reset_root_elements_reserve_hint",
 	    "set_htj2k_decoder_backend",

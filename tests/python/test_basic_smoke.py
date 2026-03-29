@@ -729,6 +729,72 @@ def test_write_roundtrip_sequence_and_pixel(tmp_path):
 	assert from_file.get_dataelement("PixelData").is_pixel_sequence
 
 
+def test_selected_read_python_api_with_dataset_selection_keeps_selected_tags_only():
+	source_bytes = _build_sequence_pixel_sample()
+	selection = dicom.DataSetSelection(
+	    [
+	        "SOPInstanceUID",
+	        ("ReferencedStudySequence", ["ReferencedSOPInstanceUID"]),
+	    ]
+	)
+
+	selected = dicom.read_bytes_selected(source_bytes, selection, name="selected-seq")
+	assert selected.transfer_syntax_uid.keyword == "ExplicitVRLittleEndian"
+	assert selected["TransferSyntaxUID"].to_transfer_syntax_uid().keyword == "ExplicitVRLittleEndian"
+	assert selected["SOPInstanceUID"].to_uid_string() == "1.2.3.4.5.6.7.8.9"
+	assert not selected["PixelData"]
+
+	seq = selected["ReferencedStudySequence"]
+	assert seq.is_sequence
+	assert seq.sequence is not None
+	assert len(seq.sequence) == 1
+	item = seq.sequence[0]
+	assert item["ReferencedSOPInstanceUID"].to_uid_string() == "1.2.3.4.5.6"
+	assert not item["StudyInstanceUID"]
+
+	with pytest.raises(Exception):
+		dicom.read_bytes_selected(
+		    _build_malformed_sample(),
+		    dicom.DataSetSelection(["PatientName"]),
+		    name="malformed-selected-default",
+		)
+
+	partial = dicom.read_bytes_selected(
+	    _build_malformed_sample(),
+	    dicom.DataSetSelection(["PatientName"]),
+	    name="malformed-selected-keep",
+	    keep_on_error=True,
+	)
+	assert partial.has_error
+	assert partial.error_message
+
+
+def test_selected_read_python_api_accepts_raw_selection_nodes_for_one_shot_reads():
+	source_bytes = _build_sequence_pixel_sample()
+
+	selected = dicom.read_bytes_selected(
+	    source_bytes,
+	    [
+	        "SOPInstanceUID",
+	        ("ReferencedStudySequence", ["ReferencedSOPInstanceUID"]),
+	    ],
+	    name="selected-seq-raw",
+	)
+
+	assert selected.transfer_syntax_uid.keyword == "ExplicitVRLittleEndian"
+	assert selected["TransferSyntaxUID"].to_transfer_syntax_uid().keyword == "ExplicitVRLittleEndian"
+	assert selected["SOPInstanceUID"].to_uid_string() == "1.2.3.4.5.6.7.8.9"
+	assert not selected["PixelData"]
+
+	seq = selected["ReferencedStudySequence"]
+	assert seq.is_sequence
+	assert seq.sequence is not None
+	assert len(seq.sequence) == 1
+	item = seq.sequence[0]
+	assert item["ReferencedSOPInstanceUID"].to_uid_string() == "1.2.3.4.5.6"
+	assert not item["StudyInstanceUID"]
+
+
 def test_write_with_transfer_syntax_roundtrip_without_mutating_source(tmp_path):
 	supported = {
 		uid.keyword or uid.value for uid in dicom.transfer_syntax_uids_encode_supported()

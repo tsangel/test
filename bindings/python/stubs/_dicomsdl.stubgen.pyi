@@ -1,6 +1,6 @@
 from collections.abc import Callable, Sequence as _Sequence
 import enum
-from typing import Literal, overload
+from typing import Literal, TypeAlias, overload
 
 from dicomsdl._image import _dicomfile_to_pil_image as to_pil_image
 
@@ -292,6 +292,26 @@ class DataSetWalkIterator:
     def skip_sequence(self) -> None: ...
 
     def skip_current_dataset(self) -> None: ...
+
+DataSetSelectionTagLike: TypeAlias = Tag | int | str
+
+DataSetSelectionNodeLike: TypeAlias = (
+    DataSetSelectionTagLike
+    | tuple[DataSetSelectionTagLike, _Sequence["DataSetSelectionNodeLike"]]
+)
+
+class DataSetSelection:
+    @overload
+    def __init__(self) -> None: ...
+
+    @overload
+    def __init__(self, nodes: _Sequence[DataSetSelectionNodeLike], /) -> None: ...
+
+    def __len__(self) -> int: ...
+
+    def __bool__(self) -> bool: ...
+
+DataSetSelectionLike: TypeAlias = DataSetSelection | _Sequence[DataSetSelectionNodeLike]
 
 class DataSet:
     def __setattr__(self, name, value, /): ...
@@ -958,9 +978,23 @@ def apply_window(source: object, window: WindowTransform) -> object: ...
 
 def read_file(path: object, load_until: Tag | None = ..., keep_on_error: bool | None = ...) -> DicomFile: ...
 
+def read_file_selected(
+    path: object,
+    selection: DataSetSelectionLike,
+    keep_on_error: bool | None = ...,
+) -> DicomFile: ...
+
 def is_dicom_file(path: object) -> bool: ...
 
 def read_bytes(data: object, name: str = ..., load_until: Tag | None = ..., keep_on_error: bool | None = ..., copy: bool = ...) -> object: ...
+
+def read_bytes_selected(
+    data: object,
+    selection: DataSetSelectionLike,
+    name: str = ...,
+    keep_on_error: bool | None = ...,
+    copy: bool = ...,
+) -> object: ...
 
 def load_root_elements_reserve_hint() -> int: ...
 
@@ -1257,4 +1291,4 @@ def generate_series_instance_uid() -> str: ...
 
 def generate_study_instance_uid() -> str: ...
 
-__all__: tuple = ('LogLevel', 'Reporter', 'StderrReporter', 'FileReporter', 'BufferingReporter', 'DICOM_STANDARD_VERSION', 'DICOMSDL_VERSION', '__version__', 'UID_PREFIX', 'IMPLEMENTATION_CLASS_UID', 'IMPLEMENTATION_VERSION_NAME', 'log_info', 'log_warn', 'log_error', 'set_default_reporter', 'set_thread_reporter', 'set_log_level', 'Planar', 'DecodeOptions', 'DecodePlan', 'VoiLutFunction', 'PixelPresentation', 'WindowTransform', 'RescaleTransform', 'ModalityLut', 'VoiLut', 'PaletteLut', 'SupplementalPaletteInfo', 'EnhancedPaletteDataPathAssignmentInfo', 'EnhancedBlendingLutInfo', 'EnhancedPaletteItemInfo', 'EnhancedPaletteInfo', 'EncoderContext', 'create_encoder_context', 'apply_rescale', 'apply_rescale_frames', 'apply_window', 'apply_modality_lut', 'apply_voi_lut', 'apply_palette_lut', 'DicomFile', 'DataElement', 'DataSet', 'PersonName', 'PersonNameGroup', 'Tag', 'VR', 'Uid', 'read_file', 'is_dicom_file', 'read_bytes', 'load_root_elements_reserve_hint', 'reset_root_elements_reserve_hint', 'set_htj2k_decoder_backend', 'get_htj2k_decoder_backend', 'use_openjph_for_htj2k_decoding', 'use_openjpeg_for_htj2k_decoding', 'register_external_codec_plugin', 'clear_external_codec_plugins', 'keyword_to_tag_vr', 'tag_to_keyword', 'tag_to_entry', 'lookup_uid', 'uid_from_value', 'uid_from_keyword', 'transfer_syntax_uids', 'transfer_syntax_uids_encode_supported', 'uid_prefix', 'implementation_class_uid', 'implementation_version_name', 'is_valid_uid_text_strict', 'make_uid_with_suffix', 'try_append_uid', 'append_uid', 'try_generate_uid', 'generate_uid', 'generate_sop_instance_uid', 'generate_series_instance_uid', 'generate_study_instance_uid')
+__all__: tuple = ('LogLevel', 'Reporter', 'StderrReporter', 'FileReporter', 'BufferingReporter', 'DICOM_STANDARD_VERSION', 'DICOMSDL_VERSION', '__version__', 'UID_PREFIX', 'IMPLEMENTATION_CLASS_UID', 'IMPLEMENTATION_VERSION_NAME', 'log_info', 'log_warn', 'log_error', 'set_default_reporter', 'set_thread_reporter', 'set_log_level', 'Planar', 'DecodeOptions', 'DecodePlan', 'VoiLutFunction', 'PixelPresentation', 'WindowTransform', 'RescaleTransform', 'ModalityLut', 'VoiLut', 'PaletteLut', 'SupplementalPaletteInfo', 'EnhancedPaletteDataPathAssignmentInfo', 'EnhancedBlendingLutInfo', 'EnhancedPaletteItemInfo', 'EnhancedPaletteInfo', 'EncoderContext', 'create_encoder_context', 'apply_rescale', 'apply_rescale_frames', 'apply_window', 'apply_modality_lut', 'apply_voi_lut', 'apply_palette_lut', 'DicomFile', 'DataElement', 'DataSet', 'DataSetSelection', 'PersonName', 'PersonNameGroup', 'Tag', 'VR', 'Uid', 'read_file', 'read_file_selected', 'is_dicom_file', 'read_bytes', 'read_bytes_selected', 'load_root_elements_reserve_hint', 'reset_root_elements_reserve_hint', 'set_htj2k_decoder_backend', 'get_htj2k_decoder_backend', 'use_openjph_for_htj2k_decoding', 'use_openjpeg_for_htj2k_decoding', 'register_external_codec_plugin', 'clear_external_codec_plugins', 'keyword_to_tag_vr', 'tag_to_keyword', 'tag_to_entry', 'lookup_uid', 'uid_from_value', 'uid_from_keyword', 'transfer_syntax_uids', 'transfer_syntax_uids_encode_supported', 'uid_prefix', 'implementation_class_uid', 'implementation_version_name', 'is_valid_uid_text_strict', 'make_uid_with_suffix', 'try_append_uid', 'append_uid', 'try_generate_uid', 'generate_uid', 'generate_sop_instance_uid', 'generate_series_instance_uid', 'generate_study_instance_uid')

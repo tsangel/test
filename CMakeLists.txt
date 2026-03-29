@@ -128,6 +128,7 @@ add_library(dicomsdl STATIC
     src/dicomfile.cpp
     src/dicom_file_probe.cpp
     src/dicomfile_pixel_encode.cpp
+    src/selected_read.cpp
     src/writing/direct_write.cpp
     src/writing/transcoded_write.cpp
     src/person_name.cpp

@@ -146,6 +146,24 @@ See also the runnable examples:
 
 Note: These attachment calls are intended for the root `DataSet` (the object returned by `read_file`/`read_bytes` or constructed directly). Sub-datasets created internally reuse the parent stream and should not reattach.
 
+## Selected read
+
+- `DataSetSelectionNode` は nested selection node です。`children` が空なら
+  tag 自体だけを選択し、空でなければその sequence 配下のすべての item dataset に
+  child selection を適用します。
+- `DataSetSelection` は構築時に canonicalize されます。root level の
+  `TransferSyntaxUID (0002,0010)` と `SpecificCharacterSet (0008,0005)` を
+  未指定なら自動追加し、sibling tag を昇順に並べ、重複をマージします。
+- private tag と unknown tag も selection tree で許可され、`"70531000"` のような explicit tag string も使えます。
+- `read_file_selected(...)` と `read_bytes_selected(...)` は、選択した tag と
+  nested sequence child だけを残した `DicomFile` を返します。
+- `ReadOptions.keep_on_error` と memory-buffer `ReadOptions.copy` はそのまま有効です。
+  `ReadOptions.load_until` は selected-read API では無視されます。
+- `SQ` だけを選択しても、source に存在する sequence と item count は保持されます。
+- 選択/訪問した領域の外にある malformed data は見えないままのことがあり、
+  `has_error` や `error_message` に反映されない場合があります。
+- 詳細な例は [Selected Read](../guide/selected_read.md) を参照してください。
+
 ## DataSet walking
 
 - `DataSet::walk()` and `DicomFile::walk()` return a `DataSetWalker` for depth-first preorder traversal over the root dataset and all nested sequence item datasets.

@@ -142,6 +142,25 @@ See also the runnable examples:
 
 Note: These attachment calls are intended for the root `DataSet` (the object returned by `read_file`/`read_bytes` or constructed directly). Sub-datasets created internally reuse the parent stream and should not reattach.
 
+## Selected read
+
+- `DataSetSelectionNode` is a nested selection node. Empty `children` selects the
+  tag itself; non-empty `children` applies to every item dataset under that
+  sequence.
+- `DataSetSelection` canonicalizes on construction: it injects root
+  `TransferSyntaxUID (0002,0010)` and `SpecificCharacterSet (0008,0005)` when
+  absent, sorts sibling tags in ascending order, and merges duplicates.
+- Private and unknown tags are allowed in the selection tree, including explicit tag strings such as `"70531000"`.
+- `read_file_selected(...)` and `read_bytes_selected(...)` return a `DicomFile`
+  that keeps only the selected tags and nested sequence children.
+- `ReadOptions.keep_on_error` and memory-buffer `ReadOptions.copy` still apply.
+  `ReadOptions.load_until` is ignored by selected-read APIs.
+- Selecting only an `SQ` keeps that present sequence and its item count, even
+  when no child tags are selected.
+- Malformed data outside the selected/visited region may remain unseen and
+  therefore may not set `has_error` or `error_message`.
+- Full usage examples in C++ and Python: [Selected Read](../guide/selected_read.md)
+
 ## DataSet walking
 
 - `DataSet::walk()` and `DicomFile::walk()` return a `DataSetWalker` for depth-first preorder traversal over the root dataset and all nested sequence item datasets.

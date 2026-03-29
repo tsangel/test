@@ -272,6 +272,361 @@ int main() {
 	}
 
 	{
+		DicomFile source;
+		source.set_declared_specific_charset(dicom::SpecificCharacterSet::ISO_IR_100);
+		auto& source_root = source.dataset();
+		const dicom::Tag top_private_tag(0x0009, 0x1001);
+		const dicom::Tag top_unknown_tag(0x7777, 0x0010);
+		const dicom::Tag nested_private_tag(0x0009, 0x1002);
+		if (!source_root.set_value("StudyInstanceUID"_tag, "1.2.840.10008.100")) {
+			fail("selected read smoke should set StudyInstanceUID");
+		}
+		if (!source_root.set_value("SOPInstanceUID"_tag, "1.2.840.10008.200")) {
+			fail("selected read smoke should set top-level SOPInstanceUID");
+		}
+		if (!source_root.set_value("PatientName"_tag, "Test^Patient")) {
+			fail("selected read smoke should set top-level PatientName");
+		}
+		if (!source_root.set_value(top_private_tag, dicom::VR::LO, "Top^Private")) {
+			fail("selected read smoke should set top-level private element");
+		}
+		if (!source_root.set_value(top_unknown_tag, dicom::VR::LO, "Top^Unknown")) {
+			fail("selected read smoke should set top-level unknown element");
+		}
+		auto* referenced_series =
+		    source_root.ensure_dataelement("ReferencedSeriesSequence"_tag, dicom::VR::SQ)
+		        .as_sequence();
+		if (referenced_series == nullptr) {
+			fail("selected read smoke should create ReferencedSeriesSequence");
+		}
+		auto* series_item0 = referenced_series->add_dataset();
+		auto* series_item1 = referenced_series->add_dataset();
+		if (series_item0 == nullptr || series_item1 == nullptr) {
+			fail("selected read smoke should create ReferencedSeriesSequence items");
+		}
+		if (!series_item0->set_value("SeriesInstanceUID"_tag, "1.2.840.10008.301") ||
+		    !series_item0->set_value("ReferencedSOPInstanceUID"_tag, "1.2.840.10008.401") ||
+		    !series_item0->set_value("PatientName"_tag, "Nested^Ignored") ||
+		    !series_item0->set_value(nested_private_tag, dicom::VR::LO, "Nested^Private0")) {
+			fail("selected read smoke should populate first sequence item");
+		}
+		if (!series_item1->set_value("SeriesInstanceUID"_tag, "1.2.840.10008.302") ||
+		    !series_item1->set_value("ReferencedSOPInstanceUID"_tag, "1.2.840.10008.402") ||
+		    !series_item1->set_value("PatientName"_tag, "Nested^Ignored2") ||
+		    !series_item1->set_value(nested_private_tag, dicom::VR::LO, "Nested^Private1")) {
+			fail("selected read smoke should populate second sequence item");
+		}
+
+		auto source_bytes = source.write_bytes();
+
+		dicom::DataSetSelection selection{
+		    "SOPInstanceUID"_tag,
+		    {"ReferencedSeriesSequence"_tag, {
+		        "SeriesInstanceUID"_tag,
+		        nested_private_tag,
+		    }},
+		    "StudyInstanceUID"_tag,
+		    top_private_tag,
+		    top_unknown_tag,
+		    {"ReferencedSeriesSequence"_tag, {
+		        "ReferencedSOPInstanceUID"_tag,
+		    }},
+		};
+		if (selection.nodes().size() != 7) {
+			fail("DataSetSelection should inject default root metadata and keep private/unknown top-level nodes");
+		}
+		if (selection.nodes()[0].tag != "TransferSyntaxUID"_tag ||
+		    selection.nodes()[1].tag != "SpecificCharacterSet"_tag ||
+		    selection.nodes()[2].tag != "SOPInstanceUID"_tag ||
+		    selection.nodes()[3].tag != "ReferencedSeriesSequence"_tag ||
+		    selection.nodes()[4].tag != top_private_tag ||
+		    selection.nodes()[5].tag != "StudyInstanceUID"_tag ||
+		    selection.nodes()[6].tag != top_unknown_tag) {
+			fail("DataSetSelection should sort top-level nodes, inject default metadata, and preserve private/unknown tags");
+		}
+		if (selection.nodes()[3].children.size() != 3 ||
+		    selection.nodes()[3].children[0].tag != "ReferencedSOPInstanceUID"_tag ||
+		    selection.nodes()[3].children[1].tag != nested_private_tag ||
+		    selection.nodes()[3].children[2].tag != "SeriesInstanceUID"_tag) {
+			fail("DataSetSelection should sort and merge nested children including private tags");
+		}
+		dicom::DataSetSelection default_selection;
+		if (default_selection.nodes().size() != 2 ||
+		    default_selection.nodes()[0].tag != "TransferSyntaxUID"_tag ||
+		    default_selection.nodes()[1].tag != "SpecificCharacterSet"_tag) {
+			fail("default DataSetSelection should canonicalize to the implicit root metadata selection");
+		}
+
+		dicom::ReadOptions selected_options;
+		selected_options.load_until = dicom::Tag::from_value(0);
+		auto selected = read_bytes_selected(
+		    source_bytes.data(), source_bytes.size(), selection, selected_options);
+		if (selected->transfer_syntax_uid() != source.transfer_syntax_uid()) {
+			fail("read_bytes_selected should preserve transfer syntax state even when not selected");
+		}
+		if (!selected->get_dataelement("(0008,0005)"_tag)) {
+			fail("read_bytes_selected should include SpecificCharacterSet even when not selected");
+		}
+		if (!selected->get_dataelement("StudyInstanceUID"_tag) ||
+		    !selected->get_dataelement("SOPInstanceUID"_tag) ||
+		    !selected->get_dataelement(top_private_tag) ||
+		    !selected->get_dataelement(top_unknown_tag)) {
+			fail("read_bytes_selected should keep explicitly selected top-level elements");
+		}
+		if (selected->get_dataelement("PatientName"_tag)) {
+			fail("read_bytes_selected should omit unselected top-level elements");
+		}
+
+		const auto& selected_series_sequence =
+		    selected->get_dataelement("ReferencedSeriesSequence"_tag);
+		if (!selected_series_sequence || selected_series_sequence.vr() != dicom::VR::SQ) {
+			fail("read_bytes_selected should keep selected SQ elements");
+		}
+		const auto* selected_sequence = selected_series_sequence.as_sequence();
+		if (selected_sequence == nullptr || selected_sequence->size() != 2) {
+			fail("read_bytes_selected should preserve selected sequence item count");
+		}
+		const auto* selected_item0 = selected_sequence->get_dataset(0);
+		const auto* selected_item1 = selected_sequence->get_dataset(1);
+		if (selected_item0 == nullptr || selected_item1 == nullptr) {
+			fail("read_bytes_selected should materialize selected sequence item datasets");
+		}
+		if (!selected_item0->get_dataelement("SeriesInstanceUID"_tag) ||
+		    !selected_item0->get_dataelement("ReferencedSOPInstanceUID"_tag) ||
+		    !selected_item0->get_dataelement(nested_private_tag) ||
+		    selected_item0->get_dataelement("PatientName"_tag)) {
+			fail("read_bytes_selected should project only the selected children for each sequence item");
+		}
+		if (!selected_item1->get_dataelement("SeriesInstanceUID"_tag) ||
+		    !selected_item1->get_dataelement("ReferencedSOPInstanceUID"_tag) ||
+		    !selected_item1->get_dataelement(nested_private_tag) ||
+		    selected_item1->get_dataelement("PatientName"_tag)) {
+			fail("read_bytes_selected should project selected children for later sequence items");
+		}
+
+		dicom::DataSetSelection sequence_only_selection{
+		    "ReferencedSeriesSequence"_tag,
+		};
+		auto sequence_only = read_bytes_selected(
+		    source_bytes.data(), source_bytes.size(), sequence_only_selection);
+		const auto& sequence_only_element =
+		    sequence_only->get_dataelement("ReferencedSeriesSequence"_tag);
+		const auto* sequence_only_value = sequence_only_element.as_sequence();
+		if (!sequence_only_element || sequence_only_value == nullptr ||
+		    sequence_only_value->size() != 2) {
+			fail("read_bytes_selected should keep a present SQ even when no child selection is provided");
+		}
+		const auto* empty_item0 = sequence_only_value->get_dataset(0);
+		const auto* empty_item1 = sequence_only_value->get_dataset(1);
+		if (empty_item0 == nullptr || empty_item1 == nullptr ||
+		    empty_item0->size() != 0 || empty_item1->size() != 0) {
+			fail("read_bytes_selected should keep sequence items empty when only the SQ itself is selected");
+		}
+
+		const auto malformed_selected = [] {
+			std::vector<std::uint8_t> bytes(128, 0);
+			bytes.insert(bytes.end(), {'D', 'I', 'C', 'M'});
+			bytes.insert(bytes.end(), {0x10, 0x00, 0x10, 0x00, 'P', 'N', 0x08, 0x00});
+			bytes.insert(bytes.end(), {'A', 'B'});
+			return bytes;
+		}();
+		bool malformed_selected_threw = false;
+		try {
+			[[maybe_unused]] auto should_throw = read_bytes_selected(
+			    "malformed-selected-default", malformed_selected.data(), malformed_selected.size(),
+			    dicom::DataSetSelection{"PatientName"_tag});
+		} catch (const std::exception&) {
+			malformed_selected_threw = true;
+		}
+		if (!malformed_selected_threw) {
+			fail("selected read should throw for malformed input when keep_on_error is false");
+		}
+
+		dicom::ReadOptions malformed_selected_keep_options;
+		malformed_selected_keep_options.keep_on_error = true;
+		const auto malformed_selected_keep = read_bytes_selected(
+		    "malformed-selected-keep", malformed_selected.data(), malformed_selected.size(),
+		    dicom::DataSetSelection{"PatientName"_tag}, malformed_selected_keep_options);
+		if (!malformed_selected_keep) {
+			fail("selected read keep_on_error should still return a DicomFile");
+		}
+		if (!malformed_selected_keep->has_error()) {
+			fail("selected read keep_on_error should record has_error=true");
+		}
+		if (malformed_selected_keep->error_message().empty()) {
+			fail("selected read keep_on_error should keep error_message");
+		}
+		if (malformed_selected_keep->size() == 0) {
+			fail("selected read keep_on_error should preserve partially parsed elements");
+		}
+	}
+
+	{
+		const auto repo_root = std::filesystem::path(__FILE__).parent_path().parent_path();
+		const auto tutorial_root = repo_root / "tutorials";
+		const auto tutorial_ct1_unc = tutorial_root / "CT1_UNC";
+		const auto tutorial_ct2_jlsn = tutorial_root / "CT2_JLSN";
+
+		auto require_selected_uid = [&](const dicom::DicomFile& full, const dicom::DicomFile& selected,
+		                                dicom::Tag tag, const std::string& context) {
+			const auto full_uid = full.get_dataelement(tag).to_uid_string();
+			const auto selected_uid = selected.get_dataelement(tag).to_uid_string();
+			if (!full_uid || !selected_uid || *full_uid != *selected_uid) {
+				fail(context);
+			}
+		};
+		auto require_selected_string =
+		    [&](const dicom::DicomFile& full, const dicom::DicomFile& selected,
+		        std::string_view tag_path, const std::string& context) {
+			    const auto full_text = full.get_value<std::string>(tag_path);
+			    const auto selected_text = selected.get_value<std::string>(tag_path);
+			    if (!full_text || !selected_text || *full_text != *selected_text) {
+				    fail(context);
+			    }
+		    };
+		auto require_selected_long =
+		    [&](const dicom::DicomFile& full, const dicom::DicomFile& selected,
+		        std::string_view tag_path, const std::string& context) {
+			    const auto full_value = full.get_value<long long>(tag_path);
+			    const auto selected_value = selected.get_value<long long>(tag_path);
+			    if (!full_value || !selected_value || *full_value != *selected_value) {
+				    fail(context);
+			    }
+		    };
+
+		if (std::filesystem::exists(tutorial_ct1_unc)) {
+			dicom::DataSetSelection selection{
+			    "StudyInstanceUID"_tag,
+			    "SOPInstanceUID"_tag,
+			    "Rows"_tag,
+			    "Columns"_tag,
+			};
+			dicom::ReadOptions selected_options;
+			selected_options.load_until = dicom::Tag::from_value(0);
+
+			auto full = read_file(tutorial_ct1_unc);
+			auto selected = read_file_selected(tutorial_ct1_unc, selection, selected_options);
+			if (selected->transfer_syntax_uid() != full->transfer_syntax_uid() ||
+			    selected->transfer_syntax_uid() != "ExplicitVRLittleEndian"_uid) {
+				fail("selected read should preserve uncompressed tutorial transfer syntax state");
+			}
+			if (!selected->get_dataelement("TransferSyntaxUID"_tag)) {
+				fail("selected read should keep TransferSyntaxUID in tutorial CT1_UNC sample");
+			}
+			if (selected->get_dataelement("FileMetaInformationVersion"_tag) ||
+			    selected->get_dataelement("MediaStorageSOPClassUID"_tag) ||
+			    selected->get_dataelement("ImplementationClassUID"_tag)) {
+				fail("selected read should omit unselected file meta elements and keep only TransferSyntaxUID");
+			}
+			if (!selected->get_dataelement("SpecificCharacterSet"_tag)) {
+				fail("selected read should keep SpecificCharacterSet in tutorial CT1_UNC sample");
+			}
+			require_selected_uid(
+			    *full, *selected, "StudyInstanceUID"_tag,
+			    "selected read should preserve StudyInstanceUID from tutorial CT1_UNC sample");
+			require_selected_uid(
+			    *full, *selected, "SOPInstanceUID"_tag,
+			    "selected read should preserve SOPInstanceUID from tutorial CT1_UNC sample");
+			require_selected_long(
+			    *full, *selected, "Rows",
+			    "selected read should preserve Rows from tutorial CT1_UNC sample");
+			require_selected_long(
+			    *full, *selected, "Columns",
+			    "selected read should preserve Columns from tutorial CT1_UNC sample");
+			if (selected->get_dataelement("PatientName"_tag)) {
+				fail("selected read should omit unselected top-level PatientName in tutorial CT1_UNC sample");
+			}
+			if (selected->get_dataelement("SeriesInstanceUID"_tag)) {
+				fail("selected read should omit unselected SeriesInstanceUID in tutorial CT1_UNC sample");
+			}
+		}
+
+		if (std::filesystem::exists(tutorial_ct2_jlsn)) {
+			dicom::DataSetSelection selection{
+			    "StudyInstanceUID"_tag,
+			    {"SourceImageSequence"_tag, {
+			        "ReferencedSOPClassUID"_tag,
+			        "ReferencedSOPInstanceUID"_tag,
+			        {"PurposeOfReferenceCodeSequence"_tag, {
+			            "CodeValue"_tag,
+			            "CodingSchemeDesignator"_tag,
+			            "CodeMeaning"_tag,
+			        }},
+			    }},
+			    {"DerivationCodeSequence"_tag, {
+			        "CodeValue"_tag,
+			        "CodingSchemeDesignator"_tag,
+			        "CodeMeaning"_tag,
+			    }},
+			};
+			dicom::ReadOptions selected_options;
+			selected_options.load_until = dicom::Tag::from_value(0);
+
+			auto full = read_file(tutorial_ct2_jlsn);
+			auto selected = read_file_selected(tutorial_ct2_jlsn, selection, selected_options);
+			if (selected->transfer_syntax_uid() != full->transfer_syntax_uid() ||
+			    selected->transfer_syntax_uid() != "JPEGLSNearLossless"_uid) {
+				fail("selected read should preserve tutorial CT2_JLSN transfer syntax state");
+			}
+			if (!selected->get_dataelement("TransferSyntaxUID"_tag)) {
+				fail("selected read should keep TransferSyntaxUID in tutorial CT2_JLSN sample");
+			}
+			if (selected->get_dataelement("SpecificCharacterSet"_tag)) {
+				fail("selected read should not materialize absent SpecificCharacterSet in tutorial CT2_JLSN sample");
+			}
+			require_selected_uid(
+			    *full, *selected, "StudyInstanceUID"_tag,
+			    "selected read should preserve StudyInstanceUID from tutorial CT2_JLSN sample");
+			require_selected_string(
+			    *full, *selected, "SourceImageSequence.0.ReferencedSOPClassUID",
+			    "selected read should preserve ReferencedSOPClassUID from tutorial CT2_JLSN sample");
+			require_selected_string(
+			    *full, *selected, "SourceImageSequence.0.ReferencedSOPInstanceUID",
+			    "selected read should preserve ReferencedSOPInstanceUID from tutorial CT2_JLSN sample");
+			require_selected_string(
+			    *full, *selected, "SourceImageSequence.0.PurposeOfReferenceCodeSequence.0.CodeValue",
+			    "selected read should preserve nested PurposeOfReference CodeValue in tutorial CT2_JLSN sample");
+			require_selected_string(
+			    *full, *selected, "SourceImageSequence.0.PurposeOfReferenceCodeSequence.0.CodingSchemeDesignator",
+			    "selected read should preserve nested PurposeOfReference CodingSchemeDesignator in tutorial CT2_JLSN sample");
+			require_selected_string(
+			    *full, *selected, "SourceImageSequence.0.PurposeOfReferenceCodeSequence.0.CodeMeaning",
+			    "selected read should preserve nested PurposeOfReference CodeMeaning in tutorial CT2_JLSN sample");
+			require_selected_string(
+			    *full, *selected, "DerivationCodeSequence.0.CodeValue",
+			    "selected read should preserve nested DerivationCodeSequence CodeValue in tutorial CT2_JLSN sample");
+			require_selected_string(
+			    *full, *selected, "DerivationCodeSequence.0.CodingSchemeDesignator",
+			    "selected read should preserve nested DerivationCodeSequence CodingSchemeDesignator in tutorial CT2_JLSN sample");
+			require_selected_string(
+			    *full, *selected, "DerivationCodeSequence.0.CodeMeaning",
+			    "selected read should preserve nested DerivationCodeSequence CodeMeaning in tutorial CT2_JLSN sample");
+			if (selected->get_dataelement("SOPInstanceUID"_tag)) {
+				fail("selected read should omit unselected SOPInstanceUID in tutorial CT2_JLSN sample");
+			}
+			if (selected->get_dataelement("PatientName"_tag)) {
+				fail("selected read should omit unselected PatientName in tutorial CT2_JLSN sample");
+			}
+			const auto* full_source_image =
+			    full->get_dataelement("SourceImageSequence"_tag).as_sequence();
+			const auto* selected_source_image =
+			    selected->get_dataelement("SourceImageSequence"_tag).as_sequence();
+			if (full_source_image == nullptr || selected_source_image == nullptr ||
+			    full_source_image->size() != selected_source_image->size()) {
+				fail("selected read should preserve SourceImageSequence item count in tutorial CT2_JLSN sample");
+			}
+			const auto* full_derivation =
+			    full->get_dataelement("DerivationCodeSequence"_tag).as_sequence();
+			const auto* selected_derivation =
+			    selected->get_dataelement("DerivationCodeSequence"_tag).as_sequence();
+			if (full_derivation == nullptr || selected_derivation == nullptr ||
+			    full_derivation->size() != selected_derivation->size()) {
+				fail("selected read should preserve DerivationCodeSequence item count in tutorial CT2_JLSN sample");
+			}
+		}
+	}
+
+	{
 		DataSet dataset;
 		if (!dataset.set_value("SOPInstanceUID"_tag, "1.2.840.10008.1")) {
 			fail("DataSet walk smoke should set top-level SOPInstanceUID");

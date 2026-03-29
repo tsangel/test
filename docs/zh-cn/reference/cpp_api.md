@@ -146,6 +146,24 @@ See also the runnable examples:
 
 Note: These attachment calls are intended for the root `DataSet` (the object returned by `read_file`/`read_bytes` or constructed directly). Sub-datasets created internally reuse the parent stream and should not reattach.
 
+## Selected read
+
+- `DataSetSelectionNode` 是一个嵌套 selection node。`children` 为空时只选择
+  tag 本身；`children` 非空时，会把 child selection 应用到该 sequence 下所有
+  item dataset。
+- `DataSetSelection` 在构造时会 canonicalize。它会在 root level 缺失时自动加入
+  `TransferSyntaxUID (0002,0010)` 和 `SpecificCharacterSet (0008,0005)`，
+  对 sibling tag 按升序排序，并合并重复节点。
+- private tag 和 unknown tag 也允许出现在 selection tree 中，也可以写成 `"70531000"` 这样的 explicit tag string。
+- `read_file_selected(...)` 和 `read_bytes_selected(...)` 会返回一个只保留所选
+  tag 和嵌套 sequence child 的 `DicomFile`。
+- `ReadOptions.keep_on_error` 和 memory-buffer `ReadOptions.copy` 仍然有效。
+  `ReadOptions.load_until` 在 selected-read API 中会被忽略。
+- 即使只选择 `SQ` 本身，也会保留 source 中存在的 sequence 和 item count。
+- 选择/访问区域之外的 malformed data 可能根本不会被看到，因此也可能不会反映到
+  `has_error` 或 `error_message` 中。
+- 更完整的例子请参见 [Selected Read](../guide/selected_read.md)。
+
 ## DataSet walking
 
 - `DataSet::walk()` and `DicomFile::walk()` return a `DataSetWalker` for depth-first preorder traversal over the root dataset and all nested sequence item datasets.

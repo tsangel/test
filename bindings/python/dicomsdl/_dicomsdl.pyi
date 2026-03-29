@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import enum
 import os
-from typing import Any, Callable, Literal, Optional, Sequence, overload
+from typing import Any, Callable, Literal, Optional, Sequence, TypeAlias, overload
 
 DICOM_STANDARD_VERSION: str
 DICOMSDL_VERSION: str
@@ -55,14 +55,17 @@ __all__ = [
     "DicomFile",
     "DataElement",
     "DataSet",
+    "DataSetSelection",
     "PersonName",
     "PersonNameGroup",
     "Tag",
     "VR",
     "Uid",
     "read_file",
+    "read_file_selected",
     "is_dicom_file",
     "read_bytes",
+    "read_bytes_selected",
     "load_root_elements_reserve_hint",
     "reset_root_elements_reserve_hint",
     "set_htj2k_decoder_backend",
@@ -1025,6 +1028,23 @@ class DataSetWalkIterator:
     def skip_current_dataset(self) -> None: ...
 
 
+DataSetSelectionTagLike: TypeAlias = Tag | int | str
+DataSetSelectionNodeLike: TypeAlias = (
+    DataSetSelectionTagLike
+    | tuple[DataSetSelectionTagLike, Sequence["DataSetSelectionNodeLike"]]
+)
+
+
+class DataSetSelection:
+    def __init__(self) -> None: ...
+    def __init__(self, nodes: Sequence[DataSetSelectionNodeLike], /) -> None: ...
+    def __len__(self) -> int: ...
+    def __bool__(self) -> bool: ...
+
+
+DataSetSelectionLike: TypeAlias = DataSetSelection | Sequence[DataSetSelectionNodeLike]
+
+
 class SequenceIterator:
     def __iter__(self) -> SequenceIterator: ...
     def __next__(self) -> DataSet: ...
@@ -1182,6 +1202,12 @@ def read_file(
     keep_on_error: bool | None = ...,
 ) -> DicomFile: ...
 
+def read_file_selected(
+    path: str | os.PathLike[str],
+    selection: DataSetSelectionLike,
+    keep_on_error: bool | None = ...,
+) -> DicomFile: ...
+
 def is_dicom_file(path: str | os.PathLike[str], /) -> bool: ...
 
 
@@ -1189,6 +1215,14 @@ def read_bytes(
     data: bytes | bytearray | memoryview,
     name: str = "<memory>",
     load_until: Tag | None = ...,
+    keep_on_error: bool | None = ...,
+    copy: bool = ...,
+) -> DicomFile: ...
+
+def read_bytes_selected(
+    data: bytes | bytearray | memoryview,
+    selection: DataSetSelectionLike,
+    name: str = "<memory>",
     keep_on_error: bool | None = ...,
     copy: bool = ...,
 ) -> DicomFile: ...

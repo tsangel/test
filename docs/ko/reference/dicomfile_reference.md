@@ -15,7 +15,7 @@
 
 ## Python surface
 
-- constructors and loaders: `read_file(...)`, `read_bytes(...)`
+- constructors and loaders: `read_file(...)`, `read_bytes(...)`, `read_file_selected(...)`, `read_bytes_selected(...)`
 - root dataset access: `df.dataset`
 - forwarded dataset operations: `add_dataelement`, `ensure_dataelement`, `ensure_loaded`, `remove_dataelement`, `get_dataelement`, `get_value`, `set_value`, `__getitem__`, `__contains__`, iteration
 - file/session state: `path`, `transfer_syntax_uid`, `has_error`, `error_message`
@@ -45,9 +45,14 @@
 - `set_encoded_pixel_frame(..., std::span<const uint8_t>)` and `add_encoded_pixel_frame(..., std::span<const uint8_t>)` copy from the caller buffer before `DicomFile` takes ownership. The `std::vector<uint8_t>&&` overloads are the move-based no-extra-copy path.
 - For large write-only transcodes, prefer `write_with_transfer_syntax(...)` over `set_transfer_syntax(...)` followed by `write_file(...)`. That path now exists in both C++ and Python for file output; C++ also provides `std::ostream` variants.
 - In Python, `has_error` and `error_message` are the file-level state you check after permissive reads that keep partial data.
+- `read_file_selected(...)`와 `read_bytes_selected(...)`는 선택한 태그와 sequence 하위 항목만 담긴 `DicomFile`을 반환합니다.
+- selected read는 root `TransferSyntaxUID`와 `SpecificCharacterSet`를 항상 고려하고, `ReadOptions.load_until`을 무시하며, selection tree에서 private/unknown tag와 `"70531000"` 같은 explicit tag string을 허용합니다.
+- selected read가 `SQ`만 선택하더라도, present한 sequence와 item count는 유지됩니다.
+- 선택/방문 영역 밖의 malformed data는 보이지 않을 수 있으므로, selected-read `has_error` / `error_message`는 실제로 방문한 영역만 설명합니다.
 
 ## Related docs
 
+- [Selected Read](../guide/selected_read.md)
 - [DataSet Reference](dataset_reference.md)
 - [Pixel Reference](pixel_reference.md)
 - [Pixel Encode Constraints](pixel_encode_constraints.md)
