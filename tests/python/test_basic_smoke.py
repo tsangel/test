@@ -166,6 +166,102 @@ def test_encoded_pixel_frame_access(tmp_path):
 		dicom.read_file(pathlib.Path(_test_file())).encoded_pixel_frame_bytes(0)
 
 
+def test_walk_api(tmp_path):
+	encap_path = tmp_path / "walk-sequence-sample.dcm"
+	encap_path.write_bytes(_build_sequence_pixel_sample())
+	obj = dicom.read_file(encap_path)
+
+	file_tags = []
+	sequence_path = None
+	sequence_contains = None
+	nested_path = None
+	nested_contains = None
+	nested_unpacked_path = None
+	nested_unpacked_tag = None
+	for entry in obj.walk():
+		file_tags.append(int(entry.element.tag))
+		if int(entry.element.tag) == 0x00081110:
+			sequence_path = entry.path.to_string()
+			sequence_contains = entry.path.contains_sequence(dicom.Tag("ReferencedStudySequence"))
+		if int(entry.element.tag) == 0x00081155 and nested_path is None:
+			nested_path = entry.path.to_string()
+			nested_contains = entry.path.contains_sequence(dicom.Tag("ReferencedStudySequence"))
+			path, elem = entry
+			nested_unpacked_path = path.to_string()
+			nested_unpacked_tag = int(elem.tag)
+
+	assert 0x00081110 in file_tags
+	assert 0x00081155 in file_tags
+	assert 0x7FE00010 in file_tags
+
+	assert sequence_path == ""
+	assert sequence_contains is False
+	assert nested_path == "00081110.0"
+	assert nested_contains is True
+	assert nested_unpacked_path == "00081110.0"
+	assert nested_unpacked_tag == 0x00081155
+
+	dataset_entries = list(obj.dataset.walk())
+	assert [int(entry.element.tag) for entry in dataset_entries] == file_tags
+
+	walker = obj.walk()
+	pruned_tags = []
+	for entry in walker:
+		pruned_tags.append(int(entry.element.tag))
+		if int(entry.element.tag) == 0x00081110:
+			entry.skip_sequence()
+
+	assert 0x00081110 in pruned_tags
+	assert 0x00081155 not in pruned_tags
+	assert 0x7FE00010 in pruned_tags
+
+	root_skip_walker = obj.walk()
+	root_skip_tags = []
+	for entry in root_skip_walker:
+		root_skip_tags.append(int(entry.element.tag))
+		if int(entry.element.tag) == 0x00081110:
+			entry.skip_current_dataset()
+
+	assert 0x00081110 in root_skip_tags
+	assert 0x00081155 not in root_skip_tags
+	assert 0x7FE00010 not in root_skip_tags
+
+	ds = dicom.DataSet()
+	ds.ensure_dataelement("SOPInstanceUID", dicom.VR.UI).value = "1.2.840.10008.1"
+	ds.ensure_dataelement("SeriesInstanceUID", dicom.VR.UI).value = "1.2.840.10008.10"
+	ds.ensure_dataelement(
+		"ReferencedStudySequence.0.ReferencedSOPInstanceUID", dicom.VR.UI
+	).value = "1.2.3"
+	ds.ensure_dataelement("ReferencedStudySequence.0.SeriesInstanceUID", dicom.VR.UI).value = (
+		"1.2.30"
+	)
+	ds.ensure_dataelement(
+		"ReferencedStudySequence.1.ReferencedSOPInstanceUID", dicom.VR.UI
+	).value = "1.2.4"
+	ds.ensure_dataelement("ReferencedStudySequence.1.SeriesInstanceUID", dicom.VR.UI).value = (
+		"1.2.40"
+	)
+
+	nested_skip_walker = ds.walk()
+	saw_item0_series = False
+	saw_item1_referenced = False
+	saw_top_level_series = False
+	for entry in nested_skip_walker:
+		path, elem = entry
+		if path.to_string() == "00081110.0" and int(elem.tag) == 0x00081155:
+			entry.skip_current_dataset()
+		if path.to_string() == "00081110.0" and int(elem.tag) == 0x0020000E:
+			saw_item0_series = True
+		if path.to_string() == "00081110.1" and int(elem.tag) == 0x00081155:
+			saw_item1_referenced = True
+		if path.to_string() == "" and int(elem.tag) == 0x0020000E:
+			saw_top_level_series = True
+
+	assert not saw_item0_series
+	assert saw_item1_referenced
+	assert saw_top_level_series
+
+
 def test_python_pathlike_support(tmp_path):
 	unicode_label = "\ud55c\uae00"
 	source = dicom.read_file(pathlib.Path(_test_file()))

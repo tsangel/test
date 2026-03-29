@@ -37,6 +37,7 @@ PersonName(Doe^Jane)
 データセット境界を明示したいときは `df.dataset` を使ってください。
 `PatientName` は `PN` なので、`df.PatientName` は通常の Python 文字列ではなく `PersonName(...)` オブジェクトとして表示されます。
 オブジェクトモデル、メタデータ検索の規則、デコード全体の流れについては [Core Objects](core_objects.md)、[Python DataSet Guide](python_dataset_guide.md)、[Pixel Decode](pixel_decode.md) を参照してください。
+ネストした sequence を再帰的にたどる必要がある場合は [DataSet Walk](dataset_walk.md) を参照してください。
 
 4. ピクセルを NumPy 配列にデコードする
 
@@ -169,6 +170,7 @@ Image size: 512 x 512
 ```
 
 より詳しい C++ API の説明は [C++ API Overview](../reference/cpp_api.md) と [DataSet Reference](../reference/dataset_reference.md) を参照してください。
+再帰的な走査やサブツリーのスキップが必要な場合は [DataSet Walk](dataset_walk.md) を参照してください。
 
 4. `ok &= ...` と error check でまとめて設定する
 ```cpp

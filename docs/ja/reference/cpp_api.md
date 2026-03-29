@@ -146,6 +146,15 @@ See also the runnable examples:
 
 Note: These attachment calls are intended for the root `DataSet` (the object returned by `read_file`/`read_bytes` or constructed directly). Sub-datasets created internally reuse the parent stream and should not reattach.
 
+## DataSet walking
+
+- `DataSet::walk()` and `DicomFile::walk()` return a `DataSetWalker` for depth-first preorder traversal over the root dataset and all nested sequence item datasets.
+- Each step yields `DataSetWalkEntry { path, element }`.
+- `path` is an ancestors-only borrowed view. Persist `path.to_string()` if you need to keep it after the walker advances.
+- `DataSetWalkEntry::skip_sequence()` / `DataSetWalkIterator::skip_sequence()` skip the current sequence subtree during the current walk.
+- `DataSetWalkEntry::skip_current_dataset()` / `DataSetWalkIterator::skip_current_dataset()` skip the rest of the current dataset during the current walk.
+- Full usage examples in C++ and Python: [DataSet Walk](../guide/dataset_walk.md)
+
 ## UID generation helpers
 
 - `dicom::uid::generate_uid()`: create a base generated UID.

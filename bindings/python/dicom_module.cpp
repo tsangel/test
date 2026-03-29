@@ -2934,6 +2934,203 @@ struct PySequenceIterator {
 	std::size_t index_;
 };
 
+struct PyDataSetWalkIterator;
+
+struct PyDataSetWalkBorrowState {
+	PyDataSetWalkIterator* iterator{nullptr};
+	std::size_t generation{0};
+};
+
+struct PyDataSetWalkPath {
+	PyDataSetWalkPath() = default;
+	PyDataSetWalkPath(std::shared_ptr<PyDataSetWalkBorrowState> state, std::size_t generation)
+	    : state_(std::move(state)), generation_(generation) {}
+
+	[[nodiscard]] dicom::WalkPathRef ref() const noexcept;
+
+	std::shared_ptr<PyDataSetWalkBorrowState> state_{};
+	std::size_t generation_{0};
+};
+
+struct PyDataSetWalkEntry {
+	PyDataSetWalkEntry() = default;
+
+	PyDataSetWalkEntry(nb::handle owner,
+	    std::shared_ptr<PyDataSetWalkBorrowState> borrow_state,
+	    std::size_t generation, DataElement* element)
+	    : owner_(nb::borrow(owner)),
+	      borrow_state_(std::move(borrow_state)),
+	      generation_(generation),
+	      element_(element) {}
+
+	nb::object path_object() {
+		if (!path_object_.is_valid()) {
+			path_object_ = nb::cast(PyDataSetWalkPath(borrow_state_, generation_));
+		}
+		return path_object_;
+	}
+
+	nb::object element_object() {
+		if (!element_object_.is_valid()) {
+			element_object_ =
+			    nb::cast(element_, nb::rv_policy::reference_internal, owner_);
+		}
+		return element_object_;
+	}
+
+	void skip_sequence() noexcept;
+
+	void skip_current_dataset() noexcept;
+
+	nb::object owner_{};
+	std::shared_ptr<PyDataSetWalkBorrowState> borrow_state_{};
+	std::size_t generation_{0};
+	DataElement* element_{nullptr};
+	mutable nb::object path_object_{};
+	mutable nb::object element_object_{};
+};
+
+struct PyDataSetWalkEntryIterator {
+	PyDataSetWalkEntryIterator() = default;
+	explicit PyDataSetWalkEntryIterator(PyDataSetWalkEntry entry)
+	    : entry_(std::move(entry)) {}
+
+	nb::object next() {
+		if (index_ == 0) {
+			++index_;
+			return entry_.path_object();
+		}
+		if (index_ == 1) {
+			++index_;
+			return entry_.element_object();
+		}
+		throw nb::stop_iteration();
+	}
+
+	PyDataSetWalkEntry entry_{};
+	std::uint8_t index_{0};
+};
+
+struct PyDataSetWalkIterator {
+	PyDataSetWalkIterator(DataSet& data_set, nb::handle owner)
+	    : owner_(nb::borrow(owner)),
+	      current_(data_set.walk().begin()),
+	      end_(data_set.walk().end()),
+	      borrow_state_(std::make_shared<PyDataSetWalkBorrowState>()) {
+		rebind_borrow_state();
+	}
+
+	PyDataSetWalkIterator(const PyDataSetWalkIterator&) = delete;
+	PyDataSetWalkIterator& operator=(const PyDataSetWalkIterator&) = delete;
+
+	PyDataSetWalkIterator(PyDataSetWalkIterator&& other) noexcept
+	    : owner_(std::move(other.owner_)),
+	      current_(std::move(other.current_)),
+	      end_(std::move(other.end_)),
+	      borrow_state_(std::move(other.borrow_state_)),
+	      generation_(other.generation_),
+	      pending_advance_(other.pending_advance_) {
+		rebind_borrow_state();
+	}
+
+	PyDataSetWalkIterator& operator=(PyDataSetWalkIterator&& other) noexcept {
+		if (this != &other) {
+			release_borrow_state();
+			owner_ = std::move(other.owner_);
+			current_ = std::move(other.current_);
+			end_ = std::move(other.end_);
+			borrow_state_ = std::move(other.borrow_state_);
+			generation_ = other.generation_;
+			pending_advance_ = other.pending_advance_;
+			rebind_borrow_state();
+		}
+		return *this;
+	}
+
+	~PyDataSetWalkIterator() {
+		release_borrow_state();
+	}
+
+	[[nodiscard]] dicom::WalkPathRef current_path() const noexcept {
+		if (current_ == end_) {
+			return dicom::WalkPathRef();
+		}
+		return (*current_).path;
+	}
+
+	PyDataSetWalkEntry next() {
+		if (pending_advance_) {
+			++current_;
+			pending_advance_ = false;
+			++generation_;
+			if (borrow_state_ != nullptr) {
+				borrow_state_->generation = generation_;
+			}
+		}
+		if (current_ == end_) {
+			throw nb::stop_iteration();
+		}
+
+		auto entry = *current_;
+		pending_advance_ = true;
+		return PyDataSetWalkEntry(owner_, borrow_state_, generation_, &entry.element);
+	}
+
+	void skip_sequence() noexcept {
+		if (pending_advance_ && current_ != end_) {
+			current_.skip_sequence();
+		}
+	}
+
+	void skip_current_dataset() noexcept {
+		if (pending_advance_ && current_ != end_) {
+			current_.skip_current_dataset();
+		}
+	}
+
+	nb::object owner_;
+	dicom::DataSetWalkIterator current_;
+	dicom::DataSetWalkIterator end_;
+	std::shared_ptr<PyDataSetWalkBorrowState> borrow_state_{};
+	std::size_t generation_{0};
+	bool pending_advance_{false};
+
+private:
+	void rebind_borrow_state() noexcept {
+		if (borrow_state_ != nullptr) {
+			borrow_state_->iterator = this;
+			borrow_state_->generation = generation_;
+		}
+	}
+
+	void release_borrow_state() noexcept {
+		if (borrow_state_ != nullptr && borrow_state_->iterator == this) {
+			borrow_state_->iterator = nullptr;
+		}
+	}
+};
+
+void PyDataSetWalkEntry::skip_sequence() noexcept {
+	if (borrow_state_ != nullptr && borrow_state_->iterator != nullptr &&
+	    borrow_state_->generation == generation_) {
+		borrow_state_->iterator->skip_sequence();
+	}
+}
+
+void PyDataSetWalkEntry::skip_current_dataset() noexcept {
+	if (borrow_state_ != nullptr && borrow_state_->iterator != nullptr &&
+	    borrow_state_->generation == generation_) {
+		borrow_state_->iterator->skip_current_dataset();
+	}
+}
+
+dicom::WalkPathRef PyDataSetWalkPath::ref() const noexcept {
+	if (state_ == nullptr || state_->iterator == nullptr || state_->generation != generation_) {
+		return dicom::WalkPathRef();
+	}
+	return state_->iterator->current_path();
+}
+
 }  // namespace
 
 NB_MODULE(_dicomsdl, m) {
@@ -3553,6 +3750,75 @@ NB_MODULE(_dicomsdl, m) {
 		    [](PyDataElementIterator& self) -> DataElement& { return self.next(); },
 		    nb::rv_policy::reference_internal);
 
+	nb::class_<PyDataSetWalkPath>(m, "DataSetWalkPath",
+	    "Borrowed ancestors-only walk path view.\n"
+	    "\n"
+	    "Use the view only within the current iteration step. Persist\n"
+	    "``path.to_string()`` if you need to keep the path after the walker\n"
+	    "advances.")
+		.def("__len__", [](const PyDataSetWalkPath& self) { return self.ref().size(); })
+		.def("__bool__", [](const PyDataSetWalkPath& self) { return !self.ref().empty(); })
+		.def("contains_sequence",
+		    [](const PyDataSetWalkPath& self, nb::handle key) {
+			    return self.ref().contains_sequence(dataset_assignment_key_to_tag(key));
+		    },
+		    nb::arg("tag"),
+		    "Return True when the ancestors path contains the given sequence tag.")
+		.def("to_string", [](const PyDataSetWalkPath& self) { return self.ref().to_string(); },
+		    "Return ancestors-only packed-hex dotted path text, e.g. '00081110.0'.")
+		.def("__str__", [](const PyDataSetWalkPath& self) { return self.ref().to_string(); })
+		.def("__repr__",
+		    [](const PyDataSetWalkPath& self) {
+			    return "DataSetWalkPath('" + self.ref().to_string() + "')";
+		    });
+
+	nb::class_<PyDataSetWalkEntry>(m, "DataSetWalkEntry")
+		.def_prop_ro("path",
+		    [](PyDataSetWalkEntry& self) -> nb::object { return self.path_object(); })
+		.def_prop_ro("element",
+		    [](PyDataSetWalkEntry& self) -> nb::object { return self.element_object(); })
+		.def("skip_sequence", &PyDataSetWalkEntry::skip_sequence,
+		    "When this entry is the current SQ walk step, prune its nested subtree.")
+		.def("skip_current_dataset", &PyDataSetWalkEntry::skip_current_dataset,
+		    "When this entry is the current walk step, prune the rest of the current dataset.")
+		.def("__len__", [](const PyDataSetWalkEntry&) { return 2; })
+		.def("__getitem__",
+		    [](PyDataSetWalkEntry& self, std::size_t index) -> nb::object {
+			    if (index == 0) {
+				    return self.path_object();
+			    }
+			    if (index == 1) {
+				    return self.element_object();
+			    }
+			    throw nb::index_error("DataSetWalkEntry index out of range");
+		    })
+		.def("__iter__",
+		    [](PyDataSetWalkEntry& self) { return PyDataSetWalkEntryIterator(self); })
+		.def("__repr__",
+		    [](PyDataSetWalkEntry& self) {
+			    auto path =
+			        nb::cast<std::string>(self.path_object().attr("to_string")());
+			    auto tag = nb::cast<std::string>(
+			        self.element_object().attr("tag").attr("__str__")());
+			    return "DataSetWalkEntry(path='" + path + "', tag=" + tag + ")";
+		    });
+
+	nb::class_<PyDataSetWalkEntryIterator>(m, "DataSetWalkEntryIterator")
+		.def("__iter__",
+		    [](PyDataSetWalkEntryIterator& self) -> PyDataSetWalkEntryIterator& { return self; },
+		    nb::rv_policy::reference_internal)
+		.def("__next__", &PyDataSetWalkEntryIterator::next);
+
+	nb::class_<PyDataSetWalkIterator>(m, "DataSetWalkIterator")
+		.def("__iter__",
+		    [](PyDataSetWalkIterator& self) -> PyDataSetWalkIterator& { return self; },
+		    nb::rv_policy::reference_internal)
+		.def("__next__", &PyDataSetWalkIterator::next)
+		.def("skip_sequence", &PyDataSetWalkIterator::skip_sequence,
+		    "When the last yielded entry is an SQ element, prune its nested subtree.")
+		.def("skip_current_dataset", &PyDataSetWalkIterator::skip_current_dataset,
+		    "Prune the rest of the current dataset before the next iteration step.");
+
 	nb::class_<DataSet>(m, "DataSet",
 	    "In-memory DICOM dataset. Created via read_file/read_bytes or directly.\n"
 	    "\n"
@@ -3736,7 +4002,21 @@ NB_MODULE(_dicomsdl, m) {
 		    [](DataSet& self) {
 			    return PyDataElementIterator(self);
 		    },
-		    nb::keep_alive<0, 1>(), "Iterate over DataElements in tag order");
+		    nb::keep_alive<0, 1>(), "Iterate over DataElements in tag order")
+		.def("walk",
+		    [](DataSet& self) {
+			    return PyDataSetWalkIterator(self, nb::cast(&self, nb::rv_policy::reference));
+		    },
+		    nb::keep_alive<0, 1>(),
+		    "Depth-first preorder walk including SQ elements and nested sequence items.\n"
+		    "Each iteration yields DataSetWalkEntry(path, element). Call entry.skip_sequence()\n"
+		    "or walker.skip_sequence() after receiving an SQ entry to prune its nested\n"
+		    "subtree. Use entry.skip_current_dataset() or walker.skip_current_dataset()\n"
+		    "to prune the rest of the current dataset.\n"
+		    "\n"
+		    "The returned ``entry.path`` is a borrowed view. Use it only within the\n"
+		    "current iteration step, and persist ``entry.path.to_string()`` if you\n"
+		    "need to keep it after the walker advances.");
 
 	nb::enum_<dicom::pixel::Planar>(m, "Planar",
 	    "Pixel sample layout for multi-sample decode output.")
@@ -4634,6 +4914,21 @@ NB_MODULE(_dicomsdl, m) {
 		    },
 		    nb::keep_alive<0, 1>(),
 		    "Iterate over DataElements from the root DataSet")
+		.def("walk",
+		    [](DicomFile& self) {
+			    return PyDataSetWalkIterator(
+			        self.dataset(), nb::cast(&self, nb::rv_policy::reference));
+		    },
+		    nb::keep_alive<0, 1>(),
+		    "Depth-first preorder walk over the root DataSet and all nested sequence items.\n"
+		    "Each iteration yields DataSetWalkEntry(path, element). Call entry.skip_sequence()\n"
+		    "or walker.skip_sequence() after receiving an SQ entry to prune its nested\n"
+		    "subtree. Use entry.skip_current_dataset() or walker.skip_current_dataset()\n"
+		    "to prune the rest of the current dataset.\n"
+		    "\n"
+		    "The returned ``entry.path`` is a borrowed view. Use it only within the\n"
+		    "current iteration step, and persist ``entry.path.to_string()`` if you\n"
+		    "need to keep it after the walker advances.")
 		.def("pixel_data",
 		    [](const DicomFile& self, std::size_t frame_index) {
 			    const auto decoded = self.pixel_data(frame_index);

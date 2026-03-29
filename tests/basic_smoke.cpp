@@ -271,6 +271,172 @@ int main() {
 		}
 	}
 
+	{
+		DataSet dataset;
+		if (!dataset.set_value("SOPInstanceUID"_tag, "1.2.840.10008.1")) {
+			fail("DataSet walk smoke should set top-level SOPInstanceUID");
+		}
+		if (!dataset.set_value("SeriesInstanceUID"_tag, "1.2.840.10008.10")) {
+			fail("DataSet walk smoke should set trailing top-level SeriesInstanceUID");
+		}
+		auto* sequence = dataset.ensure_dataelement("ReferencedStudySequence"_tag, dicom::VR::SQ)
+		                     .as_sequence();
+		if (sequence == nullptr) {
+			fail("DataSet walk smoke should create sequence element");
+		}
+		auto* item0 = sequence->add_dataset();
+		auto* item1 = sequence->add_dataset();
+		if (item0 == nullptr || item1 == nullptr) {
+			fail("DataSet walk smoke should create sequence item datasets");
+		}
+		if (!item0->set_value("ReferencedSOPInstanceUID"_tag, "1.2.3")) {
+			fail("DataSet walk smoke should set item 0 referenced SOP UID");
+		}
+		if (!item0->set_value("SeriesInstanceUID"_tag, "1.2.30")) {
+			fail("DataSet walk smoke should set item 0 SeriesInstanceUID");
+		}
+		if (!item1->set_value("ReferencedSOPInstanceUID"_tag, "1.2.4")) {
+			fail("DataSet walk smoke should set item 1 referenced SOP UID");
+		}
+		if (!item1->set_value("SeriesInstanceUID"_tag, "1.2.40")) {
+			fail("DataSet walk smoke should set item 1 SeriesInstanceUID");
+		}
+
+		std::vector<std::uint32_t> walked_tags;
+		std::vector<std::string> walked_paths;
+		for (auto entry : dataset.walk()) {
+			walked_tags.push_back(entry.element.tag().value());
+			walked_paths.push_back(entry.path.to_string());
+		}
+		if (walked_tags.size() != 7) {
+			fail("DataSet::walk should visit top-level and nested sequence elements");
+		}
+		if (walked_tags[0] != "SOPInstanceUID"_tag.value() ||
+		    walked_paths[0] != std::string()) {
+			fail("DataSet::walk should start with top-level elements and empty path");
+		}
+		if (walked_tags[1] != "ReferencedStudySequence"_tag.value() ||
+		    walked_paths[1] != std::string()) {
+			fail("DataSet::walk should include SQ elements before their children");
+		}
+		if (walked_tags[2] != "ReferencedSOPInstanceUID"_tag.value() ||
+		    walked_paths[2] != std::string("00081110.0")) {
+			fail("DataSet::walk should report ancestors-only path for first nested item");
+		}
+		if (walked_tags[3] != "SeriesInstanceUID"_tag.value() ||
+		    walked_paths[3] != std::string("00081110.0")) {
+			fail("DataSet::walk should keep the same ancestors-only path within one nested item");
+		}
+		if (walked_tags[4] != "ReferencedSOPInstanceUID"_tag.value() ||
+		    walked_paths[4] != std::string("00081110.1")) {
+			fail("DataSet::walk should report ancestors-only path for later nested items");
+		}
+		if (walked_tags[5] != "SeriesInstanceUID"_tag.value() ||
+		    walked_paths[5] != std::string("00081110.1")) {
+			fail("DataSet::walk should keep the same ancestors-only path for later nested items");
+		}
+		if (walked_tags[6] != "SeriesInstanceUID"_tag.value() ||
+		    walked_paths[6] != std::string()) {
+			fail("DataSet::walk should continue with later top-level elements after nested items");
+		}
+
+		auto walker = dataset.walk();
+		std::vector<std::uint32_t> pruned_tags;
+		for (auto it = walker.begin(); it != walker.end(); ++it) {
+			pruned_tags.push_back(it->element.tag().value());
+			if (it->element.tag() == "ReferencedStudySequence"_tag) {
+				if (!it->path.empty()) {
+					fail("SQ walk entry path should be empty at the root dataset");
+				}
+				if (it->path.contains_sequence("ReferencedStudySequence"_tag)) {
+					fail("SQ walk entry path should not include the current leaf sequence");
+				}
+				it->skip_sequence();
+			}
+		}
+		if (std::find(
+		        pruned_tags.begin(),
+		        pruned_tags.end(),
+		        "ReferencedSOPInstanceUID"_tag.value()) != pruned_tags.end()) {
+			fail("DataSetWalkIterator::skip_sequence should prune the current SQ subtree");
+		}
+		if (std::find(pruned_tags.begin(), pruned_tags.end(), "SeriesInstanceUID"_tag.value()) ==
+		    pruned_tags.end()) {
+			fail("DataSetWalkIterator::skip_sequence should continue with later top-level elements");
+		}
+
+		auto root_skip_walker = dataset.walk();
+		std::vector<std::uint32_t> root_skip_tags;
+		for (auto it = root_skip_walker.begin(); it != root_skip_walker.end(); ++it) {
+			auto entry = *it;
+			root_skip_tags.push_back(entry.element.tag().value());
+			if (entry.element.tag() == "ReferencedStudySequence"_tag) {
+				entry.skip_current_dataset();
+			}
+		}
+		if (root_skip_tags.size() != 2 ||
+		    root_skip_tags[0] != "SOPInstanceUID"_tag.value() ||
+		    root_skip_tags[1] != "ReferencedStudySequence"_tag.value()) {
+			fail("DataSetWalkIterator::skip_current_dataset should end the root dataset walk");
+		}
+
+		auto nested_skip_walker = dataset.walk();
+		bool saw_item0_series = false;
+		bool saw_item1_referenced = false;
+		bool saw_top_level_series = false;
+		for (auto it = nested_skip_walker.begin(); it != nested_skip_walker.end(); ++it) {
+			auto entry = *it;
+			const auto path = entry.path.to_string();
+			if (path == "00081110.0" && entry.element.tag() == "ReferencedSOPInstanceUID"_tag) {
+				entry.skip_current_dataset();
+			}
+			if (path == "00081110.0" && entry.element.tag() == "SeriesInstanceUID"_tag) {
+				saw_item0_series = true;
+			}
+			if (path == "00081110.1" &&
+			    entry.element.tag() == "ReferencedSOPInstanceUID"_tag) {
+				saw_item1_referenced = true;
+			}
+			if (path.empty() && entry.element.tag() == "SeriesInstanceUID"_tag) {
+				saw_top_level_series = true;
+			}
+		}
+		if (saw_item0_series) {
+			fail("DataSetWalkIterator::skip_current_dataset should prune the rest of the current nested dataset");
+		}
+		if (!saw_item1_referenced || !saw_top_level_series) {
+			fail("DataSetWalkIterator::skip_current_dataset should continue with sibling items and parent elements");
+		}
+
+		DicomFile file;
+		auto& root = file.dataset();
+		if (!root.set_value("SOPInstanceUID"_tag, "1.2.840.10008.2")) {
+			fail("DicomFile walk smoke should set top-level SOPInstanceUID");
+		}
+		auto* file_sequence =
+		    root.ensure_dataelement("ReferencedStudySequence"_tag, dicom::VR::SQ).as_sequence();
+		if (file_sequence == nullptr) {
+			fail("DicomFile walk smoke should create sequence element");
+		}
+		auto* file_item = file_sequence->add_dataset();
+		if (file_item == nullptr ||
+		    !file_item->set_value("ReferencedSOPInstanceUID"_tag, "9.8.7")) {
+			fail("DicomFile walk smoke should set nested referenced SOP UID");
+		}
+
+		std::size_t file_walk_count = 0;
+		for (auto entry : file.walk()) {
+			++file_walk_count;
+			if (entry.element.tag() == "ReferencedSOPInstanceUID"_tag &&
+			    entry.path.to_string() != std::string("00081110.0")) {
+				fail("DicomFile::walk should forward dataset walk paths");
+			}
+		}
+		if (file_walk_count != 3) {
+			fail("DicomFile::walk should visit root and nested elements");
+		}
+	}
+
 	const auto sop_uid = dicom::uid::generate_sop_instance_uid();
 	if (!dicom::uid::is_valid_uid_text_strict(sop_uid.value())) {
 		fail("generate_sop_instance_uid should return strict-valid UID text");

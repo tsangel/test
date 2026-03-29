@@ -1114,11 +1114,61 @@ class PixelFrame;
 class PixelSequence;
 class DicomFile;
 class DataSet;
+class DataElement;
+class DataSetWalker;
+class DataSetWalkIterator;
 /// Options controlling how a DataSet is read from a stream.
 struct ReadOptions {
 	Tag load_until{Tag(0xFFFFu, 0xFFFFu)};
 	bool keep_on_error{false};
 	bool copy{true};
+};
+
+class WalkPathRef {
+public:
+	constexpr WalkPathRef() noexcept = default;
+	/// Borrowed ancestors-only path view for the current walk step. Use it only
+	/// within the current iteration step. Persist to_string() if you need to keep
+	/// the path after the owning walker advances.
+	[[nodiscard]] bool empty() const noexcept;
+	[[nodiscard]] std::size_t size() const noexcept;
+
+	[[nodiscard]] bool contains_sequence(Tag sequence_tag) const noexcept;
+	[[nodiscard]] std::string to_string() const;
+
+private:
+	friend class DataSetWalkIterator;
+	constexpr WalkPathRef(
+	    const DataSetWalkIterator* owner,
+	    std::size_t depth,
+	    std::size_t revision) noexcept
+	    : owner_(owner), depth_(depth), revision_(revision) {}
+	const DataSetWalkIterator* owner_{nullptr};
+	std::size_t depth_{0};
+	std::size_t revision_{0};
+};
+
+struct DataSetWalkEntry {
+	DataSetWalkEntry(
+	    WalkPathRef path, DataElement& element, DataSetWalkIterator* owner,
+	    std::size_t revision) noexcept
+	    : path(path), element(element), owner_(owner), revision_(revision) {}
+
+	WalkPathRef path{};
+	DataElement& element;
+
+	/// When this entry is the current SQ element of a live walk iterator,
+	/// prune its nested item subtree on the next increment. No-op otherwise.
+	void skip_sequence() const noexcept;
+	/// When this entry belongs to the current dataset step of a live walk
+	/// iterator, prune the rest of that dataset on the next increment. No-op
+	/// otherwise.
+	void skip_current_dataset() const noexcept;
+
+private:
+	friend class DataSetWalkIterator;
+	DataSetWalkIterator* owner_{nullptr};
+	std::size_t revision_{0};
 };
 
 struct WriteOptions {
@@ -2556,6 +2606,18 @@ public:
 	/// Const end iterator (alias).
 	const_iterator cend() const;
 
+	/// Depth-first preorder walk over this dataset and every nested sequence item dataset.
+	/// Each step yields the current DataElement plus an ancestors-only path describing
+	/// the enclosing sequence/item chain. Sequence DataElements are included before
+	/// their children. Use DataSetWalkEntry::skip_sequence() or
+	/// DataSetWalkIterator::skip_sequence() to prune the current sequence subtree, or
+	/// DataSetWalkEntry::skip_current_dataset() /
+	/// DataSetWalkIterator::skip_current_dataset() to prune the rest of the current
+	/// dataset. The path view is borrowed and should be used
+	/// only within the current iteration step. Persist to_string() if you need to keep
+	/// the path after the iterator advances.
+	[[nodiscard]] DataSetWalker walk();
+
 	/// One-shot typed assignment helpers.
 	/// On failure these return false and leave the DataSet valid, but the destination
 	/// element state is unspecified. Callers that need rollback semantics must preserve
@@ -2763,6 +2825,16 @@ public:
 	DataElement& operator[](std::string_view tag_path);
 	const DataElement& operator[](Tag tag) const;
 	const DataElement& operator[](std::string_view tag_path) const;
+	/// Depth-first preorder walk over the root dataset and every nested sequence item dataset.
+	/// Sequence DataElements are included before their children. Use
+	/// DataSetWalkEntry::skip_sequence() or DataSetWalkIterator::skip_sequence() to
+	/// prune the current sequence subtree, or DataSetWalkEntry::skip_current_dataset() /
+	/// DataSetWalkIterator::skip_current_dataset() to prune the rest of the current
+	/// dataset.
+	/// The path view is borrowed and should be used only within the current
+	/// iteration step. Persist to_string() if you need to keep the path after the
+	/// iterator advances.
+	[[nodiscard]] DataSetWalker walk();
 	/// One-shot typed assignment helpers.
 	/// On failure these return false and leave the DicomFile/root DataSet valid, but the
 	/// destination element state is unspecified. Callers that need rollback semantics
@@ -3052,6 +3124,75 @@ private:
 	DataSet* root_dataset_{nullptr};
 	std::size_t value_offset_{0};
 	std::vector<std::unique_ptr<DataSet>> seq_;
+};
+
+class DataSetWalkIterator {
+public:
+	using iterator_category = std::input_iterator_tag;
+	using value_type = DataSetWalkEntry;
+	using difference_type = std::ptrdiff_t;
+	using reference = value_type;
+
+	DataSetWalkIterator() = default;
+	explicit DataSetWalkIterator(DataSet& dataset);
+	DataSetWalkIterator(const DataSetWalkIterator& other);
+	DataSetWalkIterator& operator=(const DataSetWalkIterator& other);
+	DataSetWalkIterator(DataSetWalkIterator&& other) noexcept;
+	DataSetWalkIterator& operator=(DataSetWalkIterator&& other) noexcept;
+
+	[[nodiscard]] value_type operator*() const;
+	[[nodiscard]] const value_type* operator->() const;
+	DataSetWalkIterator& operator++();
+	DataSetWalkIterator operator++(int);
+
+	/// When the current entry is an SQ element, prune its nested item subtree on
+	/// the next increment. No-op for non-sequence elements.
+	void skip_sequence() noexcept;
+	/// Prune the rest of the current dataset on the next increment. When called at
+	/// the root dataset, the walk ends. When called in a nested item dataset, the
+	/// walk resumes at the next sibling item or the parent dataset's next element.
+	void skip_current_dataset() noexcept;
+
+	friend bool operator==(const DataSetWalkIterator& lhs, const DataSetWalkIterator& rhs) noexcept;
+	friend bool operator!=(const DataSetWalkIterator& lhs, const DataSetWalkIterator& rhs) noexcept {
+		return !(lhs == rhs);
+	}
+
+private:
+	friend class WalkPathRef;
+	friend struct DataSetWalkEntry;
+
+	struct StackEntry {
+		DataSet::iterator current{};
+		DataSet::iterator end{};
+		Sequence* parent_sequence{nullptr};
+		Tag parent_sequence_tag{};
+		std::uint32_t item_index{0};
+	};
+
+	void initialize_root(DataSet& dataset);
+	void push_sequence_item_stack_entry(
+	    Sequence& sequence, Tag sequence_tag, std::uint32_t item_index);
+	void advance_to_next_available();
+
+	std::vector<StackEntry> stack_{};
+	DataElement* current_{nullptr};
+	std::size_t path_revision_{0};
+	bool skip_sequence_on_increment_{false};
+	bool skip_current_dataset_on_increment_{false};
+	mutable std::optional<value_type> arrow_entry_{};
+};
+
+class DataSetWalker {
+public:
+	DataSetWalker() = default;
+	explicit DataSetWalker(DataSet& dataset) noexcept : dataset_(&dataset) {}
+
+	[[nodiscard]] DataSetWalkIterator begin() const;
+	[[nodiscard]] DataSetWalkIterator end() const noexcept { return DataSetWalkIterator(); }
+
+private:
+	DataSet* dataset_{nullptr};
 };
 
 struct PixelFragment {

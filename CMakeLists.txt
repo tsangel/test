@@ -113,6 +113,7 @@ include(DicomsdlDependencies)
 
 add_library(dicomsdl STATIC
     src/dataset.cpp
+    src/dataset_walk.cpp
     src/diagnostics.cpp
     src/dataset_deflate_codec.cpp
     src/dataset_endian_converter.cpp
