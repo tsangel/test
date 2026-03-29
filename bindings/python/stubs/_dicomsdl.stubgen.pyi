@@ -295,9 +295,13 @@ class DataSetWalkIterator:
 
 DataSetSelectionTagLike: TypeAlias = Tag | int | str
 
+DataSetSelectionNodesLike: TypeAlias = (
+    list["DataSetSelectionNodeLike"] | tuple["DataSetSelectionNodeLike", ...]
+)
+
 DataSetSelectionNodeLike: TypeAlias = (
     DataSetSelectionTagLike
-    | tuple[DataSetSelectionTagLike, _Sequence["DataSetSelectionNodeLike"]]
+    | tuple[DataSetSelectionTagLike, DataSetSelectionNodesLike]
 )
 
 class DataSetSelection:
@@ -305,13 +309,13 @@ class DataSetSelection:
     def __init__(self) -> None: ...
 
     @overload
-    def __init__(self, nodes: _Sequence[DataSetSelectionNodeLike], /) -> None: ...
+    def __init__(self, nodes: DataSetSelectionNodesLike, /) -> None: ...
 
     def __len__(self) -> int: ...
 
     def __bool__(self) -> bool: ...
 
-DataSetSelectionLike: TypeAlias = DataSetSelection | _Sequence[DataSetSelectionNodeLike]
+DataSetSelectionLike: TypeAlias = DataSetSelection | DataSetSelectionNodesLike
 
 class DataSet:
     def __setattr__(self, name, value, /): ...

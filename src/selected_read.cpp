@@ -128,11 +128,7 @@ public:
 	}
 
 	[[nodiscard]] Tag max_tag() const noexcept {
-		Tag max_tag = kSpecificCharacterSetTag;
-		if (!nodes_.empty() && nodes_.back().tag.value() > max_tag.value()) {
-			max_tag = nodes_.back().tag;
-		}
-		return max_tag;
+		return nodes_.empty() ? Tag{} : nodes_.back().tag;
 	}
 
 private:
