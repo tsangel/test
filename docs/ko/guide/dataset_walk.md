@@ -12,6 +12,13 @@ item dataset을 depth-first preorder로 순회합니다.
 즉 nested metadata inspection, selective pruning, 그리고 UID rewrite 같은
 transform-style pass의 기반으로 쓰기 좋습니다.
 
+`walk()`는 이미 로드된 dataset 상태만 순회합니다. 암묵적으로
+`ensure_loaded()`나 `ensure_dataelement()`를 호출하지 않습니다.
+
+partial-load된 attached dataset에서는 뒤쪽 태그들이 walk에서 조용히 빠질 수
+있습니다. 전체 dataset을 검사해야 하는 pass라면 먼저 fully load하거나,
+walk 전에 필요한 frontier까지 `ensure_loaded(tag)`를 호출해야 합니다.
+
 ## 어떤 순서로 방문하나
 
 순회 순서는 다음과 같습니다.

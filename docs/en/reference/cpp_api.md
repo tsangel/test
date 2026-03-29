@@ -147,6 +147,8 @@ Note: These attachment calls are intended for the root `DataSet` (the object ret
 - `DataSet::walk()` and `DicomFile::walk()` return a `DataSetWalker` for depth-first preorder traversal over the root dataset and all nested sequence item datasets.
 - Each step yields `DataSetWalkEntry { path, element }`.
 - `path` is an ancestors-only borrowed view. Persist `path.to_string()` if you need to keep it after the walker advances.
+- Walking only traverses the dataset state that is already loaded; it does not implicitly call `ensure_loaded()` or `ensure_dataelement()`.
+- On partially loaded attached datasets, tags beyond the loaded frontier are silently absent from the walk. Fully load first or call `ensure_loaded(tag)` before using walk for full-dataset passes.
 - `DataSetWalkEntry::skip_sequence()` / `DataSetWalkIterator::skip_sequence()` prune the current sequence subtree.
 - `DataSetWalkEntry::skip_current_dataset()` / `DataSetWalkIterator::skip_current_dataset()` prune the rest of the current dataset.
 - Full usage examples in C++ and Python: [DataSet Walk](../guide/dataset_walk.md)

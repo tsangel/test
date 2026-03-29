@@ -365,6 +365,23 @@ int main() {
 			fail("DataSetWalkIterator::skip_sequence should continue with later top-level elements");
 		}
 
+		auto equality_walker = dataset.walk();
+		auto equality_it = equality_walker.begin();
+		++equality_it;
+		if (equality_it == equality_walker.end() ||
+		    equality_it->element.tag() != "ReferencedStudySequence"_tag) {
+			fail("DataSet walk equality smoke should reach the sequence element");
+		}
+		auto equality_copy = equality_it;
+		equality_it.skip_sequence();
+		if (!(equality_it == equality_copy)) {
+			fail("DataSetWalkIterator equality should not depend on pending skip_sequence state");
+		}
+		equality_copy.skip_current_dataset();
+		if (!(equality_it == equality_copy)) {
+			fail("DataSetWalkIterator equality should not depend on pending skip_current_dataset state");
+		}
+
 		auto root_skip_walker = dataset.walk();
 		std::vector<std::uint32_t> root_skip_tags;
 		for (auto it = root_skip_walker.begin(); it != root_skip_walker.end(); ++it) {

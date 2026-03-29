@@ -1,6 +1,6 @@
 from collections.abc import Callable, Sequence as _Sequence
 import enum
-from typing import overload
+from typing import Literal, overload
 
 from dicomsdl._image import _dicomfile_to_pil_image as to_pil_image
 
@@ -268,7 +268,7 @@ class DataSetWalkPath:
 
     def to_string(self) -> str: ...
 
-class DataSetWalkEntry:
+class DataSetWalkEntry(tuple[DataSetWalkPath, DataElement]):
     @property
     def path(self) -> DataSetWalkPath: ...
 
@@ -278,6 +278,11 @@ class DataSetWalkEntry:
     def skip_sequence(self) -> None: ...
 
     def skip_current_dataset(self) -> None: ...
+
+class DataSetWalkEntryIterator:
+    def __iter__(self) -> DataSetWalkEntryIterator: ...
+
+    def __next__(self) -> DataSetWalkPath | DataElement: ...
 
 class DataSetWalkIterator:
     def __iter__(self) -> DataSetWalkIterator: ...

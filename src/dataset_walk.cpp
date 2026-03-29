@@ -172,10 +172,7 @@ bool operator==(const DataSetWalkIterator& lhs, const DataSetWalkIterator& rhs) 
 	if (lhs.current_ == nullptr && rhs.current_ == nullptr) {
 		return true;
 	}
-	return lhs.current_ == rhs.current_ && lhs.stack_.size() == rhs.stack_.size() &&
-	       lhs.skip_sequence_on_increment_ == rhs.skip_sequence_on_increment_ &&
-	       lhs.skip_current_dataset_on_increment_ ==
-	           rhs.skip_current_dataset_on_increment_;
+	return lhs.current_ == rhs.current_ && lhs.stack_.size() == rhs.stack_.size();
 }
 
 void DataSetWalkIterator::initialize_root(DataSet& dataset) {

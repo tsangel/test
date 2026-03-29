@@ -12,6 +12,14 @@ walk は `SQ` data element 自体も先に訪問してから、その item に
 nested metadata inspection、selective pruning、UID rewrite のような
 transform-style pass の基盤として使いやすい API です。
 
+`walk()` は、すでに読み込まれている dataset 状態だけを走査します。
+暗黙に `ensure_loaded()` や `ensure_dataelement()` を呼ぶことはありません。
+
+partial-load された attached dataset では、後ろ側の tag は walk から
+静かに抜け落ちます。dataset 全体を検査する pass に使うなら、先に fully
+load するか、walk の前に必要な frontier まで `ensure_loaded(tag)` を
+呼んでください。
+
 ## 何が訪問されるか
 
 訪問順序は次の通りです。

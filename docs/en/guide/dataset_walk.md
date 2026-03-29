@@ -12,6 +12,13 @@ items. Each step yields:
 This is useful for nested metadata inspection, selective pruning, and
 transform-style passes such as UID rewriting.
 
+`walk()` only traverses the dataset state that is already loaded. It does not
+implicitly call `ensure_loaded()` or `ensure_dataelement()`.
+
+On a partially loaded attached dataset, later tags are silently absent from the
+walk. If your pass must inspect the full dataset, fully load it first or call
+`ensure_loaded(tag)` for the frontier you need before walking.
+
 ## What gets visited
 
 Walk order is:

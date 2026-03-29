@@ -2615,7 +2615,11 @@ public:
 	/// DataSetWalkIterator::skip_current_dataset() to prune the rest of the current
 	/// dataset. The path view is borrowed and should be used
 	/// only within the current iteration step. Persist to_string() if you need to keep
-	/// the path after the iterator advances.
+	/// the path after the iterator advances. Walking only traverses the dataset
+	/// state that is already loaded; it does not implicitly call ensure_loaded()
+	/// or ensure_dataelement(). On partially loaded attached datasets, tags beyond
+	/// the loaded frontier are simply not visited; fully load first or call
+	/// ensure_loaded(tag) before using walk() for full-dataset passes.
 	[[nodiscard]] DataSetWalker walk();
 
 	/// One-shot typed assignment helpers.
