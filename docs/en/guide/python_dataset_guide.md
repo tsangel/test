@@ -475,6 +475,33 @@ Failure model:
 
 If you need rollback semantics, keep the previous value yourself and restore it explicitly.
 
+### Recursive batch updates with update_values()
+
+When you want a `DataSetSelection`-style nested tree for writes, use
+`update_values(...)`:
+
+```python
+assert ds.update_values(
+    [
+        ("Rows", 512),
+        ("Columns", lambda previous: 256 if previous is None else previous + 1),
+        ("ReferencedStudySequence", [
+            ("ReferencedSOPInstanceUID", "1.2.3.4"),
+            (0x00091030, (dicom.VR.US, lambda previous: 16 if previous is None else previous + 1)),
+        ]),
+    ]
+)
+```
+
+Rules:
+
+- each node is `(tag, value)`, `(tag, callback)`, `(tag, (vr, value_or_callback))`, or `(tag, [child_nodes])`
+- callbacks receive the current typed value, or `None` when the element is missing
+- nested child nodes treat the parent tag as `SQ`, creating or resetting it if needed, and apply to every item dataset under that sequence
+- when a nested target sequence is missing or empty, one item dataset is created automatically
+- the return value is `False` if any leaf assignment cannot be encoded for the resolved VR
+- malformed node shapes, invalid tags, callback exceptions, and partial-load frontier violations still raise
+
 ### Creating zero-length values vs removing elements
 
 `None` means zero-length present value:

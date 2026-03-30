@@ -120,7 +120,7 @@ bool nested_ok =
 - If the element is missing and `vr` is omitted, standard tags resolve their dictionary VR, while
   unknown/private tags throw.
 - Dotted tag-path forms create intermediate sequence elements/items as needed. When
-  `ensure_dataelement(...)` has to materialize a nested path under an existing non-sequence
+  `ensure_dataelement(...)` has to create the requested nested path under an existing non-sequence
   intermediate element, it can reset that element to `SQ`.
 - `add_dataelement(...)` remains the always-replace API; `ensure_dataelement(...)` only resets
   when an explicit VR must be enforced.

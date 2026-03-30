@@ -27,8 +27,8 @@
 
 - Single-tag lookups accept tags and keywords such as `Rows` or `(0010,0010)`.
 - Nested lookups accept dotted tag paths such as `ReferencedStudySequence.0.ReferencedSOPInstanceUID`.
-- `ensure_dataelement(...)` and `set_value(...)` can materialize missing sequence items for dotted paths.
-- When `ensure_dataelement(...)` needs to materialize a dotted path under an existing non-sequence intermediate element, it can reset that intermediate element to `SQ`.
+- `ensure_dataelement(...)` and `set_value(...)` can create missing sequence items for dotted paths.
+- When `ensure_dataelement(...)` needs to create the requested dotted path under an existing non-sequence intermediate element, it can reset that intermediate element to `SQ`.
 - Malformed traversal or reading through a non-sequence path still raises.
 
 ## C++-only attachment APIs

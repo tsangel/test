@@ -4,7 +4,7 @@
 nested sequence children you select from a DICOM stream.
 
 Use selected read when you want a small subset of top-level tags plus specific
-nested sequence children, without materializing the rest of the dataset.
+nested sequence children, without loading the rest of the dataset.
 
 ## Selection tree
 

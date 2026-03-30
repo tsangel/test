@@ -4,7 +4,7 @@
 選択した tag と nested sequence child だけを読み込みます。
 
 トップレベル tag の一部と、ネストした sequence 内の特定 child だけが必要で、
-それ以外の dataset を materialize したくないときに使います。
+それ以外の dataset 全体を読み込みたくないときに使います。
 
 ## Selection tree
 

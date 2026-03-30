@@ -4,7 +4,7 @@
 你选中的 tag 和嵌套 sequence child。
 
 当你只需要少量顶层 tag，以及嵌套 sequence 里的特定 child，而不想把其余
-dataset 全部 materialize 出来时，可以使用 selected read。
+dataset 全部加载到内存时，可以使用 selected read。
 
 ## Selection tree
 
