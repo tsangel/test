@@ -3038,7 +3038,7 @@ struct PyDataSetWalkPath {
 	PyDataSetWalkPath(std::shared_ptr<PyDataSetWalkBorrowState> state, std::size_t generation)
 	    : state_(std::move(state)), generation_(generation) {}
 
-	[[nodiscard]] dicom::WalkPathRef ref() const noexcept;
+	[[nodiscard]] dicom::DataSetWalkPathRef ref() const noexcept;
 
 	std::shared_ptr<PyDataSetWalkBorrowState> state_{};
 	std::size_t generation_{0};
@@ -3143,9 +3143,9 @@ struct PyDataSetWalkIterator {
 		release_borrow_state();
 	}
 
-	[[nodiscard]] dicom::WalkPathRef current_path() const noexcept {
+	[[nodiscard]] dicom::DataSetWalkPathRef current_path() const noexcept {
 		if (current_ == end_) {
-			return dicom::WalkPathRef();
+			return dicom::DataSetWalkPathRef();
 		}
 		return (*current_).path;
 	}
@@ -3216,9 +3216,9 @@ void PyDataSetWalkEntry::skip_current_dataset() noexcept {
 	}
 }
 
-dicom::WalkPathRef PyDataSetWalkPath::ref() const noexcept {
+dicom::DataSetWalkPathRef PyDataSetWalkPath::ref() const noexcept {
 	if (state_ == nullptr || state_->iterator == nullptr || state_->generation != generation_) {
-		return dicom::WalkPathRef();
+		return dicom::DataSetWalkPathRef();
 	}
 	return state_->iterator->current_path();
 }
