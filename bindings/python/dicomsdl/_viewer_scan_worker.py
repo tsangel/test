@@ -2,11 +2,26 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from . import BufferingReporter, Tag, is_dicom_file, read_file, set_thread_reporter
+from . import BufferingReporter, DataSetSelection, is_dicom_file, read_file_selected, set_thread_reporter
 from ._qt_compat import QtCore, Signal, Slot
 from ._viewer_model import DicomFileEntry, FolderEntry
 
-METADATA_LOAD_UNTIL = Tag("0028,1053")
+# Reuse one canonicalized selection tree for directory scans so we only parse
+# the metadata columns dicomview actually needs to populate the file table.
+SCAN_METADATA_SELECTION = DataSetSelection(
+    [
+        "StudyDescription",
+        "SeriesDescription",
+        "StudyDate",
+        "PatientID",
+        "PatientName",
+        "Modality",
+        "Rows",
+        "Columns",
+        "BitsAllocated",
+        "NumberOfFrames",
+    ]
+)
 
 
 def _sort_key(path: Path) -> tuple[str, str]:
@@ -41,7 +56,7 @@ def _read_file_entry(path: Path) -> DicomFileEntry | None:
     if not is_dicom_file(path):
         return DicomFileEntry(path=path, name=path.name, is_dicom=False)
     try:
-        dicom_file = read_file(path, load_until=METADATA_LOAD_UNTIL)
+        dicom_file = read_file_selected(path, SCAN_METADATA_SELECTION)
     except Exception:
         return DicomFileEntry(path=path, name=path.name)
 

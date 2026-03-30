@@ -795,6 +795,36 @@ def test_selected_read_python_api_accepts_raw_selection_nodes_for_one_shot_reads
 	assert not item["StudyInstanceUID"]
 
 
+def test_selected_read_preserves_metadata_needed_for_viewer_folder_scan():
+	selection = dicom.DataSetSelection(
+	    [
+	        "StudyDescription",
+	        "SeriesDescription",
+	        "StudyDate",
+	        "PatientID",
+	        "PatientName",
+	        "Modality",
+	        "Rows",
+	        "Columns",
+	        "BitsAllocated",
+	        "NumberOfFrames",
+	    ]
+	)
+	selected = dicom.read_file_selected(_test_file(), selection)
+
+	assert selected["TransferSyntaxUID"].to_transfer_syntax_uid().keyword == "ExplicitVRLittleEndian"
+	assert selected["SpecificCharacterSet"].to_string_view() == "ISO_IR 100"
+	assert selected["StudyDescription"].to_utf8_string(errors="replace_fffd") == "SAMPLE FOR TEST"
+	assert selected["StudyDate"].to_string_view() == "20060103"
+	assert selected["PatientName"].to_utf8_string(errors="replace_fffd") == "SAMPLENAME"
+	assert selected["Modality"].to_string_view() == "CT"
+	assert selected["Rows"].to_long() == 4
+	assert selected["Columns"].to_long() == 4
+	assert selected["BitsAllocated"].to_long() == 16
+	assert selected["NumberOfFrames"].to_long() is None
+	assert not selected["PixelData"]
+
+
 def test_write_with_transfer_syntax_roundtrip_without_mutating_source(tmp_path):
 	supported = {
 		uid.keyword or uid.value for uid in dicom.transfer_syntax_uids_encode_supported()
