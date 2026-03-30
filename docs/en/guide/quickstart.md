@@ -43,7 +43,7 @@ object rather than a plain Python string.
 Need the object model, metadata lookup rules, or the full decode flow? See
 [Core Objects](core_objects.md), [Python DataSet Guide](python_dataset_guide.md), and
 [Pixel Decode](pixel_decode.md).
-Need recursive traversal over nested sequences? See [DataSet Walk](dataset_walk.md).
+Need recursive traversal over nested sequences? See [DataSet Visit and Walk](dataset_visit_and_walk.md).
 Only need a few tags? See [Selected Read](selected_read.md).
 
 4. Decode pixels into a NumPy array
@@ -194,7 +194,7 @@ Image size: 512 x 512
 
 Need more C++ API detail? See [C++ API Overview](../reference/cpp_api.md) and
 [DataSet Reference](../reference/dataset_reference.md).
-Need recursive traversal or subtree pruning? See [DataSet Walk](dataset_walk.md).
+Need recursive traversal or a way to skip a subtree? See [DataSet Visit and Walk](dataset_visit_and_walk.md).
 Only need a few tags from disk or memory? See [Selected Read](selected_read.md).
 
 4. Batch set with `ok &= ...` and error check

@@ -37,7 +37,7 @@ PersonName(Doe^Jane)
 dataset 경계를 명시적으로 드러내고 싶다면 `df.dataset`을 쓰세요.
 `PatientName`은 `PN`이므로 `df.PatientName`은 일반 Python 문자열이 아니라 `PersonName(...)` 객체로 표시됩니다.
 객체 모델, metadata lookup 규칙, 전체 decode 흐름이 필요하면 [Core Objects](core_objects.md), [Python DataSet Guide](python_dataset_guide.md), [Pixel Decode](pixel_decode.md)를 보세요.
-중첩된 sequence를 재귀적으로 순회해야 하면 [DataSet Walk](dataset_walk.md)를 보세요.
+중첩된 sequence를 재귀적으로 순회해야 하면 [DataSet Visit and Walk](dataset_visit_and_walk.md)를 보세요.
 일부 tag만 골라 읽고 싶다면 [Selected Read](selected_read.md)를 보세요.
 
 4. 픽셀을 NumPy 배열로 decode하기
@@ -171,7 +171,7 @@ Image size: 512 x 512
 ```
 
 더 자세한 C++ API 설명이 필요하면 [C++ API Overview](../reference/cpp_api.md)와 [DataSet Reference](../reference/dataset_reference.md)를 보세요.
-재귀 순회나 하위 트리 건너뛰기가 필요하면 [DataSet Walk](dataset_walk.md)를 보세요.
+재귀 순회나 하위 트리 건너뛰기가 필요하면 [DataSet Visit and Walk](dataset_visit_and_walk.md)를 보세요.
 디스크나 메모리에서 일부 tag만 골라 읽고 싶다면 [Selected Read](selected_read.md)를 보세요.
 
 4. `ok &= ...`와 오류 확인으로 일괄 설정하기

@@ -7,6 +7,7 @@
 #include <cstring>
 #include <deque>
 #include <filesystem>
+#include <functional>
 #include <initializer_list>
 #include <limits>
 #include <iterator>
@@ -409,6 +410,9 @@ static_assert(
 
 }  // namespace uid
 
+class DicomFile;
+class DataSet;
+
 class UidRemapper {
 public:
 	/// Open a journal-backed in-memory UID remapper.
@@ -449,6 +453,31 @@ private:
 
 	std::shared_ptr<Impl> impl_;
 };
+
+struct RewriteUidOptions {
+	bool rewrite_study_instance_uid{true};
+	bool rewrite_series_instance_uid{true};
+	bool rewrite_sop_instance_uids{true};
+	bool rewrite_frame_of_reference_uids{false};
+};
+
+/// Rewrite selected UID-bearing elements in the already-loaded portion of
+/// `dataset` using `remapper`.
+///
+/// This helper uses `DataSet::visit(...)`, so it only sees the dataset state
+/// that is already loaded and does not implicitly call `ensure_loaded()`.
+/// Returns the number of DataElements that were rewritten.
+[[nodiscard]] std::size_t rewrite_uids(
+    DataSet& dataset,
+    UidRemapper& remapper,
+    const RewriteUidOptions& options = {});
+
+/// Convenience overload that rewrites UIDs in the root dataset of `file`.
+/// Returns the number of DataElements that were rewritten.
+[[nodiscard]] std::size_t rewrite_uids(
+    DicomFile& file,
+    UidRemapper& remapper,
+    const RewriteUidOptions& options = {});
 
 static_assert(uid::Generated::max_str_length <= std::numeric_limits<uid::Generated::size_type>::max(),
 	"uid::Generated::size_type must fit max_str_length");
@@ -1115,6 +1144,11 @@ class PixelSequence;
 class DicomFile;
 class DataSet;
 class DataElement;
+namespace detail {
+struct DataSetVisitPathOwner;
+template <typename DataSetType, typename Fn>
+void detail_visit_dataset(DataSetType& dataset, Fn&& fn);
+}
 class DataSetWalker;
 class DataSetWalkIterator;
 class SelectedReadParser;
@@ -1166,9 +1200,9 @@ private:
 	std::vector<DataSetSelectionNode> nodes_{};
 };
 
-class WalkPathRef {
+class DataSetWalkPathRef {
 public:
-	constexpr WalkPathRef() noexcept = default;
+	constexpr DataSetWalkPathRef() noexcept = default;
 	/// Borrowed ancestors-only path view for the current walk step. Use it only
 	/// within the current iteration step. Persist to_string() if you need to keep
 	/// the path after the owning walker advances.
@@ -1180,7 +1214,7 @@ public:
 
 private:
 	friend class DataSetWalkIterator;
-	constexpr WalkPathRef(
+	constexpr DataSetWalkPathRef(
 	    const DataSetWalkIterator* owner,
 	    std::size_t depth,
 	    std::size_t revision) noexcept
@@ -1190,20 +1224,58 @@ private:
 	std::size_t revision_{0};
 };
 
+enum class DataSetVisitControl : std::uint8_t {
+	continue_ = 0,
+	skip_sequence,
+	skip_current_dataset,
+	stop,
+};
+
+struct DataSetVisitPathStep {
+	Tag parent_sequence_tag{};
+	std::uint32_t item_index{0};
+};
+
+class DataSetVisitPathRef {
+public:
+	constexpr DataSetVisitPathRef() noexcept = default;
+	/// Borrowed ancestors-only path view for the current visit callback. Use it
+	/// only within the current callback invocation. Persist to_string() if you
+	/// need to keep the path after visit() returns.
+	[[nodiscard]] bool empty() const noexcept;
+	[[nodiscard]] std::size_t size() const noexcept;
+	[[nodiscard]] std::span<const DataSetVisitPathStep> steps() const noexcept;
+
+	[[nodiscard]] bool contains_sequence(Tag sequence_tag) const noexcept;
+	[[nodiscard]] std::string to_string() const;
+
+private:
+	template <typename DataSetType, typename Fn>
+	friend void detail::detail_visit_dataset(DataSetType& dataset, Fn&& fn);
+	constexpr DataSetVisitPathRef(
+	    const detail::DataSetVisitPathOwner* owner,
+	    std::size_t depth,
+	    std::size_t revision) noexcept
+	    : owner_(owner), depth_(depth), revision_(revision) {}
+	const detail::DataSetVisitPathOwner* owner_{nullptr};
+	std::size_t depth_{0};
+	std::size_t revision_{0};
+};
+
 struct DataSetWalkEntry {
 	DataSetWalkEntry(
-	    WalkPathRef path, DataElement& element, DataSetWalkIterator* owner,
+	    DataSetWalkPathRef path, DataElement& element, DataSetWalkIterator* owner,
 	    std::size_t revision) noexcept
 	    : path(path), element(element), owner_(owner), revision_(revision) {}
 
-	WalkPathRef path{};
+	DataSetWalkPathRef path{};
 	DataElement& element;
 
 	/// When this entry is the current SQ element of a live walk iterator,
-	/// prune its nested item subtree on the next increment. No-op otherwise.
+	/// skip its nested item subtree on the next increment. No-op otherwise.
 	void skip_sequence() const noexcept;
 	/// When this entry belongs to the current dataset step of a live walk
-	/// iterator, prune the rest of that dataset on the next increment. No-op
+	/// iterator, skip the rest of that dataset on the next increment. No-op
 	/// otherwise.
 	void skip_current_dataset() const noexcept;
 
@@ -2649,18 +2721,35 @@ public:
 	/// Const end iterator (alias).
 	const_iterator cend() const;
 
-	/// Depth-first preorder walk over this dataset and every nested sequence item dataset.
-	/// Each step yields the current DataElement plus an ancestors-only path describing
-	/// the enclosing sequence/item chain. Sequence DataElements are included before
-	/// their children. Use DataSetWalkEntry::skip_sequence() or
-	/// DataSetWalkIterator::skip_sequence() to prune the current sequence subtree, or
-	/// DataSetWalkEntry::skip_current_dataset() /
-	/// DataSetWalkIterator::skip_current_dataset() to prune the rest of the current
-	/// dataset. The path view is borrowed and should be used
-	/// only within the current iteration step. Persist to_string() if you need to keep
-	/// the path after the iterator advances. Walking only traverses the dataset
-	/// state that is already loaded; it does not implicitly call ensure_loaded()
-	/// or ensure_dataelement(). On partially loaded attached datasets, tags beyond
+	/// C++-only fast-path visitor over this dataset and every nested sequence item
+	/// dataset. The callback receives `(DataSetVisitPathRef path, DataElement&
+	/// element)` and may return DataSetVisitControl to skip parts of the
+	/// traversal or stop it.
+	/// A void-returning callback is treated as DataSetVisitControl::continue_.
+	/// The path view is borrowed and should be used only within the current
+	/// callback invocation. Like walk(), visit() only traverses the dataset state
+	/// that is already loaded and does not implicitly call ensure_loaded() or
+	/// ensure_dataelement().
+	template <typename Fn>
+	void visit(Fn&& fn);
+
+	/// Const overload of visit(). The callback receives
+	/// `(DataSetVisitPathRef path, const DataElement& element)`.
+	template <typename Fn>
+	void visit(Fn&& fn) const;
+
+	/// Depth-first preorder walk over this dataset and every nested sequence item
+	/// dataset. Each step yields the current DataElement plus an ancestors-only
+	/// path describing the enclosing sequence/item chain. Sequence DataElements
+	/// are included before their children. Use DataSetWalkEntry::skip_sequence()
+	/// or DataSetWalkIterator::skip_sequence() to skip the current sequence
+	/// subtree, or DataSetWalkEntry::skip_current_dataset() /
+	/// DataSetWalkIterator::skip_current_dataset() to skip the rest of the
+	/// current dataset. The path view is borrowed and should be used only within
+	/// the current iteration step. Persist to_string() if you need to keep the
+	/// path after the iterator advances. Walking only traverses the dataset state
+	/// that is already loaded; it does not implicitly call ensure_loaded() or
+	/// ensure_dataelement(). On partially loaded attached datasets, tags beyond
 	/// the loaded frontier are simply not visited; fully load first or call
 	/// ensure_loaded(tag) before using walk() for full-dataset passes.
 	[[nodiscard]] DataSetWalker walk();
@@ -2873,15 +2962,24 @@ public:
 	DataElement& operator[](std::string_view tag_path);
 	const DataElement& operator[](Tag tag) const;
 	const DataElement& operator[](std::string_view tag_path) const;
-	/// Depth-first preorder walk over the root dataset and every nested sequence item dataset.
-	/// Sequence DataElements are included before their children. Use
-	/// DataSetWalkEntry::skip_sequence() or DataSetWalkIterator::skip_sequence() to
-	/// prune the current sequence subtree, or DataSetWalkEntry::skip_current_dataset() /
-	/// DataSetWalkIterator::skip_current_dataset() to prune the rest of the current
-	/// dataset.
-	/// The path view is borrowed and should be used only within the current
-	/// iteration step. Persist to_string() if you need to keep the path after the
-	/// iterator advances.
+	/// C++-only fast-path visitor over the root dataset and every nested sequence
+	/// item dataset. Forwards to dataset().visit(...).
+	template <typename Fn>
+	void visit(Fn&& fn);
+
+	/// Const overload of visit(). Forwards to dataset().visit(...).
+	template <typename Fn>
+	void visit(Fn&& fn) const;
+
+	/// Depth-first preorder walk over the root dataset and every nested sequence
+	/// item dataset. Sequence DataElements are included before their children.
+	/// Use DataSetWalkEntry::skip_sequence() or
+	/// DataSetWalkIterator::skip_sequence() to skip the current sequence
+	/// subtree, or DataSetWalkEntry::skip_current_dataset() /
+	/// DataSetWalkIterator::skip_current_dataset() to skip the rest of the
+	/// current dataset. The path view is borrowed and should be used only within
+	/// the current iteration step. Persist to_string() if you need to keep the
+	/// path after the iterator advances.
 	[[nodiscard]] DataSetWalker walk();
 	/// One-shot typed assignment helpers.
 	/// On failure these return false and leave the DicomFile/root DataSet valid, but the
@@ -3195,7 +3293,7 @@ public:
 	DataSetWalkIterator& operator++();
 	DataSetWalkIterator operator++(int);
 
-	/// When the current entry is an SQ element, prune its nested item subtree on
+	/// When the current entry is an SQ element, skip its nested item subtree on
 	/// the next increment. No-op for non-sequence elements.
 	void skip_sequence() noexcept;
 	/// Prune the rest of the current dataset on the next increment. When called at
@@ -3209,7 +3307,7 @@ public:
 	}
 
 private:
-	friend class WalkPathRef;
+	friend class DataSetWalkPathRef;
 	friend struct DataSetWalkEntry;
 
 	struct StackEntry {
@@ -3244,6 +3342,213 @@ public:
 private:
 	DataSet* dataset_{nullptr};
 };
+
+namespace detail {
+
+struct DataSetVisitPathOwner {
+	std::span<const DataSetVisitPathStep> path_{};
+	std::size_t path_revision_{0};
+};
+
+template <typename Iter, typename SequencePtr>
+struct VisitStackEntry {
+	Iter current{};
+	Iter end{};
+	SequencePtr parent_sequence{nullptr};
+	Tag parent_sequence_tag{};
+	std::uint32_t item_index{0};
+};
+
+template <typename Fn, typename ElementRef>
+DataSetVisitControl invoke_visit_callback(
+    Fn&& fn, DataSetVisitPathRef path, ElementRef&& element) {
+	using FnType = std::remove_reference_t<Fn>;
+	using Result = std::invoke_result_t<FnType&, DataSetVisitPathRef, ElementRef>;
+	if constexpr (std::is_void_v<Result>) {
+		std::invoke(std::forward<Fn>(fn), path, std::forward<ElementRef>(element));
+		return DataSetVisitControl::continue_;
+	} else {
+		static_assert(std::is_convertible_v<Result, DataSetVisitControl>,
+		    "visit callback must return void or DataSetVisitControl");
+		return static_cast<DataSetVisitControl>(
+		    std::invoke(std::forward<Fn>(fn), path, std::forward<ElementRef>(element)));
+	}
+}
+
+template <typename DataSetType, typename Fn>
+void detail_visit_dataset(DataSetType& dataset, Fn&& fn) {
+	using Iter = decltype(dataset.begin());
+	using DataSetBare = std::remove_reference_t<DataSetType>;
+	using SequencePtr =
+	    std::conditional_t<std::is_const_v<DataSetBare>, const Sequence*, Sequence*>;
+	std::vector<VisitStackEntry<Iter, SequencePtr>> stack;
+	std::vector<DataSetVisitPathStep> path_steps;
+	DataSetVisitPathOwner path_owner{};
+	stack.push_back(VisitStackEntry<Iter, SequencePtr>{
+	    .current = dataset.begin(),
+	    .end = dataset.end(),
+	});
+
+	while (!stack.empty()) {
+		auto& stack_entry = stack.back();
+		if (stack_entry.current != stack_entry.end) {
+			auto& element = *stack_entry.current;
+			path_owner.path_ =
+			    std::span<const DataSetVisitPathStep>(path_steps.data(), path_steps.size());
+			const auto control = invoke_visit_callback(
+			    fn,
+			    DataSetVisitPathRef(
+			        &path_owner, path_steps.size(), path_owner.path_revision_),
+			    element);
+			++path_owner.path_revision_;
+			if (control == DataSetVisitControl::stop) {
+				return;
+			}
+
+			SequencePtr yielded_sequence =
+			    (control != DataSetVisitControl::skip_sequence &&
+			            control != DataSetVisitControl::skip_current_dataset &&
+			            element.vr().is_sequence())
+			        ? element.as_sequence()
+			        : nullptr;
+			if (control == DataSetVisitControl::skip_current_dataset) {
+				stack_entry.current = stack_entry.end;
+			} else {
+				++stack_entry.current;
+			}
+			if (yielded_sequence != nullptr && yielded_sequence->size() > 0) {
+				path_steps.push_back(DataSetVisitPathStep{
+				    .parent_sequence_tag = element.tag(),
+				    .item_index = 0u,
+				});
+				auto* item_dataset = yielded_sequence->get_dataset(0);
+				if (item_dataset != nullptr) {
+					stack.push_back(VisitStackEntry<Iter, SequencePtr>{
+					    .current = item_dataset->begin(),
+					    .end = item_dataset->end(),
+					    .parent_sequence = yielded_sequence,
+					    .parent_sequence_tag = element.tag(),
+					    .item_index = 0u,
+					});
+				} else {
+					stack.push_back(VisitStackEntry<Iter, SequencePtr>{
+					    .parent_sequence = yielded_sequence,
+					    .parent_sequence_tag = element.tag(),
+					    .item_index = 0u,
+					});
+				}
+			}
+			continue;
+		}
+
+		const auto finished_entry = stack.back();
+		stack.pop_back();
+		if (finished_entry.parent_sequence == nullptr) {
+			continue;
+		}
+		if (!path_steps.empty()) {
+			path_steps.pop_back();
+		}
+		const auto next_item_index =
+		    static_cast<std::size_t>(finished_entry.item_index) + 1u;
+		if (next_item_index >=
+		    static_cast<std::size_t>(finished_entry.parent_sequence->size())) {
+			continue;
+		}
+
+		path_steps.push_back(DataSetVisitPathStep{
+		    .parent_sequence_tag = finished_entry.parent_sequence_tag,
+		    .item_index = static_cast<std::uint32_t>(next_item_index),
+		});
+		auto* next_dataset = finished_entry.parent_sequence->get_dataset(next_item_index);
+		if (next_dataset != nullptr) {
+			stack.push_back(VisitStackEntry<Iter, SequencePtr>{
+			    .current = next_dataset->begin(),
+			    .end = next_dataset->end(),
+			    .parent_sequence = finished_entry.parent_sequence,
+			    .parent_sequence_tag = finished_entry.parent_sequence_tag,
+			    .item_index = static_cast<std::uint32_t>(next_item_index),
+			});
+		} else {
+			stack.push_back(VisitStackEntry<Iter, SequencePtr>{
+			    .parent_sequence = finished_entry.parent_sequence,
+			    .parent_sequence_tag = finished_entry.parent_sequence_tag,
+			    .item_index = static_cast<std::uint32_t>(next_item_index),
+			});
+		}
+	}
+}
+
+}  // namespace detail
+
+inline bool DataSetVisitPathRef::empty() const noexcept {
+	return size() == 0;
+}
+
+inline std::size_t DataSetVisitPathRef::size() const noexcept {
+	if (owner_ == nullptr || owner_->path_revision_ != revision_) {
+		return 0;
+	}
+	return depth_;
+}
+
+inline std::span<const DataSetVisitPathStep> DataSetVisitPathRef::steps() const noexcept {
+	if (owner_ == nullptr || owner_->path_revision_ != revision_) {
+		return {};
+	}
+	return owner_->path_.first(depth_);
+}
+
+inline bool DataSetVisitPathRef::contains_sequence(Tag sequence_tag) const noexcept {
+	if (owner_ == nullptr || owner_->path_revision_ != revision_) {
+		return false;
+	}
+	for (std::size_t i = 0; i < depth_; ++i) {
+		if (owner_->path_[i].parent_sequence_tag == sequence_tag) {
+			return true;
+		}
+	}
+	return false;
+}
+
+inline std::string DataSetVisitPathRef::to_string() const {
+	if (owner_ == nullptr || owner_->path_revision_ != revision_ || depth_ == 0) {
+		return {};
+	}
+	std::string out;
+	out.reserve(depth_ * 16);
+	for (std::size_t i = 0; i < depth_; ++i) {
+		if (i != 0) {
+			out.push_back('.');
+		}
+		char buffer[9];
+		std::snprintf(buffer, sizeof(buffer), "%08X", owner_->path_[i].parent_sequence_tag.value());
+		out += buffer;
+		out.push_back('.');
+		out += std::to_string(owner_->path_[i].item_index);
+	}
+	return out;
+}
+
+template <typename Fn>
+void DataSet::visit(Fn&& fn) {
+	detail::detail_visit_dataset(*this, std::forward<Fn>(fn));
+}
+
+template <typename Fn>
+void DataSet::visit(Fn&& fn) const {
+	detail::detail_visit_dataset(*this, std::forward<Fn>(fn));
+}
+
+template <typename Fn>
+void DicomFile::visit(Fn&& fn) {
+	dataset().visit(std::forward<Fn>(fn));
+}
+
+template <typename Fn>
+void DicomFile::visit(Fn&& fn) const {
+	dataset().visit(std::forward<Fn>(fn));
+}
 
 struct PixelFragment {
 	std::size_t offset{0};  // byte offset of fragment value (relative to pixel sequence base)

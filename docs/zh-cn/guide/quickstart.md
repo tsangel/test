@@ -37,7 +37,7 @@ PersonName(Doe^Jane)
 如果你希望 dataset 边界更明确，请使用 `df.dataset`。
 `PatientName` 是 `PN`，因此 `df.PatientName` 显示的是 `PersonName(...)` 对象，而不是普通 Python 字符串。
 如果你需要对象模型、metadata lookup 规则或完整 decode 流程，请参见 [Core Objects](core_objects.md)、[Python DataSet Guide](python_dataset_guide.md) 和 [Pixel Decode](pixel_decode.md)。
-如果你需要递归遍历嵌套 sequence，请参见 [DataSet Walk](dataset_walk.md)。
+如果你需要递归遍历嵌套 sequence，请参见 [DataSet Visit and Walk](dataset_visit_and_walk.md)。
 如果你只想读取需要的少量 tag，请参见 [Selected Read](selected_read.md)。
 
 4. 将像素 decode 到 NumPy 数组
@@ -171,7 +171,7 @@ Image size: 512 x 512
 ```
 
 如果需要更多 C++ API 细节，请参见 [C++ API Overview](../reference/cpp_api.md) 和 [DataSet Reference](../reference/dataset_reference.md)。
-如果你需要递归遍历或跳过某个子树，请参见 [DataSet Walk](dataset_walk.md)。
+如果你需要递归遍历或跳过某个子树，请参见 [DataSet Visit and Walk](dataset_visit_and_walk.md)。
 如果你只想从磁盘或内存中读取需要的少量 tag，请参见 [Selected Read](selected_read.md)。
 
 4. 用 `ok &= ...` 配合错误检查批量设置

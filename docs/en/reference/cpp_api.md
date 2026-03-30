@@ -161,16 +161,19 @@ Note: These attachment calls are intended for the root `DataSet` (the object ret
   therefore may not set `has_error` or `error_message`.
 - Full usage examples in C++ and Python: [Selected Read](../guide/selected_read.md)
 
-## DataSet walking
+## DataSet visiting and walking
 
-- `DataSet::walk()` and `DicomFile::walk()` return a `DataSetWalker` for depth-first preorder traversal over the root dataset and all nested sequence item datasets.
-- Each step yields `DataSetWalkEntry { path, element }`.
-- `path` is an ancestors-only borrowed view. Persist `path.to_string()` if you need to keep it after the walker advances.
-- Walking only traverses the dataset state that is already loaded; it does not implicitly call `ensure_loaded()` or `ensure_dataelement()`.
-- On partially loaded attached datasets, tags beyond the loaded frontier are silently absent from the walk. Fully load first or call `ensure_loaded(tag)` before using walk for full-dataset passes.
-- `DataSetWalkEntry::skip_sequence()` / `DataSetWalkIterator::skip_sequence()` prune the current sequence subtree.
-- `DataSetWalkEntry::skip_current_dataset()` / `DataSetWalkIterator::skip_current_dataset()` prune the rest of the current dataset.
-- Full usage examples in C++ and Python: [DataSet Walk](../guide/dataset_walk.md)
+- `DataSet::visit(fn)` and `DicomFile::visit(fn)` provide the C++ callback-style fast path for depth-first preorder traversal over the root dataset and all nested sequence item datasets.
+- The `visit(...)` callback receives `(DataSetVisitPathRef path, DataElement& element)` or `(DataSetVisitPathRef path, const DataElement& element)` and may return `DataSetVisitControl`.
+- `DataSetVisitControl::skip_sequence`, `DataSetVisitControl::skip_current_dataset`, and `DataSetVisitControl::stop` provide visit-time skip and early-stop control.
+- `DataSet::walk()` and `DicomFile::walk()` return a `DataSetWalker` for the same traversal order when you want an iterator-style API.
+- Each walk step yields `DataSetWalkEntry { path, element }`.
+- `path` is an ancestors-only borrowed view in both APIs. Persist `path.to_string()` if you need to keep it after the current callback/iterator step.
+- Traversal only covers the dataset state that is already loaded; it does not implicitly call `ensure_loaded()` or `ensure_dataelement()`.
+- On partially loaded attached datasets, tags beyond the loaded frontier are silently absent from visit/walk. Fully load first or call `ensure_loaded(tag)` before using traversal for full-dataset passes.
+- `DataSetWalkEntry::skip_sequence()` / `DataSetWalkIterator::skip_sequence()` skip the current sequence subtree.
+- `DataSetWalkEntry::skip_current_dataset()` / `DataSetWalkIterator::skip_current_dataset()` skip the rest of the current dataset.
+- Full usage examples in C++ and Python: [DataSet Visit and Walk](../guide/dataset_visit_and_walk.md)
 
 ## UID generation helpers
 
@@ -183,6 +186,8 @@ Note: These attachment calls are intended for the root `DataSet` (the object ret
 
 - `dicom::UidRemapper::in_memory(journal_path, uid_root, flush_on_each_insert)`: open a journal-backed single-process remapper.
 - `map_uid(source_uid)`: reuse an existing persisted mapping or create and persist a new one.
+- `RewriteUidOptions`: choose which UID categories to rewrite. Study/Series/SOP UIDs are enabled by default; Frame of Reference UIDs are opt-in.
+- `rewrite_uids(dataset_or_file, remapper, options)`: rewrite selected already-loaded UI elements with `DataSet::visit(...)` and return the rewritten element count.
 - `close()`: flush pending journal state and release the single-writer lock explicitly.
 - `flush_on_each_insert = true` is the safer default. `false` can improve miss-path performance, but callers should catch exceptions and call `close()` during orderly shutdown.
 - `UidRemapper` is currently a C++-only API. There is no Python binding yet.

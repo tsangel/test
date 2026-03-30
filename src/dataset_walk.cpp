@@ -14,18 +14,18 @@ namespace {
 
 }  // namespace
 
-bool WalkPathRef::empty() const noexcept {
+bool DataSetWalkPathRef::empty() const noexcept {
 	return size() == 0;
 }
 
-std::size_t WalkPathRef::size() const noexcept {
+std::size_t DataSetWalkPathRef::size() const noexcept {
 	if (owner_ == nullptr || owner_->path_revision_ != revision_) {
 		return 0;
 	}
 	return depth_;
 }
 
-bool WalkPathRef::contains_sequence(Tag sequence_tag) const noexcept {
+bool DataSetWalkPathRef::contains_sequence(Tag sequence_tag) const noexcept {
 	if (owner_ == nullptr || owner_->path_revision_ != revision_) {
 		return false;
 	}
@@ -37,7 +37,7 @@ bool WalkPathRef::contains_sequence(Tag sequence_tag) const noexcept {
 	return false;
 }
 
-std::string WalkPathRef::to_string() const {
+std::string DataSetWalkPathRef::to_string() const {
 	if (owner_ == nullptr || owner_->path_revision_ != revision_ || depth_ == 0) {
 		return {};
 	}
@@ -111,7 +111,7 @@ DataSetWalkIterator& DataSetWalkIterator::operator=(DataSetWalkIterator&& other)
 
 DataSetWalkEntry DataSetWalkIterator::operator*() const {
 	return DataSetWalkEntry(
-	    WalkPathRef(this, stack_.size() > 1 ? stack_.size() - 1 : 0, path_revision_),
+	    DataSetWalkPathRef(this, stack_.size() > 1 ? stack_.size() - 1 : 0, path_revision_),
 	    *current_, const_cast<DataSetWalkIterator*>(this), path_revision_);
 }
 

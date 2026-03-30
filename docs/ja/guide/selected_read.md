@@ -105,7 +105,7 @@ df = dicom.read_bytes_selected(
 ## 関連ドキュメント
 
 - [File IO](file_io.md)
-- [DataSet Walk](dataset_walk.md)
+- [DataSet Visit and Walk](dataset_visit_and_walk.md)
 - [C++ API Overview](../reference/cpp_api.md)
 - [DicomFile Reference](../reference/dicomfile_reference.md)
 - [Python API Reference](../reference/python_reference.md)

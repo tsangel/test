@@ -134,6 +134,7 @@ add_library(dicomsdl STATIC
     src/person_name.cpp
     src/uid_utils.cpp
     src/uid_remapper.cpp
+    src/uid_rewrite.cpp
     src/sequence.cpp
     src/dataelement.cpp
     src/instream.cpp

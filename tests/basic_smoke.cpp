@@ -272,6 +272,182 @@ int main() {
 	}
 
 	{
+		const auto temp_root =
+		    std::filesystem::temp_directory_path() / "dicomsdl_rewrite_uids_smoke";
+		const auto file_journal = temp_root / "file.tsv";
+		const auto dataset_journal = temp_root / "dataset.tsv";
+		std::error_code cleanup_ec;
+		std::filesystem::remove_all(temp_root, cleanup_ec);
+		std::filesystem::create_directories(temp_root, cleanup_ec);
+		if (cleanup_ec) {
+			fail("rewrite_uids smoke setup should create temporary journal directory");
+		}
+
+		{
+			DicomFile file;
+			auto& dataset = file.dataset();
+			const std::string study_uid = "1.2.840.113619.2.55.3.604688435.100";
+			const std::string series_uid = "1.2.840.113619.2.55.3.604688435.101";
+			const std::string sop_uid = "1.2.840.113619.2.55.3.604688435.102";
+			const std::string rtv_sop_uid = "1.2.840.113619.2.55.3.604688435.1021";
+			const std::string referenced_uid = "1.2.840.113619.2.55.3.604688435.103";
+			const std::string referenced_in_file_uid =
+			    "1.2.840.113619.2.55.3.604688435.104";
+			const std::string frame_uid = "1.2.840.113619.2.55.3.604688435.105";
+			if (!dataset.set_value("StudyInstanceUID"_tag, study_uid) ||
+			    !dataset.set_value("SeriesInstanceUID"_tag, series_uid) ||
+			    !dataset.set_value("SOPInstanceUID"_tag, sop_uid) ||
+			    !dataset.set_value("MediaStorageSOPInstanceUID"_tag, sop_uid) ||
+			    !dataset.set_value("RTVCommunicationSOPInstanceUID"_tag, rtv_sop_uid) ||
+			    !dataset.set_value("FrameOfReferenceUID"_tag, frame_uid) ||
+			    !dataset.set_value("PatientName"_tag, "Rewrite^Smoke")) {
+				fail("rewrite_uids smoke should populate root DicomFile dataset");
+			}
+			auto* sequence =
+			    dataset.ensure_dataelement("ReferencedStudySequence"_tag, dicom::VR::SQ)
+			        .as_sequence();
+			if (sequence == nullptr) {
+				fail("rewrite_uids smoke should create nested sequence");
+			}
+			auto* item = sequence->add_dataset();
+			if (item == nullptr ||
+			    !item->set_value("ReferencedSOPInstanceUID"_tag, referenced_uid) ||
+			    !item->set_value(
+			        "ReferencedSOPInstanceUIDInFile"_tag, referenced_in_file_uid)) {
+				fail("rewrite_uids smoke should populate nested referenced UID elements");
+			}
+
+			auto remapper = dicom::UidRemapper::in_memory(
+			    file_journal, "1.2.826.0.1.3680043.10.543", false);
+			const auto rewritten = dicom::rewrite_uids(file, remapper);
+			if (rewritten != 7) {
+				fail("rewrite_uids(DicomFile) should rewrite the default Study/Series/SOP targets");
+			}
+
+			const auto expected_study = remapper.map_uid(study_uid);
+			const auto expected_series = remapper.map_uid(series_uid);
+			const auto expected_sop = remapper.map_uid(sop_uid);
+			const auto expected_rtv_sop = remapper.map_uid(rtv_sop_uid);
+			const auto expected_referenced = remapper.map_uid(referenced_uid);
+			const auto expected_referenced_in_file =
+			    remapper.map_uid(referenced_in_file_uid);
+
+			const auto actual_study =
+			    dataset.get_dataelement("StudyInstanceUID"_tag).to_uid_string();
+			const auto actual_series =
+			    dataset.get_dataelement("SeriesInstanceUID"_tag).to_uid_string();
+			const auto actual_sop =
+			    dataset.get_dataelement("SOPInstanceUID"_tag).to_uid_string();
+			const auto actual_meta_sop =
+			    dataset.get_dataelement("MediaStorageSOPInstanceUID"_tag).to_uid_string();
+			const auto actual_rtv_sop =
+			    dataset.get_dataelement("RTVCommunicationSOPInstanceUID"_tag).to_uid_string();
+			const auto actual_referenced =
+			    dataset.get_dataelement(
+			               "ReferencedStudySequence.0.ReferencedSOPInstanceUID")
+			        .to_uid_string();
+			const auto actual_referenced_in_file =
+			    dataset.get_dataelement(
+			               "ReferencedStudySequence.0.ReferencedSOPInstanceUIDInFile")
+			        .to_uid_string();
+			const auto actual_frame =
+			    dataset.get_dataelement("FrameOfReferenceUID"_tag).to_uid_string();
+			if (!actual_study || *actual_study != expected_study ||
+			    !actual_series || *actual_series != expected_series ||
+			    !actual_sop || *actual_sop != expected_sop ||
+			    !actual_meta_sop || *actual_meta_sop != expected_sop ||
+			    !actual_rtv_sop || *actual_rtv_sop != expected_rtv_sop ||
+			    !actual_referenced || *actual_referenced != expected_referenced ||
+			    !actual_referenced_in_file ||
+			        *actual_referenced_in_file != expected_referenced_in_file) {
+				fail("rewrite_uids(DicomFile) should rewrite selected UID elements consistently");
+			}
+			if (!actual_frame || *actual_frame != frame_uid) {
+				fail("rewrite_uids(DicomFile) should leave FrameOfReferenceUID unchanged by default");
+			}
+			if (dataset.get_dataelement("PatientName"_tag).to_string_view() !=
+			    std::optional<std::string_view>("Rewrite^Smoke")) {
+				fail("rewrite_uids(DicomFile) should not touch non-UI elements");
+			}
+			if (!dicom::uid::is_valid_uid_text_strict(expected_study) ||
+			    !dicom::uid::is_valid_uid_text_strict(expected_series) ||
+			    !dicom::uid::is_valid_uid_text_strict(expected_sop) ||
+			    !dicom::uid::is_valid_uid_text_strict(expected_rtv_sop) ||
+			    !dicom::uid::is_valid_uid_text_strict(expected_referenced) ||
+			    !dicom::uid::is_valid_uid_text_strict(expected_referenced_in_file)) {
+				fail("rewrite_uids(DicomFile) should produce strict-valid mapped UIDs");
+			}
+		}
+
+		{
+			DataSet dataset;
+			const std::string study_uid = "1.2.840.113619.2.55.3.604688435.200";
+			const std::string series_uid = "1.2.840.113619.2.55.3.604688435.201";
+			const std::string sop_uid = "1.2.840.113619.2.55.3.604688435.202";
+			const std::string frame_uid = "1.2.840.113619.2.55.3.604688435.203";
+			const std::string referenced_uid = "1.2.840.113619.2.55.3.604688435.204";
+			if (!dataset.set_value("StudyInstanceUID"_tag, study_uid) ||
+			    !dataset.set_value("SeriesInstanceUID"_tag, series_uid) ||
+			    !dataset.set_value("SOPInstanceUID"_tag, sop_uid) ||
+			    !dataset.set_value("FrameOfReferenceUID"_tag, frame_uid)) {
+				fail("rewrite_uids(DataSet) smoke should populate root UID elements");
+			}
+			auto* sequence =
+			    dataset.ensure_dataelement("ReferencedStudySequence"_tag, dicom::VR::SQ)
+			        .as_sequence();
+			if (sequence == nullptr) {
+				fail("rewrite_uids(DataSet) smoke should create nested sequence");
+			}
+			auto* item = sequence->add_dataset();
+			if (item == nullptr ||
+			    !item->set_value("ReferencedSOPInstanceUID"_tag, referenced_uid)) {
+				fail("rewrite_uids(DataSet) smoke should populate nested referenced UID");
+			}
+
+			dicom::RewriteUidOptions options;
+			options.rewrite_study_instance_uid = false;
+			options.rewrite_sop_instance_uids = false;
+			options.rewrite_frame_of_reference_uids = true;
+
+			auto remapper = dicom::UidRemapper::in_memory(
+			    dataset_journal, "1.2.826.0.1.3680043.10.544", false);
+			const auto rewritten = dicom::rewrite_uids(dataset, remapper, options);
+			if (rewritten != 2) {
+				fail("rewrite_uids(DataSet) should honor RewriteUidOptions");
+			}
+
+			const auto expected_series = remapper.map_uid(series_uid);
+			const auto expected_frame = remapper.map_uid(frame_uid);
+			const auto actual_study =
+			    dataset.get_dataelement("StudyInstanceUID"_tag).to_uid_string();
+			const auto actual_series =
+			    dataset.get_dataelement("SeriesInstanceUID"_tag).to_uid_string();
+			const auto actual_sop =
+			    dataset.get_dataelement("SOPInstanceUID"_tag).to_uid_string();
+			const auto actual_frame =
+			    dataset.get_dataelement("FrameOfReferenceUID"_tag).to_uid_string();
+			const auto actual_referenced =
+			    dataset.get_dataelement(
+			               "ReferencedStudySequence.0.ReferencedSOPInstanceUID")
+			        .to_uid_string();
+			if (!actual_study || *actual_study != study_uid ||
+			    !actual_sop || *actual_sop != sop_uid ||
+			    !actual_referenced || *actual_referenced != referenced_uid) {
+				fail("rewrite_uids(DataSet) should leave disabled UID categories unchanged");
+			}
+			if (!actual_series || *actual_series != expected_series ||
+			    !actual_frame || *actual_frame != expected_frame) {
+				fail("rewrite_uids(DataSet) should rewrite the enabled UID categories");
+			}
+		}
+
+		std::filesystem::remove_all(temp_root, cleanup_ec);
+		if (cleanup_ec) {
+			fail("rewrite_uids smoke cleanup should remove temporary journal files");
+		}
+	}
+
+	{
 		DicomFile source;
 		source.set_declared_specific_charset(dicom::SpecificCharacterSet::ISO_IR_100);
 		auto& source_root = source.dataset();
@@ -695,6 +871,90 @@ int main() {
 			fail("DataSet::walk should continue with later top-level elements after nested items");
 		}
 
+		std::vector<std::uint32_t> visited_tags;
+		std::vector<std::string> visited_paths;
+		dataset.visit([&](auto path, auto& element) {
+			visited_tags.push_back(element.tag().value());
+			visited_paths.push_back(path.to_string());
+		});
+		if (visited_tags != walked_tags || visited_paths != walked_paths) {
+			fail("DataSet::visit should match DataSet::walk traversal order and path semantics");
+		}
+
+		std::vector<std::uint32_t> visit_pruned_tags;
+		dataset.visit([&](auto path, auto& element) -> dicom::DataSetVisitControl {
+			visit_pruned_tags.push_back(element.tag().value());
+			if (element.tag() == "ReferencedStudySequence"_tag) {
+				if (!path.empty()) {
+					fail("DataSet::visit sequence path should be empty at the root dataset");
+				}
+				if (path.contains_sequence("ReferencedStudySequence"_tag)) {
+					fail("DataSet::visit path should not include the current leaf sequence");
+				}
+				return dicom::DataSetVisitControl::skip_sequence;
+			}
+			return dicom::DataSetVisitControl::continue_;
+		});
+		if (std::find(
+		        visit_pruned_tags.begin(),
+		        visit_pruned_tags.end(),
+		        "ReferencedSOPInstanceUID"_tag.value()) != visit_pruned_tags.end()) {
+			fail("DataSet::visit skip_sequence should prune the current SQ subtree");
+		}
+
+		std::size_t visit_stop_count = 0;
+		dataset.visit([&](auto, auto& element) -> dicom::DataSetVisitControl {
+			++visit_stop_count;
+			if (element.tag() == "ReferencedStudySequence"_tag) {
+				return dicom::DataSetVisitControl::stop;
+			}
+			return dicom::DataSetVisitControl::continue_;
+		});
+		if (visit_stop_count != 2) {
+			fail("DataSet::visit stop should end traversal immediately after the current callback");
+		}
+
+		bool visit_saw_item0_series = false;
+		bool visit_saw_item1_referenced = false;
+		bool visit_saw_top_level_series = false;
+		dataset.visit([&](auto path, auto& element) -> dicom::DataSetVisitControl {
+			const auto path_text = path.to_string();
+			if (path_text == "00081110.0" &&
+			    element.tag() == "ReferencedSOPInstanceUID"_tag) {
+				return dicom::DataSetVisitControl::skip_current_dataset;
+			}
+			if (path_text == "00081110.0" && element.tag() == "SeriesInstanceUID"_tag) {
+				visit_saw_item0_series = true;
+			}
+			if (path_text == "00081110.1" &&
+			    element.tag() == "ReferencedSOPInstanceUID"_tag) {
+				visit_saw_item1_referenced = true;
+			}
+			if (path_text.empty() && element.tag() == "SeriesInstanceUID"_tag) {
+				visit_saw_top_level_series = true;
+			}
+			return dicom::DataSetVisitControl::continue_;
+		});
+		if (visit_saw_item0_series) {
+			fail("DataSet::visit skip_current_dataset should prune the rest of the current nested dataset");
+		}
+		if (!visit_saw_item1_referenced || !visit_saw_top_level_series) {
+			fail("DataSet::visit skip_current_dataset should continue with sibling items and parent elements");
+		}
+
+		const DataSet& const_dataset = dataset;
+		std::size_t const_visit_count = 0;
+		const_dataset.visit([&](auto path, const auto& element) {
+			++const_visit_count;
+			if (element.tag() == "ReferencedSOPInstanceUID"_tag &&
+			    !path.contains_sequence("ReferencedStudySequence"_tag)) {
+				fail("const DataSet::visit should preserve borrowed path helpers");
+			}
+		});
+		if (const_visit_count != walked_tags.size()) {
+			fail("const DataSet::visit should traverse the same loaded elements");
+		}
+
 		auto walker = dataset.walk();
 		std::vector<std::uint32_t> pruned_tags;
 		for (auto it = walker.begin(); it != walker.end(); ++it) {
@@ -806,6 +1066,18 @@ int main() {
 		}
 		if (file_walk_count != 3) {
 			fail("DicomFile::walk should visit root and nested elements");
+		}
+
+		std::size_t file_visit_count = 0;
+		file.visit([&](auto path, auto& element) {
+			++file_visit_count;
+			if (element.tag() == "ReferencedSOPInstanceUID"_tag &&
+			    path.to_string() != std::string("00081110.0")) {
+				fail("DicomFile::visit should forward dataset visit paths");
+			}
+		});
+		if (file_visit_count != 3) {
+			fail("DicomFile::visit should visit root and nested elements");
 		}
 	}
 
