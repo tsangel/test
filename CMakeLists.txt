@@ -112,6 +112,7 @@ include(DicomsdlCompilerSetup)
 include(DicomsdlDependencies)
 
 add_library(dicomsdl STATIC
+    src/storage/storage_registry.cpp
     src/dataset.cpp
     src/dataset_walk.cpp
     src/diagnostics.cpp

@@ -8,12 +8,27 @@
 - `misc/dictionary/_dataelement_registry.tsv`
 - `misc/dictionary/_uid_registry.tsv`
 - `misc/dictionary/_specific_character_sets.tsv`
+- `misc/dictionary/_sopclass_iod_map.tsv`
+- `misc/dictionary/_iod_component_registry.tsv`
+- `misc/dictionary/_component_attribute_rules.tsv`
+- `misc/dictionary/_storage_context_registry.tsv`
+- `misc/dictionary/_storage_context_transition_registry.tsv`
+- `misc/dictionary/_storage_context_rule_index_registry.tsv`
+- `misc/dictionary/_storage_external_conditions.tsv`
+- `misc/dictionary/_iod_attribute_overrides.tsv`
 - `misc/dictionary/_dicom_version.txt`
 - `include/dataelement_registry.hpp`
 - `include/dataelement_lookup_tables.hpp`
 - `include/uid_registry.hpp`
 - `include/uid_lookup_tables.hpp`
 - `include/specific_character_set_registry.hpp`
+- `include/storage/storage_registry.hpp`
+- `include/storage/storage_lookup.hpp`
+- `include/storage/storage_classifier.hpp`
+- `include/storage/storage_dataset.hpp`
+- `include/storage/storage_effective.hpp`
+- `include/storage/storage_listing.hpp`
+- `src/storage/storage_registry.cpp`
 
 ## 주요 스크립트
 
@@ -21,6 +36,10 @@
   - DICOM Part 06 XML에서 tag registry, UID registry, DICOM version을 추출한다.
 - `extract_part03_specific_character_sets.py`
   - DICOM Part 03 XML에서 Specific Character Set 표를 추출한다.
+- `extract_part04_sopclass_iod_map.py`
+  - DICOM Part 04 XML의 Storage Service Class 표에서 `SOP Class UID -> IOD` 매핑 TSV를 추출한다.
+- `extract_part03_iod_tables.py`
+  - DICOM Part 03 XML에서 IOD component usage, component attribute rule, recursive storage context, sparse override scaffold TSV를 추출한다.
 - `generate_dataelement_registry.py`
   - `_dataelement_registry.tsv`에서 `include/dataelement_registry.hpp`를 생성한다.
 - `generate_lookup_tables.py`
@@ -31,6 +50,8 @@
   - `_uid_registry.tsv`에서 UID lookup CHD 테이블을 생성한다.
 - `generate_specific_character_set_registry.py`
   - `_specific_character_sets.tsv`에서 `include/specific_character_set_registry.hpp`를 생성한다.
+- `generate_storage_registry.py`
+  - IOD registry TSV들에서 `include/storage/storage_registry.hpp`, `src/storage/storage_registry.cpp`, `_storage_external_conditions.tsv`를 생성한다.
 - `update_dictionaries.sh`
   - extract + generate + version sync를 한 번에 수행한다.
 
@@ -60,6 +81,18 @@ python misc/dictionary/generate_uid_lookup_tables.py `
 python misc/dictionary/generate_specific_character_set_registry.py `
   --source misc/dictionary/_specific_character_sets.tsv `
   --output include/specific_character_set_registry.hpp
+
+python misc/dictionary/generate_storage_registry.py `
+  --uid-registry-source misc/dictionary/_uid_registry.tsv `
+  --sopclass-iod-source misc/dictionary/_sopclass_iod_map.tsv `
+  --iod-component-source misc/dictionary/_iod_component_registry.tsv `
+  --component-rule-source misc/dictionary/_component_attribute_rules.tsv `
+  --context-source misc/dictionary/_storage_context_registry.tsv `
+  --context-transition-source misc/dictionary/_storage_context_transition_registry.tsv `
+  --context-rule-index-source misc/dictionary/_storage_context_rule_index_registry.tsv `
+  --override-source misc/dictionary/_iod_attribute_overrides.tsv `
+  --header-output include/storage/storage_registry.hpp `
+  --source-output src/storage/storage_registry.cpp
 ```
 
 권장 사항:
@@ -85,7 +118,10 @@ misc/dictionary/update_dictionaries.sh
 5. `uid_lookup_tables.hpp` 재생성
 6. Part 03 XML에서 Specific Character Set 표 추출
 7. `specific_character_set_registry.hpp` 재생성
-8. `include/dicom_const.h`의 `DICOM_STANDARD_VERSION` 동기화
+8. Part 04 XML에서 `_sopclass_iod_map.tsv` 추출
+9. Part 03 XML에서 `_iod_component_registry.tsv`, `_component_attribute_rules.tsv`, `_storage_context_*`, `_iod_attribute_overrides.tsv` 추출
+10. `include/storage/storage_registry.hpp`, `src/storage/storage_registry.cpp` 재생성
+11. `include/dicom_const.h`의 `DICOM_STANDARD_VERSION` 동기화
 
 추가 동작:
 
@@ -131,6 +167,24 @@ python misc/dictionary/extract_part03_specific_character_sets.py
 
 - `misc/dictionary/_specific_character_sets.tsv`
 
+Part 04 / IOD bootstrap:
+
+```powershell
+python misc/dictionary/extract_part04_sopclass_iod_map.py
+python misc/dictionary/extract_part03_iod_tables.py
+```
+
+출력:
+
+- `misc/dictionary/_sopclass_iod_map.tsv`
+- `misc/dictionary/_iod_component_registry.tsv`
+- `misc/dictionary/_component_attribute_rules.tsv`
+- `misc/dictionary/_storage_context_registry.tsv`
+- `misc/dictionary/_storage_context_transition_registry.tsv`
+- `misc/dictionary/_storage_context_rule_index_registry.tsv`
+- `misc/dictionary/_storage_external_conditions.tsv`
+- `misc/dictionary/_iod_attribute_overrides.tsv`
+
 기본 동작은 `current` DICOM XML을 내려받아 `misc/dictionary/part06.xml`, `misc/dictionary/part03.xml`로 저장한 뒤 추출한다.
 원하면 XML 경로를 직접 인자로 넘길 수 있다.
 
@@ -139,7 +193,21 @@ python misc/dictionary/extract_part03_specific_character_sets.py
 ```powershell
 python misc/dictionary/extract_part06_tables.py misc/dictionary/part06.xml
 python misc/dictionary/extract_part03_specific_character_sets.py misc/dictionary/part03.xml
+python misc/dictionary/extract_part04_sopclass_iod_map.py --part04 misc/dictionary/part04.xml
+python misc/dictionary/extract_part03_iod_tables.py --part03 misc/dictionary/part03.xml
 ```
+
+참고:
+
+- `_iod_attribute_overrides.tsv`는 sparse manual override용 scaffold다.
+- `_component_attribute_rules.tsv`에서 PS3.3 표에 `Type` 컬럼이 없는 row는 `type=unknown`으로 기록한다.
+- `_storage_context_*` TSV는 recursive include를 flat context/transition/rule-index registry로 보존한다.
+- `_storage_external_conditions.tsv`는 generator가 내부 IR로 내리지 못한 `External` 조건의 실제 발생 위치를 usage/rule 단위로 기록한다.
+- `update_dictionaries.sh`는 storage IOD TSV와 `storage_registry.hpp/.cpp`도 함께 갱신한다.
+- generator regression 범위는 아직 storage IOD generator까지 포함하지 않는다.
+- public API는 `storage_*` header를 기준으로 사용한다.
+- listing/query entry point는 `include/storage/storage_listing.hpp`다.
+- recursive context lookup/traversal entry point는 `include/storage/storage_lookup.hpp`다.
 
 ## 회귀 테스트
 

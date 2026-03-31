@@ -61,6 +61,13 @@ __all__ = [
     "Tag",
     "VR",
     "Uid",
+    "ComponentKind",
+    "ModuleUsage",
+    "TypeDesignation",
+    "ConditionState",
+    "ConditionHandlingPolicy",
+    "EffectiveType",
+    "StorageClassifier",
     "read_file",
     "read_file_selected",
     "is_dicom_file",
@@ -94,6 +101,10 @@ __all__ = [
     "generate_sop_instance_uid",
     "generate_series_instance_uid",
     "generate_study_instance_uid",
+    "make_storage_classifier",
+    "list_effective_storage_modules",
+    "list_effective_storage_attributes",
+    "collect_storage_condition_issues",
 ]
 
 
@@ -1184,6 +1195,141 @@ class Uid:
     @property
     def is_valid(self) -> bool: ...
 
+
+class ComponentKind(enum.Enum):
+    Unknown = ...
+    Module = ...
+    FunctionalGroup = ...
+
+
+class ModuleUsage(enum.Enum):
+    Unknown = ...
+    Mandatory = ...
+    Conditional = ...
+    UserOption = ...
+
+
+class TypeDesignation(enum.Enum):
+    Unknown = ...
+    Type1 = ...
+    Type1C = ...
+    Type2 = ...
+    Type2C = ...
+    Type3 = ...
+
+
+class ConditionState(enum.Enum):
+    NotConditional = ...
+    Active = ...
+    Inactive = ...
+    Indeterminate = ...
+
+
+class ConditionHandlingPolicy(enum.Enum):
+    BestEffort = ...
+    Strict = ...
+
+
+class EffectiveType(enum.Enum):
+    Unknown = ...
+    Type1 = ...
+    Type2 = ...
+    Type3 = ...
+    Prohibited = ...
+
+
+class StorageClassifier:
+    @staticmethod
+    def from_sop_class_uid(uid_value: str, /) -> Optional[StorageClassifier]: ...
+
+    @staticmethod
+    def from_sop_class_keyword(keyword: str, /) -> Optional[StorageClassifier]: ...
+
+    @property
+    def valid(self) -> bool: ...
+
+    @property
+    def sop_class_uid(self) -> Optional[str]: ...
+
+    @property
+    def sop_class_keyword(self) -> Optional[str]: ...
+
+    @property
+    def sop_class_name(self) -> Optional[str]: ...
+
+    @property
+    def iod_xml_id(self) -> Optional[str]: ...
+
+    @property
+    def iod_title(self) -> Optional[str]: ...
+
+    def __bool__(self) -> bool: ...
+
+    def stats(self) -> dict[str, int]: ...
+
+    def list_modules(
+        self,
+        *,
+        include_mandatory: bool = ...,
+        include_conditional: bool = ...,
+        include_user_option: bool = ...,
+        component_section_id: str = ...,
+        component_name: str = ...,
+        component_name_contains: str = ...,
+        ie_name: str = ...,
+    ) -> list[dict[str, Any]]: ...
+
+    def list_attributes(
+        self,
+        *,
+        include_unknown_types: bool = ...,
+        include_conditional_types: bool = ...,
+        include_user_option_components: bool = ...,
+        component_section_id: str = ...,
+        keyword: str = ...,
+        keyword_contains: str = ...,
+        path_prefix: str = ...,
+        tag_value: int = ...,
+    ) -> list[dict[str, Any]]: ...
+
+    def list_effective_modules(
+        self,
+        source: DataSet | DicomFile,
+        *,
+        policy: ConditionHandlingPolicy = ...,
+        include_mandatory: bool = ...,
+        include_conditional: bool = ...,
+        include_user_option: bool = ...,
+        active_only: bool = ...,
+        component_section_id: str = ...,
+        component_name: str = ...,
+        component_name_contains: str = ...,
+        ie_name: str = ...,
+    ) -> list[dict[str, Any]]: ...
+
+    def list_effective_attributes(
+        self,
+        source: DataSet | DicomFile,
+        *,
+        policy: ConditionHandlingPolicy = ...,
+        include_unknown_effective_types: bool = ...,
+        include_prohibited: bool = ...,
+        include_conditional_declared_types: bool = ...,
+        active_components_only: bool = ...,
+        component_section_id: str = ...,
+        keyword: str = ...,
+        keyword_contains: str = ...,
+        path_prefix: str = ...,
+        tag_value: int = ...,
+    ) -> list[dict[str, Any]]: ...
+
+    def collect_condition_issues(
+        self,
+        source: DataSet | DicomFile,
+        *,
+        policy: ConditionHandlingPolicy = ...,
+    ) -> list[dict[str, Any]]: ...
+
     def __bool__(self) -> bool: ...
 
 
@@ -1281,3 +1427,36 @@ def generate_uid() -> str: ...
 def generate_sop_instance_uid() -> str: ...
 def generate_series_instance_uid() -> str: ...
 def generate_study_instance_uid() -> str: ...
+def make_storage_classifier(source: DataSet | DicomFile, /) -> Optional[StorageClassifier]: ...
+def list_effective_storage_modules(
+    source: DataSet | DicomFile,
+    *,
+    policy: ConditionHandlingPolicy = ...,
+    include_mandatory: bool = ...,
+    include_conditional: bool = ...,
+    include_user_option: bool = ...,
+    active_only: bool = ...,
+    component_section_id: str = ...,
+    component_name: str = ...,
+    component_name_contains: str = ...,
+    ie_name: str = ...,
+) -> list[dict[str, Any]]: ...
+def list_effective_storage_attributes(
+    source: DataSet | DicomFile,
+    *,
+    policy: ConditionHandlingPolicy = ...,
+    include_unknown_effective_types: bool = ...,
+    include_prohibited: bool = ...,
+    include_conditional_declared_types: bool = ...,
+    active_components_only: bool = ...,
+    component_section_id: str = ...,
+    keyword: str = ...,
+    keyword_contains: str = ...,
+    path_prefix: str = ...,
+    tag_value: int = ...,
+) -> list[dict[str, Any]]: ...
+def collect_storage_condition_issues(
+    source: DataSet | DicomFile,
+    *,
+    policy: ConditionHandlingPolicy = ...,
+) -> list[dict[str, Any]]: ...

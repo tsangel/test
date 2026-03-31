@@ -19,6 +19,14 @@ REPORT_FILES=(
     "misc/dictionary/_dataelement_registry.tsv"
     "misc/dictionary/_uid_registry.tsv"
     "misc/dictionary/_specific_character_sets.tsv"
+    "misc/dictionary/_sopclass_iod_map.tsv"
+    "misc/dictionary/_iod_component_registry.tsv"
+    "misc/dictionary/_component_attribute_rules.tsv"
+    "misc/dictionary/_iod_attribute_overrides.tsv"
+    "misc/dictionary/_storage_context_registry.tsv"
+    "misc/dictionary/_storage_context_transition_registry.tsv"
+    "misc/dictionary/_storage_context_rule_index_registry.tsv"
+    "misc/dictionary/_storage_external_conditions.tsv"
 )
 
 get_head_version() {
@@ -176,28 +184,47 @@ write_version_diff_report() {
 
 HEAD_DICOM_VERSION="$(get_head_version)"
 
-echo "[1/8] Extracting Part 06 tables -> _dataelement_registry.tsv/_uid_registry.tsv/_dicom_version.txt"
+echo "[1/11] Extracting Part 06 tables -> _dataelement_registry.tsv/_uid_registry.tsv/_dicom_version.txt"
 "${PYTHON_BIN}" "${DICT_DIR}/extract_part06_tables.py"
 
-echo "[2/8] Regenerating include/dataelement_registry.hpp"
+echo "[2/11] Regenerating include/dataelement_registry.hpp"
 "${PYTHON_BIN}" "${DICT_DIR}/generate_dataelement_registry.py" --source "misc/dictionary/_dataelement_registry.tsv" --output "include/dataelement_registry.hpp"
 
-echo "[3/8] Regenerating CHD lookup tables (keyword/tag)"
+echo "[3/11] Regenerating CHD lookup tables (keyword/tag)"
 "${PYTHON_BIN}" "${DICT_DIR}/generate_lookup_tables.py" --registry "misc/dictionary/_dataelement_registry.tsv" --output "include/dataelement_lookup_tables.hpp"
 
-echo "[4/8] Regenerating include/uid_registry.hpp"
+echo "[4/11] Regenerating include/uid_registry.hpp"
 "${PYTHON_BIN}" "${DICT_DIR}/generate_uid_registry.py" --source "misc/dictionary/_uid_registry.tsv" --output "include/uid_registry.hpp"
 
-echo "[5/8] Regenerating UID lookup CHD tables"
+echo "[5/11] Regenerating UID lookup CHD tables"
 "${PYTHON_BIN}" "${DICT_DIR}/generate_uid_lookup_tables.py" --source "misc/dictionary/_uid_registry.tsv" --output "include/uid_lookup_tables.hpp"
 
-echo "[6/8] Extracting Part 03 Specific Character Sets -> _specific_character_sets.tsv"
+echo "[6/11] Extracting Part 03 Specific Character Sets -> _specific_character_sets.tsv"
 "${PYTHON_BIN}" "${DICT_DIR}/extract_part03_specific_character_sets.py"
 
-echo "[7/8] Regenerating include/specific_character_set_registry.hpp"
+echo "[7/11] Regenerating include/specific_character_set_registry.hpp"
 "${PYTHON_BIN}" "${DICT_DIR}/generate_specific_character_set_registry.py" --source "misc/dictionary/_specific_character_sets.tsv" --output "include/specific_character_set_registry.hpp"
 
-echo "[8/8] Syncing include/dicom_const.h DICOM_STANDARD_VERSION"
+echo "[8/11] Extracting Part 04 SOP Class -> IOD map"
+"${PYTHON_BIN}" "${DICT_DIR}/extract_part04_sopclass_iod_map.py"
+
+echo "[9/11] Extracting Part 03 IOD/component/context tables"
+"${PYTHON_BIN}" "${DICT_DIR}/extract_part03_iod_tables.py"
+
+echo "[10/11] Regenerating include/storage/storage_registry.hpp and src/storage/storage_registry.cpp"
+"${PYTHON_BIN}" "${DICT_DIR}/generate_storage_registry.py" \
+    --sopclass-iod-source "misc/dictionary/_sopclass_iod_map.tsv" \
+    --uid-registry-source "misc/dictionary/_uid_registry.tsv" \
+    --iod-component-source "misc/dictionary/_iod_component_registry.tsv" \
+    --component-rule-source "misc/dictionary/_component_attribute_rules.tsv" \
+    --override-source "misc/dictionary/_iod_attribute_overrides.tsv" \
+    --context-source "misc/dictionary/_storage_context_registry.tsv" \
+    --context-transition-source "misc/dictionary/_storage_context_transition_registry.tsv" \
+    --context-rule-index-source "misc/dictionary/_storage_context_rule_index_registry.tsv" \
+    --header-output "include/storage/storage_registry.hpp" \
+    --source-output "src/storage/storage_registry.cpp"
+
+echo "[11/11] Syncing include/dicom_const.h DICOM_STANDARD_VERSION"
 sync_dicom_standard_version_define "$(get_worktree_version)"
 
 print_key_tsv_change_status

@@ -26,6 +26,7 @@
 #include <nanobind/stl/unique_ptr.h>
 #include <nanobind/stl/vector.h>
 
+#include <storage/storage_listing.hpp>
 #include <dicom.h>
 #include <dicom_endian.h>
 #include <diagnostics.h>
@@ -44,6 +45,7 @@ using dicom::VR;
 using dicom::uid::WellKnown;
 using Uid = dicom::uid::WellKnown;
 using EncoderContext = dicom::pixel::EncoderContext;
+namespace storage = dicom::storage;
 namespace diag = dicom::diag;
 
 namespace {
@@ -2989,6 +2991,294 @@ nb::dict make_tag_entry_dict(const dicom::DataElementEntry& entry) {
 	return info;
 }
 
+nb::object none_or_string(std::string_view value) {
+	if (value.empty()) {
+		return nb::none();
+	}
+	return nb::str(value.data(), value.size());
+}
+
+const DataSet& storage_source_dataset(nb::handle value, const char* arg_name) {
+	if (nb::isinstance<DataSet>(value)) {
+		return nb::cast<DataSet&>(value);
+	}
+	if (nb::isinstance<DicomFile>(value)) {
+		return nb::cast<DicomFile&>(value).dataset();
+	}
+	std::string message = arg_name;
+	message += " must be DataSet or DicomFile";
+	throw nb::type_error(message.c_str());
+}
+
+nb::dict make_storage_classifier_stats_dict(const storage::StorageClassifier& classifier) {
+	const auto stats = classifier.stats();
+	nb::dict info;
+	info["component_count"] = stats.component_count;
+	info["attribute_rule_count"] = stats.attribute_rule_count;
+	info["unknown_type_rule_count"] = stats.unknown_type_rule_count;
+	info["conditional_type_rule_count"] = stats.conditional_type_rule_count;
+	info["override_count"] = stats.override_count;
+	return info;
+}
+
+nb::dict make_declared_module_info_dict(
+    const storage::StorageClassifier& classifier,
+    const storage::DeclaredModuleInfo& info) {
+	nb::dict out;
+	if (!info.component) {
+		return out;
+	}
+	const auto& component = *info.component;
+	out["sop_class_uid"] = none_or_string(classifier.sop_class_uid());
+	out["sop_class_keyword"] = none_or_string(classifier.sop_class_keyword());
+	out["sop_class_name"] = none_or_string(classifier.sop_class_name());
+	out["iod_xml_id"] = none_or_string(classifier.iod_xml_id());
+	out["iod_title"] = none_or_string(classifier.iod_title());
+	out["component_section_id"] = none_or_string(component.component_section_id());
+	out["component_name"] = none_or_string(component.component_name());
+	out["ie_name"] = none_or_string(component.ie_name());
+	out["component_kind"] = nb::cast(component.entry_kind);
+	out["component_kind_name"] = none_or_string(storage::to_string(component.entry_kind));
+	out["usage"] = nb::cast(component.usage);
+	out["usage_code"] = none_or_string(storage::to_string(component.usage));
+	out["usage_condition_text"] = none_or_string(component.usage_condition_text());
+	return out;
+}
+
+nb::dict make_effective_module_info_dict(
+    const storage::StorageClassifier& classifier,
+    const storage::EffectiveModuleInfo& info) {
+	nb::dict out = make_declared_module_info_dict(
+	    classifier, storage::DeclaredModuleInfo{info.sop_class, info.evaluated.component});
+	if (!info.evaluated.component) {
+		return out;
+	}
+	out["condition_state"] = nb::cast(info.evaluated.condition_state);
+	out["condition_state_name"] = none_or_string(storage::to_string(info.evaluated.condition_state));
+	out["present_in_dataset"] = info.evaluated.present_in_dataset;
+	out["active"] = info.evaluated.active;
+	return out;
+}
+
+nb::dict make_declared_attribute_info_dict(
+    const storage::StorageClassifier& classifier,
+    const storage::DeclaredAttributeInfo& info) {
+	nb::dict out = make_declared_module_info_dict(
+	    classifier, storage::DeclaredModuleInfo{info.sop_class, info.component});
+	if (!info.component || !info.rule) {
+		return out;
+	}
+	const auto& rule = *info.rule;
+	out["path"] = none_or_string(storage::rule_path_signature(rule));
+	out["tag_value"] = rule.tag_value;
+	out["tag"] = none_or_string(storage::rule_tag_text(rule));
+	out["keyword"] = none_or_string(storage::rule_keyword(rule));
+	out["attribute_name"] = none_or_string(storage::rule_attribute_name(rule));
+	out["type_designation"] = nb::cast(rule.declared_type);
+	out["type_designation_text"] = none_or_string(storage::to_string(rule.declared_type));
+	out["condition_text"] = none_or_string(rule.condition_text());
+	out["may_be_present_otherwise"] = rule.may_be_present_otherwise;
+	return out;
+}
+
+nb::dict make_effective_attribute_info_dict(
+    const storage::StorageClassifier& classifier,
+    const storage::EffectiveAttributeInfo& info) {
+	nb::dict out = make_declared_attribute_info_dict(
+	    classifier,
+	    storage::DeclaredAttributeInfo{info.sop_class, info.component, info.rule});
+	if (!info.component || !info.rule) {
+		return out;
+	}
+	out["condition_state"] = nb::cast(info.condition_state);
+	out["condition_state_name"] = none_or_string(storage::to_string(info.condition_state));
+	out["effective_type"] = nb::cast(info.effective_type);
+	out["effective_type_name"] = none_or_string(storage::to_string(info.effective_type));
+	return out;
+}
+
+nb::dict make_unresolved_condition_info_dict(
+    const storage::StorageClassifier& classifier,
+    const storage::UnresolvedConditionInfo& info) {
+	nb::dict out;
+	out["sop_class_uid"] = none_or_string(classifier.sop_class_uid());
+	out["sop_class_keyword"] = none_or_string(classifier.sop_class_keyword());
+	out["iod_xml_id"] = none_or_string(classifier.iod_xml_id());
+	out["source"] = none_or_string(storage::to_string(info.source));
+	out["source_code"] = static_cast<std::uint32_t>(info.source);
+	out["source_name"] = none_or_string(storage::to_string(info.source));
+	out["clause_text"] = none_or_string(info.clause_text);
+	out["condition_program_index"] = info.program_index;
+	if (info.component) {
+		out["component_section_id"] = none_or_string(info.component->component_section_id());
+		out["component_name"] = none_or_string(info.component->component_name());
+		out["ie_name"] = none_or_string(info.component->ie_name());
+		out["usage"] = nb::cast(info.component->usage);
+		out["usage_code"] = none_or_string(storage::to_string(info.component->usage));
+	}
+	if (info.rule) {
+		out["path"] = none_or_string(storage::rule_path_signature(*info.rule));
+		out["tag_value"] = info.rule->tag_value;
+		out["tag"] = none_or_string(storage::rule_tag_text(*info.rule));
+		out["keyword"] = none_or_string(storage::rule_keyword(*info.rule));
+		out["attribute_name"] = none_or_string(storage::rule_attribute_name(*info.rule));
+		out["type_designation"] = nb::cast(info.rule->declared_type);
+		out["type_designation_text"] = none_or_string(storage::to_string(info.rule->declared_type));
+	}
+	return out;
+}
+
+nb::list make_unresolved_condition_report_list(
+    const storage::StorageClassifier& classifier,
+    const storage::ConditionEvaluationReport& report) {
+	nb::list out;
+	for (const auto& item : report.unresolved_conditions) {
+		out.append(make_unresolved_condition_info_dict(classifier, item));
+	}
+	return out;
+}
+
+storage::DeclaredModuleListOptions make_declared_module_list_options(
+    bool include_mandatory,
+    bool include_conditional,
+    bool include_user_option,
+    std::string_view component_section_id,
+    std::string_view component_name,
+    std::string_view component_name_contains,
+    std::string_view ie_name) {
+	storage::DeclaredModuleListOptions options;
+	options.include_mandatory = include_mandatory;
+	options.include_conditional = include_conditional;
+	options.include_user_option = include_user_option;
+	options.component_section_id = component_section_id;
+	options.component_name = component_name;
+	options.component_name_contains = component_name_contains;
+	options.ie_name = ie_name;
+	return options;
+}
+
+storage::DeclaredAttributeListOptions make_declared_attribute_list_options(
+    bool include_unknown_types,
+    bool include_conditional_types,
+    bool include_user_option_components,
+    std::string_view component_section_id,
+    std::string_view keyword,
+    std::string_view keyword_contains,
+    std::string_view path_prefix,
+    std::uint32_t tag_value) {
+	storage::DeclaredAttributeListOptions options;
+	options.include_unknown_types = include_unknown_types;
+	options.include_conditional_types = include_conditional_types;
+	options.include_user_option_components = include_user_option_components;
+	options.component_section_id = component_section_id;
+	options.keyword = keyword;
+	options.keyword_contains = keyword_contains;
+	options.path_prefix = path_prefix;
+	options.tag_value = tag_value;
+	return options;
+}
+
+storage::EffectiveModuleListOptions make_effective_module_list_options(
+    bool include_mandatory,
+    bool include_conditional,
+    bool include_user_option,
+    bool active_only,
+    std::string_view component_section_id,
+    std::string_view component_name,
+    std::string_view component_name_contains,
+    std::string_view ie_name) {
+	storage::EffectiveModuleListOptions options;
+	options.include_mandatory = include_mandatory;
+	options.include_conditional = include_conditional;
+	options.include_user_option = include_user_option;
+	options.active_only = active_only;
+	options.component_section_id = component_section_id;
+	options.component_name = component_name;
+	options.component_name_contains = component_name_contains;
+	options.ie_name = ie_name;
+	return options;
+}
+
+storage::EffectiveAttributeListOptions make_effective_attribute_list_options(
+    bool include_unknown_effective_types,
+    bool include_prohibited,
+    bool include_conditional_declared_types,
+    bool active_components_only,
+    std::string_view component_section_id,
+    std::string_view keyword,
+    std::string_view keyword_contains,
+    std::string_view path_prefix,
+    std::uint32_t tag_value) {
+	storage::EffectiveAttributeListOptions options;
+	options.include_unknown_effective_types = include_unknown_effective_types;
+	options.include_prohibited = include_prohibited;
+	options.include_conditional_declared_types = include_conditional_declared_types;
+	options.active_components_only = active_components_only;
+	options.component_section_id = component_section_id;
+	options.keyword = keyword;
+	options.keyword_contains = keyword_contains;
+	options.path_prefix = path_prefix;
+	options.tag_value = tag_value;
+	return options;
+}
+
+nb::list list_storage_modules_py(
+    const storage::StorageClassifier& classifier,
+    const storage::DeclaredModuleListOptions& options) {
+	nb::list out;
+	for (const auto& item : storage::list_modules(classifier, options)) {
+		out.append(make_declared_module_info_dict(classifier, item));
+	}
+	return out;
+}
+
+nb::list list_storage_attributes_py(
+    const storage::StorageClassifier& classifier,
+    const storage::DeclaredAttributeListOptions& options) {
+	nb::list out;
+	for (const auto& item : storage::list_attributes(classifier, options)) {
+		out.append(make_declared_attribute_info_dict(classifier, item));
+	}
+	return out;
+}
+
+nb::list list_effective_storage_modules_py(
+    const storage::StorageClassifier& classifier,
+    const DataSet& dataset,
+    const storage::EffectiveModuleListOptions& options,
+    storage::ConditionHandlingPolicy policy = storage::ConditionHandlingPolicy::BestEffort) {
+	storage::ConditionEvaluationContext context;
+	context.policy = policy;
+	nb::list out;
+	for (const auto& item : storage::list_effective_modules(classifier, dataset, options, context)) {
+		out.append(make_effective_module_info_dict(classifier, item));
+	}
+	return out;
+}
+
+nb::list list_effective_storage_attributes_py(
+    const storage::StorageClassifier& classifier,
+    const DataSet& dataset,
+    const storage::EffectiveAttributeListOptions& options,
+    storage::ConditionHandlingPolicy policy = storage::ConditionHandlingPolicy::BestEffort) {
+	storage::ConditionEvaluationContext context;
+	context.policy = policy;
+	nb::list out;
+	for (const auto& item :
+	     storage::list_effective_attributes(classifier, dataset, options, context)) {
+		out.append(make_effective_attribute_info_dict(classifier, item));
+	}
+	return out;
+}
+
+nb::list collect_storage_condition_issues_py(
+    const storage::StorageClassifier& classifier,
+    const DataSet& dataset,
+    storage::ConditionHandlingPolicy policy) {
+	return make_unresolved_condition_report_list(
+	    classifier, storage::collect_condition_issues(classifier, dataset, policy));
+}
+
 struct PyDataElementIterator {
 	explicit PyDataElementIterator(DataSet& data_set)
 	    : data_set_(&data_set), current_(data_set.begin()), end_(data_set.end()) {}
@@ -5771,6 +6061,244 @@ m.def("clear_external_codec_plugins",
 		.def_prop_ro_static("UV", [](nb::handle) { return dicom::VR::UV; })
 		.def_prop_ro_static("PX", [](nb::handle) { return dicom::VR::PX; });
 
+	nb::enum_<storage::ComponentKind>(m, "ComponentKind")
+	    .value("Unknown", storage::ComponentKind::Unknown)
+	    .value("Module", storage::ComponentKind::Module)
+	    .value("FunctionalGroup", storage::ComponentKind::FunctionalGroup);
+
+	nb::enum_<storage::ModuleUsage>(m, "ModuleUsage")
+	    .value("Unknown", storage::ModuleUsage::Unknown)
+	    .value("Mandatory", storage::ModuleUsage::Mandatory)
+	    .value("Conditional", storage::ModuleUsage::Conditional)
+	    .value("UserOption", storage::ModuleUsage::UserOption);
+
+	nb::enum_<storage::TypeDesignation>(m, "TypeDesignation")
+	    .value("Unknown", storage::TypeDesignation::Unknown)
+	    .value("Type1", storage::TypeDesignation::Type1)
+	    .value("Type1C", storage::TypeDesignation::Type1C)
+	    .value("Type2", storage::TypeDesignation::Type2)
+	    .value("Type2C", storage::TypeDesignation::Type2C)
+	    .value("Type3", storage::TypeDesignation::Type3);
+
+	nb::enum_<storage::ConditionState>(m, "ConditionState")
+	    .value("NotConditional", storage::ConditionState::NotConditional)
+	    .value("Active", storage::ConditionState::Active)
+	    .value("Inactive", storage::ConditionState::Inactive)
+	    .value("Indeterminate", storage::ConditionState::Indeterminate);
+
+	nb::enum_<storage::ConditionHandlingPolicy>(m, "ConditionHandlingPolicy")
+	    .value("BestEffort", storage::ConditionHandlingPolicy::BestEffort)
+	    .value("Strict", storage::ConditionHandlingPolicy::Strict);
+
+	nb::enum_<storage::EffectiveType>(m, "EffectiveType")
+	    .value("Unknown", storage::EffectiveType::Unknown)
+	    .value("Type1", storage::EffectiveType::Type1)
+	    .value("Type2", storage::EffectiveType::Type2)
+	    .value("Type3", storage::EffectiveType::Type3)
+	    .value("Prohibited", storage::EffectiveType::Prohibited);
+
+	nb::class_<storage::StorageClassifier>(m, "StorageClassifier",
+	    "Storage IOD classifier for declared/effective module and attribute inspection.")
+	    .def_static("from_sop_class_uid",
+	        &storage::StorageClassifier::from_sop_class_uid,
+	        nb::arg("uid_value"),
+	        "Create a classifier from a SOP Class UID value. Returns None if unsupported.")
+	    .def_static("from_sop_class_keyword",
+	        &storage::StorageClassifier::from_sop_class_keyword,
+	        nb::arg("keyword"),
+	        "Create a classifier from a SOP Class keyword. Returns None if unsupported.")
+	    .def("__bool__", &storage::StorageClassifier::valid)
+	    .def_prop_ro("valid", &storage::StorageClassifier::valid)
+	    .def_prop_ro("sop_class_uid",
+	        [](const storage::StorageClassifier& self) {
+		        return none_or_string(self.sop_class_uid());
+	        })
+	    .def_prop_ro("sop_class_keyword",
+	        [](const storage::StorageClassifier& self) {
+		        return none_or_string(self.sop_class_keyword());
+	        })
+	    .def_prop_ro("sop_class_name",
+	        [](const storage::StorageClassifier& self) {
+		        return none_or_string(self.sop_class_name());
+	        })
+	    .def_prop_ro("iod_xml_id",
+	        [](const storage::StorageClassifier& self) {
+		        return none_or_string(self.iod_xml_id());
+	        })
+	    .def_prop_ro("iod_title",
+	        [](const storage::StorageClassifier& self) {
+		        return none_or_string(self.iod_title());
+	        })
+	    .def("stats",
+	        [](const storage::StorageClassifier& self) {
+		        return make_storage_classifier_stats_dict(self);
+	        },
+	        "Return classifier registry statistics as a dict.")
+	    .def("list_modules",
+	        [](const storage::StorageClassifier& self,
+	           bool include_mandatory,
+	           bool include_conditional,
+	           bool include_user_option,
+	           std::string_view component_section_id,
+	           std::string_view component_name,
+	           std::string_view component_name_contains,
+	           std::string_view ie_name) {
+		        return list_storage_modules_py(
+		            self,
+		            make_declared_module_list_options(
+		                include_mandatory,
+		                include_conditional,
+		                include_user_option,
+		                component_section_id,
+		                component_name,
+		                component_name_contains,
+		                ie_name));
+	        },
+	        nb::kw_only(),
+	        nb::arg("include_mandatory") = true,
+	        nb::arg("include_conditional") = true,
+	        nb::arg("include_user_option") = true,
+	        nb::arg("component_section_id") = "",
+	        nb::arg("component_name") = "",
+	        nb::arg("component_name_contains") = "",
+	        nb::arg("ie_name") = "",
+	        "List declared storage modules as a list of dicts.")
+	    .def("list_attributes",
+	        [](const storage::StorageClassifier& self,
+	           bool include_unknown_types,
+	           bool include_conditional_types,
+	           bool include_user_option_components,
+	           std::string_view component_section_id,
+	           std::string_view keyword,
+	           std::string_view keyword_contains,
+	           std::string_view path_prefix,
+	           std::uint32_t tag_value) {
+		        return list_storage_attributes_py(
+		            self,
+		            make_declared_attribute_list_options(
+		                include_unknown_types,
+		                include_conditional_types,
+		                include_user_option_components,
+		                component_section_id,
+		                keyword,
+		                keyword_contains,
+		                path_prefix,
+		                tag_value));
+	        },
+	        nb::kw_only(),
+	        nb::arg("include_unknown_types") = true,
+	        nb::arg("include_conditional_types") = true,
+	        nb::arg("include_user_option_components") = true,
+	        nb::arg("component_section_id") = "",
+	        nb::arg("keyword") = "",
+	        nb::arg("keyword_contains") = "",
+	        nb::arg("path_prefix") = "",
+	        nb::arg("tag_value") = std::uint32_t{0},
+	        "List declared storage attributes as a list of dicts.")
+	    .def("list_effective_modules",
+	        [](const storage::StorageClassifier& self,
+	           nb::handle source,
+	           storage::ConditionHandlingPolicy policy,
+	           bool include_mandatory,
+	           bool include_conditional,
+	           bool include_user_option,
+	           bool active_only,
+	           std::string_view component_section_id,
+	           std::string_view component_name,
+	           std::string_view component_name_contains,
+	           std::string_view ie_name) {
+		        return list_effective_storage_modules_py(
+		            self,
+		            storage_source_dataset(source, "source"),
+		            make_effective_module_list_options(
+		                include_mandatory,
+		                include_conditional,
+		                include_user_option,
+		                active_only,
+		                component_section_id,
+		                component_name,
+		                component_name_contains,
+		                ie_name),
+		            policy);
+	        },
+	        nb::arg("source"),
+	        nb::kw_only(),
+	        nb::arg("policy") = storage::ConditionHandlingPolicy::BestEffort,
+	        nb::arg("include_mandatory") = true,
+	        nb::arg("include_conditional") = true,
+	        nb::arg("include_user_option") = true,
+	        nb::arg("active_only") = true,
+	        nb::arg("component_section_id") = "",
+	        nb::arg("component_name") = "",
+	        nb::arg("component_name_contains") = "",
+	        nb::arg("ie_name") = "",
+	        "List effective storage modules for a DataSet or DicomFile.")
+	    .def("list_effective_attributes",
+	        [](const storage::StorageClassifier& self,
+	           nb::handle source,
+	           storage::ConditionHandlingPolicy policy,
+	           bool include_unknown_effective_types,
+	           bool include_prohibited,
+	           bool include_conditional_declared_types,
+	           bool active_components_only,
+	           std::string_view component_section_id,
+	           std::string_view keyword,
+	           std::string_view keyword_contains,
+	           std::string_view path_prefix,
+	           std::uint32_t tag_value) {
+		        return list_effective_storage_attributes_py(
+		            self,
+		            storage_source_dataset(source, "source"),
+		            make_effective_attribute_list_options(
+		                include_unknown_effective_types,
+		                include_prohibited,
+		                include_conditional_declared_types,
+		                active_components_only,
+		                component_section_id,
+		                keyword,
+		                keyword_contains,
+		                path_prefix,
+		                tag_value),
+		            policy);
+	        },
+	        nb::arg("source"),
+	        nb::kw_only(),
+	        nb::arg("policy") = storage::ConditionHandlingPolicy::BestEffort,
+	        nb::arg("include_unknown_effective_types") = true,
+	        nb::arg("include_prohibited") = true,
+	        nb::arg("include_conditional_declared_types") = true,
+	        nb::arg("active_components_only") = true,
+	        nb::arg("component_section_id") = "",
+	        nb::arg("keyword") = "",
+	        nb::arg("keyword_contains") = "",
+	        nb::arg("path_prefix") = "",
+	        nb::arg("tag_value") = std::uint32_t{0},
+	        "List effective storage attributes for a DataSet or DicomFile.")
+	    .def("collect_condition_issues",
+	        [](const storage::StorageClassifier& self,
+	           nb::handle source,
+	           storage::ConditionHandlingPolicy policy) {
+		        return collect_storage_condition_issues_py(
+		            self, storage_source_dataset(source, "source"), policy);
+	        },
+	        nb::arg("source"),
+	        nb::kw_only(),
+	        nb::arg("policy") = storage::ConditionHandlingPolicy::BestEffort,
+	        "Collect unresolved external/indeterminate storage condition issues as a list of dicts.")
+	    .def("__repr__",
+	        [](const storage::StorageClassifier& self) {
+		        std::ostringstream oss;
+		        oss << "StorageClassifier(";
+		        if (self.valid()) {
+			        oss << "sop_class_keyword='" << self.sop_class_keyword()
+			            << "', iod_xml_id='" << self.iod_xml_id() << "'";
+		        } else {
+			        oss << "invalid";
+		        }
+		        oss << ")";
+		        return oss.str();
+	        });
+
 	nb::class_<dicom::PixelFragment>(m, "PixelFragment")
 		.def_ro("offset", &dicom::PixelFragment::offset, "Fragment offset relative to pixel sequence base")
 		.def_ro("length", &dicom::PixelFragment::length, "Fragment length in bytes")
@@ -6036,6 +6564,118 @@ m.def("generate_study_instance_uid",
     },
     "Generate a Study Instance UID under DicomSDL prefix.");
 
+m.def("make_storage_classifier",
+    [](nb::handle source) {
+	    const auto& dataset = storage_source_dataset(source, "source");
+	    return storage::make_storage_classifier(dataset);
+    },
+    nb::arg("source"),
+    "Create a StorageClassifier from a DataSet or DicomFile using SOPClassUID. Returns None if unsupported.");
+
+m.def("list_effective_storage_modules",
+    [](nb::handle source,
+       storage::ConditionHandlingPolicy policy,
+       bool include_mandatory,
+       bool include_conditional,
+       bool include_user_option,
+       bool active_only,
+       std::string_view component_section_id,
+       std::string_view component_name,
+       std::string_view component_name_contains,
+       std::string_view ie_name) {
+	    const auto& dataset = storage_source_dataset(source, "source");
+	    const auto classifier = storage::make_storage_classifier(dataset);
+	    if (!classifier) {
+		    return nb::list{};
+	    }
+	    return list_effective_storage_modules_py(
+	        *classifier,
+	        dataset,
+	        make_effective_module_list_options(
+	            include_mandatory,
+	            include_conditional,
+	            include_user_option,
+	            active_only,
+	            component_section_id,
+	            component_name,
+	            component_name_contains,
+	            ie_name),
+	        policy);
+    },
+    nb::arg("source"),
+    nb::kw_only(),
+    nb::arg("policy") = storage::ConditionHandlingPolicy::BestEffort,
+    nb::arg("include_mandatory") = true,
+    nb::arg("include_conditional") = true,
+    nb::arg("include_user_option") = true,
+    nb::arg("active_only") = true,
+    nb::arg("component_section_id") = "",
+    nb::arg("component_name") = "",
+    nb::arg("component_name_contains") = "",
+    nb::arg("ie_name") = "",
+    "List effective storage modules for a DataSet or DicomFile.");
+
+m.def("list_effective_storage_attributes",
+    [](nb::handle source,
+       storage::ConditionHandlingPolicy policy,
+       bool include_unknown_effective_types,
+       bool include_prohibited,
+       bool include_conditional_declared_types,
+       bool active_components_only,
+       std::string_view component_section_id,
+       std::string_view keyword,
+       std::string_view keyword_contains,
+       std::string_view path_prefix,
+       std::uint32_t tag_value) {
+	    const auto& dataset = storage_source_dataset(source, "source");
+	    const auto classifier = storage::make_storage_classifier(dataset);
+	    if (!classifier) {
+		    return nb::list{};
+	    }
+	    return list_effective_storage_attributes_py(
+	        *classifier,
+	        dataset,
+	        make_effective_attribute_list_options(
+	            include_unknown_effective_types,
+	            include_prohibited,
+	            include_conditional_declared_types,
+	            active_components_only,
+	            component_section_id,
+	            keyword,
+	            keyword_contains,
+	            path_prefix,
+	            tag_value),
+	        policy);
+    },
+    nb::arg("source"),
+    nb::kw_only(),
+    nb::arg("policy") = storage::ConditionHandlingPolicy::BestEffort,
+    nb::arg("include_unknown_effective_types") = true,
+    nb::arg("include_prohibited") = true,
+    nb::arg("include_conditional_declared_types") = true,
+    nb::arg("active_components_only") = true,
+    nb::arg("component_section_id") = "",
+    nb::arg("keyword") = "",
+    nb::arg("keyword_contains") = "",
+    nb::arg("path_prefix") = "",
+    nb::arg("tag_value") = std::uint32_t{0},
+    "List effective storage attributes for a DataSet or DicomFile.");
+
+m.def("collect_storage_condition_issues",
+    [](nb::handle source,
+       storage::ConditionHandlingPolicy policy) {
+	    const auto& dataset = storage_source_dataset(source, "source");
+	    const auto classifier = storage::make_storage_classifier(dataset);
+	    if (!classifier) {
+		    return nb::list{};
+	    }
+	    return collect_storage_condition_issues_py(*classifier, dataset, policy);
+    },
+    nb::arg("source"),
+    nb::kw_only(),
+    nb::arg("policy") = storage::ConditionHandlingPolicy::BestEffort,
+    "Collect unresolved external/indeterminate storage condition issues for a DataSet or DicomFile.");
+
 	m.attr("__all__") = nb::make_tuple(
 	    "LogLevel",
 	    "Reporter",
@@ -6086,6 +6726,13 @@ m.def("generate_study_instance_uid",
 	    "Tag",
 	    "VR",
 	    "Uid",
+	    "ComponentKind",
+	    "ModuleUsage",
+	    "TypeDesignation",
+	    "ConditionState",
+	    "ConditionHandlingPolicy",
+	    "EffectiveType",
+	    "StorageClassifier",
 	    "read_file",
 	    "read_file_selected",
 	    "is_dicom_file",
@@ -6118,6 +6765,10 @@ m.def("generate_study_instance_uid",
 	    "generate_uid",
 	    "generate_sop_instance_uid",
 	    "generate_series_instance_uid",
-	    "generate_study_instance_uid");
+	    "generate_study_instance_uid",
+	    "make_storage_classifier",
+	    "list_effective_storage_modules",
+	    "list_effective_storage_attributes",
+	    "collect_storage_condition_issues");
 }
 

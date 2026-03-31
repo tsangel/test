@@ -6,6 +6,7 @@ This section is for contributors and maintainers working on benchmarks, build wo
 :maxdepth: 1
 
 dev_notes
+storage_semantics
 translation_workflow
 logging
 cpp_build_from_source

@@ -5306,3 +5306,4 @@ tag	name	keyword	vr	vm	retired
 (0004,1512)	Referenced Transfer Syntax UID in File	ReferencedTransferSyntaxUIDInFile	UI	1	
 (0004,151A)	Referenced Related General SOP Class UID in File	ReferencedRelatedGeneralSOPClassUIDInFile	UI	1-n	
 (0004,1600)	Number of References	NumberOfReferences	UL	1	RET (2004)
+(0006,0001)	Current Frame Functional Groups Sequence	CurrentFrameFunctionalGroupsSequence	SQ	1	

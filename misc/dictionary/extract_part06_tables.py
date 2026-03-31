@@ -14,7 +14,7 @@ from typing import Iterable, Iterator, List, Sequence
 
 DB_NS = {"db": "http://docbook.org/ns/docbook"}
 XML_ID_ATTR = "{http://www.w3.org/XML/1998/namespace}id"
-TAG_TABLE_IDS: Sequence[str] = ("table_6-1", "table_7-1", "table_8-1")
+TAG_TABLE_IDS: Sequence[str] = ("table_6-1", "table_7-1", "table_8-1", "table_9-1")
 UID_TABLE_ID = "table_A-1"
 TAG_PATTERN = re.compile(r"^\([0-9A-FX]{4},[0-9A-FX]{4}\)$", flags=re.IGNORECASE)
 ZERO_WIDTH = dict.fromkeys(map(ord, "\u200b\u200c\u200d"), None)

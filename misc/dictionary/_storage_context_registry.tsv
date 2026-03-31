@@ -1,0 +1,2293 @@
+component_section_id	context_key	context_name	context_kind	is_root	is_recursive
+sect_C.10.10	table_C.10-11	Waveform Annotation Module Attributes	table	Y	N
+sect_C.10.10	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.10.10	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.10.10	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.10.11	table_C.10-12	Graphic Group Module Attributes	table	Y	N
+sect_C.10.4	table_C.10-4	Displayed Area Module Attributes	table	Y	N
+sect_C.10.4	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.10.4	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.10.5	table_C.10-5	Graphic Annotation Module Attributes	table	Y	N
+sect_C.10.5	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.10.5	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.10.5	table_C.10-5a	Text Style Sequence Macro Attributes	table	N	N
+sect_C.10.5	table_C.10-5b	Line Style Sequence Macro Attributes	table	N	N
+sect_C.10.5	table_C.10-5c	Fill Style Sequence Macro Attributes	table	N	N
+sect_C.10.6	table_C.10-6	Spatial Transformation Module Attributes	table	Y	N
+sect_C.10.7	table_C.10-7	Graphic Layer Module Attributes	table	Y	N
+sect_C.10.8	table_C.10-8	Waveform Identification Module Attributes	table	Y	N
+sect_C.10.8	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.10.8	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.10.8	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.10.8	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.10.9	table_C.10-9	Waveform Module Attributes	table	Y	N
+sect_C.10.9	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.10.9	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.10.9	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.10.9	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.10.9	table_C.10.12-1	Waveform Filter Characteristics Macro Attributes	table	N	N
+sect_C.10.9	table_C.10.13-1	Waveform Filter Lookup Table Macro Attributes	table	N	N
+sect_C.11.1	table_C.11-1	Modality LUT Module Attributes	table	Y	N
+sect_C.11.1	table_C.11-1b	Modality LUT Macro Attributes	table	N	N
+sect_C.11.10	table_C.11.10-1	Presentation State Identification Module Attributes	table	Y	N
+sect_C.11.10	table_10-1	Person Identification Macro Attributes	table	N	N
+sect_C.11.10	table_10-12	Content Identification Macro Attributes	table	N	N
+sect_C.11.10	table_10.9.3-1	Content Creator Macro Attributes	table	N	N
+sect_C.11.10	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.11.10	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.11.10	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.11.11	table_C.11.11-1	Presentation State Relationship Module Attributes	table	Y	N
+sect_C.11.11	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.11.11	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.11.11	table_C.11.11-1b	Presentation State Relationship Macro Attributes	table	N	N
+sect_C.11.12	table_C.11.12-1	Presentation State Shutter Module Attributes	table	Y	N
+sect_C.11.13	table_C.11.13-1	Presentation State Mask Module Attributes	table	Y	N
+sect_C.11.14	table_C.11.14-1	Presentation State Blending Module Attributes	table	Y	N
+sect_C.11.14	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.11.14	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.11.14	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.11.14	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.11.14	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.11.14	table_C.11-1b	Modality LUT Macro Attributes	table	N	N
+sect_C.11.14	table_C.11-2b	VOI LUT Macro Attributes	table	N	N
+sect_C.11.14	table_C.11.11-1b	Presentation State Relationship Macro Attributes	table	N	N
+sect_C.11.14	table_C.17-3	Hierarchical SOP Instance Reference Macro Attributes	table	N	N
+sect_C.11.14	table_C.17-3a	Hierarchical Series Reference Macro Attributes	table	N	N
+sect_C.11.15	table_C.11.15-1	ICC Profile Module Attributes	table	Y	N
+sect_C.11.16	table_C.11.16-1	Structured Display Module Attributes	table	Y	N
+sect_C.11.16	table_10-1	Person Identification Macro Attributes	table	N	N
+sect_C.11.16	table_10-12	Content Identification Macro Attributes	table	N	N
+sect_C.11.16	table_10.9.3-1	Content Creator Macro Attributes	table	N	N
+sect_C.11.16	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.11.16	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.11.16	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.11.16	table_C.23.2-2	Screen Specifications Macro Attributes	table	N	N
+sect_C.11.16	table_C.7-11b	Image Pixel Macro Attributes	table	N	N
+sect_C.11.16	table_C.7-11c	Image Pixel Description Macro Attributes	table	N	N
+sect_C.11.17	table_C.11.17-1	Structured Display Image Box Module Attributes	table	Y	N
+sect_C.11.17	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.11.17	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.11.18	table_C.11.18-1	Structured Display Annotation Module Attributes	table	Y	N
+sect_C.11.19	table_C.11.19-1	XA/XRF Presentation State Mask Module Attributes	table	Y	N
+sect_C.11.19	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.11.2	table_C.11-2	VOI LUT Module Attributes	table	Y	N
+sect_C.11.2	table_C.11-2b	VOI LUT Macro Attributes	table	N	N
+sect_C.11.20	table_C.11.20-1	XA/XRF Presentation State Shutter Module Attributes	table	Y	N
+sect_C.11.20	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.11.20	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.11.20	table_C.7-17a	Display Shutter Macro Attributes	table	N	N
+sect_C.11.21	table_C.11.21-1	XA/XRF Presentation State Presentation Module Attributes	table	Y	N
+sect_C.11.21	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.11.22	table_C.11.22-1	Volumetric Presentation State Identification Module Attributes	table	Y	N
+sect_C.11.22	table_10-1	Person Identification Macro Attributes	table	N	N
+sect_C.11.22	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.11.22	table_10-12	Content Identification Macro Attributes	table	N	N
+sect_C.11.22	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.11.22	table_10.9.3-1	Content Creator Macro Attributes	table	N	N
+sect_C.11.22	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.11.22	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.11.22	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.11.23	table_C.11.23-1	Volumetric Presentation State Relationship Module Attributes	table	Y	N
+sect_C.11.23	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.11.23	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.11.23	table_C.11-2b	VOI LUT Macro Attributes	table	N	N
+sect_C.11.24	table_C.11.24-1	Volume Cropping Module Attributes	table	Y	N
+sect_C.11.24	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.11.24	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.11.25	table_C.11.25-1	Presentation View Description Module Attributes	table	Y	N
+sect_C.11.25	table_10-6	General Anatomy Required Macro Attributes	table	N	N
+sect_C.11.25	table_10-8	Primary Anatomic Structure Macro Attributes	table	N	N
+sect_C.11.25	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.11.25	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.11.25	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.11.26	table_C.11.26-1	Multi-Planar Reconstruction Geometry Module Attributes	table	Y	N
+sect_C.11.27	table_C.11.27-1	MPR Volumetric Presentation State Display Module Attributes	table	Y	N
+sect_C.11.28	table_C.11.28-1	Volumetric Graphic Annotation Module Attributes	table	Y	N
+sect_C.11.28	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.11.29	table_C.11.29-1	Presentation Animation Module Attributes	table	Y	N
+sect_C.11.30	table_C.11.30-1	Volume Render Geometry Module Attributes	table	Y	N
+sect_C.11.31	table_C.11.31-1	Render Shading Module Attributes	table	Y	N
+sect_C.11.32	table_C.11.32-1	Render Display Module Attributes	table	Y	N
+sect_C.11.33	table_C.11.33-1	Advanced Blending Presentation State Module Attributes	table	Y	N
+sect_C.11.33	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.11.33	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.11.33	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.11.33	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.11.33	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.11.33	table_C.11-2b	VOI LUT Macro Attributes	table	N	N
+sect_C.11.33	table_C.11.33.1-1	Threshold Sequence Macro Attributes	table	N	N
+sect_C.11.33	table_C.17-3	Hierarchical SOP Instance Reference Macro Attributes	table	N	N
+sect_C.11.33	table_C.17-3a	Hierarchical Series Reference Macro Attributes	table	N	N
+sect_C.11.33	table_C.7-22a	Palette Color Lookup Table Macro Attributes	table	N	N
+sect_C.11.34	table_C.11.34.1-1	Advanced Blending Presentation State Display Module Attributes	table	Y	N
+sect_C.11.35	table_C.11.35-1	Variable Modality LUT Module Attributes	table	Y	N
+sect_C.11.35	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.11.35	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.11.35	table_C.11-1b	Modality LUT Macro Attributes	table	N	N
+sect_C.11.4	table_C.11-4	Presentation LUT Module Attributes	table	Y	N
+sect_C.11.5	table_C.11.5-1	Image Histogram Module Attributes	table	Y	N
+sect_C.11.6	table_C.11.6-1	Softcopy Presentation LUT Module Attributes	table	Y	N
+sect_C.11.7	table_C.11.7-1	Overlay Activation Module Attributes	table	Y	N
+sect_C.11.8	table_C.11.8-1	Softcopy VOI LUT Module Attributes	table	Y	N
+sect_C.11.8	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.11.8	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.11.8	table_C.11-2b	VOI LUT Macro Attributes	table	N	N
+sect_C.11.9	table_C.11.9-1	Presentation Series Module Attributes	table	Y	N
+sect_C.12.1	table_C.12-1	SOP Common Module Attributes	table	Y	N
+sect_C.12.1	table_10-1	Person Identification Macro Attributes	table	N	N
+sect_C.12.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.12.1	table_10-20	Selector Attribute Macro Attributes	table	N	N
+sect_C.12.1	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.12.1	table_10.29-1	UDI Macro Attributes	table	N	N
+sect_C.12.1	table_10.41-1	General Procedure Protocol Reference Macro Attributes	table	N	N
+sect_C.12.1	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.12.1	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.12.1	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.12.1	table_C.12-6	Digital Signatures Macro Attributes	table	N	N
+sect_C.12.1	table_C.12.1.1.9-1	Original Attributes Macro Attributes	table	N	N
+sect_C.12.2	table_C.12-8	Common Instance Reference Module Attributes	table	Y	N
+sect_C.12.2	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.12.2	table_10-4	Series and Instance Reference Macro Attributes	table	N	N
+sect_C.12.3	table_C.12-9	Frame Extraction Module Attributes	table	Y	N
+sect_C.12.4	table_C.12-10	General Reference Module Attributes	table	Y	N
+sect_C.12.4	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.12.4	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.12.4	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.12.4	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.12.4	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.12.5	table_C.12.5-1	Timezone Module Attributes	table	Y	N
+sect_C.13.1	table_C.13-1	Basic Film Session Presentation Module Attributes	table	Y	N
+sect_C.13.13	table_C.13-13	Printer Configuration Module Attributes	table	Y	N
+sect_C.13.2	table_C.13-2	Basic Film Session Relationship Module Attributes	table	Y	N
+sect_C.13.2	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.13.2	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.13.2	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.13.2	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.13.3	table_C.13-3	Basic Film Box Presentation Module Attributes	table	Y	N
+sect_C.13.4	table_C.13-4	Basic Film Box Relationship Module Attributes	table	Y	N
+sect_C.13.4	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.13.5	table_C.13-5	Image Box Pixel Presentation Module Attributes	table	Y	N
+sect_C.13.7	table_C.13-7	Basic Annotation Presentation Module Attributes	table	Y	N
+sect_C.13.8	table_C.13-8	Print Job Module Attributes	table	Y	N
+sect_C.13.9	table_C.13-9	Printer Module Attributes	table	Y	N
+sect_C.14	table_C.14-1	Storage Commitment Module Attributes	table	Y	N
+sect_C.14	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.17.1	table_C.17-1	SR Document Series Module Attributes	table	Y	N
+sect_C.17.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.17.1	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.17.1	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.17.1	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.17.2	table_C.17-2	SR Document General Module Attributes	table	Y	N
+sect_C.17.2	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.17.2	table_10-17	HL7v2 Hierarchic Designator Macro Attributes	table	N	N
+sect_C.17.2	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.17.2	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.17.2	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.17.2	table_C.17-3	Hierarchical SOP Instance Reference Macro Attributes	table	N	N
+sect_C.17.2	table_C.17-3a	Hierarchical Series Reference Macro Attributes	table	N	N
+sect_C.17.2	table_C.17-3b	Identified Person or Device Macro Attributes	table	N	N
+sect_C.17.2	table_C.17-3c	Referenced Request Macro Attributes	table	N	N
+sect_C.17.3	table_C.17-4	SR Document Content Module Attributes	table	Y	N
+sect_C.17.3	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.17.3	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.17.3	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.17.3	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.17.3	table_C.17-5	Document Content Macro Attributes	table	N	N
+sect_C.17.3	table_C.17-6	Document Relationship Macro Attributes	table	N	Y
+sect_C.17.3	table_C.18.1-1	Numeric Measurement Macro Attributes	table	N	N
+sect_C.17.3	table_C.18.10-1	Table Content Item Macro Attributes	table	N	N
+sect_C.17.3	table_C.18.2-1	Code Macro Attributes	table	N	N
+sect_C.17.3	table_C.18.3-1	Composite Object Reference Macro Attributes	table	N	N
+sect_C.17.3	table_C.18.4-1	Image Reference Macro Attributes	table	N	N
+sect_C.17.3	table_C.18.5-1	Waveform Reference Macro Attributes	table	N	N
+sect_C.17.3	table_C.18.6-1	Spatial Coordinates Macro Attributes	table	N	N
+sect_C.17.3	table_C.18.7-1	Temporal Coordinates Macro Attributes	table	N	N
+sect_C.17.3	table_C.18.8-1	Container Macro Attributes	table	N	N
+sect_C.17.3	table_C.18.9-1	3D Spatial Coordinates Macro Attributes	table	N	N
+sect_C.17.3	table_C.7-11b	Image Pixel Macro Attributes	table	N	N
+sect_C.17.3	table_C.7-11c	Image Pixel Description Macro Attributes	table	N	N
+sect_C.17.6.1	table_C.17.6-1	Key Object Document Series Module Attributes	table	Y	N
+sect_C.17.6.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.17.6.1	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.17.6.1	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.17.6.1	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.17.6.2	table_C.17.6-2	Key Object Document Module Attributes	table	Y	N
+sect_C.17.6.2	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.17.6.2	table_10-17	HL7v2 Hierarchic Designator Macro Attributes	table	N	N
+sect_C.17.6.2	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.17.6.2	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.17.6.2	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.17.6.2	table_C.17-3	Hierarchical SOP Instance Reference Macro Attributes	table	N	N
+sect_C.17.6.2	table_C.17-3a	Hierarchical Series Reference Macro Attributes	table	N	N
+sect_C.17.6.2	table_C.17-3c	Referenced Request Macro Attributes	table	N	N
+sect_C.19.1	table_C.19-1	Raw Data Module Attributes	table	Y	N
+sect_C.19.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.19.1	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.19.1	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.19.1	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.19.1	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.2.3	table_C.2-3	Patient Demographic Module Attributes	table	Y	N
+sect_C.2.3	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.2.3	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.2.3	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.2.4	table_C.2-4	Patient Medical Module Attributes	table	Y	N
+sect_C.2.4	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.2.4	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.2.4	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.2.4	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.20.1	table_C.20.1-1	Spatial Registration Series Module Attributes	table	Y	N
+sect_C.20.2	table_C.20.2-1	Spatial Registration Module Attributes	table	Y	N
+sect_C.20.2	table_10-1	Person Identification Macro Attributes	table	N	N
+sect_C.20.2	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.20.2	table_10-12	Content Identification Macro Attributes	table	N	N
+sect_C.20.2	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.20.2	table_10.9.3-1	Content Creator Macro Attributes	table	N	N
+sect_C.20.2	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.20.2	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.20.2	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.20.3	table_C.20.3-1	Deformable Spatial Registration Module Attributes	table	Y	N
+sect_C.20.3	table_10-1	Person Identification Macro Attributes	table	N	N
+sect_C.20.3	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.20.3	table_10-12	Content Identification Macro Attributes	table	N	N
+sect_C.20.3	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.20.3	table_10.9.3-1	Content Creator Macro Attributes	table	N	N
+sect_C.20.3	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.20.3	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.20.3	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.21.1	table_C.21.1-1	Spatial Fiducials Series Module Attributes	table	Y	N
+sect_C.21.2	table_C.21.2-1	Spatial Fiducials Module Attributes	table	Y	N
+sect_C.21.2	table_10-1	Person Identification Macro Attributes	table	N	N
+sect_C.21.2	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.21.2	table_10-12	Content Identification Macro Attributes	table	N	N
+sect_C.21.2	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.21.2	table_10.9.3-1	Content Creator Macro Attributes	table	N	N
+sect_C.21.2	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.21.2	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.21.2	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.22.1	table_C.22.1-1	Media Creation Management Module Attributes	table	Y	N
+sect_C.22.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.22.1	table_C.7-11b	Image Pixel Macro Attributes	table	N	N
+sect_C.22.1	table_C.7-11c	Image Pixel Description Macro Attributes	table	N	N
+sect_C.23.1	table_C.23.1-1	Hanging Protocol Definition Module Attributes	table	Y	N
+sect_C.23.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.23.1	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.23.1	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.23.1	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.23.1	table_C.23.4-1	Hanging Protocol Selector Attribute Context Macro Attributes	table	N	N
+sect_C.23.1	table_C.23.4-2	Hanging Protocol Selector Attribute Value Macro Attributes	table	N	N
+sect_C.23.2	table_C.23.2-1	Hanging Protocol Environment Module Attributes	table	Y	N
+sect_C.23.2	table_C.23.2-2	Screen Specifications Macro Attributes	table	N	N
+sect_C.23.3	table_C.23.3-1	Hanging Protocol Display Module Attributes	table	Y	N
+sect_C.23.3	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.23.3	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.23.3	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.23.3	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.23.3	table_C.23.4-1	Hanging Protocol Selector Attribute Context Macro Attributes	table	N	N
+sect_C.23.3	table_C.23.4-2	Hanging Protocol Selector Attribute Value Macro Attributes	table	N	N
+sect_C.24.1	table_C.24-1	Encapsulated Document Series Module Attributes	table	Y	N
+sect_C.24.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.24.1	table_10-16	Performed Procedure Step Summary Macro Attributes	table	N	N
+sect_C.24.1	table_10-17	HL7v2 Hierarchic Designator Macro Attributes	table	N	N
+sect_C.24.1	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.24.1	table_10-9	Request Attributes Macro Attributes	table	N	N
+sect_C.24.1	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.24.1	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.24.1	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.24.2	table_C.24-2	Encapsulated Document Module Attributes	table	Y	N
+sect_C.24.2	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.24.2	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.24.2	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.24.2	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.24.2	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.24.2	table_C.17-3	Hierarchical SOP Instance Reference Macro Attributes	table	N	N
+sect_C.24.2	table_C.17-3a	Hierarchical Series Reference Macro Attributes	table	N	N
+sect_C.24.2	table_C.17-5	Document Content Macro Attributes	table	N	N
+sect_C.24.2	table_C.17-6	Document Relationship Macro Attributes	table	N	Y
+sect_C.24.2	table_C.18.1-1	Numeric Measurement Macro Attributes	table	N	N
+sect_C.24.2	table_C.18.10-1	Table Content Item Macro Attributes	table	N	N
+sect_C.24.2	table_C.18.2-1	Code Macro Attributes	table	N	N
+sect_C.24.2	table_C.18.3-1	Composite Object Reference Macro Attributes	table	N	N
+sect_C.24.2	table_C.18.4-1	Image Reference Macro Attributes	table	N	N
+sect_C.24.2	table_C.18.5-1	Waveform Reference Macro Attributes	table	N	N
+sect_C.24.2	table_C.18.6-1	Spatial Coordinates Macro Attributes	table	N	N
+sect_C.24.2	table_C.18.7-1	Temporal Coordinates Macro Attributes	table	N	N
+sect_C.24.2	table_C.18.8-1	Container Macro Attributes	table	N	N
+sect_C.24.2	table_C.18.9-1	3D Spatial Coordinates Macro Attributes	table	N	N
+sect_C.24.2	table_C.7-11b	Image Pixel Macro Attributes	table	N	N
+sect_C.24.2	table_C.7-11c	Image Pixel Description Macro Attributes	table	N	N
+sect_C.25.1	table_C.25.1-1	Real World Value Mapping Series Module Attributes	table	Y	N
+sect_C.25.2	table_C.25.2-1	Real World Value Mapping Module Attributes	table	Y	N
+sect_C.25.2	table_10-1	Person Identification Macro Attributes	table	N	N
+sect_C.25.2	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.25.2	table_10-12	Content Identification Macro Attributes	table	N	N
+sect_C.25.2	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.25.2	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.25.2	table_10.2.1-1	Content Item with Modifiers Macro Attributes	table	N	N
+sect_C.25.2	table_10.9.3-1	Content Creator Macro Attributes	table	N	N
+sect_C.25.2	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.25.2	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.25.2	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.25.2	table_C.7.6.16-12	Real World Value Mapping Macro Attributes	table	N	N
+sect_C.25.2	table_C.7.6.16-12b	Real World Value Mapping Item Macro Attributes	table	N	N
+sect_C.27.1	table_C.27-1	Surface Mesh Module Attributes	table	Y	N
+sect_C.27.1	table_10-19	Algorithm Identification Macro Attributes	table	N	N
+sect_C.27.1	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.27.1	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.27.1	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.27.1	table_C.27-2	Points Macro Attributes	table	N	N
+sect_C.27.1	table_C.27-3	Vectors Macro Attributes	table	N	N
+sect_C.27.1	table_C.27-4	Surface Mesh Primitives Macro Attributes	table	N	N
+sect_C.27.5	table_C.27.5-1	Point Cloud Module Attributes	table	Y	N
+sect_C.27.5	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.27.5	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.27.5	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.27.5	table_C.27-2	Points Macro Attributes	table	N	N
+sect_C.27.6	table_C.27.6-1	UV Mapping Module Attributes	table	Y	N
+sect_C.27.6	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.27.6	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.28.1	table_C.28.1-1	Color Palette Definition Module Attributes	table	Y	N
+sect_C.28.1	table_10-1	Person Identification Macro Attributes	table	N	N
+sect_C.28.1	table_10-12	Content Identification Macro Attributes	table	N	N
+sect_C.28.1	table_10.9.3-1	Content Creator Macro Attributes	table	N	N
+sect_C.28.1	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.28.1	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.28.1	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.29.1.1	table_C.29.1.1-1	Generic Implant Template Description Module Attributes	table	Y	N
+sect_C.29.1.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.29.1.1	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.29.1.1	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.29.1.1	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.29.1.2	table_C.29.1.2-1	Generic Implant Template 2D Drawings Module Attributes	table	Y	N
+sect_C.29.1.2	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.29.1.2	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.29.1.2	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.29.1.3	table_C.29.1.3-1	Generic Implant Template 3D Models Module Attributes	table	Y	N
+sect_C.29.1.4	table_C.29.1.4-1	Generic Implant Template Mating Features Module Attributes	table	Y	N
+sect_C.29.1.5	table_C.29.1.5-1	Generic Implant Template Planning Landmarks Module Attributes	table	Y	N
+sect_C.29.1.5	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.29.1.5	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.29.1.5	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.29.1.5	table_C.29.1.5-2	Planning Landmark Point Macro Attributes	table	N	N
+sect_C.29.1.5	table_C.29.1.5-3	Planning Landmark Line Macro Attributes	table	N	N
+sect_C.29.1.5	table_C.29.1.5-4	Planning Landmark Plane Macro Attributes	table	N	N
+sect_C.29.2.1	table_C.29.2-1	Implant Assembly Template Module Attributes	table	Y	N
+sect_C.29.2.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.29.2.1	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.29.2.1	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.29.2.1	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.29.3	table_C.29.3-1	Implant Template Group Module Attributes	table	Y	N
+sect_C.29.3	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.29.3	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.29.3	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.29.3	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.3.2	table_C.3-2	Visit Identification Module Attributes	table	Y	N
+sect_C.3.2	table_10-17	HL7v2 Hierarchic Designator Macro Attributes	table	N	N
+sect_C.3.2	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.3.2	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.3.2	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.3.3	table_C.3-3	Visit Status Module Attributes	table	Y	N
+sect_C.3.4	table_C.3-4	Visit Admission Module Attributes	table	Y	N
+sect_C.3.4	table_10-1	Person Identification Macro Attributes	table	N	N
+sect_C.3.4	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.3.4	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.3.4	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.30.1	table_C.30.1-1	Unified Procedure Step Progress Information Module Attributes	table	Y	N
+sect_C.30.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.30.1	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.30.1	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.30.1	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.30.1	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.30.2	table_C.30.2-1	Unified Procedure Step Scheduled Procedure Information Module Attributes	table	Y	N
+sect_C.30.2	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.30.2	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.30.2	table_10-3b	Referenced Instances and Access Macro Attributes	table	N	N
+sect_C.30.2	table_10-3c	Storage Macro Attributes	table	N	N
+sect_C.30.2	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.30.2	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.30.2	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.30.3	table_C.30.3-1	Unified Procedure Step Performed Procedure Information Module Attributes	table	Y	N
+sect_C.30.3	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.30.3	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.30.3	table_10-3b	Referenced Instances and Access Macro Attributes	table	N	N
+sect_C.30.3	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.30.3	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.30.3	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.30.4	table_C.30.4-1	Unified Procedure Step Relationship Module Attributes	table	Y	N
+sect_C.30.4	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.30.4	table_10-17	HL7v2 Hierarchic Designator Macro Attributes	table	N	N
+sect_C.30.4	table_10-18	Issuer of Patient ID Macro Attributes	table	N	N
+sect_C.30.4	table_10-3b	Referenced Instances and Access Macro Attributes	table	N	N
+sect_C.30.4	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.30.4	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.30.4	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.31.1	table_C.31-1	RT General Machine Verification Module Attributes	table	Y	N
+sect_C.31.1	table_10-1	Person Identification Macro Attributes	table	N	N
+sect_C.31.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.31.1	table_10-17	HL7v2 Hierarchic Designator Macro Attributes	table	N	N
+sect_C.31.1	table_10-18	Issuer of Patient ID Macro Attributes	table	N	N
+sect_C.31.1	table_10-20	Selector Attribute Macro Attributes	table	N	N
+sect_C.31.1	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.31.1	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.31.1	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.31.2	table_C.31-2	RT Conventional Machine Verification Module Attributes	table	Y	N
+sect_C.31.3	table_C.31-3	RT Ion Machine Verification Module Attributes	table	Y	N
+sect_C.32.1	table_C.32.1-1	Display System Module Attributes	table	Y	N
+sect_C.32.1	table_10-1	Person Identification Macro Attributes	table	N	N
+sect_C.32.1	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.32.1	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.32.1	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.32.2	table_C.32.2-1	Target Luminance Characteristics Module Attributes	table	Y	N
+sect_C.32.3	table_C.32.3-1	QA Results Module Attributes	table	Y	N
+sect_C.32.3	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.32.3	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.32.3	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.32.3	table_C.32.3.1-1	Display QA Result Context Macro Attributes	table	N	N
+sect_C.32.3	table_C.32.3.2-1	Visual Evaluation Result Macro Attributes	table	N	N
+sect_C.32.3	table_C.32.3.3-1	Luminance Uniformity Result Macro Attributes	table	N	N
+sect_C.32.3	table_C.32.3.4-1	Luminance Result Macro Attributes	table	N	N
+sect_C.33.1	table_C.33.1-1	Content Assessment Results Module Attributes	table	Y	N
+sect_C.33.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.33.1	table_10-20	Selector Attribute Macro Attributes	table	N	N
+sect_C.33.1	table_10-20a	Extended Selector Attribute Macro Attributes	table	N	N
+sect_C.33.1	table_10.25-1	Attribute Value Constraint Macro Attributes	table	N	N
+sect_C.33.1	table_10.26-1	Attribute Value Macro Attributes	table	N	N
+sect_C.33.1	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.33.1	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.33.1	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.33.1	table_C.17-3b	Identified Person or Device Macro Attributes	table	N	N
+sect_C.34.1	table_C.34.1-1	CT Protocol Series Module Attributes	table	Y	N
+sect_C.34.10	table_C.34.10-1	Performed CT Acquisition Module Attributes	table	Y	N
+sect_C.34.10	table_10.27-1	Reference Location Macro Attributes	table	N	N
+sect_C.34.10	table_10.28-1	Protocol Element Identification Macro Attributes	table	N	N
+sect_C.34.10	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.34.10	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.34.10	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.34.11	table_C.34.11-1	General Defined Reconstruction Module Attributes	table	Y	N
+sect_C.34.11	table_10-20	Selector Attribute Macro Attributes	table	N	N
+sect_C.34.11	table_10-20a	Extended Selector Attribute Macro Attributes	table	N	N
+sect_C.34.11	table_10.25-1	Attribute Value Constraint Macro Attributes	table	N	N
+sect_C.34.11	table_10.26-1	Attribute Value Macro Attributes	table	N	N
+sect_C.34.11	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.34.11	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.34.11	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.34.12	table_C.34.12-1	Performed CT Reconstruction Module Attributes	table	Y	N
+sect_C.34.12	table_10-19	Algorithm Identification Macro Attributes	table	N	N
+sect_C.34.12	table_10.27-1	Reference Location Macro Attributes	table	N	N
+sect_C.34.12	table_10.28-1	Protocol Element Identification Macro Attributes	table	N	N
+sect_C.34.12	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.34.12	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.34.12	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.34.13	table_C.34.13-1	Defined Storage Module Attributes	table	Y	N
+sect_C.34.13	table_10-20	Selector Attribute Macro Attributes	table	N	N
+sect_C.34.13	table_10-20a	Extended Selector Attribute Macro Attributes	table	N	N
+sect_C.34.13	table_10.25-1	Attribute Value Constraint Macro Attributes	table	N	N
+sect_C.34.13	table_10.26-1	Attribute Value Macro Attributes	table	N	N
+sect_C.34.13	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.34.13	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.34.13	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.34.14	table_C.34.14-1	Performed Storage Module Attributes	table	Y	N
+sect_C.34.14	table_10-3c	Storage Macro Attributes	table	N	N
+sect_C.34.14	table_10.28-1	Protocol Element Identification Macro Attributes	table	N	N
+sect_C.34.15	table_C.34.15-1	Protocol Approval Module Attributes	table	Y	N
+sect_C.34.15	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.34.15	table_10.30-1	Assertion Macro Attributes	table	N	N
+sect_C.34.15	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.34.15	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.34.15	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.34.15	table_C.17-3b	Identified Person or Device Macro Attributes	table	N	N
+sect_C.34.16	table_C.34.16-1	XA Protocol Series Module Attributes	table	Y	N
+sect_C.34.17	table_C.34.17-1	Performed XA Acquisition Module Attributes	table	Y	N
+sect_C.34.17	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.34.17	table_10.28-1	Protocol Element Identification Macro Attributes	table	N	N
+sect_C.34.17	table_10.41-1	General Procedure Protocol Reference Macro Attributes	table	N	N
+sect_C.34.17	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.34.17	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.34.17	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.34.18	table_C.34.18-1	Performed XA Reconstruction Module Attributes	table	Y	N
+sect_C.34.18	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.34.18	table_10.28-1	Protocol Element Identification Macro Attributes	table	N	N
+sect_C.34.18	table_10.41-1	General Procedure Protocol Reference Macro Attributes	table	N	N
+sect_C.34.18	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.34.18	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.34.18	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.34.2	table_C.34.2-1	Protocol Context Module Attributes	table	Y	N
+sect_C.34.2	table_10-1	Person Identification Macro Attributes	table	N	N
+sect_C.34.2	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.34.2	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.34.2	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.34.2	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.34.3	table_C.34.3-1	Patient Protocol Context Module Attributes	table	Y	N
+sect_C.34.3	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.34.4	table_C.34.4-1	Clinical Trial Context Module Attributes	table	Y	N
+sect_C.34.5	table_C.34.5-1	Patient Specification Module Attributes	table	Y	N
+sect_C.34.5	table_10-20	Selector Attribute Macro Attributes	table	N	N
+sect_C.34.5	table_10-20a	Extended Selector Attribute Macro Attributes	table	N	N
+sect_C.34.5	table_10.25-1	Attribute Value Constraint Macro Attributes	table	N	N
+sect_C.34.5	table_10.26-1	Attribute Value Macro Attributes	table	N	N
+sect_C.34.5	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.34.5	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.34.5	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.34.6	table_C.34.6-1	Equipment Specification Module Attributes	table	Y	N
+sect_C.34.7	table_C.34.7-1	Instructions Module Attributes	table	Y	N
+sect_C.34.8	table_C.34.8-1	Patient Positioning Module Attributes	table	Y	N
+sect_C.34.8	table_10.27-1	Reference Location Macro Attributes	table	N	N
+sect_C.34.8	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.34.8	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.34.8	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.34.9	table_C.34.9-1	General Defined Acquisition Module Attributes	table	Y	N
+sect_C.34.9	table_10-20	Selector Attribute Macro Attributes	table	N	N
+sect_C.34.9	table_10-20a	Extended Selector Attribute Macro Attributes	table	N	N
+sect_C.34.9	table_10.25-1	Attribute Value Constraint Macro Attributes	table	N	N
+sect_C.34.9	table_10.26-1	Attribute Value Macro Attributes	table	N	N
+sect_C.34.9	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.34.9	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.34.9	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.35.1	table_C.35.1-1	Manufacturing 3D Model Module Attributes	table	Y	N
+sect_C.35.1	table_10-19	Algorithm Identification Macro Attributes	table	N	N
+sect_C.35.1	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.35.1	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.35.1	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.35.1	table_C.7-11b	Image Pixel Macro Attributes	table	N	N
+sect_C.35.1	table_C.7-11c	Image Pixel Description Macro Attributes	table	N	N
+sect_C.36.10	table_C.36.10-1	RT Radiation Set Module Attributes	table	Y	N
+sect_C.36.10	table_10-1	Person Identification Macro Attributes	table	N	N
+sect_C.36.10	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.36.10	table_10.9.1-1	Enhanced Content Identification Macro Attributes	table	N	N
+sect_C.36.10	table_10.9.3-1	Content Creator Macro Attributes	table	N	N
+sect_C.36.10	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.36.10	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.36.10	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.36.10	table_C.36.2.1.1-1	Radiation Fraction Pattern Macro Attributes	table	N	N
+sect_C.36.11	table_C.36.11-1	RT Dose Contribution Module Attributes	table	Y	N
+sect_C.36.11	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.36.11	table_10-19	Algorithm Identification Macro Attributes	table	N	N
+sect_C.36.11	table_10.33-1	Conceptual Volume Macro Attributes	table	N	N
+sect_C.36.11	table_10.34-1	Conceptual Volume Segmentation Reference And Combination Macro Attributes	table	N	N
+sect_C.36.11	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.36.11	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.36.11	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.36.11	table_C.36.2.1.5-1	Radiobiological Dose Effect Description Macro Attributes	table	N	N
+sect_C.36.12	table_C.36.12-1	RT Delivery Device Common Module Attributes	table	Y	N
+sect_C.36.12	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.36.12	table_10-19	Algorithm Identification Macro Attributes	table	N	N
+sect_C.36.12	table_10.29-1	UDI Macro Attributes	table	N	N
+sect_C.36.12	table_10.33-1	Conceptual Volume Macro Attributes	table	N	N
+sect_C.36.12	table_10.34-1	Conceptual Volume Segmentation Reference And Combination Macro Attributes	table	N	N
+sect_C.36.12	table_10.35-1	Device Model Macro Attributes	table	N	N
+sect_C.36.12	table_10.36-1	Device Identification Macro Attributes	table	N	N
+sect_C.36.12	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.36.12	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.36.12	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.36.12	table_C.36.2.2.1-1	Treatment Device Identification Macro Attributes	table	N	N
+sect_C.36.12	table_C.36.2.2.2-1	RT Patient Support Devices Macro Attributes	table	N	N
+sect_C.36.13	table_C.36.13-1	RT Radiation Common Module Attributes	table	Y	N
+sect_C.36.13	table_10-1	Person Identification Macro Attributes	table	N	N
+sect_C.36.13	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.36.13	table_10-15a	Patient Orientation and Equipment Relationship Macro Attributes	table	N	N
+sect_C.36.13	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.36.13	table_10-20	Selector Attribute Macro Attributes	table	N	N
+sect_C.36.13	table_10.39-1	Patient to Equipment Relationship Macro Attributes	table	N	N
+sect_C.36.13	table_10.40-1	Patient Support Position Macro Attributes	table	N	N
+sect_C.36.13	table_10.9.1-1	Enhanced Content Identification Macro Attributes	table	N	N
+sect_C.36.13	table_10.9.3-1	Content Creator Macro Attributes	table	N	N
+sect_C.36.13	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.36.13	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.36.13	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.36.13	table_C.36.2.1.6-1	RT Radiation Common Base Macro Attributes	table	N	N
+sect_C.36.13	table_C.36.2.2.17-1	RT Tolerance Set Macro Attributes	table	N	N
+sect_C.36.13	table_C.36.2.2.4-1	RT Treatment Position Macro Attributes	table	N	N
+sect_C.36.14	table_C.36.14-1	C-Arm Photon-Electron Delivery Device Module Attributes	table	Y	N
+sect_C.36.14	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.36.14	table_10-19	Algorithm Identification Macro Attributes	table	N	N
+sect_C.36.14	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.36.14	table_10.29-1	UDI Macro Attributes	table	N	N
+sect_C.36.14	table_10.33-1	Conceptual Volume Macro Attributes	table	N	N
+sect_C.36.14	table_10.34-1	Conceptual Volume Segmentation Reference And Combination Macro Attributes	table	N	N
+sect_C.36.14	table_10.35-1	Device Model Macro Attributes	table	N	N
+sect_C.36.14	table_10.36-1	Device Identification Macro Attributes	table	N	N
+sect_C.36.14	table_10.38-1	Outline Definition Macro Attributes	table	N	N
+sect_C.36.14	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.36.14	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.36.14	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.36.14	table_C.36.2.2.10-1	Wedges Definition Macro Attributes	table	N	N
+sect_C.36.14	table_C.36.2.2.12-1	Compensators Definition Macro Attributes	table	N	N
+sect_C.36.14	table_C.36.2.2.13-1	Blocks Definition Macro Attributes	table	N	N
+sect_C.36.14	table_C.36.2.2.14-1	RT Accessory Holders Definition Macro Attributes	table	N	N
+sect_C.36.14	table_C.36.2.2.15-1	General Accessories Definition Macro Attributes	table	N	N
+sect_C.36.14	table_C.36.2.2.16-1	Boluses Definition Macro Attributes	table	N	N
+sect_C.36.14	table_C.36.2.2.19-1	RT Beam Limiting Device Definition Macro Attributes	table	N	N
+sect_C.36.14	table_C.36.2.2.3-1	RT Accessory Device Identification Macro Attributes	table	N	N
+sect_C.36.14	table_C.36.2.2.7-1	Radiation Generation Mode Macro Attributes	table	N	N
+sect_C.36.14	table_C.36.2.2.8-1	RT Beam Limiting Devices Definition Macro Attributes	table	N	N
+sect_C.36.15	table_C.36.15-1	C-Arm Photon-Electron Beam Module Attributes	table	Y	N
+sect_C.36.15	table_10.38-1	Outline Definition Macro Attributes	table	N	N
+sect_C.36.15	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.36.15	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.36.15	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.36.15	table_C.36.2.2.11-1	Wedge Positions Macro Attributes	table	N	N
+sect_C.36.15	table_C.36.2.2.20-1	RT Beam Limiting Device Opening Definition Macro Attributes	table	N	N
+sect_C.36.15	table_C.36.2.2.5-1	RT Control Point General Macro Attributes	table	N	N
+sect_C.36.15	table_C.36.2.2.6-1	External Beam Control Point General Macro Attributes	table	N	N
+sect_C.36.15	table_C.36.2.2.9-1	RT Beam Limiting Device Opening Macro Attributes	table	N	N
+sect_C.36.16	table_C.36.16-1	Tomotherapeutic Delivery Device Module Attributes	table	Y	N
+sect_C.36.16	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.36.16	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.36.16	table_10.29-1	UDI Macro Attributes	table	N	N
+sect_C.36.16	table_10.35-1	Device Model Macro Attributes	table	N	N
+sect_C.36.16	table_10.36-1	Device Identification Macro Attributes	table	N	N
+sect_C.36.16	table_10.38-1	Outline Definition Macro Attributes	table	N	N
+sect_C.36.16	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.36.16	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.36.16	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.36.16	table_C.36.2.2.19-1	RT Beam Limiting Device Definition Macro Attributes	table	N	N
+sect_C.36.16	table_C.36.2.2.3-1	RT Accessory Device Identification Macro Attributes	table	N	N
+sect_C.36.16	table_C.36.2.2.7-1	Radiation Generation Mode Macro Attributes	table	N	N
+sect_C.36.16	table_C.36.2.2.8-1	RT Beam Limiting Devices Definition Macro Attributes	table	N	N
+sect_C.36.17	table_C.36.17-1	Tomotherapeutic Beam Module Attributes	table	Y	N
+sect_C.36.17	table_10.38-1	Outline Definition Macro Attributes	table	N	N
+sect_C.36.17	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.36.17	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.36.17	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.36.17	table_C.36.2.2.20-1	RT Beam Limiting Device Opening Definition Macro Attributes	table	N	N
+sect_C.36.17	table_C.36.2.2.5-1	RT Control Point General Macro Attributes	table	N	N
+sect_C.36.17	table_C.36.2.2.6-1	External Beam Control Point General Macro Attributes	table	N	N
+sect_C.36.17	table_C.36.2.2.9-1	RT Beam Limiting Device Opening Macro Attributes	table	N	N
+sect_C.36.18	table_C.36.18-1	Robotic-Arm Delivery Device Module Attributes	table	Y	N
+sect_C.36.18	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.36.18	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.36.18	table_10.29-1	UDI Macro Attributes	table	N	N
+sect_C.36.18	table_10.35-1	Device Model Macro Attributes	table	N	N
+sect_C.36.18	table_10.36-1	Device Identification Macro Attributes	table	N	N
+sect_C.36.18	table_10.38-1	Outline Definition Macro Attributes	table	N	N
+sect_C.36.18	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.36.18	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.36.18	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.36.18	table_C.36.2.2.14-1	RT Accessory Holders Definition Macro Attributes	table	N	N
+sect_C.36.18	table_C.36.2.2.19-1	RT Beam Limiting Device Definition Macro Attributes	table	N	N
+sect_C.36.18	table_C.36.2.2.3-1	RT Accessory Device Identification Macro Attributes	table	N	N
+sect_C.36.18	table_C.36.2.2.7-1	Radiation Generation Mode Macro Attributes	table	N	N
+sect_C.36.18	table_C.36.2.2.8-1	RT Beam Limiting Devices Definition Macro Attributes	table	N	N
+sect_C.36.19	table_C.36.19-1	Robotic-Arm Path Module Attributes	table	Y	N
+sect_C.36.19	table_10.38-1	Outline Definition Macro Attributes	table	N	N
+sect_C.36.19	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.36.19	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.36.19	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.36.19	table_C.36.2.2.20-1	RT Beam Limiting Device Opening Definition Macro Attributes	table	N	N
+sect_C.36.19	table_C.36.2.2.5-1	RT Control Point General Macro Attributes	table	N	N
+sect_C.36.19	table_C.36.2.2.6-1	External Beam Control Point General Macro Attributes	table	N	N
+sect_C.36.19	table_C.36.2.2.9-1	RT Beam Limiting Device Opening Macro Attributes	table	N	N
+sect_C.36.2.2.21	table_C.36.2.2.21-1	RT Beam Limiting Device Opening Sequence Macro Attributes	table	Y	N
+sect_C.36.2.2.21	table_10.38-1	Outline Definition Macro Attributes	table	N	N
+sect_C.36.2.2.21	table_C.36.2.2.20-1	RT Beam Limiting Device Opening Definition Macro Attributes	table	N	N
+sect_C.36.2.4.10	table_C.36.2.4.10-1	RT Image Frame Radiation Acquisition Parameters Macro Attributes	table	Y	N
+sect_C.36.2.4.10	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.36.2.4.10	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.36.2.4.10	table_10.29-1	UDI Macro Attributes	table	N	N
+sect_C.36.2.4.10	table_10.36-1	Device Identification Macro Attributes	table	N	N
+sect_C.36.2.4.10	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.36.2.4.10	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.36.2.4.10	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.36.2.4.10	table_C.36.2.2.7-1	Radiation Generation Mode Macro Attributes	table	N	N
+sect_C.36.2.4.10	table_C.36.2.4.6-1	KV Radiation Image Acquisition Parameters Macro Attributes	table	N	N
+sect_C.36.2.4.10	table_C.36.2.4.7-1	MV Radiation Image Acquisition Parameters Macro Attributes	table	N	N
+sect_C.36.2.4.11	table_C.36.2.4.11-1	RT Image Frame Context Macro Attributes	table	Y	N
+sect_C.36.2.4.11	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.36.2.4.11	table_C.36.2.3.3-1	RT Patient Position Scope With Legacy Support Macro Attributes	table	N	N
+sect_C.36.2.4.8	table_C.36.2.4.8-1	RT Image Frame General Content Macro Attributes	table	Y	N
+sect_C.36.2.4.9	table_C.36.2.4.9-1	RT Image Frame Imaging Device Position Macro Attributes	table	Y	N
+sect_C.36.2.4.9	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.36.2.4.9	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.36.2.4.9	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.36.2.4.9	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.36.2.4.9	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.36.2.4.9	table_C.36.2.4.2-1	Matrix-based RT Imaging Geometry Macro Attributes	table	N	N
+sect_C.36.20	table_C.36.20-1	RT Radiation Record Set Module Attributes	table	Y	N
+sect_C.36.20	table_10-1	Person Identification Macro Attributes	table	N	N
+sect_C.36.20	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.36.20	table_10.9.2-1	Extended Content Identification Macro Attributes	table	N	N
+sect_C.36.20	table_10.9.3-1	Content Creator Macro Attributes	table	N	N
+sect_C.36.20	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.36.20	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.36.20	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.36.21	table_C.36.21-1	RT Dose Contribution Record Module Attributes	table	Y	N
+sect_C.36.21	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.36.21	table_10-19	Algorithm Identification Macro Attributes	table	N	N
+sect_C.36.21	table_10.33-1	Conceptual Volume Macro Attributes	table	N	N
+sect_C.36.21	table_10.34-1	Conceptual Volume Segmentation Reference And Combination Macro Attributes	table	N	N
+sect_C.36.21	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.36.21	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.36.21	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.36.21	table_C.36.2.1.5-1	Radiobiological Dose Effect Description Macro Attributes	table	N	N
+sect_C.36.22	table_C.36.22-1	RT Radiation Record Common Module Attributes	table	Y	N
+sect_C.36.22	table_10-1	Person Identification Macro Attributes	table	N	N
+sect_C.36.22	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.36.22	table_10-15a	Patient Orientation and Equipment Relationship Macro Attributes	table	N	N
+sect_C.36.22	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.36.22	table_10-20	Selector Attribute Macro Attributes	table	N	N
+sect_C.36.22	table_10-20a	Extended Selector Attribute Macro Attributes	table	N	N
+sect_C.36.22	table_10.29-1	UDI Macro Attributes	table	N	N
+sect_C.36.22	table_10.30-1	Assertion Macro Attributes	table	N	N
+sect_C.36.22	table_10.36-1	Device Identification Macro Attributes	table	N	N
+sect_C.36.22	table_10.39-1	Patient to Equipment Relationship Macro Attributes	table	N	N
+sect_C.36.22	table_10.40-1	Patient Support Position Macro Attributes	table	N	N
+sect_C.36.22	table_10.9.2-1	Extended Content Identification Macro Attributes	table	N	N
+sect_C.36.22	table_10.9.3-1	Content Creator Macro Attributes	table	N	N
+sect_C.36.22	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.36.22	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.36.22	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.36.22	table_C.17-3b	Identified Person or Device Macro Attributes	table	N	N
+sect_C.36.22	table_C.36.2.1.6-1	RT Radiation Common Base Macro Attributes	table	N	N
+sect_C.36.22	table_C.36.2.2.17-1	RT Tolerance Set Macro Attributes	table	N	N
+sect_C.36.22	table_C.36.2.2.18-1	Interlock Macro Attributes	table	N	N
+sect_C.36.22	table_C.36.2.2.4-1	RT Treatment Position Macro Attributes	table	N	N
+sect_C.36.23	table_C.36.23-1	RT Radiation Salvage Record Module Attributes	table	Y	N
+sect_C.36.23	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.36.23	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.36.23	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.36.23	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.36.23	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.36.23	table_C.36.2.2.5-1	RT Control Point General Macro Attributes	table	N	N
+sect_C.36.23	table_C.36.2.2.7-1	Radiation Generation Mode Macro Attributes	table	N	N
+sect_C.36.24	table_C.36.24-1	RT Radiation Set Delivery Instruction Module Attributes	table	Y	N
+sect_C.36.24	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.36.24	table_10-15a	Patient Orientation and Equipment Relationship Macro Attributes	table	N	N
+sect_C.36.24	table_10-19	Algorithm Identification Macro Attributes	table	N	N
+sect_C.36.24	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.36.24	table_10-28	Device Motion Control Macro Attributes	table	N	N
+sect_C.36.24	table_10.29-1	UDI Macro Attributes	table	N	N
+sect_C.36.24	table_10.33-1	Conceptual Volume Macro Attributes	table	N	N
+sect_C.36.24	table_10.34-1	Conceptual Volume Segmentation Reference And Combination Macro Attributes	table	N	N
+sect_C.36.24	table_10.35-1	Device Model Macro Attributes	table	N	N
+sect_C.36.24	table_10.36-1	Device Identification Macro Attributes	table	N	N
+sect_C.36.24	table_10.39-1	Patient to Equipment Relationship Macro Attributes	table	N	N
+sect_C.36.24	table_10.40-1	Patient Support Position Macro Attributes	table	N	N
+sect_C.36.24	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.36.24	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.36.24	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.36.24	table_C.17-3b	Identified Person or Device Macro Attributes	table	N	N
+sect_C.36.24	table_C.36.2.2.1-1	Treatment Device Identification Macro Attributes	table	N	N
+sect_C.36.24	table_C.36.2.3.2-1	RT Patient Position Macro Attributes	table	N	N
+sect_C.36.25	table_C.36.25-1	RT Treatment Preparation Module Attributes	table	Y	N
+sect_C.36.25	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.36.25	table_10-15a	Patient Orientation and Equipment Relationship Macro Attributes	table	N	N
+sect_C.36.25	table_10-19	Algorithm Identification Macro Attributes	table	N	N
+sect_C.36.25	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.36.25	table_10.2.1-1	Content Item with Modifiers Macro Attributes	table	N	N
+sect_C.36.25	table_10.29-1	UDI Macro Attributes	table	N	N
+sect_C.36.25	table_10.32-1	Entity Long Labeling Macro Attributes	table	N	N
+sect_C.36.25	table_10.33-1	Conceptual Volume Macro Attributes	table	N	N
+sect_C.36.25	table_10.34-1	Conceptual Volume Segmentation Reference And Combination Macro Attributes	table	N	N
+sect_C.36.25	table_10.35-1	Device Model Macro Attributes	table	N	N
+sect_C.36.25	table_10.36-1	Device Identification Macro Attributes	table	N	N
+sect_C.36.25	table_10.39-1	Patient to Equipment Relationship Macro Attributes	table	N	N
+sect_C.36.25	table_10.40-1	Patient Support Position Macro Attributes	table	N	N
+sect_C.36.25	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.36.25	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.36.25	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.36.25	table_C.36.2.2.3-1	RT Accessory Device Identification Macro Attributes	table	N	N
+sect_C.36.25	table_C.36.2.3.2-1	RT Patient Position Macro Attributes	table	N	N
+sect_C.36.25	table_C.36.2.3.3-1	RT Patient Position Scope With Legacy Support Macro Attributes	table	N	N
+sect_C.36.25	table_C.36.2.3.4-1	RT Patient Treatment Preparation Macro Attributes	table	N	N
+sect_C.36.26	table_C.36.26-1	Enhanced RT Image Device Module Attributes	table	Y	N
+sect_C.36.26	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.36.26	table_10-19	Algorithm Identification Macro Attributes	table	N	N
+sect_C.36.26	table_10.29-1	UDI Macro Attributes	table	N	N
+sect_C.36.26	table_10.33-1	Conceptual Volume Macro Attributes	table	N	N
+sect_C.36.26	table_10.34-1	Conceptual Volume Segmentation Reference And Combination Macro Attributes	table	N	N
+sect_C.36.26	table_10.35-1	Device Model Macro Attributes	table	N	N
+sect_C.36.26	table_10.36-1	Device Identification Macro Attributes	table	N	N
+sect_C.36.26	table_10.38-1	Outline Definition Macro Attributes	table	N	N
+sect_C.36.26	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.36.26	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.36.26	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.36.26	table_C.36.2.2.15-1	General Accessories Definition Macro Attributes	table	N	N
+sect_C.36.26	table_C.36.2.2.19-1	RT Beam Limiting Device Definition Macro Attributes	table	N	N
+sect_C.36.26	table_C.36.2.2.2-1	RT Patient Support Devices Macro Attributes	table	N	N
+sect_C.36.26	table_C.36.2.2.22-1	Patient Position Acquisition Device Macro Attributes	table	N	N
+sect_C.36.26	table_C.36.2.2.3-1	RT Accessory Device Identification Macro Attributes	table	N	N
+sect_C.36.26	table_C.36.2.2.8-1	RT Beam Limiting Devices Definition Macro Attributes	table	N	N
+sect_C.36.27	table_C.36.27-1	Enhanced RT Image Module Attributes	table	Y	N
+sect_C.36.27	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.36.27	table_10-15a	Patient Orientation and Equipment Relationship Macro Attributes	table	N	N
+sect_C.36.27	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.36.27	table_10.32-1	Entity Long Labeling Macro Attributes	table	N	N
+sect_C.36.27	table_10.39-1	Patient to Equipment Relationship Macro Attributes	table	N	N
+sect_C.36.27	table_10.40-1	Patient Support Position Macro Attributes	table	N	N
+sect_C.36.27	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.36.27	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.36.27	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.36.27	table_C.36.2.2.4-1	RT Treatment Position Macro Attributes	table	N	N
+sect_C.36.28	table_C.36.28-1	RT Patient Position Acquisition Device Module Attributes	table	Y	N
+sect_C.36.28	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.36.28	table_10-19	Algorithm Identification Macro Attributes	table	N	N
+sect_C.36.28	table_10.29-1	UDI Macro Attributes	table	N	N
+sect_C.36.28	table_10.33-1	Conceptual Volume Macro Attributes	table	N	N
+sect_C.36.28	table_10.34-1	Conceptual Volume Segmentation Reference And Combination Macro Attributes	table	N	N
+sect_C.36.28	table_10.35-1	Device Model Macro Attributes	table	N	N
+sect_C.36.28	table_10.36-1	Device Identification Macro Attributes	table	N	N
+sect_C.36.28	table_10.38-1	Outline Definition Macro Attributes	table	N	N
+sect_C.36.28	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.36.28	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.36.28	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.36.28	table_C.36.2.2.14-1	RT Accessory Holders Definition Macro Attributes	table	N	N
+sect_C.36.28	table_C.36.2.2.15-1	General Accessories Definition Macro Attributes	table	N	N
+sect_C.36.28	table_C.36.2.2.19-1	RT Beam Limiting Device Definition Macro Attributes	table	N	N
+sect_C.36.28	table_C.36.2.2.2-1	RT Patient Support Devices Macro Attributes	table	N	N
+sect_C.36.28	table_C.36.2.2.22-1	Patient Position Acquisition Device Macro Attributes	table	N	N
+sect_C.36.28	table_C.36.2.2.3-1	RT Accessory Device Identification Macro Attributes	table	N	N
+sect_C.36.28	table_C.36.2.2.8-1	RT Beam Limiting Devices Definition Macro Attributes	table	N	N
+sect_C.36.29	table_C.36.29-1	RT Patient Position Acquisition Instruction Module Attributes	table	Y	N
+sect_C.36.29	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.36.29	table_10-15a	Patient Orientation and Equipment Relationship Macro Attributes	table	N	N
+sect_C.36.29	table_10-19	Algorithm Identification Macro Attributes	table	N	N
+sect_C.36.29	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.36.29	table_10-20	Selector Attribute Macro Attributes	table	N	N
+sect_C.36.29	table_10-20a	Extended Selector Attribute Macro Attributes	table	N	N
+sect_C.36.29	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.36.29	table_10.25-1	Attribute Value Constraint Macro Attributes	table	N	N
+sect_C.36.29	table_10.26-1	Attribute Value Macro Attributes	table	N	N
+sect_C.36.29	table_10.29-1	UDI Macro Attributes	table	N	N
+sect_C.36.29	table_10.32-1	Entity Long Labeling Macro Attributes	table	N	N
+sect_C.36.29	table_10.33-1	Conceptual Volume Macro Attributes	table	N	N
+sect_C.36.29	table_10.34-1	Conceptual Volume Segmentation Reference And Combination Macro Attributes	table	N	N
+sect_C.36.29	table_10.36-1	Device Identification Macro Attributes	table	N	N
+sect_C.36.29	table_10.37-1	Related Information Entities Macro Attributes	table	N	N
+sect_C.36.29	table_10.38-1	Outline Definition Macro Attributes	table	N	N
+sect_C.36.29	table_10.39-1	Patient to Equipment Relationship Macro Attributes	table	N	N
+sect_C.36.29	table_10.40-1	Patient Support Position Macro Attributes	table	N	N
+sect_C.36.29	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.36.29	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.36.29	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.36.29	table_C.36.2.2.20-1	RT Beam Limiting Device Opening Definition Macro Attributes	table	N	N
+sect_C.36.29	table_C.36.2.2.21-1	RT Beam Limiting Device Opening Sequence Macro Attributes	table	N	N
+sect_C.36.29	table_C.36.2.2.7-1	Radiation Generation Mode Macro Attributes	table	N	N
+sect_C.36.29	table_C.36.2.3.2-1	RT Patient Position Macro Attributes	table	N	N
+sect_C.36.29	table_C.36.2.3.3-1	RT Patient Position Scope With Legacy Support Macro Attributes	table	N	N
+sect_C.36.29	table_C.36.2.4.1-1	RT Projection Imaging Request Geometry Macro Attributes	table	N	N
+sect_C.36.29	table_C.36.2.4.2-1	Matrix-based RT Imaging Geometry Macro Attributes	table	N	N
+sect_C.36.29	table_C.36.2.4.3-1	Parameterized RT Imaging Geometry Macro Attributes	table	N	N
+sect_C.36.29	table_C.36.2.4.4-1	RT Imaging Aperture Macro Attributes	table	N	N
+sect_C.36.29	table_C.36.2.4.5-1	3D RT Cone-Beam Imaging Geometry Macro Attributes	table	N	N
+sect_C.36.29	table_C.36.2.4.6-1	KV Radiation Image Acquisition Parameters Macro Attributes	table	N	N
+sect_C.36.29	table_C.36.2.4.7-1	MV Radiation Image Acquisition Parameters Macro Attributes	table	N	N
+sect_C.36.3	table_C.36.3-1	Enhanced RT Series Module Attributes	table	Y	N
+sect_C.36.3	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.36.4	table_C.36.4-1	Radiotherapy Common Instance Module Attributes	table	Y	N
+sect_C.36.4	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.36.4	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.36.4	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.36.4	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.36.4	table_C.17-3b	Identified Person or Device Macro Attributes	table	N	N
+sect_C.36.5	table_C.36.5-1	RT Physician Intent Module Attributes	table	Y	N
+sect_C.36.5	table_10-1	Person Identification Macro Attributes	table	N	N
+sect_C.36.5	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.36.5	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.36.5	table_10.37-1	Related Information Entities Macro Attributes	table	N	N
+sect_C.36.5	table_10.9.2-1	Extended Content Identification Macro Attributes	table	N	N
+sect_C.36.5	table_10.9.3-1	Content Creator Macro Attributes	table	N	N
+sect_C.36.5	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.36.5	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.36.5	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.36.6	table_C.36.6-1	RT Enhanced Prescription Module Attributes	table	Y	N
+sect_C.36.6	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.36.6	table_10-15a	Patient Orientation and Equipment Relationship Macro Attributes	table	N	N
+sect_C.36.6	table_10-19	Algorithm Identification Macro Attributes	table	N	N
+sect_C.36.6	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.36.6	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.36.6	table_10.31-1	Entity Labeling Macro Attributes	table	N	N
+sect_C.36.6	table_10.33-1	Conceptual Volume Macro Attributes	table	N	N
+sect_C.36.6	table_10.34-1	Conceptual Volume Segmentation Reference And Combination Macro Attributes	table	N	N
+sect_C.36.6	table_10.37-1	Related Information Entities Macro Attributes	table	N	N
+sect_C.36.6	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.36.6	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.36.6	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.36.6	table_C.36.2.1.1-1	Radiation Fraction Pattern Macro Attributes	table	N	N
+sect_C.36.6	table_C.36.2.1.4-1	Dosimetric Objective Macro Attributes	table	N	N
+sect_C.36.6	table_C.36.2.1.5-1	Radiobiological Dose Effect Description Macro Attributes	table	N	N
+sect_C.36.7	table_C.36.7-1	RT Treatment Phase Intent Module Attributes	table	Y	N
+sect_C.36.7	table_10.31-1	Entity Labeling Macro Attributes	table	N	N
+sect_C.36.7	table_C.36.2.1.2-1	RT Treatment Phase Macro Attributes	table	N	N
+sect_C.36.7	table_C.36.2.1.3-1	RT Treatment Phase Interval Macro Attributes	table	N	N
+sect_C.36.8	table_C.36.8-1	RT Segment Annotation Module Attributes	table	Y	N
+sect_C.36.8	table_10-1	Person Identification Macro Attributes	table	N	N
+sect_C.36.8	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.36.8	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.36.8	table_10.2.1-1	Content Item with Modifiers Macro Attributes	table	N	N
+sect_C.36.8	table_10.29-1	UDI Macro Attributes	table	N	N
+sect_C.36.8	table_10.32-1	Entity Long Labeling Macro Attributes	table	N	N
+sect_C.36.8	table_10.35-1	Device Model Macro Attributes	table	N	N
+sect_C.36.8	table_10.36-1	Device Identification Macro Attributes	table	N	N
+sect_C.36.8	table_10.9.2-1	Extended Content Identification Macro Attributes	table	N	N
+sect_C.36.8	table_10.9.3-1	Content Creator Macro Attributes	table	N	N
+sect_C.36.8	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.36.8	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.36.8	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.36.9	table_C.36.9-1	Segment Reference Module Attributes	table	Y	N
+sect_C.36.9	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.36.9	table_10-19	Algorithm Identification Macro Attributes	table	N	N
+sect_C.36.9	table_10.33-1	Conceptual Volume Macro Attributes	table	N	N
+sect_C.36.9	table_10.34-1	Conceptual Volume Segmentation Reference And Combination Macro Attributes	table	N	N
+sect_C.36.9	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.36.9	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.36.9	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.37.1.1	table_C.37.1-1	Microscopy Bulk Simple Annotations Series Module Attributes	table	Y	N
+sect_C.37.1.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.37.1.2	table_C.37.1-2	Microscopy Bulk Simple Annotations Module Attributes	table	Y	N
+sect_C.37.1.2	table_10-1	Person Identification Macro Attributes	table	N	N
+sect_C.37.1.2	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.37.1.2	table_10-12	Content Identification Macro Attributes	table	N	N
+sect_C.37.1.2	table_10-19	Algorithm Identification Macro Attributes	table	N	N
+sect_C.37.1.2	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.37.1.2	table_10-7b	Multiple Site General Anatomy Optional Macro Attributes	table	N	N
+sect_C.37.1.2	table_10-8	Primary Anatomic Structure Macro Attributes	table	N	N
+sect_C.37.1.2	table_10.9.3-1	Content Creator Macro Attributes	table	N	N
+sect_C.37.1.2	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.37.1.2	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.37.1.2	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.38.1	table_C.38.1-1	Inventory Module Attributes	table	Y	N
+sect_C.38.1	table_10-1	Person Identification Macro Attributes	table	N	N
+sect_C.38.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.38.1	table_10-17	HL7v2 Hierarchic Designator Macro Attributes	table	N	N
+sect_C.38.1	table_10-18	Issuer of Patient ID Macro Attributes	table	N	N
+sect_C.38.1	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.38.1	table_10-20	Selector Attribute Macro Attributes	table	N	N
+sect_C.38.1	table_10-9	Request Attributes Macro Attributes	table	N	N
+sect_C.38.1	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.38.1	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.38.1	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.38.1	table_C.12.1.1.9-1	Original Attributes Macro Attributes	table	N	N
+sect_C.38.1	table_C.17-3c	Referenced Request Macro Attributes	table	N	N
+sect_C.38.1	table_C.38.2-1	Scope of Inventory Macro Attributes	table	N	N
+sect_C.38.1	table_C.38.2-2	Stored File Access Macro Attributes	table	N	N
+sect_C.38.1	table_C.38.2-3	Inventory Reference Macro Attributes	table	N	Y
+sect_C.38.1	table_C.38.2-4	Access End Points Macro Attributes	table	N	N
+sect_C.38.3	table_C.38.3-1	Inventory Creation Module Attributes	table	Y	N
+sect_C.38.3	table_C.38.2-1	Scope of Inventory Macro Attributes	table	N	N
+sect_C.38.3	table_C.38.2-2	Stored File Access Macro Attributes	table	N	N
+sect_C.39.1	table_C.39.1-1	Waveform Presentation State Relationship Module	table	Y	N
+sect_C.39.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.39.2	table_C.39.2-1	Structured Waveform Annotation Module Attributes	table	Y	N
+sect_C.39.2	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.39.3	table_C.39.3-1	Textual Waveform Annotation Module Attributes	table	Y	N
+sect_C.39.3	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.39.3	table_C.39.8-1	Temporal Range Macro Attributes	table	N	N
+sect_C.39.4	table_C.39.4-1	Displayed Waveform Segment Module Attributes	table	Y	N
+sect_C.39.4	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.39.4	table_C.39.8-1	Temporal Range Macro Attributes	table	N	N
+sect_C.39.5	table_C.39.5-1	Montage Activation Module Attributes	table	Y	N
+sect_C.39.6	table_C.39.6-1	Waveform Presentation Montage Module Attributes	table	Y	N
+sect_C.39.6	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.39.6	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.39.6	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.39.6	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.39.6	table_C.10.12-1	Waveform Filter Characteristics Macro Attributes	table	N	N
+sect_C.39.6	table_C.10.13-1	Waveform Filter Lookup Table Macro Attributes	table	N	N
+sect_C.39.6	table_C.39.7-1	Montage Channel Macro Attributes	table	N	N
+sect_C.4.13	table_C.4-13	Performed Procedure Step Relationship Module Attributes	table	Y	N
+sect_C.4.13	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.4.13	table_10-17	HL7v2 Hierarchic Designator Macro Attributes	table	N	N
+sect_C.4.13	table_10-18	Issuer of Patient ID Macro Attributes	table	N	N
+sect_C.4.13	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.4.13	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.4.13	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.4.13	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.4.14	table_C.4-14	Performed Procedure Step Information Module Attributes	table	Y	N
+sect_C.4.14	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.4.14	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.4.14	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.4.15	table_C.4-15	Image Acquisition Results Module Attributes	table	Y	N
+sect_C.4.15	table_10-1	Person Identification Macro Attributes	table	N	N
+sect_C.4.15	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.4.15	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.4.15	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.4.15	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.4.15	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.4.17	table_C.4-17	Billing and Material Management Code Module Attributes	table	Y	N
+sect_C.4.17	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.4.17	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.4.17	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.4.23	table_C.4.23-1	Instance Availability Notification Module Attributes	table	Y	N
+sect_C.4.23	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.4.23	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.4.23	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.4.23	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.7.1.1	table_C.7-1	Patient Module Attributes	table	Y	N
+sect_C.7.1.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.7.1.1	table_10-17	HL7v2 Hierarchic Designator Macro Attributes	table	N	N
+sect_C.7.1.1	table_10-18	Issuer of Patient ID Macro Attributes	table	N	N
+sect_C.7.1.1	table_10-3b	Referenced Instances and Access Macro Attributes	table	N	N
+sect_C.7.1.1	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.7.1.1	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.7.1.1	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.7.1.1	table_C.7.1.4-1	Patient Group Macro Attributes	table	N	N
+sect_C.7.1.3	table_C.7-2b	Clinical Trial Subject Module Attributes	table	Y	N
+sect_C.7.10.1	table_C.7.10.1-1	General Acquisition Module Attributes	table	Y	N
+sect_C.7.11.1	table_C.7.11.1-1	Multi-Resolution Pyramid Module Attributes	table	Y	N
+sect_C.7.2.1	table_C.7-3	General Study Module Attributes	table	Y	N
+sect_C.7.2.1	table_10-1	Person Identification Macro Attributes	table	N	N
+sect_C.7.2.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.7.2.1	table_10-17	HL7v2 Hierarchic Designator Macro Attributes	table	N	N
+sect_C.7.2.1	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.7.2.1	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.7.2.1	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.7.2.2	table_C.7-4a	Patient Study Module Attributes	table	Y	N
+sect_C.7.2.2	table_10-17	HL7v2 Hierarchic Designator Macro Attributes	table	N	N
+sect_C.7.2.2	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.7.2.2	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.7.2.2	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.7.2.3	table_C.7-4b	Clinical Trial Study Module Attributes	table	Y	N
+sect_C.7.2.3	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.7.2.3	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.7.2.3	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.7.3.1	table_C.7-5a	General Series Module Attributes	table	Y	N
+sect_C.7.3.1	table_10-1	Person Identification Macro Attributes	table	N	N
+sect_C.7.3.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.7.3.1	table_10-16	Performed Procedure Step Summary Macro Attributes	table	N	N
+sect_C.7.3.1	table_10-17	HL7v2 Hierarchic Designator Macro Attributes	table	N	N
+sect_C.7.3.1	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.7.3.1	table_10-9	Request Attributes Macro Attributes	table	N	N
+sect_C.7.3.1	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.7.3.1	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.7.3.1	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.7.3.2	table_C.7-5b	Clinical Trial Series Module Attributes	table	Y	N
+sect_C.7.3.3	table_C.7-5c	Enhanced Series Module Attributes	table	Y	N
+sect_C.7.3.3	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.7.4.1	table_C.7-6	Frame of Reference Module Attributes	table	Y	N
+sect_C.7.4.2	table_C.7-7	Synchronization Module Attributes	table	Y	N
+sect_C.7.5.1	table_C.7-8	General Equipment Module Attributes	table	Y	N
+sect_C.7.5.1	table_10.29-1	UDI Macro Attributes	table	N	N
+sect_C.7.5.1	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.7.5.1	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.7.5.1	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.7.5.2	table_C.7-8b	Enhanced General Equipment Module Attributes	table	Y	N
+sect_C.7.6.1	table_C.7-9	General Image Module Attributes	table	Y	N
+sect_C.7.6.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.7.6.1	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.7.6.1	table_10-7	General Anatomy Optional Macro Attributes	table	N	N
+sect_C.7.6.1	table_10-8	Primary Anatomic Structure Macro Attributes	table	N	N
+sect_C.7.6.1	table_10.2.1-1	Content Item with Modifiers Macro Attributes	table	N	N
+sect_C.7.6.1	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.1	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.1	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.1	table_C.7-11b	Image Pixel Macro Attributes	table	N	N
+sect_C.7.6.1	table_C.7-11c	Image Pixel Description Macro Attributes	table	N	N
+sect_C.7.6.1	table_C.7.6.16-12b	Real World Value Mapping Item Macro Attributes	table	N	N
+sect_C.7.6.10	table_C.7-16	Mask Module Attributes	table	Y	N
+sect_C.7.6.11	table_C.7-17	Display Shutter Module Attributes	table	Y	N
+sect_C.7.6.11	table_C.7-17a	Display Shutter Macro Attributes	table	N	N
+sect_C.7.6.12	table_C.7-18	Device Module Attributes	table	Y	N
+sect_C.7.6.12	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.12	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.12	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.13	table_C.7-19	Intervention Module Attributes	table	Y	N
+sect_C.7.6.13	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.13	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.13	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.14	table_C.7.6.14-1	Acquisition Context Module Attributes	table	Y	N
+sect_C.7.6.14	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.7.6.14	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.7.6.14	table_10.2.1-1	Content Item with Modifiers Macro Attributes	table	N	N
+sect_C.7.6.14	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.14	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.14	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.15	table_C.7.6.15-1	Bitmap Display Shutter Module Attributes	table	Y	N
+sect_C.7.6.16	table_C.7.6.16-1	Multi-frame Functional Groups Module Attributes	table	Y	N
+sect_C.7.6.16.2.1	table_C.7.6.16-2	Pixel Measures Macro Attributes	table	Y	N
+sect_C.7.6.16.2.10	table_C.7.6.16-11	Frame VOI LUT Macro Attributes	table	Y	N
+sect_C.7.6.16.2.10b	table_C.7.6.16-11b	Frame VOI LUT with LUT Macro Attributes	table	Y	N
+sect_C.7.6.16.2.10b	table_C.11-2b	VOI LUT Macro Attributes	table	N	N
+sect_C.7.6.16.2.11	table_C.7.6.16-12	Real World Value Mapping Macro Attributes	table	Y	N
+sect_C.7.6.16.2.11	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.7.6.16.2.11	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.7.6.16.2.11	table_10.2.1-1	Content Item with Modifiers Macro Attributes	table	N	N
+sect_C.7.6.16.2.11	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.16.2.11	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.16.2.11	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.16.2.11	table_C.7.6.16-12b	Real World Value Mapping Item Macro Attributes	table	N	N
+sect_C.7.6.16.2.12	table_C.7.16-13	Contrast/Bolus Usage Macro Attributes	table	Y	N
+sect_C.7.6.16.2.13	table_C.7.6.16-14	Pixel Intensity Relationship LUT Macro Attributes	table	Y	N
+sect_C.7.6.16.2.14	table_C.7.6.16-15	Frame Pixel Shift Macro Attributes	table	Y	N
+sect_C.7.6.16.2.15	table_C.7.6.16-16	Patient Orientation in Frame Macro Attributes	table	Y	N
+sect_C.7.6.16.2.16	table_C.7.6.16-17	Frame Display Shutter Macro Attributes	table	Y	N
+sect_C.7.6.16.2.16	table_C.7-17a	Display Shutter Macro Attributes	table	N	N
+sect_C.7.6.16.2.17	table_C.7.6.16-18	Respiratory Synchronization Macro Attributes	table	Y	N
+sect_C.7.6.16.2.18	table_C.7.6.16-19	Irradiation Event Identification Macro Attributes	table	Y	N
+sect_C.7.6.16.2.19	table_C.7.6.16.2-20	Radiopharmaceutical Usage Macro Attributes	table	Y	N
+sect_C.7.6.16.2.2	table_C.7.6.16-3	Frame Content Macro Attributes	table	Y	N
+sect_C.7.6.16.2.20	table_C.7.6.16.2-21	Patient Physiological State Macro Attributes	table	Y	N
+sect_C.7.6.16.2.20	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.16.2.20	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.16.2.20	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.16.2.21	table_C.7.6.16.2.21-1	Plane Position (Volume) Macro Attributes	table	Y	N
+sect_C.7.6.16.2.22	table_C.7.6.16.2.22-1	Plane Orientation (Volume) Macro Attributes	table	Y	N
+sect_C.7.6.16.2.23	table_C.7.6.16.2.23-1	Temporal Position Macro Attributes	table	Y	N
+sect_C.7.6.16.2.24	table_C.7.6.16.2.24-1	Image Data Type Macro Attributes	table	Y	N
+sect_C.7.6.16.2.25.1	table_C.7.6.16.2.25.1-1	Unassigned Shared Converted Attributes Macro Attributes	table	Y	N
+sect_C.7.6.16.2.25.2	table_C.7.6.16.2.25.2-1	Unassigned Per-Frame Converted Attributes Macro Attributes	table	Y	N
+sect_C.7.6.16.2.25.3	table_C.7.6.16.2.25.3-1	Image Frame Conversion Source Macro Attributes	table	Y	N
+sect_C.7.6.16.2.25.3	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.7.6.16.2.25.3	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.7.6.16.2.26	table_C.7.6.16.2.26-1	Stored Value Color Range Macro Attributes	table	Y	N
+sect_C.7.6.16.2.27	table_C.7.6.16.2.27-1	Frame Usefulness Functional Group Macro Attributes	table	Y	N
+sect_C.7.6.16.2.28	table_C.7.6.16.2.28-1	Camera Position Functional Group Macro Attributes	table	Y	N
+sect_C.7.6.16.2.29	table_C.7.6.16.2.29-1	Time of Frame Functional Group Macro Attributes	table	Y	N
+sect_C.7.6.16.2.3	table_C.7.6.16-4	Plane Position (Patient) Macro Attributes	table	Y	N
+sect_C.7.6.16.2.4	table_C.7.6.16-5	Plane Orientation (Patient) Macro Attributes	table	Y	N
+sect_C.7.6.16.2.5	table_C.7.6.16-6	Referenced Image Macro Attributes	table	Y	N
+sect_C.7.6.16.2.5	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.7.6.16.2.5	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.7.6.16.2.5	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.16.2.5	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.16.2.5	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.16.2.6	table_C.7.6.16-7	Derivation Image Macro Attributes	table	Y	N
+sect_C.7.6.16.2.6	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.7.6.16.2.6	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.7.6.16.2.6	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.16.2.6	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.16.2.6	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.16.2.7	table_C.7.6.16-8	Cardiac Synchronization Macro Attributes	table	Y	N
+sect_C.7.6.16.2.8	table_C.7.6.16-9	Frame Anatomy Macro Attributes	table	Y	N
+sect_C.7.6.16.2.8	table_10-5	General Anatomy Mandatory Macro Attributes	table	N	N
+sect_C.7.6.16.2.8	table_10-8	Primary Anatomic Structure Macro Attributes	table	N	N
+sect_C.7.6.16.2.8	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.16.2.8	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.16.2.8	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.16.2.9	table_C.7.6.16-10	Pixel Value Transformation Macro Attributes	table	Y	N
+sect_C.7.6.16.2.9b	table_C.7.6.16-10b	Identity Pixel Value Transformation Macro Attributes	table	Y	N
+sect_C.7.6.17	table_C.7.6.17-1	Multi-frame Dimension Module Attributes	table	Y	N
+sect_C.7.6.18.1	table_C.7.6.18-1	Cardiac Synchronization Module Attributes	table	Y	N
+sect_C.7.6.18.2	table_C.7.6.18-2	Respiratory Synchronization Module Attributes	table	Y	N
+sect_C.7.6.18.3	table_C.7.6.18-3	Bulk Motion Synchronization Module Attributes	table	Y	N
+sect_C.7.6.19	table_C.7.6.19-1	Supplemental Palette Color Lookup Table Module Attributes	table	Y	N
+sect_C.7.6.2	table_C.7-10	Image Plane Module Attributes	table	Y	N
+sect_C.7.6.20	table_C.7.6.20-1	Patient Orientation Module Attributes	table	Y	N
+sect_C.7.6.20	table_10-15	Patient Orientation Macro Attributes	table	N	N
+sect_C.7.6.20	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.20	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.20	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.21	table_C.7.6.21-1	Image - Equipment Coordinate Relationship Module Attributes	table	Y	N
+sect_C.7.6.22	table_C.7.6.22-1	Specimen Module Attributes	table	Y	N
+sect_C.7.6.22	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.7.6.22	table_10-17	HL7v2 Hierarchic Designator Macro Attributes	table	N	N
+sect_C.7.6.22	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.7.6.22	table_10-8	Primary Anatomic Structure Macro Attributes	table	N	N
+sect_C.7.6.22	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.22	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.22	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.22	table_C.7.6.22-2	Specimen Macro Attributes	table	N	N
+sect_C.7.6.23	table_C.7.6.23-1	Enhanced Palette Color Lookup Table Module Attributes	table	Y	N
+sect_C.7.6.23	table_C.11-2b	VOI LUT Macro Attributes	table	N	N
+sect_C.7.6.24	table_PS3.3_C.7.6.24-1	Floating Point Image Pixel Module Attributes	table	Y	N
+sect_C.7.6.25	table_PS3.3_C.7.6.25-1	Double Floating Point Image Pixel Module Attributes	table	Y	N
+sect_C.7.6.26	table_C.7.6.26-1	Real-Time Bulk Data Flow Module Attributes	table	Y	N
+sect_C.7.6.27	table_C.7.6.27-1	Current Frame Functional Groups Module Attributes	table	Y	N
+sect_C.7.6.28	table_C.7.6.28-1	Real-Time Acquisition Module Attributes	table	Y	N
+sect_C.7.6.29	table_C.7.6.29-1	Sparse Multi-frame Functional Groups Module Attributes	table	Y	N
+sect_C.7.6.3	table_C.7-11a	Image Pixel Module Attributes	table	Y	N
+sect_C.7.6.3	table_C.7-11c	Image Pixel Description Macro Attributes	table	N	N
+sect_C.7.6.30	table_C.7.6.30-1	Enhanced Patient Orientation Module Attributes	table	Y	N
+sect_C.7.6.30	table_10-15a	Patient Orientation and Equipment Relationship Macro Attributes	table	N	N
+sect_C.7.6.30	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.30	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.30	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.4	table_C.7-12	Contrast/Bolus Module Attributes	table	Y	N
+sect_C.7.6.4	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.4	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.4	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.4b	table_C.7-12b	Enhanced Contrast/Bolus Module Attributes	table	Y	N
+sect_C.7.6.4b	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.4b	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.4b	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.5	table_C.7-13	Cine Module Attributes	table	Y	N
+sect_C.7.6.5	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.5	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.5	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.7.6.6	table_C.7-14	Multi-frame Module Attributes	table	Y	N
+sect_C.7.6.9	table_C.7-15	Frame Pointers Module Attributes	table	Y	N
+sect_C.7.9	table_C.7-22	Palette Color Lookup Table Module Attributes	table	Y	N
+sect_C.7.9	table_C.7-22a	Palette Color Lookup Table Macro Attributes	table	N	N
+sect_C.8.1.1	table_C.8-1	CR Series Module Attributes	table	Y	N
+sect_C.8.1.2	table_C.8-2	CR Image Module Attributes	table	Y	N
+sect_C.8.1.2	table_10-10	Basic Pixel Spacing Calibration Macro Attributes	table	N	N
+sect_C.8.1.2	table_10-23	Exposure Index Macro Attributes	table	N	N
+sect_C.8.1.2	table_10-7	General Anatomy Optional Macro Attributes	table	N	N
+sect_C.8.1.2	table_10-8	Primary Anatomic Structure Macro Attributes	table	N	N
+sect_C.8.1.2	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.1.2	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.1.2	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.11.1	table_C.8-68	DX Series Module Attributes	table	Y	N
+sect_C.8.11.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.11.10	table_C.8-76b	Enhanced Mammography Series Module Attributes	table	Y	N
+sect_C.8.11.10	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.11.10	table_10-17	HL7v2 Hierarchic Designator Macro Attributes	table	N	N
+sect_C.8.11.10	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.8.11.10	table_10-9	Request Attributes Macro Attributes	table	N	N
+sect_C.8.11.10	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.11.10	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.11.10	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.11.2	table_C.8-69	DX Anatomy Imaged Module Attributes	table	Y	N
+sect_C.8.11.2	table_10-6	General Anatomy Required Macro Attributes	table	N	N
+sect_C.8.11.2	table_10-8	Primary Anatomic Structure Macro Attributes	table	N	N
+sect_C.8.11.2	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.11.2	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.11.2	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.11.3	table_C.8-70	DX Image Module Attributes	table	Y	N
+sect_C.8.11.4	table_C.8-71	DX Detector Module Attributes	table	Y	N
+sect_C.8.11.4	table_10-10	Basic Pixel Spacing Calibration Macro Attributes	table	N	N
+sect_C.8.11.4	table_10-23	Exposure Index Macro Attributes	table	N	N
+sect_C.8.11.4	table_C.8-71b	Digital X-Ray Detector Macro Attributes	table	N	N
+sect_C.8.11.5	table_C.8-72	DX Positioning Module Attributes	table	Y	N
+sect_C.8.11.5	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.11.5	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.11.5	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.11.6	table_C.8-73	Mammography Series Module Attributes	table	Y	N
+sect_C.8.11.6	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.11.6	table_10-17	HL7v2 Hierarchic Designator Macro Attributes	table	N	N
+sect_C.8.11.6	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.8.11.6	table_10-9	Request Attributes Macro Attributes	table	N	N
+sect_C.8.11.6	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.11.6	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.11.6	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.11.7	table_C.8-74	Mammography Image Module Attributes	table	Y	N
+sect_C.8.11.7	table_10-5	General Anatomy Mandatory Macro Attributes	table	N	N
+sect_C.8.11.7	table_10-8	Primary Anatomic Structure Macro Attributes	table	N	N
+sect_C.8.11.7	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.11.7	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.11.7	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.11.8	table_C.8-75	Intra-Oral Series Module Attributes	table	Y	N
+sect_C.8.11.9	table_C.8-76	Intra-Oral Image Module Attributes	table	Y	N
+sect_C.8.11.9	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.11.9	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.11.9	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.12.1	table_C.8-77	VL Image Module Attributes	table	Y	N
+sect_C.8.12.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.12.1	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.12.1	table_10-8	Primary Anatomic Structure Macro Attributes	table	N	N
+sect_C.8.12.1	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.12.1	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.12.1	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.12.10	table_C.8.12.10-1	VL Photographic Equipment Module Attributes	table	Y	N
+sect_C.8.12.11	table_C.8.12.11-1	VL Photographic Acquisition Module Attributes	table	Y	N
+sect_C.8.12.12	table_C.8.12.12-1	VL Photographic Geolocation Module Attributes	table	Y	N
+sect_C.8.12.13	table_C.8.12.13-1	Dermoscopic Image Module Attributes	table	Y	N
+sect_C.8.12.14	table_C.8.12.14-1	Microscope Slide Layer Tile Organization Module Attributes	table	Y	N
+sect_C.8.12.2	table_C.8-78	Slide Coordinates Module Attributes	table	Y	N
+sect_C.8.12.3	table_C.8.12.3-1	Whole Slide Microscopy Series Module Attributes	table	Y	N
+sect_C.8.12.3	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.12.4	table_C.8.12.4-1	Whole Slide Microscopy Image Module Attributes	table	Y	N
+sect_C.8.12.5	table_C.8.12.5-1	Optical Path Module Attributes	table	Y	N
+sect_C.8.12.5	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.12.5	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.12.5	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.12.5	table_C.7-22a	Palette Color Lookup Table Macro Attributes	table	N	N
+sect_C.8.12.6.1	table_C.8.12.6.1-1	Plane Position (Slide) Macro Attributes	table	Y	N
+sect_C.8.12.6.2	table_C.8.12.6.2-1	Optical Path Identification Macro Attributes	table	Y	N
+sect_C.8.12.6.3	table_C.8.12.6.3-1	Specimen Reference Macro Attributes	table	Y	N
+sect_C.8.12.8	table_C.8.12.8-1	Slide Label Module Attributes	table	Y	N
+sect_C.8.12.9	table_C.8.12.9-1	Whole Slide Microscopy Image Frame Type Macro Attributes	table	Y	N
+sect_C.8.13.1	table_C.8-79	Enhanced MR Image Module Attributes	table	Y	N
+sect_C.8.13.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.13.1	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.8.13.1	table_10-25	Optional View and Slice Progression Direction Macro Attributes	table	N	N
+sect_C.8.13.1	table_10.2.1-1	Content Item with Modifiers Macro Attributes	table	N	N
+sect_C.8.13.1	table_10.29-1	UDI Macro Attributes	table	N	N
+sect_C.8.13.1	table_10.35-1	Device Model Macro Attributes	table	N	N
+sect_C.8.13.1	table_10.36-1	Device Identification Macro Attributes	table	N	N
+sect_C.8.13.1	table_10.42-1	Hierarchical Evidence Reference Macro Attributes	table	N	N
+sect_C.8.13.1	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.13.1	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.13.1	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.13.1	table_C.17-3	Hierarchical SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.13.1	table_C.17-3a	Hierarchical Series Reference Macro Attributes	table	N	N
+sect_C.8.13.1	table_C.36.2.2.3-1	RT Accessory Device Identification Macro Attributes	table	N	N
+sect_C.8.13.1	table_C.36.2.3.4-1	RT Patient Treatment Preparation Macro Attributes	table	N	N
+sect_C.8.13.1	table_C.36.2.4.12-1	RT Equipment Mapping and Plan Reference Macro Attributes	table	N	N
+sect_C.8.13.1	table_C.7-11b	Image Pixel Macro Attributes	table	N	N
+sect_C.8.13.1	table_C.7-11c	Image Pixel Description Macro Attributes	table	N	N
+sect_C.8.13.1	table_C.8-131	Common CT/MR and Photoacoustic Image Description Macro Attributes	table	N	N
+sect_C.8.13.1	table_C.8-83	MR Image and Spectroscopy Instance Macro Attributes	table	N	N
+sect_C.8.13.1	table_C.8-84	MR Image Description Macro Attributes	table	N	N
+sect_C.8.13.4	table_C.8-87	MR Pulse Sequence Module Attributes	table	Y	N
+sect_C.8.13.5.1	table_C.8-88	MR Image Frame Type Macro Attributes	table	Y	N
+sect_C.8.13.5.1	table_C.8-131	Common CT/MR and Photoacoustic Image Description Macro Attributes	table	N	N
+sect_C.8.13.5.1	table_C.8-84	MR Image Description Macro Attributes	table	N	N
+sect_C.8.13.5.10	table_C.8-97	MR Averages Macro Attributes	table	Y	N
+sect_C.8.13.5.11	table_C.8-98	MR Spatial Saturation Macro Attributes	table	Y	N
+sect_C.8.13.5.12	table_C.8-99	MR Metabolite Map Macro Attributes	table	Y	N
+sect_C.8.13.5.12	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.13.5.12	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.13.5.12	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.13.5.13	table_C.8-100	MR Velocity Encoding Macro Attributes	table	Y	N
+sect_C.8.13.5.14	table_C.8-100b	MR Arterial Spin Labeling Macro Attributes	table	Y	N
+sect_C.8.13.5.14	table_10-7	General Anatomy Optional Macro Attributes	table	N	N
+sect_C.8.13.5.14	table_10-8	Primary Anatomic Structure Macro Attributes	table	N	N
+sect_C.8.13.5.14	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.13.5.14	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.13.5.14	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.13.5.15	table_C.8-100c	Functional MR Macro Attributes	table	Y	N
+sect_C.8.13.5.2	table_C.8-89	MR Timing and Related Parameters Macro Attributes	table	Y	N
+sect_C.8.13.5.3	table_C.8-90	MR FOV/Geometry Macro Attributes	table	Y	N
+sect_C.8.13.5.4	table_C.8-91	MR Echo Macro Attributes	table	Y	N
+sect_C.8.13.5.5	table_C.8-92	MR Modifier Macro Attributes	table	Y	N
+sect_C.8.13.5.6	table_C.8-93	MR Imaging Modifier Macro Attributes	table	Y	N
+sect_C.8.13.5.7	table_C.8-94	MR Receive Coil Macro Attributes	table	Y	N
+sect_C.8.13.5.8	table_C.8-95	MR Transmit Coil Macro Attributes	table	Y	N
+sect_C.8.13.5.9	table_C.8-96	MR Diffusion Macro Attributes	table	Y	N
+sect_C.8.13.6	table_C.8-101	MR Series Module Attributes	table	Y	N
+sect_C.8.13.6	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.14.1	table_C.8-102	MR Spectroscopy Module Attributes	table	Y	N
+sect_C.8.14.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.14.1	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.14.1	table_10.42-1	Hierarchical Evidence Reference Macro Attributes	table	N	N
+sect_C.8.14.1	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.14.1	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.14.1	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.14.1	table_C.17-3	Hierarchical SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.14.1	table_C.17-3a	Hierarchical Series Reference Macro Attributes	table	N	N
+sect_C.8.14.1	table_C.8-107	MR Spectroscopy Description Macro Attributes	table	N	N
+sect_C.8.14.1	table_C.8-83	MR Image and Spectroscopy Instance Macro Attributes	table	N	N
+sect_C.8.14.2	table_C.8-103	MR Spectroscopy Pulse Sequence Module Attributes	table	Y	N
+sect_C.8.14.3.1	table_C.8-104	MR Spectroscopy Frame Type Macro Attributes	table	Y	N
+sect_C.8.14.3.1	table_C.8-107	MR Spectroscopy Description Macro Attributes	table	N	N
+sect_C.8.14.3.2	table_C.8-105	MR Spectroscopy FOV/Geometry Macro Attributes	table	Y	N
+sect_C.8.14.4	table_C.8-106	MR Spectroscopy Data Module Attributes	table	Y	N
+sect_C.8.15.1	table_C.8-113	CT Series Module Attributes	table	Y	N
+sect_C.8.15.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.15.2	table_C.8-114	Enhanced CT Image Module Attributes	table	Y	N
+sect_C.8.15.2	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.15.2	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.8.15.2	table_10-25	Optional View and Slice Progression Direction Macro Attributes	table	N	N
+sect_C.8.15.2	table_10.2.1-1	Content Item with Modifiers Macro Attributes	table	N	N
+sect_C.8.15.2	table_10.29-1	UDI Macro Attributes	table	N	N
+sect_C.8.15.2	table_10.35-1	Device Model Macro Attributes	table	N	N
+sect_C.8.15.2	table_10.36-1	Device Identification Macro Attributes	table	N	N
+sect_C.8.15.2	table_10.42-1	Hierarchical Evidence Reference Macro Attributes	table	N	N
+sect_C.8.15.2	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.15.2	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.15.2	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.15.2	table_C.17-3	Hierarchical SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.15.2	table_C.17-3a	Hierarchical Series Reference Macro Attributes	table	N	N
+sect_C.8.15.2	table_C.36.2.2.3-1	RT Accessory Device Identification Macro Attributes	table	N	N
+sect_C.8.15.2	table_C.36.2.3.4-1	RT Patient Treatment Preparation Macro Attributes	table	N	N
+sect_C.8.15.2	table_C.36.2.4.12-1	RT Equipment Mapping and Plan Reference Macro Attributes	table	N	N
+sect_C.8.15.2	table_C.7-11b	Image Pixel Macro Attributes	table	N	N
+sect_C.8.15.2	table_C.7-11c	Image Pixel Description Macro Attributes	table	N	N
+sect_C.8.15.2	table_C.8-131	Common CT/MR and Photoacoustic Image Description Macro Attributes	table	N	N
+sect_C.8.15.3.1	table_C.8-117	CT Image Frame Type Macro Attributes	table	Y	N
+sect_C.8.15.3.1	table_C.8-131	Common CT/MR and Photoacoustic Image Description Macro Attributes	table	N	N
+sect_C.8.15.3.10	table_C.8-126	CT Pixel Value Transformation Macro Attributes	table	Y	N
+sect_C.8.15.3.11	table_C.8-126b	CT Additional X-Ray Source Macro Attributes	table	Y	N
+sect_C.8.15.3.12	table_C.8.15.3.12-1	Multi-energy CT Characteristics Macro Attributes	table	Y	N
+sect_C.8.15.3.12	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.15.3.12	table_10-19	Algorithm Identification Macro Attributes	table	N	N
+sect_C.8.15.3.12	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.8.15.3.12	table_10.2.1-1	Content Item with Modifiers Macro Attributes	table	N	N
+sect_C.8.15.3.12	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.15.3.12	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.15.3.12	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.15.3.13	table_C.8.15.3.13-1	Multi-energy CT Processing Macro Attributes	table	Y	N
+sect_C.8.15.3.13	table_10-19	Algorithm Identification Macro Attributes	table	N	N
+sect_C.8.15.3.13	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.15.3.13	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.15.3.13	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.15.3.14	table_C.8.15.3.14-1	RT Cone-Beam Imaging Macro Attributes	table	Y	N
+sect_C.8.15.3.14	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.15.3.14	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.8.15.3.14	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.15.3.14	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.15.3.14	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.15.3.14	table_C.36.2.4.3-1	Parameterized RT Imaging Geometry Macro Attributes	table	N	N
+sect_C.8.15.3.14	table_C.36.2.4.5-2	3D RT Cone-Beam Imaging Geometry Optional Macro Attributes	table	N	N
+sect_C.8.15.3.15	table_C.8.15.3.15-1	Metal Artifact Reduction Macro Attributes	table	Y	N
+sect_C.8.15.3.15	table_10-19	Algorithm Identification Macro Attributes	table	N	N
+sect_C.8.15.3.15	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.15.3.15	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.15.3.15	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.15.3.2	table_C.8-118	CT Acquisition Type Macro Attributes	table	Y	N
+sect_C.8.15.3.3	table_C.8-119	CT Acquisition Details Macro Attributes	table	Y	N
+sect_C.8.15.3.4	table_C.8-120	CT Table Dynamics Macro Attributes	table	Y	N
+sect_C.8.15.3.5	table_C.8-121	CT Position Macro Attributes	table	Y	N
+sect_C.8.15.3.6	table_C.8-122	CT Geometry Macro Attributes	table	Y	N
+sect_C.8.15.3.7	table_C.8-123	CT Reconstruction Macro Attributes	table	Y	N
+sect_C.8.15.3.8	table_C.8-124	CT Exposure Macro Attributes	table	Y	N
+sect_C.8.15.3.8	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.15.3.8	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.15.3.8	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.15.3.9	table_C.8-125	CT X-Ray Details Macro Attributes	table	Y	N
+sect_C.8.15.4	table_C.8.15.4-1	Enhanced Multi-energy CT Acquisition Module Attributes	table	Y	N
+sect_C.8.15.4	table_C.8.2.2-2	Multi-energy CT X-Ray Source Macro Attributes	table	N	N
+sect_C.8.15.4	table_C.8.2.2-3	Multi-energy CT X-Ray Detector Macro Attributes	table	N	N
+sect_C.8.15.4	table_C.8.2.2-4	Multi-energy CT Path Macro Attributes	table	N	N
+sect_C.8.17.1	table_C.8.17.1-1	Ophthalmic Photography Series Module Attributes	table	Y	N
+sect_C.8.17.10.1	table_C.8.17.10-1	Ophthalmic Frame Location Macro Attributes	table	Y	N
+sect_C.8.17.10.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.17.10.1	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.17.10.1	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.17.10.1	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.17.10.1	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.17.11	table_C.8.17.11-1	Wide Field Ophthalmic Photography Stereographic Projection Module Attributes	table	Y	N
+sect_C.8.17.11	table_10-19	Algorithm Identification Macro Attributes	table	N	N
+sect_C.8.17.11	table_10-5	General Anatomy Mandatory Macro Attributes	table	N	N
+sect_C.8.17.11	table_10-8	Primary Anatomic Structure Macro Attributes	table	N	N
+sect_C.8.17.11	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.17.11	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.17.11	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.17.12	table_C.8.17.12-1	Wide Field Ophthalmic Photography 3D Coordinates Module Attributes	table	Y	N
+sect_C.8.17.12	table_10-19	Algorithm Identification Macro Attributes	table	N	N
+sect_C.8.17.12	table_10-5	General Anatomy Mandatory Macro Attributes	table	N	N
+sect_C.8.17.12	table_10-8	Primary Anatomic Structure Macro Attributes	table	N	N
+sect_C.8.17.12	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.17.12	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.17.12	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.17.13	table_C.8.17.13-1	Wide Field Ophthalmic Photography Quality Rating Module Attributes	table	Y	N
+sect_C.8.17.13	table_10-19	Algorithm Identification Macro Attributes	table	N	N
+sect_C.8.17.13	table_10-26	Numeric Value Macro Attributes	table	N	N
+sect_C.8.17.13	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.17.13	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.17.13	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.17.14	table_C.8.17.14-1	Ophthalmic Optical Coherence Tomography En Face Image Module Attributes	table	Y	N
+sect_C.8.17.14	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.17.14	table_10-19	Algorithm Identification Macro Attributes	table	N	N
+sect_C.8.17.14	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.17.14	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.17.14	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.17.14	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.17.15	table_C.8.17.15-1	Ophthalmic Optical Coherence Tomography En Face Image Quality Rating Module Attributes	table	Y	N
+sect_C.8.17.15	table_10-19	Algorithm Identification Macro Attributes	table	N	N
+sect_C.8.17.15	table_10-26	Numeric Value Macro Attributes	table	N	N
+sect_C.8.17.15	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.17.15	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.17.15	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.17.16	table_C.8.17.16-1	Ophthalmic Optical Coherence Tomography B-scan Volume Analysis Image Module Attributes	table	Y	N
+sect_C.8.17.16	table_10-19	Algorithm Identification Macro Attributes	table	N	N
+sect_C.8.17.16	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.17.16	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.17.16	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.17.17	table_C.8.17.17-1	Ophthalmic Tomography En Face Series Module Attributes	table	Y	N
+sect_C.8.17.17	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.17.18	table_C.8.17.18-1	Ophthalmic Tomography B-scan Volume Analysis Series Module Attributes	table	Y	N
+sect_C.8.17.18	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.17.2	table_C.8.17.2-1	Ophthalmic Photography Image Module Attributes	table	Y	N
+sect_C.8.17.2	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.17.2	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.17.2	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.17.2	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.17.2	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.17.3	table_C.8.17.3-1	Ophthalmic Photographic Parameters Module Attributes	table	Y	N
+sect_C.8.17.3	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.17.3	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.17.3	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.17.4	table_C.8.17.4-1	Ophthalmic Photography Acquisition Parameters Module Attributes	table	Y	N
+sect_C.8.17.4	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.17.4	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.17.4	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.17.4	table_C.8.17.8-2	Ophthalmic Acquisition Parameters Macro Attributes	table	N	N
+sect_C.8.17.5	table_C.8.17.5-1	Ocular Region Imaged Module Attributes	table	Y	N
+sect_C.8.17.5	table_10-5	General Anatomy Mandatory Macro Attributes	table	N	N
+sect_C.8.17.5	table_10-8	Primary Anatomic Structure Macro Attributes	table	N	N
+sect_C.8.17.5	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.17.5	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.17.5	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.17.6	table_C.8.17.6-1	Ophthalmic Tomography Series Module Attributes	table	Y	N
+sect_C.8.17.6	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.17.7	table_C.8.17.7-1	Ophthalmic Tomography Image Module Attributes	table	Y	N
+sect_C.8.17.8	table_C.8.17.8-1	Ophthalmic Tomography Acquisition Parameters Module Attributes	table	Y	N
+sect_C.8.17.8	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.17.8	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.17.8	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.17.8	table_C.8.17.8-2	Ophthalmic Acquisition Parameters Macro Attributes	table	N	N
+sect_C.8.17.9	table_C.8.17.9-1	Ophthalmic Tomography Parameters Module Attributes	table	Y	N
+sect_C.8.17.9	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.17.9	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.17.9	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.18.1	table_C.8.18.1-1	Stereometric Series Module Attributes	table	Y	N
+sect_C.8.18.2	table_C.8.18.2-1	Stereometric Relationship Module Attributes	table	Y	N
+sect_C.8.18.2	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.18.2	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.19.1	table_C.8.19.1-1	XA/XRF Series Module Attributes	table	Y	N
+sect_C.8.19.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.19.2	table_C.8.19.2-1	Enhanced XA/XRF Image Module Table	table	Y	N
+sect_C.8.19.2	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.19.2	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.19.2	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.19.2	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.19.2	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.19.2	table_C.17-3	Hierarchical SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.19.2	table_C.17-3a	Hierarchical Series Reference Macro Attributes	table	N	N
+sect_C.8.19.2	table_C.7-11b	Image Pixel Macro Attributes	table	N	N
+sect_C.8.19.2	table_C.7-11c	Image Pixel Description Macro Attributes	table	N	N
+sect_C.8.19.3	table_C.8.19.3-1	XA/XRF Acquisition Module Attributes	table	Y	N
+sect_C.8.19.4	table_C.8.19.4-1	X-Ray Image Intensifier Module Attributes	table	Y	N
+sect_C.8.19.5	table_C.8.19.5-1	X-Ray Detector Module Attributes	table	Y	N
+sect_C.8.19.5	table_10-23	Exposure Index Macro Attributes	table	N	N
+sect_C.8.19.5	table_C.8-71b	Digital X-Ray Detector Macro Attributes	table	N	N
+sect_C.8.19.6.1	table_C.8.19.6-1	X-Ray Frame Characteristics Macro Attributes	table	Y	N
+sect_C.8.19.6.1	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.19.6.1	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.19.6.1	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.19.6.10	table_C.8.19.6-10	X-Ray Positioner Macro Attributes	table	Y	N
+sect_C.8.19.6.11	table_C.8.19.6-11	X-Ray Table Position Macro Attributes	table	Y	N
+sect_C.8.19.6.12	table_C.8.19.6-12	X-Ray Collimator Macro Attributes	table	Y	N
+sect_C.8.19.6.13	table_C.8.19.6-13	X-Ray Isocenter Reference System Macro Attributes	table	Y	N
+sect_C.8.19.6.14	table_C.8.19.6-14	X-Ray Geometry Macro Attributes	table	Y	N
+sect_C.8.19.6.2	table_C.8.19.6-2	X-Ray Field of View Macro Attributes	table	Y	N
+sect_C.8.19.6.3	table_C.8.19.6-3	X-Ray Exposure Control Sensing Regions Macro Attributes	table	Y	N
+sect_C.8.19.6.4	table_C.8.19.6-4	X-Ray Frame Pixel Data Properties Macro Attributes	table	Y	N
+sect_C.8.19.6.5	table_C.8.19.6-5	X-Ray Frame Detector Parameters Macro Attributes	table	Y	N
+sect_C.8.19.6.6	table_C.8.19.6-6	X-Ray Calibration Device Usage Macro Attributes	table	Y	N
+sect_C.8.19.6.7	table_C.8.19.6-7	X-Ray Object Thickness Macro Attributes	table	Y	N
+sect_C.8.19.6.8	table_C.8.19.6-8	X-Ray Frame Acquisition Macro Attributes	table	Y	N
+sect_C.8.19.6.9	table_C.8.19.6-9	X-Ray Projection Pixel Calibration Macro Attributes	table	Y	N
+sect_C.8.19.7	table_C.8.19.7-1	XA/XRF Multi-frame Presentation Module Attributes	table	Y	N
+sect_C.8.2.1	table_C.8-3	CT Image Module Attributes	table	Y	N
+sect_C.8.2.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.2.1	table_10-19	Algorithm Identification Macro Attributes	table	N	N
+sect_C.8.2.1	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.8.2.1	table_10-25	Optional View and Slice Progression Direction Macro Attributes	table	N	N
+sect_C.8.2.1	table_10-7	General Anatomy Optional Macro Attributes	table	N	N
+sect_C.8.2.1	table_10-8	Primary Anatomic Structure Macro Attributes	table	N	N
+sect_C.8.2.1	table_10.2.1-1	Content Item with Modifiers Macro Attributes	table	N	N
+sect_C.8.2.1	table_10.29-1	UDI Macro Attributes	table	N	N
+sect_C.8.2.1	table_10.35-1	Device Model Macro Attributes	table	N	N
+sect_C.8.2.1	table_10.36-1	Device Identification Macro Attributes	table	N	N
+sect_C.8.2.1	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.2.1	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.2.1	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.2.1	table_C.36.2.2.3-1	RT Accessory Device Identification Macro Attributes	table	N	N
+sect_C.8.2.1	table_C.36.2.3.4-1	RT Patient Treatment Preparation Macro Attributes	table	N	N
+sect_C.8.2.1	table_C.36.2.4.12-1	RT Equipment Mapping and Plan Reference Macro Attributes	table	N	N
+sect_C.8.2.1	table_C.36.2.4.3-1	Parameterized RT Imaging Geometry Macro Attributes	table	N	N
+sect_C.8.2.1	table_C.36.2.4.5-2	3D RT Cone-Beam Imaging Geometry Optional Macro Attributes	table	N	N
+sect_C.8.2.2	table_C.8.2.2-1	Multi-energy CT Image Module Attributes	table	Y	N
+sect_C.8.2.2	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.2.2	table_10-19	Algorithm Identification Macro Attributes	table	N	N
+sect_C.8.2.2	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.8.2.2	table_10.2.1-1	Content Item with Modifiers Macro Attributes	table	N	N
+sect_C.8.2.2	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.2.2	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.2.2	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.2.2	table_C.8-119	CT Acquisition Details Macro Attributes	table	N	N
+sect_C.8.2.2	table_C.8-122	CT Geometry Macro Attributes	table	N	N
+sect_C.8.2.2	table_C.8-124	CT Exposure Macro Attributes	table	N	N
+sect_C.8.2.2	table_C.8-125	CT X-Ray Details Macro Attributes	table	N	N
+sect_C.8.2.2	table_C.8.15.3.12-1	Multi-energy CT Characteristics Macro Attributes	table	N	N
+sect_C.8.2.2	table_C.8.15.3.13-1	Multi-energy CT Processing Macro Attributes	table	N	N
+sect_C.8.2.2	table_C.8.2.2-2	Multi-energy CT X-Ray Source Macro Attributes	table	N	N
+sect_C.8.2.2	table_C.8.2.2-3	Multi-energy CT X-Ray Detector Macro Attributes	table	N	N
+sect_C.8.2.2	table_C.8.2.2-4	Multi-energy CT Path Macro Attributes	table	N	N
+sect_C.8.20.1	table_C.8.20-1	Segmentation Series Module Attributes	table	Y	N
+sect_C.8.20.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.20.2	table_C.8.20-2	Segmentation Image Module Attributes	table	Y	N
+sect_C.8.20.2	table_10-1	Person Identification Macro Attributes	table	N	N
+sect_C.8.20.2	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.20.2	table_10-12	Content Identification Macro Attributes	table	N	N
+sect_C.8.20.2	table_10-19	Algorithm Identification Macro Attributes	table	N	N
+sect_C.8.20.2	table_10-7b	Multiple Site General Anatomy Optional Macro Attributes	table	N	N
+sect_C.8.20.2	table_10-8	Primary Anatomic Structure Macro Attributes	table	N	N
+sect_C.8.20.2	table_10.9.3-1	Content Creator Macro Attributes	table	N	N
+sect_C.8.20.2	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.20.2	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.20.2	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.20.2	table_C.8.20-4	Segment Description Macro Attributes	table	N	N
+sect_C.8.20.3.1	table_C.8.20-3	Segmentation Macro Attributes	table	Y	N
+sect_C.8.20.5	table_C.8.20-5	Height Map Segmentation Image Module Attributes	table	Y	N
+sect_C.8.20.5	table_10-1	Person Identification Macro Attributes	table	N	N
+sect_C.8.20.5	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.20.5	table_10-12	Content Identification Macro Attributes	table	N	N
+sect_C.8.20.5	table_10-19	Algorithm Identification Macro Attributes	table	N	N
+sect_C.8.20.5	table_10-7b	Multiple Site General Anatomy Optional Macro Attributes	table	N	N
+sect_C.8.20.5	table_10-8	Primary Anatomic Structure Macro Attributes	table	N	N
+sect_C.8.20.5	table_10.9.3-1	Content Creator Macro Attributes	table	N	N
+sect_C.8.20.5	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.20.5	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.20.5	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.20.5	table_C.8.20-4	Segment Description Macro Attributes	table	N	N
+sect_C.8.21.1	table_C.8.21.1-1	X-Ray 3D Image Module Attributes	table	Y	N
+sect_C.8.21.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.21.1	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.21.1	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.21.1	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.21.1	table_C.17-3	Hierarchical SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.21.1	table_C.17-3a	Hierarchical Series Reference Macro Attributes	table	N	N
+sect_C.8.21.1	table_C.7-11b	Image Pixel Macro Attributes	table	N	N
+sect_C.8.21.1	table_C.7-11c	Image Pixel Description Macro Attributes	table	N	N
+sect_C.8.21.1	table_C.8-131	Common CT/MR and Photoacoustic Image Description Macro Attributes	table	N	N
+sect_C.8.21.2.1	table_C.8.21.2.1-1	X-Ray 3D Angiographic Image Contributing Sources Module Attributes	table	Y	N
+sect_C.8.21.2.1	table_10-1	Person Identification Macro Attributes	table	N	N
+sect_C.8.21.2.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.21.2.1	table_10-13	General Contributing Sources Macro Attributes	table	N	N
+sect_C.8.21.2.1	table_10-14	Contributing Image Sources Macro Attributes	table	N	N
+sect_C.8.21.2.1	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.21.2.1	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.21.2.1	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.21.2.2	table_C.8.21.2.2-1	X-Ray 3D Craniofacial Image Contributing Sources Module Attributes	table	Y	N
+sect_C.8.21.2.2	table_10-1	Person Identification Macro Attributes	table	N	N
+sect_C.8.21.2.2	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.21.2.2	table_10-13	General Contributing Sources Macro Attributes	table	N	N
+sect_C.8.21.2.2	table_10-14	Contributing Image Sources Macro Attributes	table	N	N
+sect_C.8.21.2.2	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.21.2.2	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.21.2.2	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.21.2.3	table_C.8.21.2.3-1	Breast Tomosynthesis Contributing Sources Module Attributes	table	Y	N
+sect_C.8.21.2.3	table_10-1	Person Identification Macro Attributes	table	N	N
+sect_C.8.21.2.3	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.21.2.3	table_10-13	General Contributing Sources Macro Attributes	table	N	N
+sect_C.8.21.2.3	table_10-14	Contributing Image Sources Macro Attributes	table	N	N
+sect_C.8.21.2.3	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.21.2.3	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.21.2.3	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.21.3.2	table_C.8.21.3.2-1	X-Ray 3D Angiographic Acquisition Module Attributes	table	Y	N
+sect_C.8.21.3.2	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.21.3.2	table_10-23	Exposure Index Macro Attributes	table	N	N
+sect_C.8.21.3.2	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.21.3.2	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.21.3.2	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.21.3.2	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.21.3.2	table_C.8-28b	X-Ray Collimator Dimensions Macro Attributes	table	N	N
+sect_C.8.21.3.2	table_C.8-36b	X-Ray Grid Description Macro Attributes	table	N	N
+sect_C.8.21.3.2	table_C.8-71b	Digital X-Ray Detector Macro Attributes	table	N	N
+sect_C.8.21.3.2	table_C.8.21.3.1.1-1	X-Ray 3D General Shared Acquisition Macro Attributes	table	N	N
+sect_C.8.21.3.2	table_C.8.21.3.1.2-1	X-Ray 3D General Per Projection Acquisition Macro Attributes	table	N	N
+sect_C.8.21.3.2	table_C.8.21.3.1.3-1	X-Ray 3D General Positioner Movement Macro Attributes	table	N	N
+sect_C.8.21.3.3	table_C.8.21.3.3-1	X-Ray 3D Craniofacial Acquisition Module Attributes	table	Y	N
+sect_C.8.21.3.3	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.21.3.3	table_10-23	Exposure Index Macro Attributes	table	N	N
+sect_C.8.21.3.3	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.21.3.3	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.21.3.3	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.21.3.3	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.21.3.3	table_C.8-28b	X-Ray Collimator Dimensions Macro Attributes	table	N	N
+sect_C.8.21.3.3	table_C.8-36b	X-Ray Grid Description Macro Attributes	table	N	N
+sect_C.8.21.3.3	table_C.8-71b	Digital X-Ray Detector Macro Attributes	table	N	N
+sect_C.8.21.3.3	table_C.8.21.3.1.1-1	X-Ray 3D General Shared Acquisition Macro Attributes	table	N	N
+sect_C.8.21.3.3	table_C.8.21.3.1.2-1	X-Ray 3D General Per Projection Acquisition Macro Attributes	table	N	N
+sect_C.8.21.3.4	table_C.8.21.3.4-1	Breast Tomosynthesis Acquisition Module Attributes	table	Y	N
+sect_C.8.21.3.4	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.21.3.4	table_10-23	Exposure Index Macro Attributes	table	N	N
+sect_C.8.21.3.4	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.21.3.4	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.21.3.4	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.21.3.4	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.21.3.4	table_C.8-28b	X-Ray Collimator Dimensions Macro Attributes	table	N	N
+sect_C.8.21.3.4	table_C.8-36b	X-Ray Grid Description Macro Attributes	table	N	N
+sect_C.8.21.3.4	table_C.8.21.3.1.1-1	X-Ray 3D General Shared Acquisition Macro Attributes	table	N	N
+sect_C.8.21.3.4	table_C.8.21.3.1.2-1	X-Ray 3D General Per Projection Acquisition Macro Attributes	table	N	N
+sect_C.8.21.3.4	table_C.8.21.3.1.3-1	X-Ray 3D General Positioner Movement Macro Attributes	table	N	N
+sect_C.8.21.4	table_C.8.21.4-1	X-Ray 3D Reconstruction Module Attributes	table	Y	N
+sect_C.8.21.5.1	table_C.8.21.5.1-1	X-Ray 3D Frame Type Macro Attributes	table	Y	N
+sect_C.8.21.5.1	table_C.8-131	Common CT/MR and Photoacoustic Image Description Macro Attributes	table	N	N
+sect_C.8.21.5.2	table_C.8.21.5.2-1	Breast Biopsy Target Macro Attributes	table	Y	N
+sect_C.8.21.6	table_C.8.21.6-1	Breast View Module Attributes	table	Y	N
+sect_C.8.21.6	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.21.6	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.21.6	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.22.1	table_C.8.22-1	Enhanced PET Series Module Attributes	table	Y	N
+sect_C.8.22.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.22.1	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.22.1	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.22.1	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.22.2	table_C.8.22-2	Enhanced PET Acquisition Module Attributes	table	Y	N
+sect_C.8.22.2	table_10-24	Mandatory View and Slice Progression Direction Macro Attributes	table	N	N
+sect_C.8.22.2	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.22.2	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.22.2	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.22.3	table_C.8.22-3	Enhanced PET Image Module Attributes	table	Y	N
+sect_C.8.22.3	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.22.3	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.8.22.3	table_10.2.1-1	Content Item with Modifiers Macro Attributes	table	N	N
+sect_C.8.22.3	table_10.29-1	UDI Macro Attributes	table	N	N
+sect_C.8.22.3	table_10.35-1	Device Model Macro Attributes	table	N	N
+sect_C.8.22.3	table_10.36-1	Device Identification Macro Attributes	table	N	N
+sect_C.8.22.3	table_10.42-1	Hierarchical Evidence Reference Macro Attributes	table	N	N
+sect_C.8.22.3	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.22.3	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.22.3	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.22.3	table_C.17-3	Hierarchical SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.22.3	table_C.17-3a	Hierarchical Series Reference Macro Attributes	table	N	N
+sect_C.8.22.3	table_C.36.2.2.3-1	RT Accessory Device Identification Macro Attributes	table	N	N
+sect_C.8.22.3	table_C.36.2.3.4-1	RT Patient Treatment Preparation Macro Attributes	table	N	N
+sect_C.8.22.3	table_C.36.2.4.12-1	RT Equipment Mapping and Plan Reference Macro Attributes	table	N	N
+sect_C.8.22.3	table_C.7-11b	Image Pixel Macro Attributes	table	N	N
+sect_C.8.22.3	table_C.7-11c	Image Pixel Description Macro Attributes	table	N	N
+sect_C.8.22.3	table_C.8-131	Common CT/MR and Photoacoustic Image Description Macro Attributes	table	N	N
+sect_C.8.22.4	table_C.8.22-9	Enhanced PET Isotope Module Attributes	table	Y	N
+sect_C.8.22.4	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.22.4	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.22.4	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.22.5.1	table_C.8.22-10	PET Frame Type Macro Attributes	table	Y	N
+sect_C.8.22.5.1	table_C.8-131	Common CT/MR and Photoacoustic Image Description Macro Attributes	table	N	N
+sect_C.8.22.5.2	table_C.8.22-11	PET Frame Acquisition Macro Attributes	table	Y	N
+sect_C.8.22.5.3	table_C.8.22-12	PET Detector Motion Details Macro Attributes	table	Y	N
+sect_C.8.22.5.4	table_C.8.22-14	PET Position Macro Attributes	table	Y	N
+sect_C.8.22.5.5	table_C.8.22-15	PET Frame Correction Factors Macro Attributes	table	Y	N
+sect_C.8.22.5.6	table_C.8.22-17	PET Reconstruction Macro Attributes	table	Y	N
+sect_C.8.22.5.7	table_C.8.22-18	PET Table Dynamics Macro Attributes	table	Y	N
+sect_C.8.22.6	table_C.8.22-19	Enhanced PET Corrections Module Attributes	table	Y	N
+sect_C.8.23.1	table_C.8.23-1	Surface Segmentation Module Attributes	table	Y	N
+sect_C.8.23.1	table_10-1	Person Identification Macro Attributes	table	N	N
+sect_C.8.23.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.23.1	table_10-12	Content Identification Macro Attributes	table	N	N
+sect_C.8.23.1	table_10-19	Algorithm Identification Macro Attributes	table	N	N
+sect_C.8.23.1	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.23.1	table_10-7b	Multiple Site General Anatomy Optional Macro Attributes	table	N	N
+sect_C.8.23.1	table_10-8	Primary Anatomic Structure Macro Attributes	table	N	N
+sect_C.8.23.1	table_10.9.3-1	Content Creator Macro Attributes	table	N	N
+sect_C.8.23.1	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.23.1	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.23.1	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.23.1	table_C.8.20-4	Segment Description Macro Attributes	table	N	N
+sect_C.8.24.1	table_C.8.24.1-1	Enhanced US Series Module Attributes	table	Y	N
+sect_C.8.24.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.24.1	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.8.24.1	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.24.1	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.24.1	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.24.2	table_C.8.24.2-1	Ultrasound Frame of Reference Module Attributes	table	Y	N
+sect_C.8.24.3	table_C.8.24.3-1	Enhanced US Image Module Attributes	table	Y	N
+sect_C.8.24.3	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.24.3	table_10-24	Mandatory View and Slice Progression Direction Macro Attributes	table	N	N
+sect_C.8.24.3	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.24.3	table_10-5	General Anatomy Mandatory Macro Attributes	table	N	N
+sect_C.8.24.3	table_10-8	Primary Anatomic Structure Macro Attributes	table	N	N
+sect_C.8.24.3	table_10.29-1	UDI Macro Attributes	table	N	N
+sect_C.8.24.3	table_10.36-1	Device Identification Macro Attributes	table	N	N
+sect_C.8.24.3	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.24.3	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.24.3	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.24.3	table_C.17-3	Hierarchical SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.24.3	table_C.17-3a	Hierarchical Series Reference Macro Attributes	table	N	N
+sect_C.8.24.3	table_C.7-11b	Image Pixel Macro Attributes	table	N	N
+sect_C.8.24.3	table_C.7-11c	Image Pixel Description Macro Attributes	table	N	N
+sect_C.8.24.4	table_C.8.24.4-1	IVUS Image Module Attributes	table	Y	N
+sect_C.8.24.5	table_C.8.24.5-1	Excluded Intervals Module Attributes	table	Y	N
+sect_C.8.24.6.1	table_C.8.24.6.1-1	US Image Description Macro Attributes	table	Y	N
+sect_C.8.25.1	table_C.8.25.1-1	Lensometry Measurements Series Module Attributes	table	Y	N
+sect_C.8.25.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.25.10	table_C.8.25.10-1	Keratometry Measurements Module Attributes	table	Y	N
+sect_C.8.25.10	table_C.8.25.10-2	Keratometric Measurements Macro Attributes	table	N	N
+sect_C.8.25.11	table_C.8.25.11-1	Subjective Refraction Measurements Module Attributes	table	Y	N
+sect_C.8.25.11	table_C.8.25.11-2	Subjective Refraction Measurements Macro Attributes	table	N	N
+sect_C.8.25.11	table_C.8.25.6.1-1	Cylinder Sequence Macro Attributes	table	N	N
+sect_C.8.25.11	table_C.8.25.6.2-1	Prism Sequence Macro Attributes	table	N	N
+sect_C.8.25.12	table_C.8.25.12-1	Visual Acuity Measurements Module Attributes	table	Y	N
+sect_C.8.25.12	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.25.12	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.25.12	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.25.12	table_C.8.25.12-2	Visual Acuity Measurements Macro Attributes	table	N	N
+sect_C.8.25.13	table_C.8.25.13-1	Ophthalmic Axial Measurements Series Module Attributes	table	Y	N
+sect_C.8.25.13	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.25.14	table_C.8.25.14-1	Ophthalmic Axial Measurements Module Attributes	table	Y	N
+sect_C.8.25.14	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.25.14	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.25.14	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.25.14	table_C.8.25.14-2	Ophthalmic Axial Measurements Macro Attributes	table	N	N
+sect_C.8.25.14	table_C.8.25.14-3	Ophthalmic Axial Length Segmental Measurements Macro Attributes	table	N	N
+sect_C.8.25.14	table_C.8.25.14-4	Ophthalmic Axial Measurements Related Information Macro Attributes	table	N	N
+sect_C.8.25.14	table_C.8.25.14-5	Ophthalmic Axial Measurements Selected Macro Attributes	table	N	N
+sect_C.8.25.14	table_C.8.25.14-6	Ophthalmic Axial Length Quality Metric Macro Attributes	table	N	N
+sect_C.8.25.14	table_C.8.25.16-6	Ophthalmic Axial Measurements Quality Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.25.15	table_C.8.25.15-1	Intraocular Lens Calculations Series Module Attributes	table	Y	N
+sect_C.8.25.15	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.25.16	table_C.8.25.16-1	Intraocular Lens Calculations Module Attributes	table	Y	N
+sect_C.8.25.16	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.25.16	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.25.16	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.25.16	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.25.16	table_C.8.25.16-2	Intraocular Lens Calculations Macro Attributes	table	N	N
+sect_C.8.25.16	table_C.8.25.16-3	Keratometry Macro Attributes	table	N	N
+sect_C.8.25.16	table_C.8.25.16-4	IOL Ophthalmic Axial Length Macro Attributes	table	N	N
+sect_C.8.25.16	table_C.8.25.16-5	Calculated IOL Macro Attributes	table	N	N
+sect_C.8.25.16	table_C.8.25.16-7	Calculated Toric Power Macro Attributes	table	N	N
+sect_C.8.25.16	table_C.8.25.16-8	Cornea Measurement Macro Attributes	table	N	N
+sect_C.8.25.2	table_C.8.25.2-1	Autorefraction Measurements Series Module Attributes	table	Y	N
+sect_C.8.25.2	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.25.3	table_C.8.25.3-1	Keratometry Measurements Series Module Attributes	table	Y	N
+sect_C.8.25.3	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.25.4	table_C.8.25.4-1	Subjective Refraction Measurements Series Module Attributes	table	Y	N
+sect_C.8.25.4	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.25.5	table_C.8.25.5-1	Visual Acuity Measurements Series Module Attributes	table	Y	N
+sect_C.8.25.5	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.25.7	table_C.8.25.7-1	General Ophthalmic Refractive Measurements Module Attributes	table	Y	N
+sect_C.8.25.7	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.25.8	table_C.8.25.8-1	Lensometry Measurements Module Attributes	table	Y	N
+sect_C.8.25.8	table_C.8.25.6.1-1	Cylinder Sequence Macro Attributes	table	N	N
+sect_C.8.25.8	table_C.8.25.6.2-1	Prism Sequence Macro Attributes	table	N	N
+sect_C.8.25.8	table_C.8.25.8-2	Lensometry Measurements Macro Attributes	table	N	N
+sect_C.8.25.9	table_C.8.25.9-1	Autorefraction Measurements Module Attributes	table	Y	N
+sect_C.8.25.9	table_C.8.25.6.1-1	Cylinder Sequence Macro Attributes	table	N	N
+sect_C.8.26.1	table_C.8.26.1-1	Visual Field Static Perimetry Measurements Series Module Attributes	table	Y	N
+sect_C.8.26.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.26.1	table_10-16	Performed Procedure Step Summary Macro Attributes	table	N	N
+sect_C.8.26.1	table_10-17	HL7v2 Hierarchic Designator Macro Attributes	table	N	N
+sect_C.8.26.1	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.8.26.1	table_10-9	Request Attributes Macro Attributes	table	N	N
+sect_C.8.26.1	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.26.1	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.26.1	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.26.2	table_C.8.26.2-1	Visual Field Static Perimetry Test Parameters Module Attributes	table	Y	N
+sect_C.8.26.2	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.26.2	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.26.2	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.26.3	table_C.8.26.3-1	Visual Field Static Perimetry Test Reliability Module Attributes	table	Y	N
+sect_C.8.26.3	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.26.3	table_10-19	Algorithm Identification Macro Attributes	table	N	N
+sect_C.8.26.3	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.8.26.3	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.26.3	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.26.3	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.26.3	table_C.8.26.3-2	Ophthalmic Visual Field Global Index Macro Attributes	table	N	N
+sect_C.8.26.4	table_C.8.26.4-1	Visual Field Static Perimetry Test Measurements Module Attributes	table	Y	N
+sect_C.8.26.4	table_10-19	Algorithm Identification Macro Attributes	table	N	N
+sect_C.8.26.4	table_10-22	Externally-Sourced Data Set Identification Macro Attributes	table	N	N
+sect_C.8.26.4	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.26.4	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.26.4	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.26.5	table_C.8.26.5-1	Visual Field Static Perimetry Test Results Module Attributes	table	Y	N
+sect_C.8.26.5	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.26.5	table_10-19	Algorithm Identification Macro Attributes	table	N	N
+sect_C.8.26.5	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.8.26.5	table_10-22	Externally-Sourced Data Set Identification Macro Attributes	table	N	N
+sect_C.8.26.5	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.26.5	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.26.5	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.26.5	table_C.8.26.3-2	Ophthalmic Visual Field Global Index Macro Attributes	table	N	N
+sect_C.8.26.6	table_C.8.26.6-1	Ophthalmic Patient Clinical Information and Test Lens Parameters Module Attributes	table	Y	N
+sect_C.8.26.6	table_C.8.25.12-2	Visual Acuity Measurements Macro Attributes	table	N	N
+sect_C.8.26.6	table_C.8.26.6-2	Ophthalmic Patient Clinical Information and Test Lens Parameters Macro Attributes	table	N	N
+sect_C.8.27.1	table_C.8.27.1-1	Intravascular OCT Series Module Attributes	table	Y	N
+sect_C.8.27.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.27.2	table_C.8.27.2-1	Intravascular OCT Image Module Attributes	table	Y	N
+sect_C.8.27.2	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.27.2	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.27.2	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.27.2	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.27.3	table_C.8.27.3-1	Intravascular OCT Acquisition Parameters Module Attributes	table	Y	N
+sect_C.8.27.4	table_C.8.27.4-1	Intravascular OCT Processing Parameters Module Attributes	table	Y	N
+sect_C.8.27.5	table_C.8.27.5-1	Intravascular Image Acquisition Parameters Module Attributes	table	Y	N
+sect_C.8.27.5	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.27.5	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.27.5	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.27.6.1	table_C.8.27.6.1-1	Intravascular OCT Frame Type Macro Attributes	table	Y	N
+sect_C.8.27.6.2	table_C.8.27.6.2-1	Intravascular Frame Content Macro Attributes	table	Y	N
+sect_C.8.27.6.3	table_C.8.27.6.3-1	Intravascular OCT Frame Content Macro Attributes	table	Y	N
+sect_C.8.28.1	table_C.8.28.1-1	Ophthalmic Thickness Map Series Module Attributes	table	Y	N
+sect_C.8.28.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.28.2	table_C.8.28.2-1	Ophthalmic Thickness Map Module Attributes	table	Y	N
+sect_C.8.28.2	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.28.2	table_10-19	Algorithm Identification Macro Attributes	table	N	N
+sect_C.8.28.2	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.8.28.2	table_10-22	Externally-Sourced Data Set Identification Macro Attributes	table	N	N
+sect_C.8.28.2	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.28.2	table_10-5	General Anatomy Mandatory Macro Attributes	table	N	N
+sect_C.8.28.2	table_10-8	Primary Anatomic Structure Macro Attributes	table	N	N
+sect_C.8.28.2	table_10.2.1-1	Content Item with Modifiers Macro Attributes	table	N	N
+sect_C.8.28.2	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.28.2	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.28.2	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.28.2	table_C.7.6.16-12	Real World Value Mapping Macro Attributes	table	N	N
+sect_C.8.28.2	table_C.7.6.16-12b	Real World Value Mapping Item Macro Attributes	table	N	N
+sect_C.8.28.3	table_C.8.28.3-1	Ophthalmic Thickness Map Quality Rating Module Attributes	table	Y	N
+sect_C.8.28.3	table_10-19	Algorithm Identification Macro Attributes	table	N	N
+sect_C.8.28.3	table_10-26	Numeric Value Macro Attributes	table	N	N
+sect_C.8.28.3	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.28.3	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.28.3	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.29.1	table_C.8.29-1	Optical Surface Scanner Series Module Attributes	table	Y	N
+sect_C.8.29.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.29.2	table_C.8.29-2	Scan Procedure Module Attributes	table	Y	N
+sect_C.8.29.2	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.29.2	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.29.2	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.3.1	table_C.8-4	MR Image Module Attributes	table	Y	N
+sect_C.8.3.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.3.1	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.8.3.1	table_10-25	Optional View and Slice Progression Direction Macro Attributes	table	N	N
+sect_C.8.3.1	table_10-7	General Anatomy Optional Macro Attributes	table	N	N
+sect_C.8.3.1	table_10-8	Primary Anatomic Structure Macro Attributes	table	N	N
+sect_C.8.3.1	table_10.2.1-1	Content Item with Modifiers Macro Attributes	table	N	N
+sect_C.8.3.1	table_10.29-1	UDI Macro Attributes	table	N	N
+sect_C.8.3.1	table_10.35-1	Device Model Macro Attributes	table	N	N
+sect_C.8.3.1	table_10.36-1	Device Identification Macro Attributes	table	N	N
+sect_C.8.3.1	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.3.1	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.3.1	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.3.1	table_C.36.2.2.3-1	RT Accessory Device Identification Macro Attributes	table	N	N
+sect_C.8.3.1	table_C.36.2.3.4-1	RT Patient Treatment Preparation Macro Attributes	table	N	N
+sect_C.8.3.1	table_C.36.2.4.12-1	RT Equipment Mapping and Plan Reference Macro Attributes	table	N	N
+sect_C.8.30.1	table_C.8.30.1-1	Corneal Topography Map Series Module Attributes	table	Y	N
+sect_C.8.30.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.30.2	table_C.8.30.2-1	Corneal Topography Map Image Module Attributes	table	Y	N
+sect_C.8.30.2	table_10-10	Basic Pixel Spacing Calibration Macro Attributes	table	N	N
+sect_C.8.30.2	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.30.2	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.8.30.2	table_10-5	General Anatomy Mandatory Macro Attributes	table	N	N
+sect_C.8.30.2	table_10-8	Primary Anatomic Structure Macro Attributes	table	N	N
+sect_C.8.30.2	table_10.2.1-1	Content Item with Modifiers Macro Attributes	table	N	N
+sect_C.8.30.2	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.30.2	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.30.2	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.30.2	table_C.7.6.16-12	Real World Value Mapping Macro Attributes	table	N	N
+sect_C.8.30.2	table_C.7.6.16-12b	Real World Value Mapping Item Macro Attributes	table	N	N
+sect_C.8.30.3	table_C.8.30.3-1	Corneal Topography Map Analysis Module Attributes	table	Y	N
+sect_C.8.30.3	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.30.3	table_10-22	Externally-Sourced Data Set Identification Macro Attributes	table	N	N
+sect_C.8.30.3	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.30.3	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.30.3	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.30.3	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.30.3	table_C.8.25.10-2	Keratometric Measurements Macro Attributes	table	N	N
+sect_C.8.31.1	table_C.8.31-1	Enhanced Mammography Image Module Attributes	table	Y	N
+sect_C.8.31.1	table_10-23	Exposure Index Macro Attributes	table	N	N
+sect_C.8.31.1	table_C.7-11b	Image Pixel Macro Attributes	table	N	N
+sect_C.8.31.1	table_C.7-11c	Image Pixel Description Macro Attributes	table	N	N
+sect_C.8.31.1	table_C.8-71b	Digital X-Ray Detector Macro Attributes	table	N	N
+sect_C.8.31.2	table_C.8.31.2-1	Breast X-Ray Positioner Macro Attributes	table	Y	N
+sect_C.8.31.3	table_C.8.31.3-1	Breast X-Ray Detector Macro Attributes	table	Y	N
+sect_C.8.31.4	table_C.8.31.4-1	Breast X-Ray Geometry Macro Attributes	table	Y	N
+sect_C.8.31.5	table_C.8.31.5-1	Breast X-Ray Acquisition Dose Macro Attributes	table	Y	N
+sect_C.8.31.6	table_C.8.31.6-1	Breast X-Ray Isocenter Reference System Macro Attributes	table	Y	N
+sect_C.8.31.7	table_C.8.31.7-1	X-Ray Grid Macro Attributes	table	Y	N
+sect_C.8.31.7	table_C.8-36b	X-Ray Grid Description Macro Attributes	table	N	N
+sect_C.8.31.8	table_C.8.31.8-1	X-Ray Filter Macro Attributes	table	Y	N
+sect_C.8.31.8	table_C.8-35a	X-Ray Filtration Macro Attributes	table	N	N
+sect_C.8.32.1	table_PS3.3_C.8.32-1	Parametric Map Series Module Attributes	table	Y	N
+sect_C.8.32.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.32.2	table_PS3.3_C.8.32-2	Parametric Map Image Module Attributes	table	Y	N
+sect_C.8.32.2	table_10-1	Person Identification Macro Attributes	table	N	N
+sect_C.8.32.2	table_10-12	Content Identification Macro Attributes	table	N	N
+sect_C.8.32.2	table_10.9.3-1	Content Creator Macro Attributes	table	N	N
+sect_C.8.32.2	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.32.2	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.32.2	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.32.3.1	table_PS3.3_C.8.32-3	Parametric Map Frame Type Macro Attributes	table	Y	N
+sect_C.8.33.1	table_C.8.33-1	Tractography Results Series Module Attributes	table	Y	N
+sect_C.8.33.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.33.2	table_C.8.33-2	Tractography Results Module Attributes	table	Y	N
+sect_C.8.33.2	table_10-1	Person Identification Macro Attributes	table	N	N
+sect_C.8.33.2	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.33.2	table_10-12	Content Identification Macro Attributes	table	N	N
+sect_C.8.33.2	table_10-19	Algorithm Identification Macro Attributes	table	N	N
+sect_C.8.33.2	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.33.2	table_10.9.3-1	Content Creator Macro Attributes	table	N	N
+sect_C.8.33.2	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.33.2	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.33.2	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.33.2	table_C.8.33-3	Table Summary Statistics Macro Attributes	table	N	N
+sect_C.8.34.1	table_C.8.34.1-1	Photoacoustic Image Module Attributes	table	Y	N
+sect_C.8.34.1	table_C.7-11b	Image Pixel Macro Attributes	table	N	N
+sect_C.8.34.1	table_C.7-11c	Image Pixel Description Macro Attributes	table	N	N
+sect_C.8.34.1	table_C.8-131	Common CT/MR and Photoacoustic Image Description Macro Attributes	table	N	N
+sect_C.8.34.2	table_C.8.34.2-1	Photoacoustic Acquisition Parameters Module Attributes	table	Y	N
+sect_C.8.34.2	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.34.2	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.34.2	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.34.3	table_C.8.34.3-1	Photoacoustic Transducer Module Attributes	table	Y	N
+sect_C.8.34.3	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.34.3	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.34.3	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.34.4	table_C.8.34.4-1	Photoacoustic Reconstruction Module Attributes	table	Y	N
+sect_C.8.34.4	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.34.4	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.34.4	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.34.4	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.34.4	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.34.5.1	table_C.8.34.5.1-1	Photoacoustic Excitation Characteristics Macro Attributes	table	Y	N
+sect_C.8.34.5.2	table_C.8.34.5.2-1	Photoacoustic Image Frame Type Macro Attributes	table	Y	N
+sect_C.8.34.5.2	table_C.8-131	Common CT/MR and Photoacoustic Image Description Macro Attributes	table	N	N
+sect_C.8.34.5.3	table_C.8.34.5.3-1	Photoacoustic Image Data Type Macro Attributes	table	Y	N
+sect_C.8.34.5.3	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.34.5.3	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.34.5.3	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.34.5.4	table_C.8.34.5.4-1	Photoacoustic Reconstruction Algorithm Macro Attributes	table	Y	N
+sect_C.8.34.5.4	table_10-19	Algorithm Identification Macro Attributes	table	N	N
+sect_C.8.34.5.4	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.34.5.4	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.34.5.4	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.35.1	table_C.8.35.1-1	Confocal Microscopy Image Module Attributes	table	Y	N
+sect_C.8.35.2	table_C.8.35.2-1	Confocal Microscopy Tiled Pyramidal Image Module Attributes	table	Y	N
+sect_C.8.35.3	table_C.8.35.3-1	Cutaneous Confocal Microscopy Image Acquisition Parameters Module Attributes	table	Y	N
+sect_C.8.35.4.1	table_C.8.35.4.1-1	Confocal Microscopy Image Frame Type Macro Attributes	table	Y	N
+sect_C.8.4.10	table_C.8-10	NM Isotope Module Attributes	table	Y	N
+sect_C.8.4.10	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.4.10	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.4.10	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.4.11	table_C.8-11	NM Detector Module Attributes	table	Y	N
+sect_C.8.4.11	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.4.11	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.4.11	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.4.12	table_C.8-12	NM Tomo Acquisition Module Attributes	table	Y	N
+sect_C.8.4.13	table_C.8-13	NM Multi-Gated Acquisition Module Attributes	table	Y	N
+sect_C.8.4.14	table_C.8-14	NM Phase Module Attributes	table	Y	N
+sect_C.8.4.15	table_C.8-15	NM Reconstruction Module Attributes	table	Y	N
+sect_C.8.4.6	table_C.8-5	NM/PET Patient Orientation Module Attributes	table	Y	N
+sect_C.8.4.6	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.4.6	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.4.6	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.4.7	table_C.8-6	NM Image Pixel Module Attributes	table	Y	N
+sect_C.8.4.8	table_C.8-7	NM Multi-frame Module Attributes	table	Y	N
+sect_C.8.4.9	table_C.8-9	NM Image Module Attributes	table	Y	N
+sect_C.8.4.9	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.4.9	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.8.4.9	table_10-7	General Anatomy Optional Macro Attributes	table	N	N
+sect_C.8.4.9	table_10-8	Primary Anatomic Structure Macro Attributes	table	N	N
+sect_C.8.4.9	table_10.2.1-1	Content Item with Modifiers Macro Attributes	table	N	N
+sect_C.8.4.9	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.4.9	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.4.9	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.4.9	table_C.7.6.16-12b	Real World Value Mapping Item Macro Attributes	table	N	N
+sect_C.8.5.5	table_C.8-17	US Region Calibration Module Attributes	table	Y	N
+sect_C.8.5.5	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.5.5	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.5.5	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.5.6	table_C.8-18	US Image Module Attributes	table	Y	N
+sect_C.8.5.6	table_10-25	Optional View and Slice Progression Direction Macro Attributes	table	N	N
+sect_C.8.5.6	table_10-7	General Anatomy Optional Macro Attributes	table	N	N
+sect_C.8.5.6	table_10-8	Primary Anatomic Structure Macro Attributes	table	N	N
+sect_C.8.5.6	table_10.29-1	UDI Macro Attributes	table	N	N
+sect_C.8.5.6	table_10.36-1	Device Identification Macro Attributes	table	N	N
+sect_C.8.5.6	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.5.6	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.5.6	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.6.1	table_C.8-24	SC Equipment Module Attributes	table	Y	N
+sect_C.8.6.2	table_C.8-25	SC Image Module Attributes	table	Y	N
+sect_C.8.6.2	table_10-10	Basic Pixel Spacing Calibration Macro Attributes	table	N	N
+sect_C.8.6.2	table_10-25	Optional View and Slice Progression Direction Macro Attributes	table	N	N
+sect_C.8.6.2	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.6.2	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.6.2	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.6.3	table_C.8-25b	SC Multi-frame Image Module Attributes	table	Y	N
+sect_C.8.6.3	table_10-10	Basic Pixel Spacing Calibration Macro Attributes	table	N	N
+sect_C.8.6.4	table_C.8-25c	SC Multi-frame Vector Module Attributes	table	Y	N
+sect_C.8.7.1	table_C.8-26	X-Ray Image Module Attributes	table	Y	N
+sect_C.8.7.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.7.1	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.7.1	table_10-7	General Anatomy Optional Macro Attributes	table	N	N
+sect_C.8.7.1	table_10-8	Primary Anatomic Structure Macro Attributes	table	N	N
+sect_C.8.7.1	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.7.1	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.7.1	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.7.10	table_C.8-35	X-Ray Filtration Module Attributes	table	Y	N
+sect_C.8.7.10	table_C.8-35a	X-Ray Filtration Macro Attributes	table	N	N
+sect_C.8.7.11	table_C.8-36	X-Ray Grid Module Attributes	table	Y	N
+sect_C.8.7.11	table_C.8-36b	X-Ray Grid Description Macro Attributes	table	N	N
+sect_C.8.7.2	table_C.8-27	X-Ray Acquisition Module Attributes	table	Y	N
+sect_C.8.7.2	table_10-10	Basic Pixel Spacing Calibration Macro Attributes	table	N	N
+sect_C.8.7.3	table_C.8-28	X-Ray Collimator Module Attributes	table	Y	N
+sect_C.8.7.3	table_C.8-28b	X-Ray Collimator Dimensions Macro Attributes	table	N	N
+sect_C.8.7.4	table_C.8-29	X-Ray Table Module Attributes	table	Y	N
+sect_C.8.7.5	table_C.8-30	XA Positioner Module Attributes	table	Y	N
+sect_C.8.7.6	table_C.8-31	XRF Positioner Module Attributes	table	Y	N
+sect_C.8.7.7	table_C.8-32	X-Ray Tomography Acquisition Module Attributes	table	Y	N
+sect_C.8.7.8	table_C.8-33	X-Ray Acquisition Dose Module Attributes	table	Y	N
+sect_C.8.7.8	table_10-23	Exposure Index Macro Attributes	table	N	N
+sect_C.8.7.8	table_C.8-35a	X-Ray Filtration Macro Attributes	table	N	N
+sect_C.8.7.9	table_C.8-34	X-Ray Generation Module Attributes	table	Y	N
+sect_C.8.8.1	table_C.8-37	RT Series Module Attributes	table	Y	N
+sect_C.8.8.1	table_10-1	Person Identification Macro Attributes	table	N	N
+sect_C.8.8.1	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.8.1	table_10-16	Performed Procedure Step Summary Macro Attributes	table	N	N
+sect_C.8.8.1	table_10-17	HL7v2 Hierarchic Designator Macro Attributes	table	N	N
+sect_C.8.8.1	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.8.8.1	table_10-9	Request Attributes Macro Attributes	table	N	N
+sect_C.8.8.1	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.1	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.1	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.10	table_C.8-46	RT Prescription Module Attributes	table	Y	N
+sect_C.8.8.11	table_C.8-47	RT Tolerance Tables Module Attributes	table	Y	N
+sect_C.8.8.12	table_C.8-48	RT Patient Setup Module Attributes	table	Y	N
+sect_C.8.8.12	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.8.12	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.8.8.12	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.8.12	table_10.2.1-1	Content Item with Modifiers Macro Attributes	table	N	N
+sect_C.8.8.12	table_10.29-1	UDI Macro Attributes	table	N	N
+sect_C.8.8.12	table_10.35-1	Device Model Macro Attributes	table	N	N
+sect_C.8.8.12	table_10.36-1	Device Identification Macro Attributes	table	N	N
+sect_C.8.8.12	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.12	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.12	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.12	table_C.36.2.2.3-1	RT Accessory Device Identification Macro Attributes	table	N	N
+sect_C.8.8.12	table_C.36.2.3.4-1	RT Patient Treatment Preparation Macro Attributes	table	N	N
+sect_C.8.8.13	table_C.8-49	RT Fraction Scheme Module Attributes	table	Y	N
+sect_C.8.8.13	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.8.13	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.8.8.13	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.13	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.13	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.14	table_C.8-50	RT Beams Module Attributes	table	Y	N
+sect_C.8.8.14	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.8.14	table_10.29-1	UDI Macro Attributes	table	N	N
+sect_C.8.8.14	table_10.35-1	Device Model Macro Attributes	table	N	N
+sect_C.8.8.14	table_10.36-1	Device Identification Macro Attributes	table	N	N
+sect_C.8.8.14	table_10.38-1	Outline Definition Macro Attributes	table	N	N
+sect_C.8.8.14	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.14	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.14	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.14	table_C.36.2.2.19-1	RT Beam Limiting Device Definition Macro Attributes	table	N	N
+sect_C.8.8.14	table_C.36.2.2.20-1	RT Beam Limiting Device Opening Definition Macro Attributes	table	N	N
+sect_C.8.8.14	table_C.36.2.2.3-1	RT Accessory Device Identification Macro Attributes	table	N	N
+sect_C.8.8.15	table_C.8-51	RT Brachy Application Setups Module Attributes	table	Y	N
+sect_C.8.8.15	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.8.15	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.15	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.15	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.16	table_C.8-52	Approval Module Attributes	table	Y	N
+sect_C.8.8.17	table_C.8-53	RT General Treatment Record Module Attributes	table	Y	N
+sect_C.8.8.17	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.8.18	table_C.8-54	RT Treatment Machine Record Module Attributes	table	Y	N
+sect_C.8.8.18	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.18	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.18	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.19	table_C.8-55	Measured Dose Reference Record Module Attributes	table	Y	N
+sect_C.8.8.2	table_C.8-38	RT Image Module Attributes	table	Y	N
+sect_C.8.8.2	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.8.2	table_10.29-1	UDI Macro Attributes	table	N	N
+sect_C.8.8.2	table_10.35-1	Device Model Macro Attributes	table	N	N
+sect_C.8.8.2	table_10.36-1	Device Identification Macro Attributes	table	N	N
+sect_C.8.8.2	table_10.38-1	Outline Definition Macro Attributes	table	N	N
+sect_C.8.8.2	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.2	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.2	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.2	table_C.36.2.2.19-1	RT Beam Limiting Device Definition Macro Attributes	table	N	N
+sect_C.8.8.2	table_C.36.2.2.20-1	RT Beam Limiting Device Opening Definition Macro Attributes	table	N	N
+sect_C.8.8.2	table_C.36.2.2.3-1	RT Accessory Device Identification Macro Attributes	table	N	N
+sect_C.8.8.20	table_C.8-56	Calculated Dose Reference Record Module Attributes	table	Y	N
+sect_C.8.8.21	table_C.8-57	RT Beams Session Record Module Attributes	table	Y	N
+sect_C.8.8.21	table_10-1	Person Identification Macro Attributes	table	N	N
+sect_C.8.8.21	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.8.21	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.8.8.21	table_10.29-1	UDI Macro Attributes	table	N	N
+sect_C.8.8.21	table_10.35-1	Device Model Macro Attributes	table	N	N
+sect_C.8.8.21	table_10.36-1	Device Identification Macro Attributes	table	N	N
+sect_C.8.8.21	table_10.38-1	Outline Definition Macro Attributes	table	N	N
+sect_C.8.8.21	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.21	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.21	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.21	table_C.36.2.2.18-1	Interlock Macro Attributes	table	N	N
+sect_C.8.8.21	table_C.36.2.2.19-1	RT Beam Limiting Device Definition Macro Attributes	table	N	N
+sect_C.8.8.21	table_C.36.2.2.20-1	RT Beam Limiting Device Opening Definition Macro Attributes	table	N	N
+sect_C.8.8.21	table_C.36.2.2.3-1	RT Accessory Device Identification Macro Attributes	table	N	N
+sect_C.8.8.22	table_C.8-58	RT Brachy Session Record Module Attributes	table	Y	N
+sect_C.8.8.22	table_10-1	Person Identification Macro Attributes	table	N	N
+sect_C.8.8.22	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.8.22	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.22	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.22	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.23	table_C.8-59	RT Treatment Summary Record Module Attributes	table	Y	N
+sect_C.8.8.24	table_C.8.8.24-1	RT Ion Tolerance Tables Module Attributes	table	Y	N
+sect_C.8.8.25	table_C.8.8.25-1	RT Ion Beams Module Attributes	table	Y	N
+sect_C.8.8.25	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.8.25	table_10.29-1	UDI Macro Attributes	table	N	N
+sect_C.8.8.25	table_10.35-1	Device Model Macro Attributes	table	N	N
+sect_C.8.8.25	table_10.36-1	Device Identification Macro Attributes	table	N	N
+sect_C.8.8.25	table_10.38-1	Outline Definition Macro Attributes	table	N	N
+sect_C.8.8.25	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.25	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.25	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.25	table_C.36.2.2.19-1	RT Beam Limiting Device Definition Macro Attributes	table	N	N
+sect_C.8.8.25	table_C.36.2.2.20-1	RT Beam Limiting Device Opening Definition Macro Attributes	table	N	N
+sect_C.8.8.25	table_C.36.2.2.3-1	RT Accessory Device Identification Macro Attributes	table	N	N
+sect_C.8.8.25	table_C.8.8.27-1	Beam Limiting Device Position Macro Attributes	table	N	N
+sect_C.8.8.25	table_C.8.8.28-1	Patient Support Identification Macro Attributes	table	N	N
+sect_C.8.8.26	table_C.8.8.26-1	RT Ion Beams Session Record Module Attributes	table	Y	N
+sect_C.8.8.26	table_10-1	Person Identification Macro Attributes	table	N	N
+sect_C.8.8.26	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.8.26	table_10.29-1	UDI Macro Attributes	table	N	N
+sect_C.8.8.26	table_10.35-1	Device Model Macro Attributes	table	N	N
+sect_C.8.8.26	table_10.36-1	Device Identification Macro Attributes	table	N	N
+sect_C.8.8.26	table_10.38-1	Outline Definition Macro Attributes	table	N	N
+sect_C.8.8.26	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.26	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.26	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.26	table_C.36.2.2.18-1	Interlock Macro Attributes	table	N	N
+sect_C.8.8.26	table_C.36.2.2.19-1	RT Beam Limiting Device Definition Macro Attributes	table	N	N
+sect_C.8.8.26	table_C.36.2.2.20-1	RT Beam Limiting Device Opening Definition Macro Attributes	table	N	N
+sect_C.8.8.26	table_C.36.2.2.3-1	RT Accessory Device Identification Macro Attributes	table	N	N
+sect_C.8.8.26	table_C.8.8.27-1	Beam Limiting Device Position Macro Attributes	table	N	N
+sect_C.8.8.26	table_C.8.8.28-1	Patient Support Identification Macro Attributes	table	N	N
+sect_C.8.8.29	table_C.8.8.29-1	RT Beams Delivery Instruction Module Attributes	table	Y	N
+sect_C.8.8.29	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.8.29	table_10-28	Device Motion Control Macro Attributes	table	N	N
+sect_C.8.8.29	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.29	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.29	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.3	table_C.8-39	RT Dose Module Attributes	table	Y	N
+sect_C.8.8.3	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.8.3	table_10-19	Algorithm Identification Macro Attributes	table	N	N
+sect_C.8.8.3	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.8.8.3	table_10.2.1-1	Content Item with Modifiers Macro Attributes	table	N	N
+sect_C.8.8.3	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.3	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.3	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.3	table_C.36.2.1.5-1	Radiobiological Dose Effect Description Macro Attributes	table	N	N
+sect_C.8.8.3	table_C.36.2.5.1-1	RT Dose Calculation Model Macro Attributes	table	N	N
+sect_C.8.8.30	table_C.8.8.30-1	RT Brachy Application Setup Delivery Instruction Module Attributes	table	Y	N
+sect_C.8.8.30	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.8.30	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.30	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.30	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.30	table_C.17-3	Hierarchical SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.8.30	table_C.17-3a	Hierarchical Series Reference Macro Attributes	table	N	N
+sect_C.8.8.31	table_C.8.8.31-1	RT Beams Salvage Record Module Attributes	table	Y	N
+sect_C.8.8.31	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.31	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.31	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.31	table_C.36.2.2.23-1	RT Salvage Session Beam Macro Attributes	table	N	N
+sect_C.8.8.32	table_C.8.8.32-1	RT Ion Beams Salvage Record Module Attributes	table	Y	N
+sect_C.8.8.32	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.32	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.32	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.32	table_C.36.2.2.23-1	RT Salvage Session Beam Macro Attributes	table	N	N
+sect_C.8.8.4	table_C.8-40	RT DVH Module Attributes	table	Y	N
+sect_C.8.8.4	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.8.5	table_C.8-41	Structure Set Module Attributes	table	Y	N
+sect_C.8.8.5	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.8.5	table_10-19	Algorithm Identification Macro Attributes	table	N	N
+sect_C.8.8.5	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.8.5	table_10-7	General Anatomy Optional Macro Attributes	table	N	N
+sect_C.8.8.5	table_10-8	Primary Anatomic Structure Macro Attributes	table	N	N
+sect_C.8.8.5	table_10.33-1	Conceptual Volume Macro Attributes	table	N	N
+sect_C.8.8.5	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.5	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.5	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.5	table_C.17-3b	Identified Person or Device Macro Attributes	table	N	N
+sect_C.8.8.6	table_C.8-42	ROI Contour Module Attributes	table	Y	N
+sect_C.8.8.6	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.8.6	table_10-3	Image SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.8.8	table_C.8-44	RT ROI Observations Module Attributes	table	Y	N
+sect_C.8.8.8	table_10-7b	Multiple Site General Anatomy Optional Macro Attributes	table	N	N
+sect_C.8.8.8	table_10-8	Primary Anatomic Structure Macro Attributes	table	N	N
+sect_C.8.8.8	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.8	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.8	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.8	table_C.17-3b	Identified Person or Device Macro Attributes	table	N	N
+sect_C.8.8.9	table_C.8-45	RT General Plan Module Attributes	table	Y	N
+sect_C.8.8.9	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.8.9	table_10.30-1	Assertion Macro Attributes	table	N	N
+sect_C.8.8.9	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.9	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.9	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.8.9	table_C.17-3b	Identified Person or Device Macro Attributes	table	N	N
+sect_C.8.9.1	table_C.8-60	PET Series Module Attributes	table	Y	N
+sect_C.8.9.2	table_C.8-61	PET Isotope Module Attributes	table	Y	N
+sect_C.8.9.2	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.9.2	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.9.2	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.9.3	table_C.8-62	PET Multi-Gated Acquisition Module Attributes	table	Y	N
+sect_C.8.9.4	table_C.8-63	PET Image Module Attributes	table	Y	N
+sect_C.8.9.4	table_10-11	SOP Instance Reference Macro Attributes	table	N	N
+sect_C.8.9.4	table_10-2	Content Item Macro Attributes	table	N	N
+sect_C.8.9.4	table_10-25	Optional View and Slice Progression Direction Macro Attributes	table	N	N
+sect_C.8.9.4	table_10-7	General Anatomy Optional Macro Attributes	table	N	N
+sect_C.8.9.4	table_10-8	Primary Anatomic Structure Macro Attributes	table	N	N
+sect_C.8.9.4	table_10.2.1-1	Content Item with Modifiers Macro Attributes	table	N	N
+sect_C.8.9.4	table_10.29-1	UDI Macro Attributes	table	N	N
+sect_C.8.9.4	table_10.35-1	Device Model Macro Attributes	table	N	N
+sect_C.8.9.4	table_10.36-1	Device Identification Macro Attributes	table	N	N
+sect_C.8.9.4	table_8.8-1	Code Sequence Macro Attributes	table	N	N
+sect_C.8.9.4	table_8.8-1a	Basic Code Sequence Macro Attributes	table	N	N
+sect_C.8.9.4	table_8.8-1b	Enhanced Code Sequence Macro Attributes	table	N	N
+sect_C.8.9.4	table_C.36.2.2.3-1	RT Accessory Device Identification Macro Attributes	table	N	N
+sect_C.8.9.4	table_C.36.2.3.4-1	RT Patient Treatment Preparation Macro Attributes	table	N	N
+sect_C.8.9.4	table_C.36.2.4.12-1	RT Equipment Mapping and Plan Reference Macro Attributes	table	N	N
+sect_C.9.2	table_C.9-2	Overlay Plane Module Attributes	table	Y	N
+sect_C.9.3	table_C.9-3	Multi-frame Overlay Module Attributes	table	Y	N
