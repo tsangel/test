@@ -3,6 +3,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "../dicom.h"
@@ -167,6 +168,10 @@ namespace detail {
 
 struct PresentElementRegistry {
     std::vector<std::uint8_t> present_path_nodes;
+};
+
+struct ScopeDatasetRegistry {
+    std::unordered_map<std::uint16_t, std::vector<const DataSet*>> scope_datasets_by_node;
 };
 
 inline void append_unresolved_condition(
@@ -651,6 +656,60 @@ inline void append_unresolved_condition(
         }
     });
     return registry;
+}
+
+inline void append_scope_dataset(
+    ScopeDatasetRegistry& registry,
+    std::uint16_t scope_node_index,
+    const DataSet* dataset) {
+    if (dataset == nullptr) {
+        return;
+    }
+    registry.scope_datasets_by_node[scope_node_index].push_back(dataset);
+}
+
+inline void collect_scope_datasets_recursive(
+    const DataSet& dataset,
+    std::uint16_t scope_node_index,
+    ScopeDatasetRegistry& registry) {
+    append_scope_dataset(registry, scope_node_index, &dataset);
+    for (const auto& element : dataset) {
+        if (!element.is_present() || !element.vr().is_sequence()) {
+            continue;
+        }
+        const auto* sequence = element.as_sequence();
+        if (sequence == nullptr) {
+            continue;
+        }
+        const auto child_scope_node_index =
+            find_storage_path_child_node(scope_node_index, element.tag().value());
+        if (child_scope_node_index == kInvalidStoragePathNodeIndex) {
+            continue;
+        }
+        for (int item_index = 0; item_index < sequence->size(); ++item_index) {
+            const auto* item_dataset = sequence->get_dataset(static_cast<std::size_t>(item_index));
+            if (item_dataset == nullptr) {
+                continue;
+            }
+            collect_scope_datasets_recursive(*item_dataset, child_scope_node_index, registry);
+        }
+    }
+}
+
+[[nodiscard]] inline ScopeDatasetRegistry collect_scope_datasets(const DataSet& dataset) {
+    ScopeDatasetRegistry registry;
+    collect_scope_datasets_recursive(dataset, 0, registry);
+    return registry;
+}
+
+[[nodiscard]] inline const std::vector<const DataSet*>* find_scope_datasets(
+    const ScopeDatasetRegistry& registry,
+    std::uint16_t scope_node_index) noexcept {
+    if (const auto it = registry.scope_datasets_by_node.find(scope_node_index);
+        it != registry.scope_datasets_by_node.end()) {
+        return &it->second;
+    }
+    return nullptr;
 }
 
 [[nodiscard]] inline bool component_present_in_dataset(

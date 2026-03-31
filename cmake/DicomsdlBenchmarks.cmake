@@ -49,6 +49,12 @@ if(DICOM_BUILD_BENCHMARKS)
     target_link_libraries(dicomsdl_dataset_walk_bench PRIVATE dicomsdl)
     target_compile_features(dicomsdl_dataset_walk_bench PRIVATE cxx_std_20)
 
+    add_executable(dicomsdl_storage_effective_attributes_bench
+        benchmarks/storage_effective_attributes_bench.cpp
+    )
+    target_link_libraries(dicomsdl_storage_effective_attributes_bench PRIVATE dicomsdl)
+    target_compile_features(dicomsdl_storage_effective_attributes_bench PRIVATE cxx_std_20)
+
     add_executable(dicomsdl_read_all_dcm
         benchmarks/read_all_dcm.cpp
     )

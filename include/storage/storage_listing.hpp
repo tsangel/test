@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "storage_dataset.hpp"
@@ -92,6 +93,76 @@ struct EffectiveAttributeInfo {
         return component != nullptr && rule != nullptr;
     }
 };
+
+namespace detail {
+
+struct ScopedRuleGroup {
+    std::uint16_t scope_node_index{0};
+    std::vector<const ComponentAttributeRuleEntry*> rules;
+};
+
+struct PartitionedScopedRules {
+    std::vector<const ComponentAttributeRuleEntry*> root_rules;
+    std::vector<ScopedRuleGroup> nested_groups;
+};
+
+[[nodiscard]] inline PartitionedScopedRules build_partitioned_scoped_rules(
+    std::span<const ComponentAttributeRuleEntry> rules) {
+    PartitionedScopedRules partitioned;
+    partitioned.root_rules.reserve(rules.size());
+
+    std::unordered_map<std::uint16_t, std::size_t> nested_group_indices;
+
+    for (const auto& rule : rules) {
+        const auto* path_node = find_storage_path_node_entry(rule.path_node_index);
+        if (path_node == nullptr) {
+            continue;
+        }
+        const auto scope_node_index = path_node->parent_node_index;
+        if (scope_node_index == 0) {
+            partitioned.root_rules.push_back(&rule);
+            continue;
+        }
+        if (nested_group_indices.empty()) {
+            partitioned.nested_groups.reserve(rules.size());
+            nested_group_indices.reserve(rules.size());
+        }
+        const auto [it, inserted] = nested_group_indices.try_emplace(
+            scope_node_index, partitioned.nested_groups.size());
+        if (inserted) {
+            partitioned.nested_groups.push_back(ScopedRuleGroup{scope_node_index, {}});
+        }
+        partitioned.nested_groups[it->second].rules.push_back(&rule);
+    }
+
+    return partitioned;
+}
+
+[[nodiscard]] inline const PartitionedScopedRules& partition_component_rules_by_scope(
+    const StorageComponentRegistryEntry& component) {
+    static const auto* cache = [] {
+        auto* partitioned_rules =
+            new std::vector<PartitionedScopedRules>(kStorageComponentRegistry.size());
+        for (std::size_t index = 0; index < kStorageComponentRegistry.size(); ++index) {
+            const auto& component_entry = kStorageComponentRegistry[index];
+            (*partitioned_rules)[index] =
+                build_partitioned_scoped_rules(find_component_attribute_rules(
+                    component_entry.component_section_id()));
+        }
+        return partitioned_rules;
+    }();
+
+    const auto* begin = kStorageComponentRegistry.data();
+    const auto* end = begin + kStorageComponentRegistry.size();
+    if (&component < begin || &component >= end) {
+        static const auto* empty = new PartitionedScopedRules{};
+        return *empty;
+    }
+
+    return (*cache)[static_cast<std::size_t>(&component - begin)];
+}
+
+} // namespace detail
 
 [[nodiscard]] inline bool matches_declared_module_options(
     const StorageComponentRegistryEntry& component,
@@ -369,20 +440,26 @@ struct EffectiveAttributeInfo {
     const ConditionEvaluationContext& context = {}) {
     std::vector<EffectiveAttributeInfo> attributes;
     const auto modules = evaluate_components(dataset, classifier, context);
+    detail::ScopeDatasetRegistry scope_datasets;
+    bool scope_datasets_collected = false;
     for (const auto& module : modules) {
         if (!module.component) {
             continue;
         }
         const auto rules = classifier.component_rules(*module.component);
+        const auto& partitioned_rules = detail::partition_component_rules_by_scope(*module.component);
         attributes.reserve(attributes.size() + rules.size());
         const auto module_info = EffectiveModuleInfo{classifier.sop_class_entry(), module};
-        for (const auto& rule : rules) {
+        for (const auto* rule : partitioned_rules.root_rules) {
+            if (rule == nullptr) {
+                continue;
+            }
             const auto evaluated =
-                evaluate_rule(dataset, DeclaredRuleRef{module.component, &rule}, context);
+                evaluate_rule(dataset, DeclaredRuleRef{module.component, rule}, context);
             const auto info = EffectiveAttributeInfo{
                 classifier.sop_class_entry(),
                 module.component,
-                &rule,
+                rule,
                 evaluated.condition_state,
                 evaluated.effective_type,
             };
@@ -390,6 +467,41 @@ struct EffectiveAttributeInfo {
                 continue;
             }
             attributes.push_back(info);
+        }
+
+        for (const auto& group : partitioned_rules.nested_groups) {
+            if (!scope_datasets_collected) {
+                scope_datasets = detail::collect_scope_datasets(dataset);
+                scope_datasets_collected = true;
+            }
+            const auto* scopes = detail::find_scope_datasets(scope_datasets, group.scope_node_index);
+            if (scopes == nullptr || scopes->empty()) {
+                continue;
+            }
+
+            for (const auto* rule : group.rules) {
+                if (rule == nullptr) {
+                    continue;
+                }
+                for (const auto* scope_dataset : *scopes) {
+                    if (scope_dataset == nullptr) {
+                        continue;
+                    }
+                    const auto evaluated =
+                        evaluate_rule(*scope_dataset, DeclaredRuleRef{module.component, rule}, context);
+                    const auto info = EffectiveAttributeInfo{
+                        classifier.sop_class_entry(),
+                        module.component,
+                        rule,
+                        evaluated.condition_state,
+                        evaluated.effective_type,
+                    };
+                    if (!matches_effective_attribute_options(module_info, info, options)) {
+                        continue;
+                    }
+                    attributes.push_back(info);
+                }
+            }
         }
     }
     return attributes;

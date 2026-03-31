@@ -6570,7 +6570,7 @@ m.def("make_storage_classifier",
 	    return storage::make_storage_classifier(dataset);
     },
     nb::arg("source"),
-    "Create a StorageClassifier from a DataSet or DicomFile using SOPClassUID. Returns None if unsupported.");
+    "Create a StorageClassifier from a DataSet or DicomFile using SOPClassUID with MediaStorageSOPClassUID fallback. Returns None if unsupported.");
 
 m.def("list_effective_storage_modules",
     [](nb::handle source,
