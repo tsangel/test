@@ -145,6 +145,15 @@ def test_list_effective_storage_attributes_matches_multivalued_eqtext_conditions
     exposure_sequence = ds.ensure_dataelement("ExposureSequence", dicom.VR.SQ).sequence
     exposure_sequence.add_dataset()
 
+    image_type_rows = [
+        row
+        for row in dicom.list_effective_storage_attributes(
+            ds,
+            keyword="ImageType",
+            include_prohibited=True,
+        )
+        if row["keyword"] == "ImageType"
+    ]
     rows = [
         row
         for row in dicom.list_effective_storage_attributes(
@@ -157,10 +166,14 @@ def test_list_effective_storage_attributes_matches_multivalued_eqtext_conditions
         and row["component_section_id"] == "sect_C.8.8.2"
     ]
 
-    assert any(
-        row["condition_state_name"] == "active" and row["effective_type_name"] == "type2"
-        for row in rows
-    )
+    assert len(image_type_rows) == 2
+    assert sum(
+        row["component_section_id"] == "sect_C.7.6.1" and row["path"] == "00080008"
+        for row in image_type_rows
+    ) == 1
+    assert len(rows) == 1
+    assert rows[0]["condition_state_name"] == "active"
+    assert rows[0]["effective_type_name"] == "type2"
 
 
 def test_list_effective_storage_attributes_keeps_root_conditional_rt_image_rules():

@@ -187,6 +187,7 @@ inline void append_unique_rule_candidate(
 
 inline void append_context_rule_candidates(
     const TraversalComponentState& state,
+    std::uint16_t scope_node_index,
     std::vector<const ComponentAttributeRuleEntry*>& candidates) {
     if (!state.use_context_traversal || state.module_info.evaluated.component == nullptr ||
         state.traversal.active_context_indices.empty()) {
@@ -205,6 +206,30 @@ inline void append_context_rule_candidates(
             const auto* rule = &kComponentAttributeRuleRegistry[rule_index];
             if (rule->component_section_id() !=
                 state.module_info.evaluated.component->component_section_id()) {
+                continue;
+            }
+            const auto* path_node = find_storage_path_node_entry(rule->path_node_index);
+            if (path_node == nullptr) {
+                continue;
+            }
+            auto candidate_scope_node_index = path_node->parent_node_index;
+            auto current_scope_node_index = scope_node_index;
+            bool scope_matches = candidate_scope_node_index == current_scope_node_index;
+            while (!scope_matches &&
+                   candidate_scope_node_index != kInvalidStoragePathNodeIndex &&
+                   current_scope_node_index != kInvalidStoragePathNodeIndex) {
+                const auto* scope_node = find_storage_path_node_entry(current_scope_node_index);
+                if (scope_node == nullptr ||
+                    std::find(
+                        state.recursive_sequence_tags.begin(),
+                        state.recursive_sequence_tags.end(),
+                        scope_node->incoming_tag) == state.recursive_sequence_tags.end()) {
+                    break;
+                }
+                current_scope_node_index = scope_node->parent_node_index;
+                scope_matches = candidate_scope_node_index == current_scope_node_index;
+            }
+            if (!scope_matches) {
                 continue;
             }
             bool local_to_current_recursive_frame = true;
@@ -641,7 +666,7 @@ inline void traverse_storage_frames(
                 }
 
                 std::vector<const ComponentAttributeRuleEntry*> candidates;
-                detail::append_context_rule_candidates(state, candidates);
+                detail::append_context_rule_candidates(state, scope_node_index, candidates);
                 for (const auto* rule : candidates) {
                     const auto evaluated = evaluate_rule(
                         scope_dataset,

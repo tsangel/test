@@ -285,6 +285,13 @@ inline void append_unresolved_condition(
 }
 
 [[nodiscard]] inline const DataElement& element_for_tag(const DataSet& dataset, Tag tag) {
+    for (const auto* current = &dataset; current != nullptr;
+         current = current->parent_dataset()) {
+        const auto& element = current->get_dataelement(tag);
+        if (element.is_present()) {
+            return element;
+        }
+    }
     return dataset.get_dataelement(tag);
 }
 
