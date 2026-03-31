@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <string_view>
 #include <unordered_map>
@@ -102,16 +103,13 @@ struct ScopedRuleGroup {
 };
 
 struct PartitionedScopedRules {
-    std::vector<const ComponentAttributeRuleEntry*> root_rules;
-    std::vector<ScopedRuleGroup> nested_groups;
+    std::vector<ScopedRuleGroup> groups;
+    std::unordered_map<std::uint16_t, std::size_t> group_lookup;
 };
 
 [[nodiscard]] inline PartitionedScopedRules build_partitioned_scoped_rules(
     std::span<const ComponentAttributeRuleEntry> rules) {
     PartitionedScopedRules partitioned;
-    partitioned.root_rules.reserve(rules.size());
-
-    std::unordered_map<std::uint16_t, std::size_t> nested_group_indices;
 
     for (const auto& rule : rules) {
         const auto* path_node = find_storage_path_node_entry(rule.path_node_index);
@@ -119,20 +117,16 @@ struct PartitionedScopedRules {
             continue;
         }
         const auto scope_node_index = path_node->parent_node_index;
-        if (scope_node_index == 0) {
-            partitioned.root_rules.push_back(&rule);
-            continue;
+        if (partitioned.group_lookup.empty()) {
+            partitioned.groups.reserve(rules.size());
+            partitioned.group_lookup.reserve(rules.size());
         }
-        if (nested_group_indices.empty()) {
-            partitioned.nested_groups.reserve(rules.size());
-            nested_group_indices.reserve(rules.size());
-        }
-        const auto [it, inserted] = nested_group_indices.try_emplace(
-            scope_node_index, partitioned.nested_groups.size());
+        const auto [it, inserted] =
+            partitioned.group_lookup.try_emplace(scope_node_index, partitioned.groups.size());
         if (inserted) {
-            partitioned.nested_groups.push_back(ScopedRuleGroup{scope_node_index, {}});
+            partitioned.groups.push_back(ScopedRuleGroup{scope_node_index, {}});
         }
-        partitioned.nested_groups[it->second].rules.push_back(&rule);
+        partitioned.groups[it->second].rules.push_back(&rule);
     }
 
     return partitioned;
@@ -160,6 +154,152 @@ struct PartitionedScopedRules {
     }
 
     return (*cache)[static_cast<std::size_t>(&component - begin)];
+}
+
+[[nodiscard]] inline const ScopedRuleGroup* find_scoped_rule_group(
+    const PartitionedScopedRules& partitioned,
+    std::uint16_t scope_node_index) noexcept {
+    const auto it = partitioned.group_lookup.find(scope_node_index);
+    if (it == partitioned.group_lookup.end()) {
+        return nullptr;
+    }
+    return &partitioned.groups[it->second];
+}
+
+struct TraversalComponentState {
+    EffectiveModuleInfo module_info{};
+    const PartitionedScopedRules* partitioned_rules{nullptr};
+    bool use_context_traversal{false};
+    StorageTraversalContext traversal{};
+    std::vector<std::uint32_t> recursive_sequence_tags;
+};
+
+inline void append_unique_rule_candidate(
+    std::vector<const ComponentAttributeRuleEntry*>& candidates,
+    const ComponentAttributeRuleEntry* rule) {
+    if (rule == nullptr) {
+        return;
+    }
+    if (std::find(candidates.begin(), candidates.end(), rule) == candidates.end()) {
+        candidates.push_back(rule);
+    }
+}
+
+inline void append_context_rule_candidates(
+    const TraversalComponentState& state,
+    std::vector<const ComponentAttributeRuleEntry*>& candidates) {
+    if (!state.use_context_traversal || state.module_info.evaluated.component == nullptr ||
+        state.traversal.path_stack.empty()) {
+        return;
+    }
+    for (const auto rule_index : find_active_storage_context_rule_indices(state.traversal)) {
+        if (rule_index >= kComponentAttributeRuleRegistry.size()) {
+            continue;
+        }
+        const auto* rule = &kComponentAttributeRuleRegistry[rule_index];
+        if (rule->component_section_id() !=
+            state.module_info.evaluated.component->component_section_id()) {
+            continue;
+        }
+        bool local_to_current_recursive_frame = true;
+        for (const auto recursive_sequence_tag : state.recursive_sequence_tags) {
+            if (storage_path_node_contains_tag(rule->path_node_index, recursive_sequence_tag)) {
+                local_to_current_recursive_frame = false;
+                break;
+            }
+        }
+        if (!local_to_current_recursive_frame) {
+            continue;
+        }
+        append_unique_rule_candidate(candidates, rule);
+    }
+}
+
+[[nodiscard]] inline std::vector<std::uint32_t> find_recursive_context_sequence_tags(
+    std::string_view component_section_id) {
+    std::vector<std::uint32_t> tags;
+    for (const auto& context : find_storage_contexts(component_section_id)) {
+        for (const auto& transition : storage_context_transitions(context)) {
+            if (!transition.is_recursive || transition.sequence_tag_value == 0) {
+                continue;
+            }
+            if (std::find(tags.begin(), tags.end(), transition.sequence_tag_value) == tags.end()) {
+                tags.push_back(transition.sequence_tag_value);
+            }
+        }
+    }
+    return tags;
+}
+
+[[nodiscard]] inline std::vector<TraversalComponentState> make_traversal_component_states(
+    const SopClassStorageMapEntry* sop_class,
+    const std::vector<EvaluatedComponentRef>& modules) {
+    std::vector<TraversalComponentState> states;
+    states.reserve(modules.size());
+    for (const auto& module : modules) {
+        if (!module.component) {
+            continue;
+        }
+        const auto component_section_id = module.component->component_section_id();
+        const auto root_context_indices = find_root_storage_context_indices(component_section_id);
+        states.push_back(TraversalComponentState{
+            EffectiveModuleInfo{sop_class, module},
+            &partition_component_rules_by_scope(*module.component),
+            !root_context_indices.empty(),
+            root_context_indices.empty() ? StorageTraversalContext{}
+                                         : make_storage_traversal_context(component_section_id),
+            find_recursive_context_sequence_tags(component_section_id),
+        });
+    }
+    return states;
+}
+
+template <typename EmitFrameFn>
+inline void traverse_storage_frames(
+    const DataSet& dataset,
+    std::uint16_t scope_node_index,
+    std::span<TraversalComponentState> states,
+    EmitFrameFn&& emit_frame) {
+    emit_frame(dataset, scope_node_index, states);
+
+    for (const auto& element : dataset) {
+        if (!element.is_present() || !element.vr().is_sequence()) {
+            continue;
+        }
+        const auto* sequence = element.as_sequence();
+        if (sequence == nullptr) {
+            continue;
+        }
+
+        const auto child_scope_node_index =
+            find_storage_path_child_node(scope_node_index, element.tag().value());
+
+        std::vector<std::uint8_t> entered_contexts(states.size(), 0);
+        for (int item_index = 0; item_index < sequence->size(); ++item_index) {
+            const auto* item_dataset = sequence->get_dataset(static_cast<std::size_t>(item_index));
+            if (item_dataset == nullptr) {
+                continue;
+            }
+
+            for (std::size_t state_index = 0; state_index < states.size(); ++state_index) {
+                auto& state = states[state_index];
+                entered_contexts[state_index] = state.use_context_traversal &&
+                                                enter_storage_sequence_item(
+                                                    state.traversal, element.tag().value())
+                                                    ? 1u
+                                                    : 0u;
+            }
+
+            traverse_storage_frames(
+                *item_dataset, child_scope_node_index, states, emit_frame);
+
+            for (std::size_t state_index = states.size(); state_index-- > 0;) {
+                if (entered_contexts[state_index] != 0) {
+                    leave_storage_sequence_item(states[state_index].traversal);
+                }
+            }
+        }
+    }
 }
 
 } // namespace detail
@@ -440,70 +580,81 @@ struct PartitionedScopedRules {
     const ConditionEvaluationContext& context = {}) {
     std::vector<EffectiveAttributeInfo> attributes;
     const auto modules = evaluate_components(dataset, classifier, context);
-    detail::ScopeDatasetRegistry scope_datasets;
-    bool scope_datasets_collected = false;
-    for (const auto& module : modules) {
-        if (!module.component) {
+    auto traversal_states =
+        detail::make_traversal_component_states(classifier.sop_class_entry(), modules);
+    for (const auto& state : traversal_states) {
+        if (state.module_info.evaluated.component == nullptr) {
             continue;
         }
-        const auto rules = classifier.component_rules(*module.component);
-        const auto& partitioned_rules = detail::partition_component_rules_by_scope(*module.component);
-        attributes.reserve(attributes.size() + rules.size());
-        const auto module_info = EffectiveModuleInfo{classifier.sop_class_entry(), module};
-        for (const auto* rule : partitioned_rules.root_rules) {
-            if (rule == nullptr) {
-                continue;
-            }
-            const auto evaluated =
-                evaluate_rule(dataset, DeclaredRuleRef{module.component, rule}, context);
-            const auto info = EffectiveAttributeInfo{
-                classifier.sop_class_entry(),
-                module.component,
-                rule,
-                evaluated.condition_state,
-                evaluated.effective_type,
-            };
-            if (!matches_effective_attribute_options(module_info, info, options)) {
-                continue;
-            }
-            attributes.push_back(info);
-        }
+        attributes.reserve(
+            attributes.size() +
+            classifier.component_rules(*state.module_info.evaluated.component).size());
+    }
 
-        for (const auto& group : partitioned_rules.nested_groups) {
-            if (!scope_datasets_collected) {
-                scope_datasets = detail::collect_scope_datasets(dataset);
-                scope_datasets_collected = true;
-            }
-            const auto* scopes = detail::find_scope_datasets(scope_datasets, group.scope_node_index);
-            if (scopes == nullptr || scopes->empty()) {
-                continue;
-            }
-
-            for (const auto* rule : group.rules) {
-                if (rule == nullptr) {
+    detail::traverse_storage_frames(
+        dataset,
+        0,
+        std::span<detail::TraversalComponentState>{traversal_states},
+        [&](const DataSet& scope_dataset,
+            std::uint16_t scope_node_index,
+            std::span<detail::TraversalComponentState> states) {
+            detail::ConditionProgramCache program_cache;
+            program_cache.states.reserve(16);
+            for (auto& state : states) {
+                if (state.module_info.evaluated.component == nullptr ||
+                    state.partitioned_rules == nullptr) {
                     continue;
                 }
-                for (const auto* scope_dataset : *scopes) {
-                    if (scope_dataset == nullptr) {
-                        continue;
+                const bool skip_recursive_root_exact_rules =
+                    state.use_context_traversal && scope_node_index == 0 &&
+                    state.traversal.path_stack.empty();
+                const auto* exact_group =
+                    detail::find_scoped_rule_group(*state.partitioned_rules, scope_node_index);
+                if (!skip_recursive_root_exact_rules && exact_group != nullptr) {
+                    for (const auto* rule : exact_group->rules) {
+                        const auto evaluated = evaluate_rule(
+                            scope_dataset,
+                            DeclaredRuleRef{state.module_info.evaluated.component, rule},
+                            &program_cache,
+                            context);
+                        const auto info = EffectiveAttributeInfo{
+                            classifier.sop_class_entry(),
+                            state.module_info.evaluated.component,
+                            rule,
+                            evaluated.condition_state,
+                            evaluated.effective_type,
+                        };
+                        if (!matches_effective_attribute_options(
+                                state.module_info, info, options)) {
+                            continue;
+                        }
+                        attributes.push_back(info);
                     }
-                    const auto evaluated =
-                        evaluate_rule(*scope_dataset, DeclaredRuleRef{module.component, rule}, context);
+                    continue;
+                }
+
+                std::vector<const ComponentAttributeRuleEntry*> candidates;
+                detail::append_context_rule_candidates(state, candidates);
+                for (const auto* rule : candidates) {
+                    const auto evaluated = evaluate_rule(
+                        scope_dataset,
+                        DeclaredRuleRef{state.module_info.evaluated.component, rule},
+                        &program_cache,
+                        context);
                     const auto info = EffectiveAttributeInfo{
                         classifier.sop_class_entry(),
-                        module.component,
+                        state.module_info.evaluated.component,
                         rule,
                         evaluated.condition_state,
                         evaluated.effective_type,
                     };
-                    if (!matches_effective_attribute_options(module_info, info, options)) {
+                    if (!matches_effective_attribute_options(state.module_info, info, options)) {
                         continue;
                     }
                     attributes.push_back(info);
                 }
             }
-        }
-    }
+        });
     return attributes;
 }
 

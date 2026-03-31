@@ -211,7 +211,7 @@ double measure_ms(Fn&& fn, int iterations) {
     return std::chrono::duration<double, std::milli>(end - start).count();
 }
 
-void run_case(const BenchCase& bench_case) {
+void run_case(const BenchCase& bench_case, bool include_prohibited) {
     const auto classifier = dicom::storage::make_storage_classifier(bench_case.dataset);
     if (!classifier) {
         std::cerr << "classifier unavailable for " << bench_case.name << '\n';
@@ -220,7 +220,7 @@ void run_case(const BenchCase& bench_case) {
 
     auto options = dicom::storage::EffectiveAttributeListOptions{};
     options.active_components_only = false;
-    options.include_prohibited = true;
+    options.include_prohibited = include_prohibited;
     options.include_unknown_effective_types = true;
     options.include_conditional_declared_types = true;
 
@@ -238,7 +238,10 @@ void run_case(const BenchCase& bench_case) {
     const auto ungrouped_per_call = ungrouped_ms / static_cast<double>(bench_case.iterations);
     const auto new_per_call = new_ms / static_cast<double>(bench_case.iterations);
 
-    std::cout << bench_case.name << '\n';
+    std::cout << bench_case.name
+              << (include_prohibited ? " [include_prohibited=true]"
+                                     : " [include_prohibited=false]")
+              << '\n';
     std::cout << "  iterations: " << bench_case.iterations << '\n';
     std::cout << "  old_root_only_ms_per_call: " << std::fixed << std::setprecision(6)
               << old_per_call << '\n';
@@ -269,10 +272,15 @@ int main() {
     BenchCase sr_500{.name = "sr_500_items", .iterations = 12};
     fill_sr_dataset(sr_500.dataset, 500);
 
-    run_case(flat_ct);
-    run_case(sr_2);
-    run_case(sr_100);
-    run_case(sr_500);
+    run_case(flat_ct, true);
+    run_case(sr_2, true);
+    run_case(sr_100, true);
+    run_case(sr_500, true);
+
+    run_case(flat_ct, false);
+    run_case(sr_2, false);
+    run_case(sr_100, false);
+    run_case(sr_500, false);
 
     std::cout << "sink: " << g_sink << '\n';
     return 0;

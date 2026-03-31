@@ -597,6 +597,10 @@ def split_expected_values_text(text: str) -> tuple[str, ...]:
     return tuple(value for value in expanded if value)
 
 
+def canonicalize_condition_literal(value: str) -> str:
+    return trim_ascii(strip_balanced_quotes(value)).lower()
+
+
 def infer_subject_tag_from_clause(
     clause: str, implied_subject_tag: int | None = None
 ) -> int | None:
@@ -650,13 +654,14 @@ class ConditionCompiler:
         return index
 
     def _intern_string_refs(self, values: tuple[str, ...]) -> tuple[int, int]:
-        if values in self._string_ref_ranges:
-            return self._string_ref_ranges[values]
+        canonical_values = tuple(canonicalize_condition_literal(value) for value in values if value)
+        if canonical_values in self._string_ref_ranges:
+            return self._string_ref_ranges[canonical_values]
         begin = len(self._string_ref_pool)
-        for value in values:
+        for value in canonical_values:
             self._string_ref_pool.append(self._intern_string(value))
-        result = (begin, len(values))
-        self._string_ref_ranges[values] = result
+        result = (begin, len(canonical_values))
+        self._string_ref_ranges[canonical_values] = result
         return result
 
     def _intern_tag_refs(self, values: tuple[int, ...]) -> tuple[int, int]:

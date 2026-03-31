@@ -1,5 +1,6 @@
 #pragma once
 
+#include <charconv>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -170,6 +171,15 @@ struct PresentElementRegistry {
     std::vector<std::uint8_t> present_path_nodes;
 };
 
+struct ConditionProgramCacheEntry {
+    std::uint32_t key{0};
+    ConditionState state{ConditionState::Indeterminate};
+};
+
+struct ConditionProgramCache {
+    std::vector<ConditionProgramCacheEntry> states;
+};
+
 struct ScopeDatasetRegistry {
     std::unordered_map<std::uint16_t, std::vector<const DataSet*>> scope_datasets_by_node;
 };
@@ -183,17 +193,36 @@ inline void append_unresolved_condition(
     report->unresolved_conditions.push_back(info);
 }
 
-[[nodiscard]] inline std::string ascii_lower(std::string_view text) {
-    std::string out;
-    out.reserve(text.size());
-    for (const char ch : text) {
-        if (ch >= 'A' && ch <= 'Z') {
-            out.push_back(static_cast<char>(ch - 'A' + 'a'));
-        } else {
-            out.push_back(ch);
+[[nodiscard]] inline constexpr char ascii_lower_char(char ch) noexcept {
+    if (ch >= 'A' && ch <= 'Z') {
+        return static_cast<char>(ch - 'A' + 'a');
+    }
+    return ch;
+}
+
+[[nodiscard]] inline bool ascii_iequals(std::string_view lhs, std::string_view rhs) noexcept {
+    if (lhs.size() != rhs.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < lhs.size(); ++i) {
+        if (ascii_lower_char(lhs[i]) != ascii_lower_char(rhs[i])) {
+            return false;
         }
     }
-    return out;
+    return true;
+}
+
+[[nodiscard]] inline bool ascii_matches_lower_literal(
+    std::string_view actual, std::string_view expected_lower) noexcept {
+    if (actual.size() != expected_lower.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < actual.size(); ++i) {
+        if (ascii_lower_char(actual[i]) != expected_lower[i]) {
+            return false;
+        }
+    }
+    return true;
 }
 
 [[nodiscard]] inline std::string_view trim_ascii(std::string_view text) noexcept {
@@ -271,23 +300,27 @@ inline void append_unresolved_condition(
 [[nodiscard]] inline bool element_has_text_value(
     const DataSet& dataset,
     Tag tag,
-    std::string_view expected_upper) {
+    std::string_view expected_lower) {
     const auto& element = element_for_tag(dataset, tag);
     if (!element.is_present()) {
         return false;
     }
+    const auto expected = trim_ascii(expected_lower);
+    if (const auto value = element.to_string_view()) {
+        const auto trimmed = trim_ascii(*value);
+        if (trimmed.find('\\') == std::string_view::npos) {
+            return ascii_matches_lower_literal(trim_ascii(*value), expected);
+        }
+    }
     if (const auto values = element.to_string_views()) {
         for (const auto value : *values) {
-            if (ascii_lower(trim_ascii(value)) == ascii_lower(trim_ascii(expected_upper))) {
+            if (ascii_matches_lower_literal(trim_ascii(value), expected)) {
                 return true;
             }
         }
     }
-    if (const auto value = element.to_string_view()) {
-        return ascii_lower(trim_ascii(*value)) == ascii_lower(trim_ascii(expected_upper));
-    }
     if (const auto value = element.to_utf8_string()) {
-        return ascii_lower(trim_ascii(*value)) == ascii_lower(trim_ascii(expected_upper));
+        return ascii_matches_lower_literal(trim_ascii(*value), expected);
     }
     return false;
 }
@@ -352,14 +385,26 @@ inline void append_unresolved_condition(
     if (!element.is_present()) {
         return false;
     }
+    if (value_index_one_based == 1) {
+        if (const auto value = element.to_string_view()) {
+            const auto trimmed = trim_ascii(*value);
+            if (trimmed.find('\\') == std::string_view::npos) {
+                for (const auto string_id : expected_string_ids) {
+                    if (ascii_matches_lower_literal(trimmed, storage_condition_string(string_id))) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+        }
+    }
     if (const auto values = element.to_string_views()) {
         if (value_index_one_based == 0 || value_index_one_based > values->size()) {
             return false;
         }
         const auto actual = trim_ascii((*values)[value_index_one_based - 1]);
         for (const auto string_id : expected_string_ids) {
-            const auto expected = storage_condition_string(string_id);
-            if (ascii_lower(actual) == ascii_lower(trim_ascii(expected))) {
+            if (ascii_matches_lower_literal(actual, storage_condition_string(string_id))) {
                 return true;
             }
         }
@@ -379,11 +424,15 @@ inline void append_unresolved_condition(
         return *value > threshold;
     }
     if (const auto text = element.to_string_view()) {
-        try {
-            return std::stoll(std::string(trim_ascii(*text))) > threshold;
-        } catch (...) {
+        const auto trimmed = trim_ascii(*text);
+        long long value = 0;
+        const auto* begin = trimmed.data();
+        const auto* end = begin + trimmed.size();
+        const auto result = std::from_chars(begin, end, value, 10);
+        if (result.ec != std::errc{} || result.ptr != end) {
             return false;
         }
+        return value > threshold;
     }
     return false;
 }
@@ -406,6 +455,46 @@ inline void append_unresolved_condition(
         return lhs;
     }
     return ConditionState::Indeterminate;
+}
+
+[[nodiscard]] inline bool condition_program_is_cacheable(
+    std::uint16_t program_index) noexcept {
+    static const auto* cache = [] {
+        auto* values = new std::vector<std::uint8_t>(
+            kStorageConditionProgramRegistry.size(), 0u);
+        auto visit = [&](auto&& self, std::uint16_t index) -> bool {
+            const auto* program = find_storage_condition_program_entry(index);
+            if (program == nullptr) {
+                return false;
+            }
+            if ((*values)[index] != 0u) {
+                return (*values)[index] == 2u;
+            }
+            (*values)[index] = 1u;
+            bool cacheable = true;
+            switch (program->op) {
+            case StorageConditionOp::External:
+                cacheable = false;
+                break;
+            case StorageConditionOp::And:
+            case StorageConditionOp::Or:
+                cacheable = self(self, static_cast<std::uint16_t>(program->arg0)) &&
+                            self(self, static_cast<std::uint16_t>(program->arg1));
+                break;
+            default:
+                cacheable = true;
+                break;
+            }
+            (*values)[index] = cacheable ? 2u : 3u;
+            return cacheable;
+        };
+        for (std::uint16_t index = 0; index < values->size(); ++index) {
+            (void)visit(visit, index);
+        }
+        return values;
+    }();
+
+    return program_index < cache->size() && (*cache)[program_index] == 2u;
 }
 
 [[nodiscard]] inline ConditionState combine_any_conditions(
@@ -619,7 +708,7 @@ inline void append_unresolved_condition(
             return ConditionState::Indeterminate;
         }
         for (const auto string_id : storage_condition_string_refs(*program)) {
-            if (ascii_lower(actual) == ascii_lower(storage_condition_string(string_id))) {
+            if (ascii_matches_lower_literal(actual, storage_condition_string(string_id))) {
                 return ConditionState::Active;
             }
         }
@@ -731,21 +820,51 @@ inline void collect_scope_datasets_recursive(
 [[nodiscard]] inline EvaluatedRuleRef evaluate_rule(
     const DataSet& scope_dataset,
     DeclaredRuleRef declared_rule,
-    const ConditionEvaluationContext& context = {}) {
+    detail::ConditionProgramCache* program_cache,
+    const ConditionEvaluationContext& context) {
     if (!declared_rule) {
         return {};
     }
     ConditionState condition_state = ConditionState::NotConditional;
     if (is_conditional_type_designation(declared_rule.rule->declared_type)) {
         if (declared_rule.rule->condition_program_index != kInvalidStorageConditionProgramIndex) {
-            condition_state = detail::evaluate_condition_program(
-                scope_dataset,
-                declared_rule.rule->condition_program_index,
-                declared_rule.rule->path_node_index,
-                ConditionSource::AttributeType,
-                declared_rule.component,
-                declared_rule.rule,
-                context);
+            const auto program_index = declared_rule.rule->condition_program_index;
+            const auto path_node_index = declared_rule.rule->path_node_index;
+            const bool use_cache = program_cache != nullptr &&
+                                   detail::condition_program_is_cacheable(program_index);
+            if (use_cache) {
+                const auto cache_key =
+                    (static_cast<std::uint32_t>(program_index) << 16) | path_node_index;
+                bool found = false;
+                for (const auto& entry : program_cache->states) {
+                    if (entry.key == cache_key) {
+                        condition_state = entry.state;
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    condition_state = detail::evaluate_condition_program(
+                        scope_dataset,
+                        program_index,
+                        path_node_index,
+                        ConditionSource::AttributeType,
+                        declared_rule.component,
+                        declared_rule.rule,
+                        context);
+                    program_cache->states.push_back(
+                        detail::ConditionProgramCacheEntry{cache_key, condition_state});
+                }
+            } else {
+                condition_state = detail::evaluate_condition_program(
+                    scope_dataset,
+                    program_index,
+                    path_node_index,
+                    ConditionSource::AttributeType,
+                    declared_rule.component,
+                    declared_rule.rule,
+                    context);
+            }
         } else {
             condition_state = ConditionState::Indeterminate;
         }
@@ -759,6 +878,13 @@ inline void collect_scope_datasets_recursive(
             condition_state,
             declared_rule.rule->may_be_present_otherwise),
     };
+}
+
+[[nodiscard]] inline EvaluatedRuleRef evaluate_rule(
+    const DataSet& scope_dataset,
+    DeclaredRuleRef declared_rule,
+    const ConditionEvaluationContext& context = {}) {
+    return evaluate_rule(scope_dataset, declared_rule, nullptr, context);
 }
 
 [[nodiscard]] inline std::vector<DeclaredRuleRef> find_rule_candidates(

@@ -20,6 +20,25 @@ def _make_basic_text_sr_with_mixed_value_types() -> dicom.DataSet:
     return ds
 
 
+def _make_nested_basic_text_sr() -> dicom.DataSet:
+    ds = dicom.DataSet()
+    ds.set_value("SOPClassUID", "1.2.840.10008.5.1.4.1.1.88.11")
+
+    root = ds.ensure_dataelement("ContentSequence", dicom.VR.SQ).sequence
+
+    container_item = root.add_dataset()
+    container_item.set_value("ValueType", "CONTAINER")
+    container_item.set_value("RelationshipType", "CONTAINS")
+
+    nested = container_item.ensure_dataelement("ContentSequence", dicom.VR.SQ).sequence
+    text_item = nested.add_dataset()
+    text_item.set_value("ValueType", "TEXT")
+    text_item.set_value("RelationshipType", "CONTAINS")
+    text_item.set_value("TextValue", "hello")
+
+    return ds
+
+
 def _ct_storage_uid() -> str:
     return "1.2.840.10008.5.1.4.1.1.2"
 
@@ -39,11 +58,21 @@ def _nested_effective_rows(ds: dicom.DataSet, keyword: str) -> list[dict]:
 def test_list_effective_storage_attributes_uses_item_local_dataset_scope():
     ds = _make_basic_text_sr_with_mixed_value_types()
 
+    all_rows = dicom.list_effective_storage_attributes(
+        ds,
+        include_prohibited=True,
+    )
     person_name_rows = _nested_effective_rows(ds, "PersonName")
     text_value_rows = _nested_effective_rows(ds, "TextValue")
+    all_person_name_rows = [row for row in all_rows if row["keyword"] == "PersonName"]
+    all_text_value_rows = [row for row in all_rows if row["keyword"] == "TextValue"]
 
     assert len(person_name_rows) == 2
     assert len(text_value_rows) == 2
+    assert len(all_person_name_rows) == 2
+    assert len(all_text_value_rows) == 2
+    assert all(row["path"].startswith("0040A730/") for row in all_person_name_rows)
+    assert all(row["path"].startswith("0040A730/") for row in all_text_value_rows)
 
     assert sum(
         row["effective_type_name"] == "type1" and row["condition_state_name"] == "active"
@@ -62,6 +91,25 @@ def test_list_effective_storage_attributes_uses_item_local_dataset_scope():
         row["effective_type_name"] == "prohibited" and row["condition_state_name"] == "inactive"
         for row in text_value_rows
     ) == 1
+
+
+def test_list_effective_storage_attributes_handles_recursive_sr_items():
+    ds = _make_nested_basic_text_sr()
+
+    rows = [
+        row
+        for row in dicom.list_effective_storage_attributes(
+            ds,
+            keyword="TextValue",
+            include_prohibited=True,
+        )
+        if row["keyword"] == "TextValue"
+    ]
+
+    assert any(
+        row["effective_type_name"] == "type1" and row["condition_state_name"] == "active"
+        for row in rows
+    )
 
 
 def test_make_storage_classifier_falls_back_to_media_storage_sop_class_uid_for_dataset():
