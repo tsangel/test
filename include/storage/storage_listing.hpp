@@ -189,29 +189,36 @@ inline void append_context_rule_candidates(
     const TraversalComponentState& state,
     std::vector<const ComponentAttributeRuleEntry*>& candidates) {
     if (!state.use_context_traversal || state.module_info.evaluated.component == nullptr ||
-        state.traversal.path_stack.empty()) {
+        state.traversal.active_context_indices.empty()) {
         return;
     }
-    for (const auto rule_index : find_active_storage_context_rule_indices(state.traversal)) {
-        if (rule_index >= kComponentAttributeRuleRegistry.size()) {
+    const bool root_frame = state.traversal.path_stack.empty();
+    for (const auto context_index : state.traversal.active_context_indices) {
+        const auto* context = find_storage_context_entry(context_index);
+        if (context == nullptr || (root_frame && !context->is_root)) {
             continue;
         }
-        const auto* rule = &kComponentAttributeRuleRegistry[rule_index];
-        if (rule->component_section_id() !=
-            state.module_info.evaluated.component->component_section_id()) {
-            continue;
-        }
-        bool local_to_current_recursive_frame = true;
-        for (const auto recursive_sequence_tag : state.recursive_sequence_tags) {
-            if (storage_path_node_contains_tag(rule->path_node_index, recursive_sequence_tag)) {
-                local_to_current_recursive_frame = false;
-                break;
+        for (const auto rule_index : storage_context_rule_indices(*context)) {
+            if (rule_index >= kComponentAttributeRuleRegistry.size()) {
+                continue;
             }
+            const auto* rule = &kComponentAttributeRuleRegistry[rule_index];
+            if (rule->component_section_id() !=
+                state.module_info.evaluated.component->component_section_id()) {
+                continue;
+            }
+            bool local_to_current_recursive_frame = true;
+            for (const auto recursive_sequence_tag : state.recursive_sequence_tags) {
+                if (storage_path_node_contains_tag(rule->path_node_index, recursive_sequence_tag)) {
+                    local_to_current_recursive_frame = false;
+                    break;
+                }
+            }
+            if (!local_to_current_recursive_frame) {
+                continue;
+            }
+            append_unique_rule_candidate(candidates, rule);
         }
-        if (!local_to_current_recursive_frame) {
-            continue;
-        }
-        append_unique_rule_candidate(candidates, rule);
     }
 }
 

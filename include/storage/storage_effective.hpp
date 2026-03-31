@@ -306,18 +306,16 @@ inline void append_unresolved_condition(
         return false;
     }
     const auto expected = trim_ascii(expected_lower);
-    if (const auto value = element.to_string_view()) {
-        const auto trimmed = trim_ascii(*value);
-        if (trimmed.find('\\') == std::string_view::npos) {
-            return ascii_matches_lower_literal(trim_ascii(*value), expected);
-        }
-    }
     if (const auto values = element.to_string_views()) {
         for (const auto value : *values) {
             if (ascii_matches_lower_literal(trim_ascii(value), expected)) {
                 return true;
             }
         }
+        return false;
+    }
+    if (const auto value = element.to_string_view()) {
+        return ascii_matches_lower_literal(trim_ascii(*value), expected);
     }
     if (const auto value = element.to_utf8_string()) {
         return ascii_matches_lower_literal(trim_ascii(*value), expected);

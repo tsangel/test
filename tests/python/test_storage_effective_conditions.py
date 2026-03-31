@@ -43,6 +43,14 @@ def _ct_storage_uid() -> str:
     return "1.2.840.10008.5.1.4.1.1.2"
 
 
+def _make_rt_image_storage(*image_type_values: str) -> dicom.DataSet:
+    ds = dicom.DataSet()
+    ds.set_value("SOPClassUID", "1.2.840.10008.5.1.4.1.1.481.1")
+    if image_type_values:
+        ds.set_value("ImageType", list(image_type_values))
+    return ds
+
+
 def _nested_effective_rows(ds: dicom.DataSet, keyword: str) -> list[dict]:
     return [
         row
@@ -110,6 +118,69 @@ def test_list_effective_storage_attributes_handles_recursive_sr_items():
         row["effective_type_name"] == "type1" and row["condition_state_name"] == "active"
         for row in rows
     )
+
+
+def test_list_effective_storage_attributes_keeps_root_rules_for_context_modules():
+    ds = _make_rt_image_storage()
+
+    rows = [
+        row
+        for row in dicom.list_effective_storage_attributes(
+            ds,
+            keyword="ImageType",
+            include_prohibited=True,
+        )
+        if row["keyword"] == "ImageType"
+        and row["path"] == "00080008"
+        and row["component_section_id"] == "sect_C.8.8.2"
+    ]
+
+    assert len(rows) == 1
+    assert rows[0]["condition_state_name"] == "not_conditional"
+    assert rows[0]["effective_type_name"] == "type1"
+
+
+def test_list_effective_storage_attributes_matches_multivalued_eqtext_conditions():
+    ds = _make_rt_image_storage("ORIGINAL", "PRIMARY", "PORTAL")
+    exposure_sequence = ds.ensure_dataelement("ExposureSequence", dicom.VR.SQ).sequence
+    exposure_sequence.add_dataset()
+
+    rows = [
+        row
+        for row in dicom.list_effective_storage_attributes(
+            ds,
+            keyword="MetersetExposure",
+            include_prohibited=True,
+        )
+        if row["keyword"] == "MetersetExposure"
+        and row["path"] == "30020030/30020032"
+        and row["component_section_id"] == "sect_C.8.8.2"
+    ]
+
+    assert any(
+        row["condition_state_name"] == "active" and row["effective_type_name"] == "type2"
+        for row in rows
+    )
+
+
+def test_list_effective_storage_attributes_keeps_root_conditional_rt_image_rules():
+    ds = _make_rt_image_storage("ORIGINAL", "PRIMARY", "PORTAL")
+
+    rows = [
+        row
+        for row in dicom.list_effective_storage_attributes(
+            ds,
+            keyword="ReportedValuesOrigin",
+            include_prohibited=True,
+        )
+        if row["keyword"] == "ReportedValuesOrigin"
+        and row["path"] == "3002000A"
+        and row["component_section_id"] == "sect_C.8.8.2"
+    ]
+
+    assert len(rows) == 1
+    assert rows[0]["condition_state_name"] == "active"
+    assert rows[0]["effective_type_name"] == "type2"
 
 
 def test_make_storage_classifier_falls_back_to_media_storage_sop_class_uid_for_dataset():
