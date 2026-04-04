@@ -106,7 +106,10 @@ values at or above the threshold become `BulkDataURI`.
 
 ### `bulk_data_uri_template`
 
-Template used for non-PixelData bulk elements when `bulk_data="uri"`.
+Template used for bulk elements when `bulk_data="uri"`.
+
+`PixelData (7FE0,0010)` also uses this template unless
+`pixel_data_uri_template` is set.
 
 Supported placeholders:
 
@@ -144,7 +147,8 @@ json_text, bulk_parts = df.write_json(
 ```
 
 Use this when your server exposes frame-oriented pixel routes separately from
-other bulk data.
+other bulk data. If you do not set this override, `PixelData` falls back to
+`bulk_data_uri_template`.
 
 ### Write `charset_errors`
 

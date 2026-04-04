@@ -17,7 +17,7 @@ import dicomsdl as dicom
 - `tag_to_keyword(tag: Tag | str) -> str`: resolve a tag to a keyword.
 - `read_file(path) -> DicomFile`: load a DICOM file/session from disk.
 - `read_bytes(data, name="inline") -> DicomFile`: load from an in-memory buffer.
-- `read_json(source, name="<memory>", charset_errors="strict") -> list[(DicomFile, list[JsonBulkRef])]`: read DICOM JSON from UTF-8 text or bytes already in memory.
+- `read_json(source, name="<memory>", charset_errors="strict") -> list[tuple[DicomFile, list[JsonBulkRef]]]`: read DICOM JSON from UTF-8 text or bytes already in memory.
 - `generate_uid() -> str`: create a new UID under the DICOMSDL prefix.
 - `append_uid(base_uid: str, component: int) -> str`: append one UID component with fallback policy.
 

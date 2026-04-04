@@ -105,8 +105,10 @@ C++ 取值：
 
 ### `bulk_data_uri_template`
 
-在 `bulk_data="uri"` 时，用于非 `PixelData` bulk element 的
-URI template。
+在 `bulk_data="uri"` 时，用于 bulk element 的 URI template。
+
+如果没有单独设置 `pixel_data_uri_template`，`PixelData (7FE0,0010)`
+也会使用这个 template。
 
 支持的 placeholder：
 
@@ -144,7 +146,8 @@ json_text, bulk_parts = df.write_json(
 ```
 
 当服务器把面向 frame 的 pixel route 与其他 bulk data route 分开暴露时，
-通常会这样使用。
+通常会这样使用。如果不设置这个 override，`PixelData` 也会回退到
+`bulk_data_uri_template`。
 
 ### Write `charset_errors`
 
