@@ -277,6 +277,71 @@ void test_multiframe_compressed_bulk_uses_frame_uris() {
 	    "non-PixelData bulk part should continue borrowing the generic value span");
 }
 
+void test_singleframe_compressed_bulk_uses_frame_uri_and_roundtrips_reader_refs() {
+	dicom::DicomFile file;
+	auto& study_uid = file.add_dataelement("StudyInstanceUID"_tag, dicom::VR::UI);
+	if (!study_uid.from_uid_string("1.2.826.0.1.3680043.10.543.51")) {
+		fail("single-frame StudyInstanceUID assignment failed");
+	}
+	auto& series_uid = file.add_dataelement("SeriesInstanceUID"_tag, dicom::VR::UI);
+	if (!series_uid.from_uid_string("1.2.826.0.1.3680043.10.543.52")) {
+		fail("single-frame SeriesInstanceUID assignment failed");
+	}
+	auto& instance_uid = file.add_dataelement("SOPInstanceUID"_tag, dicom::VR::UI);
+	if (!instance_uid.from_uid_string("1.2.826.0.1.3680043.10.543.53")) {
+		fail("single-frame SOPInstanceUID assignment failed");
+	}
+	auto& transfer_syntax =
+	    file.add_dataelement(dicom::Tag(0x0002u, 0x0010u), dicom::VR::UI);
+	if (!transfer_syntax.from_transfer_syntax_uid("JPEGLSLossless"_uid)) {
+		fail("single-frame TransferSyntaxUID assignment failed");
+	}
+
+	file.reset_encapsulated_pixel_data(1);
+	file.set_encoded_pixel_frame(0, std::vector<std::uint8_t>{0x11u, 0x22u, 0x33u});
+
+	dicom::JsonWriteOptions options;
+	options.include_group_0002 = true;
+	options.bulk_data_mode = dicom::JsonBulkDataMode::uri;
+	options.bulk_data_threshold = 1u;
+	options.pixel_data_uri_template =
+	    "/dicomweb/studies/{study}/series/{series}/instances/{instance}/frames";
+
+	const auto result = file.write_json(options);
+	const std::string base_uri =
+	    "/dicomweb/studies/1.2.826.0.1.3680043.10.543.51/"
+	    "series/1.2.826.0.1.3680043.10.543.52/"
+	    "instances/1.2.826.0.1.3680043.10.543.53/frames";
+	expect_contains(
+	    result.json,
+	    "\"7FE00010\":{\"vr\":\"OB\",\"BulkDataURI\":\"" + base_uri + "\"}",
+	    "single-frame compressed PixelData should keep the frame-base BulkDataURI in JSON");
+	expect_true(
+	    result.bulk_parts.size() == 1u,
+	    "single-frame compressed PixelData should emit one downloadable frame part");
+	expect_true(
+	    result.bulk_parts[0].uri == base_uri + "/1",
+	    "single-frame compressed PixelData should expose /frames/1 in bulk_parts");
+	const auto frame0 = file.encoded_pixel_frame_view(0);
+	expect_true(
+	    result.bulk_parts[0].bytes().data() == frame0.data() &&
+	        result.bulk_parts[0].bytes().size() == frame0.size(),
+	    "single-frame compressed bulk part should borrow the encoded frame bytes");
+	expect_true(
+	    result.bulk_parts[0].media_type == "image/jls" &&
+	        result.bulk_parts[0].transfer_syntax_uid == "JPEGLSLossless"_uid.value(),
+	    "single-frame compressed bulk part should carry JPEG-LS metadata");
+
+	const auto reread = dicom::read_json(
+	    reinterpret_cast<const std::uint8_t*>(result.json.data()), result.json.size());
+	expect_true(reread.items.size() == 1u, "round-trip JSON should produce one dataset");
+	expect_true(
+	    reread.items[0].pending_bulk_data.size() == 1u &&
+	        reread.items[0].pending_bulk_data[0].kind == dicom::JsonBulkTargetKind::pixel_frame &&
+	        reread.items[0].pending_bulk_data[0].uri == result.bulk_parts[0].uri,
+	    "read_json should request the same single-frame URI that write_json emits");
+}
+
 void test_multiframe_native_bulk_uses_frame_uris() {
 	dicom::DicomFile file;
 	auto& study_uid = file.add_dataelement("StudyInstanceUID"_tag, dicom::VR::UI);
@@ -488,6 +553,7 @@ int main() {
 	test_bulk_uri_mode_collects_parts();
 	test_omit_mode_keeps_vr_only();
 	test_multiframe_compressed_bulk_uses_frame_uris();
+	test_singleframe_compressed_bulk_uses_frame_uri_and_roundtrips_reader_refs();
 	test_multiframe_native_bulk_uses_frame_uris();
 	test_nested_bulk_uses_dotted_tag_paths_for_tag_placeholder();
 	test_missing_template_placeholder_throws();
