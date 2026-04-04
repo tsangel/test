@@ -2,6 +2,10 @@
 
 This page covers disk and memory input, partial loading, and the main output paths for files, bytes, and streams.
 
+For DICOM JSON Model read/write, including `read_json(...)`,
+`write_json(...)`, `BulkDataURI`, and `set_bulk_data(...)`, see
+[DICOM JSON](dicom_json.md).
+
 ## How File I/O Works
 
 - `read_file(...)` and `read_bytes(...)` create a `DicomFile` and parse input up to `load_until` immediately.
@@ -210,6 +214,7 @@ Notes:
 
 ## Related docs
 
+- [DICOM JSON](dicom_json.md)
 - [Core Objects](core_objects.md)
 - [C++ DataSet Guide](cpp_dataset_guide.md)
 - [Python DataSet Guide](python_dataset_guide.md)

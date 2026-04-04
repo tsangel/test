@@ -15,6 +15,22 @@ Use that page for:
 - presence checks
 - explicit VR assignment for private tags
 
+DICOM JSON Model 읽기/쓰기에 대해서는
+[DICOM JSON](../guide/dicom_json.md)을 참고하세요.
+
+## DICOM JSON
+
+- `read_json(source, name="<memory>", charset_errors="strict")`는 UTF-8
+  DICOM JSON 텍스트에서 top-level 데이터세트 객체 하나 또는 데이터세트 객체
+  배열 하나를 읽습니다.
+- Python에서 `DicomFile.write_json(...)`와 `DataSet.write_json(...)`는
+  `(json_text, bulk_parts)`를 반환합니다.
+- `JsonBulkRef`는 아직 다운로드해서 `set_bulk_data(...)`로
+  `DicomFile`에 채워 넣어야 하는 `BulkDataURI` payload를 설명합니다.
+- `read_json(...)`는 opaque presigned URL이나 토큰이 붙은 다운로드 URL은
+  그대로 보존하고, URI 모양이 frame 확장을 명확히 지원할 때만 frame URL을
+  합성합니다.
+
 ## Selected read
 
 - `DataSetSelection([...])`는 canonicalized nested selection tree를 만듭니다.

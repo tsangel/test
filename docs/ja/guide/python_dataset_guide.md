@@ -17,8 +17,13 @@ import dicomsdl as dicom
 - `tag_to_keyword(tag: Tag | str) -> str`: タグをキーワードに解決します。
 - `read_file(path) -> DicomFile`: DICOM ファイル/セッションをディスクからロードします。
 - `read_bytes(data, name="inline") -> DicomFile`: メモリ内バッファからロードします。
+- `read_json(source, name="<memory>", charset_errors="strict") -> list[(DicomFile, list[JsonBulkRef])]`: メモリ上にある UTF-8 DICOM JSON テキストまたはバイト列を読み込みます。
 - `generate_uid() -> str`: DICOMSDL プレフィックスの下に新しい UID を作成します。
 - `append_uid(base_uid: str, component: int) -> str`: フォールバック ポリシーを含む 1 つの UID コンポーネントを追加します。
+
+`write_json(...)`、`BulkDataURI`、presigned URL やトークン付き
+ダウンロード URL の保持、`set_bulk_data(...)` を含む JSON 専用フローに
+ついては [DICOM JSON](dicom_json.md) を参照してください。
 
 ## DicomSDL と DICOM のマッピング方法
 

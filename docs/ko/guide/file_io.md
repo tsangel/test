@@ -2,6 +2,10 @@
 
 이 페이지에서는 디스크 및 메모리 입력, 부분 로딩, 파일, 바이트 및 스트림의 기본 출력 경로를 다룹니다.
 
+DICOM JSON Model 읽기/쓰기, `read_json(...)`, `write_json(...)`,
+`BulkDataURI`, `set_bulk_data(...)`에 대해서는
+[DICOM JSON](dicom_json.md)을 참고하세요.
+
 ## 파일 I/O 작동 방식
 
 - `read_file(...)` 및 `read_bytes(...)`는 `DicomFile`를 생성하고 최대 `load_until`까지 입력을 즉시 구문 분석합니다.
@@ -210,6 +214,7 @@ df.write_with_transfer_syntax(Path("out_htj2k_lossless.dcm"), "HTJ2KLossless")
 
 ## 관련 문서
 
+- [DICOM JSON](dicom_json.md)
 - [핵심 개체](core_objects.md)
 - [C++ 데이터세트 가이드](cpp_dataset_guide.md)
 - [Python 데이터세트 가이드](python_dataset_guide.md)

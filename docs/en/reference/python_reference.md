@@ -11,6 +11,21 @@ Use that page for:
 - presence checks
 - explicit VR assignment for private tags
 
+For DICOM JSON Model read/write, see [DICOM JSON](../guide/dicom_json.md).
+
+## DICOM JSON
+
+- `read_json(source, name="<memory>", charset_errors="strict")` reads one
+  top-level dataset object or a top-level array of dataset objects from UTF-8
+  DICOM JSON text.
+- `DicomFile.write_json(...)` and `DataSet.write_json(...)` return
+  `(json_text, bulk_parts)` in Python.
+- `JsonBulkRef` describes unresolved `BulkDataURI` payloads that still need to
+  be downloaded and filled back into the `DicomFile` with `set_bulk_data(...)`.
+- `read_json(...)` keeps opaque presigned or tokenized download URLs unchanged
+  and only synthesizes frame URLs when the URI shape explicitly supports that
+  expansion.
+
 ## Selected read
 
 - `DataSetSelection([...])` builds a canonicalized nested selection tree.

@@ -17,8 +17,13 @@ import dicomsdl as dicom
 - `tag_to_keyword(tag: Tag | str) -> str`：将标签解析为关键字。
 - `read_file(path) -> DicomFile`：从磁盘加载 DICOM 文件/会话。
 - `read_bytes(data, name="inline") -> DicomFile`：从内存缓冲区加载。
+- `read_json(source, name="<memory>", charset_errors="strict") -> list[(DicomFile, list[JsonBulkRef])]`：读取内存中已有的 UTF-8 DICOM JSON 文本或字节。
 - `generate_uid() -> str`：在 DICOMSDL 前缀下创建一个新的 UID。
 - `append_uid(base_uid: str, component: int) -> str`：附加一个具有后备策略的 UID 组件。
+
+关于 `write_json(...)`、`BulkDataURI`、presigned URL 或带签名/令牌的下载
+URL 保留以及 `set_bulk_data(...)` 等 JSON 专用流程，请参阅
+[DICOM JSON](dicom_json.md)。
 
 ## DicomSDL 如何映射到 DICOM
 

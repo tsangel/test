@@ -2,6 +2,10 @@
 
 本页涵盖磁盘和内存输入、部分加载以及文件、字节和流的主要输出路径。
 
+关于 DICOM JSON Model 的读写，包括 `read_json(...)`、`write_json(...)`、
+`BulkDataURI` 和 `set_bulk_data(...)`，请参阅
+[DICOM JSON](dicom_json.md)。
+
 ## 文件 I/O 的工作原理
 
 - `read_file(...)` 和 `read_bytes(...)` 创建 `DicomFile` 并立即解析输入到 `load_until`。
@@ -210,6 +214,7 @@ df.write_with_transfer_syntax(Path("out_htj2k_lossless.dcm"), "HTJ2KLossless")
 
 ## 相关文档
 
+- [DICOM JSON](dicom_json.md)
 - [核心对象](core_objects.md)
 - [C++ 数据集指南](cpp_dataset_guide.md)
 - [Python数据集指南](python_dataset_guide.md)
