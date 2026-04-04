@@ -165,6 +165,41 @@ def test_write_json_singleframe_compressed_uses_frame_uri_and_matches_read_json(
     assert refs[0].uri == uri
 
 
+def test_write_json_singleframe_compressed_generic_bulk_uri_uses_frame_payload_uri():
+    df = dicom.DicomFile()
+    assert df.set_value("StudyInstanceUID", "1.2.826.0.1.3680043.10.543.61")
+    assert df.set_value("SeriesInstanceUID", "1.2.826.0.1.3680043.10.543.62")
+    assert df.set_value("SOPInstanceUID", "1.2.826.0.1.3680043.10.543.63")
+    assert df.set_value("TransferSyntaxUID", "1.2.840.10008.1.2.4.80")
+    df.add_encoded_pixel_frame(b"\x21\x22\x23")
+
+    json_text, bulk_parts = df.write_json(
+        include_group_0002=True,
+        bulk_data="uri",
+        bulk_data_threshold=4,
+        bulk_data_uri_template="/dicomweb/studies/{study}/series/{series}/instances/{instance}/bulk/{tag}",
+    )
+
+    base_uri = (
+        "/dicomweb/studies/1.2.826.0.1.3680043.10.543.61/"
+        "series/1.2.826.0.1.3680043.10.543.62/"
+        "instances/1.2.826.0.1.3680043.10.543.63/bulk/7FE00010"
+    )
+    assert f'"7FE00010":{{"vr":"OB","BulkDataURI":"{base_uri}"}}' in json_text
+    assert len(bulk_parts) == 1
+    uri, payload, media_type, transfer_syntax_uid = bulk_parts[0]
+    assert uri == f"{base_uri}/frames/1"
+    assert bytes(payload) == b"\x21\x22\x23"
+    assert media_type == "image/jls"
+    assert transfer_syntax_uid == "1.2.840.10008.1.2.4.80"
+
+    items = dicom.read_json(json_text)
+    _df2, refs = items[0]
+    assert len(refs) == 1
+    assert refs[0].kind == dicom.JsonBulkTargetKind.pixel_frame
+    assert refs[0].uri == uri
+
+
 def test_write_json_multiframe_native_uses_one_bulk_uri():
     df = dicom.DicomFile()
     assert df.set_value("StudyInstanceUID", "1.2.826.0.1.3680043.10.543.31")

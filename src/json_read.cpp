@@ -413,6 +413,14 @@ constexpr Tag kTransferSyntaxUidTag{0x0002u, 0x0010u};
 	       path == "PixelData" || path == "FloatPixelData" || path == "DoubleFloatPixelData";
 }
 
+[[nodiscard]] std::string frame_bulk_uri(std::string_view base_uri, std::size_t frame_index) {
+	const auto frame_number = frame_index + 1u;
+	if (base_uri.size() >= 7u && base_uri.substr(base_uri.size() - 7u) == "/frames") {
+		return fmt::format("{}/{}", base_uri, frame_number);
+	}
+	return fmt::format("{}/frames/{}", base_uri, frame_number);
+}
+
 [[nodiscard]] std::string bulk_media_type_for_transfer_syntax(
     uid::WellKnown transfer_syntax, bool pixel_data) {
 	if (!pixel_data || !transfer_syntax.valid() || transfer_syntax.is_uncompressed()) {
@@ -1377,8 +1385,6 @@ void JsonReadParser::postprocess_pending_bulk(
 	for (const auto& ref : pending_bulk_data) {
 		if (ref.kind == JsonBulkTargetKind::element &&
 		    ref.path == "7FE00010" &&
-		    ref.uri.size() >= 7u &&
-		    ref.uri.substr(ref.uri.size() - 7u) == "/frames" &&
 		    pixel_data_frames_are_encapsulated) {
 			const auto number_of_frames =
 			    static_cast<std::size_t>(
@@ -1388,7 +1394,7 @@ void JsonReadParser::postprocess_pending_bulk(
 				frame_ref.kind = JsonBulkTargetKind::pixel_frame;
 				frame_ref.path = ref.path;
 				frame_ref.frame_index = i;
-				frame_ref.uri = fmt::format("{}/{}", ref.uri, i + 1u);
+				frame_ref.uri = frame_bulk_uri(ref.uri, i);
 				frame_ref.vr = ref.vr;
 				apply_bulk_ref_metadata(frame_ref, transfer_syntax);
 				expanded.push_back(std::move(frame_ref));

@@ -66,6 +66,23 @@ def test_read_json_available_transfer_syntax_uid_does_not_expand_frame_refs():
     assert refs[0].transfer_syntax_uid == ""
 
 
+def test_read_json_encapsulated_generic_bulk_uri_expands_frame_refs():
+    json_text = (
+        '{"00020010":{"vr":"UI","Value":["1.2.840.10008.1.2.4.50"]},'
+        '"00280008":{"vr":"IS","Value":[1]},'
+        '"7FE00010":{"vr":"OB","BulkDataURI":"instances/1/bulk/7FE00010"}}'
+    )
+
+    items = dicom.read_json(json_text)
+    _df, refs = items[0]
+    assert len(refs) == 1
+    assert refs[0].kind == dicom.JsonBulkTargetKind.pixel_frame
+    assert refs[0].frame_index == 0
+    assert refs[0].uri == "instances/1/bulk/7FE00010/frames/1"
+    assert refs[0].media_type == "image/jpeg"
+    assert refs[0].transfer_syntax_uid == "1.2.840.10008.1.2.4.50"
+
+
 def test_read_json_set_bulk_data_populates_targets():
     native_json = '{"7FE00010":{"vr":"OW","BulkDataURI":"instances/1/frames"}}'
     native_items = dicom.read_json(native_json)

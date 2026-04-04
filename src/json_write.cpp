@@ -800,8 +800,7 @@ void append_bulk_parts_for_uri(
 	const auto [media_type, transfer_syntax_uid] = bulk_metadata_for_element(dataset, element);
 	if (const auto* pixel_sequence = element.as_pixel_sequence()) {
 		const auto frame_count = pixel_sequence->number_of_frames();
-		const bool frame_style_uri = has_suffix(base_uri, "/frames");
-		if (frame_count > 1u || (frame_style_uri && frame_count >= 1u)) {
+		if (frame_count >= 1u) {
 			if (!context.seen_bulk_uris.insert(std::string(base_uri)).second) {
 				diag::throw_exception(fmt::format(
 				    "DataSet::write_json reason=duplicate BulkDataURI generated uri={}. "
