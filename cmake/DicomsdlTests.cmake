@@ -39,6 +39,26 @@ if(BUILD_TESTING)
     add_test(NAME charset_smoke COMMAND dicomsdl_charset_smoke)
     set_tests_properties(charset_smoke PROPERTIES LABELS "dicomsdl")
 
+    add_executable(dicomsdl_json_write_smoke
+        tests/json_write_smoke.cpp
+    )
+    target_link_libraries(dicomsdl_json_write_smoke PRIVATE dicomsdl)
+    add_test(NAME json_write_smoke COMMAND dicomsdl_json_write_smoke)
+    set_tests_properties(json_write_smoke PROPERTIES
+        LABELS "dicomsdl"
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+
+    add_executable(dicomsdl_json_read_api_smoke
+        tests/json_read_api_smoke.cpp
+    )
+    target_link_libraries(dicomsdl_json_read_api_smoke PRIVATE dicomsdl)
+    add_test(NAME json_read_api_smoke COMMAND dicomsdl_json_read_api_smoke)
+    set_tests_properties(json_read_api_smoke PROPERTIES
+        LABELS "dicomsdl"
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+
     add_executable(dicomsdl_charset_generated_tables_smoke
         tests/charset_generated_tables_smoke.cpp
     )

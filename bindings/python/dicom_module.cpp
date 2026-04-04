@@ -51,6 +51,7 @@ namespace {
 std::string_view vr_to_string_view(const VR& vr);
 nb::object readonly_memoryview_from_span(
     const void* data, std::size_t size, nb::handle owner = nb::handle());
+std::vector<std::uint8_t> pybuffer_to_bytes(nb::handle value);
 
 PyObject* new_reference_or_null(PyObject* obj) noexcept {
 	if (obj == nullptr) {
@@ -2912,6 +2913,28 @@ dicom::CharsetDecodeErrorPolicy parse_charset_decode_error_policy(
 	        .c_str());
 }
 
+dicom::JsonBulkDataMode parse_json_bulk_data_mode(
+    nb::handle value, const char* argument_name) {
+	if (value.is_none()) {
+		return dicom::JsonBulkDataMode::inline_;
+	}
+	if (!nb::isinstance<nb::str>(value)) {
+		throw nb::type_error((std::string(argument_name) + " must be str or None").c_str());
+	}
+	const auto text = nb::cast<std::string>(value);
+	if (text == "inline") {
+		return dicom::JsonBulkDataMode::inline_;
+	}
+	if (text == "uri") {
+		return dicom::JsonBulkDataMode::uri;
+	}
+	if (text == "omit") {
+		return dicom::JsonBulkDataMode::omit;
+	}
+	throw nb::value_error(
+	    (std::string(argument_name) + " must be one of: 'inline', 'uri', 'omit'").c_str());
+}
+
 dicom::PersonNameGroup make_person_name_group(
     const std::vector<std::string>& components, std::string_view arg_name) {
 	if (components.size() > 5) {
@@ -2951,11 +2974,68 @@ dicom::WriteOptions make_write_options(
 	return options;
 }
 
+dicom::JsonWriteOptions make_json_write_options(
+    bool include_group_0002, nb::handle bulk_data, std::size_t bulk_data_threshold,
+    const std::string& bulk_data_uri_template, const std::string& pixel_data_uri_template,
+    nb::handle charset_errors) {
+	dicom::JsonWriteOptions options;
+	options.include_group_0002 = include_group_0002;
+	options.bulk_data_mode = parse_json_bulk_data_mode(bulk_data, "bulk_data");
+	options.bulk_data_threshold = bulk_data_threshold;
+	options.bulk_data_uri_template = bulk_data_uri_template;
+	options.pixel_data_uri_template = pixel_data_uri_template;
+	options.charset_errors = parse_charset_decode_error_policy(charset_errors, "charset_errors");
+	return options;
+}
+
+dicom::JsonReadOptions make_json_read_options(nb::handle charset_errors) {
+	dicom::JsonReadOptions options;
+	options.charset_errors = parse_charset_encode_error_policy(charset_errors, "charset_errors");
+	return options;
+}
+
 nb::bytes to_python_bytes(std::vector<std::uint8_t>&& bytes) {
 	if (bytes.empty()) {
 		return nb::bytes("", 0);
 	}
 	return nb::bytes(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+}
+
+std::pair<std::string, std::vector<std::uint8_t>> json_source_to_named_buffer(
+    nb::handle source, std::string name) {
+	if (nb::isinstance<nb::str>(source)) {
+		auto text = nb::cast<std::string>(source);
+		return {std::move(name), std::vector<std::uint8_t>(text.begin(), text.end())};
+	}
+	return {std::move(name), pybuffer_to_bytes(source)};
+}
+
+nb::object json_write_result_to_python(
+    dicom::JsonWriteResult&& result, nb::handle owner) {
+	nb::list bulk_parts;
+	for (const auto& part : result.bulk_parts) {
+		const auto bytes = part.bytes();
+		bulk_parts.append(nb::make_tuple(
+		    nb::str(part.uri.c_str(), part.uri.size()),
+		    readonly_memoryview_from_span(bytes.data(), bytes.size(), owner),
+		    nb::str(part.media_type.c_str(), part.media_type.size()),
+		    nb::str(part.transfer_syntax_uid.c_str(), part.transfer_syntax_uid.size())));
+	}
+	return nb::make_tuple(
+	    nb::str(result.json.c_str(), result.json.size()),
+	    std::move(bulk_parts));
+}
+
+nb::object json_read_result_to_python(dicom::JsonReadResult&& result) {
+	nb::list items;
+	for (auto& item : result.items) {
+		nb::list pending_bulk_data;
+		for (const auto& ref : item.pending_bulk_data) {
+			pending_bulk_data.append(nb::cast(ref));
+		}
+		items.append(nb::make_tuple(nb::cast(std::move(item.file)), std::move(pending_bulk_data)));
+	}
+	return std::move(items);
 }
 
 nb::object generated_uid_or_none(std::optional<dicom::uid::Generated> uid) {
@@ -3911,6 +3991,41 @@ NB_MODULE(_dicomsdl, m) {
 		.def("skip_current_dataset", &PyDataSetWalkIterator::skip_current_dataset,
 		    "Prune the rest of the current dataset before the next iteration step.");
 
+	nb::enum_<dicom::JsonBulkTargetKind>(m, "JsonBulkTargetKind",
+	    "Destination kind for unresolved BulkDataURI entries returned by read_json().")
+		.value("element", dicom::JsonBulkTargetKind::element)
+		.value("pixel_frame", dicom::JsonBulkTargetKind::pixel_frame);
+
+	nb::class_<dicom::JsonBulkRef>(m, "JsonBulkRef",
+	    "Reference to unresolved DICOM JSON bulk content returned by read_json().")
+		.def(nb::init<>())
+		.def_rw("kind", &dicom::JsonBulkRef::kind,
+		    "Destination kind: whole element or encapsulated PixelData frame.")
+		.def_rw("path", &dicom::JsonBulkRef::path,
+		    "Tag-path destination such as '7FE00010' or '0040A730.0.0040A123'.")
+		.def_rw("frame_index", &dicom::JsonBulkRef::frame_index,
+		    "Zero-based frame index used only when kind == JsonBulkTargetKind.pixel_frame.")
+	.def_rw("uri", &dicom::JsonBulkRef::uri,
+		    "BulkDataURI that still needs to be downloaded or resolved.")
+		.def_rw("media_type", &dicom::JsonBulkRef::media_type,
+		    "DICOMweb media type for the bulk payload, or '' when unknown.")
+		.def_rw("transfer_syntax_uid", &dicom::JsonBulkRef::transfer_syntax_uid,
+		    "Transfer Syntax UID string for pixel payloads, or '' when unknown/not applicable.")
+		.def_rw("vr", &dicom::JsonBulkRef::vr,
+		    "Target VR parsed from the JSON attribute.")
+		.def("__repr__",
+		    [](const dicom::JsonBulkRef& self) {
+			    std::ostringstream oss;
+			    oss << "JsonBulkRef(kind="
+			        << (self.kind == dicom::JsonBulkTargetKind::pixel_frame ? "pixel_frame"
+			                                                                 : "element")
+			        << ", path='" << self.path << "', frame_index=" << self.frame_index
+			        << ", uri='" << self.uri << "', media_type='" << self.media_type
+			        << "', transfer_syntax_uid='" << self.transfer_syntax_uid
+			        << "', vr='" << vr_to_string_view(self.vr) << "')";
+			    return oss.str();
+		    });
+
 	nb::class_<DataSet>(m, "DataSet",
 	    "In-memory DICOM dataset. Created via read_file/read_bytes or directly.\n"
 	    "\n"
@@ -3974,6 +4089,61 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::arg("max_print_chars") = static_cast<std::size_t>(80),
 		    nb::arg("include_offset") = true,
 		    "Return a human-readable DataSet dump as text")
+		.def("write_json",
+		    [](DataSet& self, bool include_group_0002, nb::handle bulk_data,
+		        std::size_t bulk_data_threshold, const std::string& bulk_data_uri_template,
+		        const std::string& pixel_data_uri_template, nb::handle charset_errors) {
+			    return json_write_result_to_python(
+			        self.write_json(make_json_write_options(
+			            include_group_0002, bulk_data, bulk_data_threshold,
+			            bulk_data_uri_template, pixel_data_uri_template, charset_errors)),
+			        nb::cast(&self, nb::rv_policy::reference));
+		    },
+		    nb::kw_only(),
+		    nb::arg("include_group_0002") = false,
+		    nb::arg("bulk_data") = nb::str("inline"),
+		    nb::arg("bulk_data_threshold") = static_cast<std::size_t>(1024),
+		    nb::arg("bulk_data_uri_template") = "",
+		    nb::arg("pixel_data_uri_template") = "",
+		    nb::arg("charset_errors") = nb::str("strict"),
+		    "Serialize this DataSet using the DICOM JSON Model.\n"
+		    "\n"
+		    "Returns\n"
+		    "-------\n"
+		    "(json_text, bulk_parts) : tuple[str, list[tuple[str, memoryview, str, str]]]\n"
+		    "    `json_text` is the DICOM JSON payload. `bulk_parts` contains\n"
+		    "    `(uri, memoryview, media_type, transfer_syntax_uid)` tuples for\n"
+		    "    bulk values emitted via `BulkDataURI`.\n"
+		    "    Encapsulated multi-frame PixelData is returned one frame per bulk\n"
+		    "    part while the JSON keeps a single base `BulkDataURI`. Native\n"
+		    "    multi-frame PixelData remains one aggregate bulk part.\n"
+		    "    The returned memoryviews borrow the underlying DataSet/stream storage,\n"
+		    "    so keep the owning DataSet alive while using them.\n"
+		    "\n"
+		    "Parameters\n"
+		    "----------\n"
+		    "include_group_0002 : bool, optional\n"
+		    "    Include file meta group 0002 when present. Defaults to False.\n"
+		    "bulk_data : {'inline', 'uri', 'omit'}, optional\n"
+		    "    Bulk value policy. Defaults to 'inline'.\n"
+		    "bulk_data_threshold : int, optional\n"
+		    "    Minimum value-field size in bytes before `bulk_data='uri'` emits\n"
+		    "    `BulkDataURI`. Defaults to 1024.\n"
+		    "bulk_data_uri_template : str, optional\n"
+		    "    URI template used when `bulk_data='uri'`. Supports placeholders\n"
+		    "    `{study}`, `{series}`, `{instance}`, and `{tag}`.\n"
+		    "    `{tag}` expands to the 8-digit tag at top level and to a dotted\n"
+		    "    tag path for nested sequence items, e.g. `22002200.0.12340012`.\n"
+		    "    Example:\n"
+		    "    `/dicomweb/studies/{study}/series/{series}/instances/{instance}/bulk/{tag}`\n"
+		    "pixel_data_uri_template : str, optional\n"
+		    "    Optional override for PixelData (7FE0,0010), useful for frame routes.\n"
+		    "    Example:\n"
+		    "    `/dicomweb/studies/{study}/series/{series}/instances/{instance}/frames`\n"
+		    "    Keep `bulk_data_uri_template` distinct for other bulk elements,\n"
+		    "    typically with `{tag}` in the path.\n"
+		    "charset_errors : {'strict', 'replace_fffd', 'replace_hex_escape'}, optional\n"
+		    "    Charset decode policy for text VRs. Defaults to 'strict'.")
 		.def("get_dataelement",
 		    [](DataSet& self, nb::object key) -> DataElement& {
 			    return dataset_lookup_dataelement_py(
@@ -5000,6 +5170,67 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::arg("write_file_meta") = true,
 		    nb::arg("keep_existing_meta") = true,
 		    "Serialize this DicomFile to bytes using the current dataset state.")
+		.def("write_json",
+		    [](DicomFile& self, bool include_group_0002, nb::handle bulk_data,
+		        std::size_t bulk_data_threshold, const std::string& bulk_data_uri_template,
+		        const std::string& pixel_data_uri_template, nb::handle charset_errors) {
+			    return json_write_result_to_python(
+			        self.write_json(make_json_write_options(
+			            include_group_0002, bulk_data, bulk_data_threshold,
+			            bulk_data_uri_template, pixel_data_uri_template, charset_errors)),
+			        nb::cast(&self, nb::rv_policy::reference));
+		    },
+		    nb::kw_only(),
+		    nb::arg("include_group_0002") = false,
+		    nb::arg("bulk_data") = nb::str("inline"),
+		    nb::arg("bulk_data_threshold") = static_cast<std::size_t>(1024),
+		    nb::arg("bulk_data_uri_template") = "",
+		    nb::arg("pixel_data_uri_template") = "",
+		    nb::arg("charset_errors") = nb::str("strict"),
+		    "Serialize this DicomFile root dataset using the DICOM JSON Model.\n"
+		    "\n"
+		    "Returns\n"
+		    "-------\n"
+		    "(json_text, bulk_parts) : tuple[str, list[tuple[str, memoryview, str, str]]]\n"
+		    "    `json_text` is the DICOM JSON payload. `bulk_parts` contains\n"
+		    "    `(uri, memoryview, media_type, transfer_syntax_uid)` tuples for\n"
+		    "    bulk values emitted via `BulkDataURI`.\n"
+		    "    Encapsulated multi-frame PixelData is returned one frame per bulk\n"
+		    "    part while the JSON keeps a single base `BulkDataURI`. Native\n"
+		    "    multi-frame PixelData remains one aggregate bulk part.\n"
+		    "    The returned memoryviews borrow the underlying DicomFile storage,\n"
+		    "    so keep the owning DicomFile alive while using them.\n"
+		    "\n"
+		    "Keyword options match DataSet.write_json().\n"
+		    "\n"
+		    "Example bulk_data_uri_template:\n"
+		    "    `/dicomweb/studies/{study}/series/{series}/instances/{instance}/bulk/{tag}`\n"
+		    "Here `{tag}` expands to the 8-digit tag at top level and to a dotted\n"
+		    "tag path for nested sequence items.\n"
+		    "Example pixel_data_uri_template:\n"
+		    "    `/dicomweb/studies/{study}/series/{series}/instances/{instance}/frames`\n"
+		    "Use both together when a dataset may contain bulk attributes besides PixelData.")
+		.def("set_bulk_data",
+		    [](DicomFile& self, const dicom::JsonBulkRef& ref, nb::handle source) {
+			    auto bytes = pybuffer_to_bytes(source);
+			    return self.set_bulk_data(
+			        ref, std::span<const std::uint8_t>(bytes.data(), bytes.size()));
+		    },
+		    nb::arg("ref"),
+		    nb::arg("source"),
+		    "Copy downloaded JSON BulkDataURI content into the referenced destination.\n"
+		    "\n"
+		    "Parameters\n"
+		    "----------\n"
+		    "ref : JsonBulkRef\n"
+		    "    Pending bulk reference returned by read_json().\n"
+		    "source : bytes-like\n"
+		    "    Downloaded payload bytes for that URI.\n"
+		    "\n"
+		    "Returns\n"
+		    "-------\n"
+		    "bool\n"
+		    "    True when the payload was accepted and written into the DicomFile.")
 		.def("__iter__",
 		    [](DicomFile& self) {
 			    return PyDataElementIterator(self.dataset());
@@ -5327,6 +5558,46 @@ NB_MODULE(_dicomsdl, m) {
 	    nb::arg("source"),
 	    nb::arg("window"),
 	    "Apply a WindowTransform and return a NumPy array backed by owned output storage.");
+
+	m.def("read_json",
+	    [](nb::handle source, const std::string& name, nb::handle charset_errors) {
+		    auto [buffer_name, buffer] = json_source_to_named_buffer(source, name);
+		    return json_read_result_to_python(dicom::read_json(
+		        std::move(buffer_name), std::move(buffer),
+		        make_json_read_options(charset_errors)));
+	    },
+	    nb::arg("source"),
+	    nb::kw_only(),
+	    nb::arg("name") = "<memory>",
+	    nb::arg("charset_errors") = nb::str("strict"),
+	    "Read DICOM JSON from a UTF-8 string or bytes-like object.\n"
+	    "\n"
+	    "Returns\n"
+	    "-------\n"
+	    "list[tuple[DicomFile, list[JsonBulkRef]]]\n"
+	    "    One item per top-level JSON dataset object. A single JSON object returns\n"
+	    "    a one-item list; a top-level JSON array returns one tuple per dataset.\n"
+	    "    Each tuple contains the parsed DicomFile plus unresolved BulkDataURI\n"
+	    "    references that still need payload bytes. JsonBulkRef.media_type and\n"
+	    "    JsonBulkRef.transfer_syntax_uid are populated when they can be inferred\n"
+	    "    from the JSON/meta context; otherwise they are empty strings.\n"
+	    "\n"
+	    "Parameters\n"
+	    "----------\n"
+	    "source : str | bytes-like\n"
+	    "    UTF-8 DICOM JSON text or an equivalent bytes-like object.\n"
+	    "name : str, optional\n"
+	    "    Identifier attached to the in-memory dataset tree. Defaults to '<memory>'.\n"
+	    "charset_errors : {'strict', 'replace_qmark', 'replace_unicode_escape'}, optional\n"
+	    "    Policy used when lazy raw-byte materialization must encode UTF-8 JSON text\n"
+	    "    into a declared SpecificCharacterSet. Defaults to 'strict'.\n"
+	    "\n"
+	    "Typical flow:\n"
+	    "    items = dicom.read_json(text)\n"
+	    "    for df, refs in items:\n"
+	    "        for ref in refs:\n"
+	    "            payload = download(ref.uri)\n"
+	    "            df.set_bulk_data(ref, payload)\n");
 
 m.def("read_file",
     [](nb::handle path, std::optional<Tag> load_until, std::optional<bool> keep_on_error) {
@@ -6083,9 +6354,12 @@ m.def("generate_study_instance_uid",
 	    "DataSetSelection",
 	    "PersonName",
 	    "PersonNameGroup",
+	    "JsonBulkTargetKind",
+	    "JsonBulkRef",
 	    "Tag",
 	    "VR",
 	    "Uid",
+	    "read_json",
 	    "read_file",
 	    "read_file_selected",
 	    "is_dicom_file",

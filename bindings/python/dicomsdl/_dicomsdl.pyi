@@ -58,9 +58,12 @@ __all__ = [
     "DataSetSelection",
     "PersonName",
     "PersonNameGroup",
+    "JsonBulkTargetKind",
+    "JsonBulkRef",
     "Tag",
     "VR",
     "Uid",
+    "read_json",
     "read_file",
     "read_file_selected",
     "is_dicom_file",
@@ -121,6 +124,21 @@ class PixelPresentation(enum.Enum):
     true_color = ...
     color_range = ...
     color_ref = ...
+
+
+class JsonBulkTargetKind(enum.Enum):
+    element = ...
+    pixel_frame = ...
+
+
+class JsonBulkRef:
+    kind: JsonBulkTargetKind
+    path: str
+    frame_index: int
+    uri: str
+    media_type: str
+    transfer_syntax_uid: str
+    vr: VR
 
 
 class Reporter: ...
@@ -692,6 +710,7 @@ class DicomFile:
     def encoded_pixel_frame_view(self, frame_index: int, /) -> memoryview: ...
     def set_encoded_pixel_frame(self, frame_index: int, source: Any, /) -> None: ...
     def add_encoded_pixel_frame(self, source: Any, /) -> None: ...
+    def set_bulk_data(self, ref: JsonBulkRef, source: Any, /) -> bool: ...
     def to_array(
         self,
         frame: int = ...,
@@ -1204,6 +1223,13 @@ def read_file(
     load_until: Tag | None = ...,
     keep_on_error: bool | None = ...,
 ) -> DicomFile: ...
+
+def read_json(
+    source: str | bytes | bytearray | memoryview,
+    *,
+    name: str = ...,
+    charset_errors: Literal["strict", "replace_qmark", "replace_unicode_escape"] = ...,
+) -> list[tuple[DicomFile, list[JsonBulkRef]]]: ...
 
 def read_file_selected(
     path: str | os.PathLike[str],

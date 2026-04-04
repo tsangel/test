@@ -1304,6 +1304,132 @@ enum class CharsetDecodeErrorPolicy : std::uint8_t {
 	replace_hex_escape,
 };
 
+enum class JsonBulkDataMode : std::uint8_t {
+	inline_ = 0,
+	uri,
+	omit,
+};
+
+struct JsonWriteOptions {
+	// DICOM JSON / DICOMweb outputs normally exclude file meta group 0002.
+	// Group length attributes (gggg,0000) are always excluded.
+	bool include_group_0002{false};
+	JsonBulkDataMode bulk_data_mode{JsonBulkDataMode::inline_};
+	std::size_t bulk_data_threshold{1024};
+	// Supported placeholders: {study}, {series}, {instance}, {tag}.
+	// {tag} expands to the 8-digit tag at top level and to a dotted tag path for
+	// nested sequence items, e.g. `22002200.0.12340012`.
+	std::string bulk_data_uri_template{};
+	// Optional override for PixelData (7FE0,0010), typically used for multi-frame
+	// frame-retrieval routes such as `/.../frames`. Supports the same placeholders.
+	std::string pixel_data_uri_template{};
+	CharsetDecodeErrorPolicy charset_errors{CharsetDecodeErrorPolicy::strict};
+};
+
+struct JsonBulkPart {
+	std::string uri{};
+	std::string media_type{};
+	std::string transfer_syntax_uid{};
+
+	JsonBulkPart() = default;
+	JsonBulkPart(std::string uri_value, std::span<const std::uint8_t> bytes_view,
+	    std::string media_type_value = {}, std::string transfer_syntax_uid_value = {}) noexcept
+	    : uri(std::move(uri_value)),
+	      media_type(std::move(media_type_value)),
+	      transfer_syntax_uid(std::move(transfer_syntax_uid_value)),
+	      bytes_view_(bytes_view) {}
+	JsonBulkPart(std::string uri_value, std::vector<std::uint8_t>&& owned_bytes,
+	    std::string media_type_value = {}, std::string transfer_syntax_uid_value = {}) noexcept
+	    : uri(std::move(uri_value)),
+	      media_type(std::move(media_type_value)),
+	      transfer_syntax_uid(std::move(transfer_syntax_uid_value)),
+	      owned_bytes_(std::move(owned_bytes)),
+	      bytes_view_(owned_bytes_) {}
+
+	JsonBulkPart(const JsonBulkPart& other)
+	    : uri(other.uri),
+	      media_type(other.media_type),
+	      transfer_syntax_uid(other.transfer_syntax_uid),
+	      owned_bytes_(other.owned_bytes_),
+	      bytes_view_(
+	          owned_bytes_.empty() ? other.bytes_view_ : std::span<const std::uint8_t>(owned_bytes_)) {}
+	JsonBulkPart& operator=(const JsonBulkPart& other) {
+		if (this == &other) {
+			return *this;
+		}
+		uri = other.uri;
+		media_type = other.media_type;
+		transfer_syntax_uid = other.transfer_syntax_uid;
+		owned_bytes_ = other.owned_bytes_;
+		bytes_view_ =
+		    owned_bytes_.empty() ? other.bytes_view_ : std::span<const std::uint8_t>(owned_bytes_);
+		return *this;
+	}
+
+	JsonBulkPart(JsonBulkPart&& other) noexcept
+	    : uri(std::move(other.uri)),
+	      media_type(std::move(other.media_type)),
+	      transfer_syntax_uid(std::move(other.transfer_syntax_uid)),
+	      owned_bytes_(std::move(other.owned_bytes_)),
+	      bytes_view_(
+	          owned_bytes_.empty() ? other.bytes_view_ : std::span<const std::uint8_t>(owned_bytes_)) {}
+	JsonBulkPart& operator=(JsonBulkPart&& other) noexcept {
+		if (this == &other) {
+			return *this;
+		}
+		uri = std::move(other.uri);
+		media_type = std::move(other.media_type);
+		transfer_syntax_uid = std::move(other.transfer_syntax_uid);
+		owned_bytes_ = std::move(other.owned_bytes_);
+		bytes_view_ =
+		    owned_bytes_.empty() ? other.bytes_view_ : std::span<const std::uint8_t>(owned_bytes_);
+		return *this;
+	}
+
+	[[nodiscard]] std::span<const std::uint8_t> bytes() const noexcept { return bytes_view_; }
+
+private:
+	std::vector<std::uint8_t> owned_bytes_{};
+	std::span<const std::uint8_t> bytes_view_{};
+};
+
+struct JsonWriteResult {
+	std::string json{};
+	std::vector<JsonBulkPart> bulk_parts{};
+};
+
+enum class JsonBulkTargetKind : std::uint8_t {
+	element = 0,
+	pixel_frame,
+};
+
+struct JsonBulkRef {
+	JsonBulkTargetKind kind{JsonBulkTargetKind::element};
+	// Tag-path for the destination element, e.g. "7FE00010" or "0040A730.0.0040A123".
+	std::string path{};
+	// Used only when kind == pixel_frame. Stored as 0-based frame index.
+	std::size_t frame_index{0};
+	std::string uri{};
+	// DICOMweb media type for this bulk payload, or empty when unknown.
+	std::string media_type{};
+	// Transfer Syntax UID for pixel-data payloads, or empty when unknown/not applicable.
+	std::string transfer_syntax_uid{};
+	VR vr{VR::None};
+};
+
+struct JsonReadOptions {
+	CharsetEncodeErrorPolicy charset_errors{CharsetEncodeErrorPolicy::strict};
+};
+
+struct JsonReadResultItem {
+	std::unique_ptr<DicomFile> file{};
+	std::vector<JsonBulkRef> pending_bulk_data{};
+};
+
+struct JsonReadResult {
+	std::vector<JsonReadResultItem> items{};
+};
+
 /// One component group of a PN value.
 /// Components are stored in canonical DICOM order:
 /// component 0..4 = family-name-complex, given-name-complex, middle-name,
@@ -2079,6 +2205,7 @@ public:
 	enum class StorageKind : std::uint16_t {
 		none = 0,
 		stream,
+		json_stream,
 		inline_bytes,
 		heap,
 		owned_bytes,
@@ -2103,7 +2230,8 @@ public:
 	/// VR of this element.
 	[[nodiscard]] constexpr VR vr() const noexcept { return vr_; }
 	/// Value length in bytes (may be undefined for sequences).
-	[[nodiscard]] constexpr std::size_t length() const noexcept { return length_; }
+	/// JSON-backed lazy string values materialize on first raw-length access.
+	[[nodiscard]] std::size_t length() const;
 	/// Absolute offset of the value within the root stream.
 	/// Valid for stream-backed elements and SQ/PX elements; otherwise returns 0.
 	[[nodiscard]] std::size_t offset() const noexcept;
@@ -2345,6 +2473,7 @@ private:
 	DataSet* parent_{nullptr};
 
 	friend class DataSet;
+	friend class JsonReadParser;
 	friend class SelectedReadParser;
 	friend bool charset::detail::apply_declared_charset(
 	    DataSet& dataset, const charset::detail::ParsedSpecificCharacterSet& parsed,
@@ -2535,6 +2664,12 @@ public:
 	/// Returns the current stream identifier (file path, provided name, or "<memory>").
 	const std::string& path() const;
 
+	/// JSON lazy-read materialization policy inherited from the root dataset.
+	[[nodiscard]] CharsetEncodeErrorPolicy json_read_charset_errors_policy() const noexcept {
+		return root_dataset_ ? root_dataset_->json_read_charset_errors_
+		                     : json_read_charset_errors_;
+	}
+
 	/// Access the underlying input stream (root dataset only).
 	InStream& stream();
 
@@ -2676,6 +2811,8 @@ public:
 	/// Render a human-readable dataset dump as text.
 	[[nodiscard]] std::string dump(
 	    std::size_t max_print_chars = 80, bool include_offset = true) const;
+	/// Serialize this dataset using the DICOM JSON Model.
+	[[nodiscard]] JsonWriteResult write_json(const JsonWriteOptions& options = {}) const;
 
 	/// Read all elements from the attached stream with options.
 	void read_attached_stream(const ReadOptions& options);
@@ -2864,7 +3001,9 @@ private:
 	    const charset::detail::CharsetSpec* inherited, std::string* out_error = nullptr);
 	[[nodiscard]] const charset::detail::CharsetSpec* effective_charset_spec(
 	    std::string* out_error = nullptr) const;
+	friend class JsonReadParser;
 	std::unique_ptr<InStream> stream_;
+	std::shared_ptr<const std::vector<std::uint8_t>> attached_memory_owner_{};
 	DicomFile* root_file_{nullptr};
 	DataSet* root_dataset_{nullptr};
 	DataSet* parent_dataset_{nullptr};
@@ -2873,6 +3012,7 @@ private:
 	bool explicit_vr_{true};
 	std::size_t offset_{0};  // absolute offset within the root stream where this dataset starts
 	std::size_t active_element_count_{0};
+	CharsetEncodeErrorPolicy json_read_charset_errors_{CharsetEncodeErrorPolicy::strict};
 	std::deque<DataElement> elements_;
 	std::map<std::uint32_t, DataElement> element_map_;
 	std::vector<ElementRef> element_index_;
@@ -2904,6 +3044,12 @@ public:
 	void write_to_stream(std::ostream& os, const WriteOptions& options = {});
 	[[nodiscard]] std::vector<std::uint8_t> write_bytes(const WriteOptions& options = {});
 	void write_file(const std::filesystem::path& path, const WriteOptions& options = {});
+	/// Serialize the root dataset using the DICOM JSON Model.
+	[[nodiscard]] JsonWriteResult write_json(const JsonWriteOptions& options = {}) const;
+	/// Copy downloaded JSON BulkDataURI content into the referenced destination.
+	/// Element targets currently write raw value bytes. Pixel-frame targets currently
+	/// populate encapsulated PixelData frame slots.
+	bool set_bulk_data(const JsonBulkRef& ref, std::span<const std::uint8_t> bytes);
 	/// Serialize this dataset using `transfer_syntax` without mutating the source DicomFile.
 	/// When the target PixelData is encapsulated and `os` is seekable, the writer backpatches
 	/// ExtendedOffsetTable / ExtendedOffsetTableLengths for the streamed frames.
@@ -3710,6 +3856,7 @@ inline void DataElement::release_storage() noexcept {
 		break;
 	case StorageKind::none:
 	case StorageKind::stream:
+	case StorageKind::json_stream:
 	case StorageKind::inline_bytes:
 		break;
 	}
@@ -3720,6 +3867,7 @@ inline void DataElement::release_storage() noexcept {
 inline std::size_t DataElement::offset() const noexcept {
 	switch (storage_kind_) {
 	case StorageKind::stream:
+	case StorageKind::json_stream:
 		return storage_.offset_;
 	case StorageKind::sequence:
 		return storage_.seq ? storage_.seq->value_offset() : 0;
@@ -3762,6 +3910,16 @@ std::unique_ptr<DicomFile> read_bytes(const std::string& name, const std::uint8_
 /// Read from an owning buffer moved into the dataset.
 std::unique_ptr<DicomFile> read_bytes(std::string name, std::vector<std::uint8_t>&& buffer,
     ReadOptions options = {});
+/// Read a DICOM JSON dataset from a raw memory buffer.
+/// Current implementation is memory-based and does not support ensure_loaded()-style partial reads.
+[[nodiscard]] JsonReadResult read_json(
+    const std::uint8_t* data, std::size_t size, JsonReadOptions options = {});
+/// Read a named DICOM JSON dataset from a raw memory buffer.
+[[nodiscard]] JsonReadResult read_json(const std::string& name, const std::uint8_t* data,
+    std::size_t size, JsonReadOptions options = {});
+/// Read a DICOM JSON dataset from an owning buffer moved into the reader.
+[[nodiscard]] JsonReadResult read_json(
+    std::string name, std::vector<std::uint8_t>&& buffer, JsonReadOptions options = {});
 /// Read from disk while materializing only the selected tags and nested sequence children.
 /// Selected-read APIs reuse ReadOptions.keep_on_error and, for memory overloads,
 /// ReadOptions.copy. ReadOptions.load_until is ignored and replaced by a frontier

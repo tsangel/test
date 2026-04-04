@@ -603,9 +603,9 @@ DataElement* DataSet::find_dataelement_in_elements(std::uint32_t tag_value) {
 	if (element_index_.empty() || tag_value > element_index_.back().tag.value()) {
 		return nullptr;
 	}
-	auto it = lower_bound_elements(elements_.begin(), elements_.end(), tag_value);
-	if (it != elements_.end() && it->tag().value() == tag_value) {
-		return &(*it);
+	auto it = lower_bound_element_index(element_index_.begin(), element_index_.end(), tag_value);
+	if (it != element_index_.end() && it->tag.value() == tag_value) {
+		return it->element;
 	}
 	return nullptr;
 }
@@ -614,9 +614,9 @@ const DataElement* DataSet::find_dataelement_in_elements(std::uint32_t tag_value
 	if (element_index_.empty() || tag_value > element_index_.back().tag.value()) {
 		return nullptr;
 	}
-	auto it = lower_bound_elements(elements_.cbegin(), elements_.cend(), tag_value);
-	if (it != elements_.cend() && it->tag().value() == tag_value) {
-		return &(*it);
+	auto it = lower_bound_element_index(element_index_.cbegin(), element_index_.cend(), tag_value);
+	if (it != element_index_.cend() && it->tag.value() == tag_value) {
+		return it->element;
 	}
 	return nullptr;
 }

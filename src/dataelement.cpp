@@ -48,6 +48,528 @@ inline std::string_view trim(std::string_view s) {
 	return name;
 }
 
+struct JsonStringToken {
+	std::size_t token_begin{0};
+	std::size_t token_end{0};
+	std::size_t content_begin{0};
+	std::size_t content_end{0};
+	bool has_escape{false};
+};
+
+void skip_json_whitespace(std::string_view text, std::size_t& pos) noexcept {
+	while (pos < text.size() && std::isspace(static_cast<unsigned char>(text[pos]))) {
+		++pos;
+	}
+}
+
+[[nodiscard]] std::optional<std::uint32_t> parse_hex4(std::string_view text, std::size_t pos) {
+	if (pos + 4u > text.size()) {
+		return std::nullopt;
+	}
+	std::uint32_t value = 0;
+	for (std::size_t i = 0; i < 4u; ++i) {
+		value <<= 4u;
+		const char ch = text[pos + i];
+		if (ch >= '0' && ch <= '9') {
+			value |= static_cast<std::uint32_t>(ch - '0');
+			continue;
+		}
+		if (ch >= 'a' && ch <= 'f') {
+			value |= static_cast<std::uint32_t>(10 + ch - 'a');
+			continue;
+		}
+		if (ch >= 'A' && ch <= 'F') {
+			value |= static_cast<std::uint32_t>(10 + ch - 'A');
+			continue;
+		}
+		return std::nullopt;
+	}
+	return value;
+}
+
+void append_utf8_codepoint(std::string& out, std::uint32_t codepoint) {
+	if (codepoint <= 0x7Fu) {
+		out.push_back(static_cast<char>(codepoint));
+		return;
+	}
+	if (codepoint <= 0x7FFu) {
+		out.push_back(static_cast<char>(0xC0u | (codepoint >> 6u)));
+		out.push_back(static_cast<char>(0x80u | (codepoint & 0x3Fu)));
+		return;
+	}
+	if (codepoint <= 0xFFFFu) {
+		out.push_back(static_cast<char>(0xE0u | (codepoint >> 12u)));
+		out.push_back(static_cast<char>(0x80u | ((codepoint >> 6u) & 0x3Fu)));
+		out.push_back(static_cast<char>(0x80u | (codepoint & 0x3Fu)));
+		return;
+	}
+	out.push_back(static_cast<char>(0xF0u | (codepoint >> 18u)));
+	out.push_back(static_cast<char>(0x80u | ((codepoint >> 12u) & 0x3Fu)));
+	out.push_back(static_cast<char>(0x80u | ((codepoint >> 6u) & 0x3Fu)));
+	out.push_back(static_cast<char>(0x80u | (codepoint & 0x3Fu)));
+}
+
+[[nodiscard]] bool parse_json_string_token(
+    std::string_view text, std::size_t& pos, JsonStringToken& out_token) {
+	skip_json_whitespace(text, pos);
+	if (pos >= text.size() || text[pos] != '"') {
+		return false;
+	}
+	out_token = JsonStringToken{};
+	out_token.token_begin = pos;
+	out_token.content_begin = pos + 1u;
+	++pos;
+	while (pos < text.size()) {
+		const char ch = text[pos];
+		if (ch == '"') {
+			out_token.content_end = pos;
+			out_token.token_end = pos + 1u;
+			++pos;
+			return true;
+		}
+		if (ch == '\\') {
+			out_token.has_escape = true;
+			++pos;
+			if (pos >= text.size()) {
+				return false;
+			}
+			if (text[pos] == 'u') {
+				pos += 5u;
+				if (pos > text.size()) {
+					return false;
+				}
+				continue;
+			}
+			++pos;
+			continue;
+		}
+		++pos;
+	}
+	return false;
+}
+
+[[nodiscard]] std::optional<std::string> decode_json_string_token(
+    std::string_view text, const JsonStringToken& token) {
+	if (!token.has_escape) {
+		return std::string(text.substr(
+		    token.content_begin, token.content_end - token.content_begin));
+	}
+
+	std::string out;
+	out.reserve(token.content_end - token.content_begin);
+	for (std::size_t pos = token.content_begin; pos < token.content_end; ++pos) {
+		const char ch = text[pos];
+		if (ch != '\\') {
+			out.push_back(ch);
+			continue;
+		}
+		++pos;
+		if (pos >= token.content_end) {
+			return std::nullopt;
+		}
+		switch (text[pos]) {
+		case '"':
+		case '\\':
+		case '/':
+			out.push_back(text[pos]);
+			break;
+		case 'b':
+			out.push_back('\b');
+			break;
+		case 'f':
+			out.push_back('\f');
+			break;
+		case 'n':
+			out.push_back('\n');
+			break;
+		case 'r':
+			out.push_back('\r');
+			break;
+		case 't':
+			out.push_back('\t');
+			break;
+		case 'u': {
+			auto codepoint = parse_hex4(text, pos + 1u);
+			if (!codepoint) {
+				return std::nullopt;
+			}
+			pos += 4u;
+			if (*codepoint >= 0xD800u && *codepoint <= 0xDBFFu) {
+				if (pos + 6u >= token.content_end || text[pos + 1u] != '\\' ||
+				    text[pos + 2u] != 'u') {
+					return std::nullopt;
+				}
+				auto low = parse_hex4(text, pos + 3u);
+				if (!low || *low < 0xDC00u || *low > 0xDFFFu) {
+					return std::nullopt;
+				}
+				*codepoint =
+				    0x10000u + (((*codepoint - 0xD800u) << 10u) | (*low - 0xDC00u));
+				pos += 6u;
+			}
+			append_utf8_codepoint(out, *codepoint);
+			break;
+		}
+		default:
+			return std::nullopt;
+		}
+	}
+	return out;
+}
+
+[[nodiscard]] bool skip_json_number_token(
+    std::string_view text, std::size_t& pos, std::string_view& out_token) {
+	skip_json_whitespace(text, pos);
+	const std::size_t begin = pos;
+	if (pos < text.size() && (text[pos] == '-' || text[pos] == '+')) {
+		++pos;
+	}
+	bool saw_digit = false;
+	while (pos < text.size() && std::isdigit(static_cast<unsigned char>(text[pos]))) {
+		saw_digit = true;
+		++pos;
+	}
+	if (pos < text.size() && text[pos] == '.') {
+		++pos;
+		while (pos < text.size() && std::isdigit(static_cast<unsigned char>(text[pos]))) {
+			saw_digit = true;
+			++pos;
+		}
+	}
+	if (pos < text.size() && (text[pos] == 'e' || text[pos] == 'E')) {
+		++pos;
+		if (pos < text.size() && (text[pos] == '-' || text[pos] == '+')) {
+			++pos;
+		}
+		bool saw_exp_digit = false;
+		while (pos < text.size() && std::isdigit(static_cast<unsigned char>(text[pos]))) {
+			saw_exp_digit = true;
+			++pos;
+		}
+		if (!saw_exp_digit) {
+			return false;
+		}
+	}
+	if (!saw_digit) {
+		return false;
+	}
+	out_token = text.substr(begin, pos - begin);
+	return true;
+}
+
+[[nodiscard]] bool skip_json_literal(std::string_view text, std::size_t& pos, std::string_view literal) {
+	skip_json_whitespace(text, pos);
+	if (text.substr(pos, literal.size()) != literal) {
+		return false;
+	}
+	pos += literal.size();
+	return true;
+}
+
+[[nodiscard]] bool skip_json_value(std::string_view text, std::size_t& pos);
+
+[[nodiscard]] bool skip_json_array(std::string_view text, std::size_t& pos) {
+	skip_json_whitespace(text, pos);
+	if (pos >= text.size() || text[pos] != '[') {
+		return false;
+	}
+	++pos;
+	skip_json_whitespace(text, pos);
+	if (pos < text.size() && text[pos] == ']') {
+		++pos;
+		return true;
+	}
+	while (pos < text.size()) {
+		if (!skip_json_value(text, pos)) {
+			return false;
+		}
+		skip_json_whitespace(text, pos);
+		if (pos < text.size() && text[pos] == ',') {
+			++pos;
+			continue;
+		}
+		if (pos < text.size() && text[pos] == ']') {
+			++pos;
+			return true;
+		}
+		return false;
+	}
+	return false;
+}
+
+[[nodiscard]] bool skip_json_object(std::string_view text, std::size_t& pos) {
+	skip_json_whitespace(text, pos);
+	if (pos >= text.size() || text[pos] != '{') {
+		return false;
+	}
+	++pos;
+	skip_json_whitespace(text, pos);
+	if (pos < text.size() && text[pos] == '}') {
+		++pos;
+		return true;
+	}
+	while (pos < text.size()) {
+		JsonStringToken key{};
+		if (!parse_json_string_token(text, pos, key)) {
+			return false;
+		}
+		skip_json_whitespace(text, pos);
+		if (pos >= text.size() || text[pos] != ':') {
+			return false;
+		}
+		++pos;
+		if (!skip_json_value(text, pos)) {
+			return false;
+		}
+		skip_json_whitespace(text, pos);
+		if (pos < text.size() && text[pos] == ',') {
+			++pos;
+			continue;
+		}
+		if (pos < text.size() && text[pos] == '}') {
+			++pos;
+			return true;
+		}
+		return false;
+	}
+	return false;
+}
+
+[[nodiscard]] bool skip_json_value(std::string_view text, std::size_t& pos) {
+	skip_json_whitespace(text, pos);
+	if (pos >= text.size()) {
+		return false;
+	}
+	if (text[pos] == '"') {
+		JsonStringToken token{};
+		return parse_json_string_token(text, pos, token);
+	}
+	if (text[pos] == '{') {
+		return skip_json_object(text, pos);
+	}
+	if (text[pos] == '[') {
+		return skip_json_array(text, pos);
+	}
+	std::string_view number{};
+	if (skip_json_number_token(text, pos, number)) {
+		return true;
+	}
+	return skip_json_literal(text, pos, "null") || skip_json_literal(text, pos, "true") ||
+	       skip_json_literal(text, pos, "false");
+}
+
+[[nodiscard]] std::string_view json_fragment_text(
+    const DataElement& element, std::size_t fragment_length) {
+	const auto* parent = element.parent();
+	const auto* root = parent ? parent->root_dataset() : nullptr;
+	if (!root) {
+		diag::error_and_throw(
+		    "json_stream tag={} vr={} reason=no root dataset context",
+		    element.tag().to_string(), element.vr().str());
+	}
+	const auto& stream = root->stream();
+	const auto span = stream.get_span(element.offset(), fragment_length);
+	return std::string_view(reinterpret_cast<const char*>(span.data()), span.size());
+}
+
+[[nodiscard]] std::optional<std::string> parse_json_person_name_object(
+    std::string_view text, std::size_t& pos) {
+	skip_json_whitespace(text, pos);
+	if (pos >= text.size() || text[pos] != '{') {
+		return std::nullopt;
+	}
+	++pos;
+	bool have_alphabetic = false;
+	bool have_ideographic = false;
+	bool have_phonetic = false;
+	std::string alphabetic;
+	std::string ideographic;
+	std::string phonetic;
+	skip_json_whitespace(text, pos);
+	if (pos < text.size() && text[pos] == '}') {
+		++pos;
+		return std::string{};
+	}
+	while (pos < text.size()) {
+		JsonStringToken key_token{};
+		if (!parse_json_string_token(text, pos, key_token)) {
+			return std::nullopt;
+		}
+		auto key = decode_json_string_token(text, key_token);
+		if (!key) {
+			return std::nullopt;
+		}
+		skip_json_whitespace(text, pos);
+		if (pos >= text.size() || text[pos] != ':') {
+			return std::nullopt;
+		}
+		++pos;
+		skip_json_whitespace(text, pos);
+		if (*key == "Alphabetic" || *key == "Ideographic" || *key == "Phonetic") {
+			JsonStringToken value_token{};
+			if (!parse_json_string_token(text, pos, value_token)) {
+				return std::nullopt;
+			}
+			auto value = decode_json_string_token(text, value_token);
+			if (!value) {
+				return std::nullopt;
+			}
+			if (*key == "Alphabetic") {
+				have_alphabetic = true;
+				alphabetic = std::move(*value);
+			} else if (*key == "Ideographic") {
+				have_ideographic = true;
+				ideographic = std::move(*value);
+			} else {
+				have_phonetic = true;
+				phonetic = std::move(*value);
+			}
+		} else if (!skip_json_value(text, pos)) {
+			return std::nullopt;
+		}
+		skip_json_whitespace(text, pos);
+		if (pos < text.size() && text[pos] == ',') {
+			++pos;
+			continue;
+		}
+		if (pos < text.size() && text[pos] == '}') {
+			++pos;
+			break;
+		}
+		return std::nullopt;
+	}
+
+	std::string out;
+	if (have_alphabetic) {
+		out += alphabetic;
+	}
+	if (have_ideographic || have_phonetic) {
+		out.push_back('=');
+		if (have_ideographic) {
+			out += ideographic;
+		}
+	}
+	if (have_phonetic) {
+		out.push_back('=');
+		out += phonetic;
+	}
+	return out;
+}
+
+[[nodiscard]] std::optional<std::vector<std::string>> parse_json_stream_utf8_values(
+    const DataElement& element, std::size_t fragment_length) {
+	const auto fragment = json_fragment_text(element, fragment_length);
+	std::size_t pos = 0;
+	skip_json_whitespace(fragment, pos);
+	if (pos >= fragment.size() || fragment[pos] != '[') {
+		return std::nullopt;
+	}
+	++pos;
+	std::vector<std::string> values;
+	skip_json_whitespace(fragment, pos);
+	if (pos < fragment.size() && fragment[pos] == ']') {
+		++pos;
+		return values;
+	}
+
+	while (pos < fragment.size()) {
+		skip_json_whitespace(fragment, pos);
+		if (skip_json_literal(fragment, pos, "null")) {
+			values.emplace_back();
+		} else if (element.vr() == VR::PN) {
+			auto pn = parse_json_person_name_object(fragment, pos);
+			if (!pn) {
+				return std::nullopt;
+			}
+			if (!charset::validate_utf8(*pn)) {
+				return std::nullopt;
+			}
+			values.push_back(std::move(*pn));
+		} else if (pos < fragment.size() && fragment[pos] == '"') {
+			JsonStringToken token{};
+			if (!parse_json_string_token(fragment, pos, token)) {
+				return std::nullopt;
+			}
+			auto decoded = decode_json_string_token(fragment, token);
+			if (!decoded) {
+				return std::nullopt;
+			}
+			if (!charset::validate_utf8(*decoded)) {
+				return std::nullopt;
+			}
+			values.push_back(std::move(*decoded));
+		} else if ((element.vr() == VR::DS || element.vr() == VR::IS || element.vr() == VR::UN) &&
+		    pos < fragment.size()) {
+			std::string_view number{};
+			if (!skip_json_number_token(fragment, pos, number)) {
+				return std::nullopt;
+			}
+			values.emplace_back(number);
+		} else {
+			return std::nullopt;
+		}
+
+		skip_json_whitespace(fragment, pos);
+		if (pos < fragment.size() && fragment[pos] == ',') {
+			++pos;
+			continue;
+		}
+		if (pos < fragment.size() && fragment[pos] == ']') {
+			++pos;
+			return values;
+		}
+		return std::nullopt;
+	}
+	return std::nullopt;
+}
+
+void materialize_json_stream_element(DataElement& element, std::size_t fragment_length) {
+	if (element.storage_kind() != DataElement::StorageKind::json_stream) {
+		return;
+	}
+	auto values = parse_json_stream_utf8_values(element, fragment_length);
+	if (!values) {
+		diag::error_and_throw(
+		    "json_stream tag={} vr={} reason=failed to parse JSON Value fragment",
+		    element.tag().to_string(), element.vr().str());
+	}
+	std::vector<std::string_view> value_views;
+	value_views.reserve(values->size());
+	for (const auto& value : *values) {
+		value_views.push_back(value);
+	}
+	if (element.vr() == VR::UN) {
+		std::string raw_text;
+		std::size_t total_length = values->empty() ? 0u : values->size() - 1u;
+		for (const auto& value : *values) {
+			total_length += value.size();
+		}
+		raw_text.reserve(total_length);
+		for (std::size_t i = 0; i < values->size(); ++i) {
+			if (i != 0u) {
+				raw_text.push_back('\\');
+			}
+			raw_text += (*values)[i];
+		}
+		const auto* ptr = reinterpret_cast<const std::uint8_t*>(raw_text.data());
+		element.set_value_bytes(std::span<const std::uint8_t>(ptr, raw_text.size()));
+		return;
+	}
+	const auto* root = element.parent() ? element.parent()->root_dataset() : nullptr;
+	const auto charset_errors =
+	    root ? root->json_read_charset_errors_policy() : CharsetEncodeErrorPolicy::strict;
+	const bool ok = element.vr().uses_specific_character_set()
+	    ? element.from_utf8_views(value_views, charset_errors, nullptr)
+	    : element.from_string_views(value_views);
+	if (!ok) {
+		diag::error_and_throw(
+		    "json_stream tag={} vr={} reason=failed to materialize raw DICOM bytes "
+		    "from JSON UTF-8 values. Add (0008,0005) or choose an encodable charset "
+		    "before requesting raw bytes.",
+		    element.tag().to_string(), element.vr().str());
+	}
+}
+
 bool report_from_assignment_failure(const DataElement& element, std::string_view reason,
     std::source_location location = std::source_location::current()) {
 	diag::error("{} tag={} vr={} reason={}",
@@ -546,12 +1068,25 @@ std::span<const std::uint8_t> DataElement::value_span() const {
 			return {};
 		}
 		return parent_->stream().get_span(storage_.offset_, length_);
+	case StorageKind::json_stream: {
+		auto* self = const_cast<DataElement*>(this);
+		materialize_json_stream_element(*self, length_);
+		return self->value_span();
+	}
 	case StorageKind::none:
 	case StorageKind::sequence:
 	case StorageKind::pixel_sequence:
 		return {};
 	}
 	return {};
+}
+
+std::size_t DataElement::length() const {
+	if (storage_kind_ == StorageKind::json_stream) {
+		auto* self = const_cast<DataElement*>(this);
+		materialize_json_stream_element(*self, length_);
+	}
+	return length_;
 }
 
 void DataElement::reserve_value_bytes(std::size_t length) {
@@ -1134,6 +1669,9 @@ bool DataElement::from_sop_class_uid(uid::WellKnown uid) {
 }
 
 int DataElement::vm() const {
+	if (storage_kind_ == StorageKind::json_stream) {
+		(void)value_span();
+	}
 	// PS 3.5, 6.4 VALUE MULTIPLICITY (VM) AND DELIMITATION
 	if (length_ == 0) {
 		return 0;
@@ -1851,11 +2389,27 @@ std::optional<std::vector<std::string_view>> DataElement::to_string_views() cons
 
 std::optional<std::string> DataElement::to_utf8_string(
     CharsetDecodeErrorPolicy errors, bool* out_replaced) const {
+	if (storage_kind_ == StorageKind::json_stream) {
+		if (out_replaced) {
+			*out_replaced = false;
+		}
+		auto values = parse_json_stream_utf8_values(*this, length_);
+		if (!values) {
+			return std::nullopt;
+		}
+		return values->empty() ? std::optional<std::string>(std::string{}) : (*values)[0];
+	}
 	return charset::raw_element_as_owned_utf8_value(*this, errors, nullptr, out_replaced);
 }
 
 std::optional<std::vector<std::string>> DataElement::to_utf8_strings(
     CharsetDecodeErrorPolicy errors, bool* out_replaced) const {
+	if (storage_kind_ == StorageKind::json_stream) {
+		if (out_replaced) {
+			*out_replaced = false;
+		}
+		return parse_json_stream_utf8_values(*this, length_);
+	}
 	if (!vr_.is_string()) {
 		if (out_replaced) {
 			*out_replaced = false;
