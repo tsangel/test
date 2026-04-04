@@ -413,21 +413,45 @@ constexpr Tag kTransferSyntaxUidTag{0x0002u, 0x0010u};
 	       path == "PixelData" || path == "FloatPixelData" || path == "DoubleFloatPixelData";
 }
 
-[[nodiscard]] std::string frame_bulk_uri(std::string_view base_uri, std::size_t frame_index) {
-	const auto frame_number = frame_index + 1u;
-	if (base_uri.size() >= 7u && base_uri.substr(base_uri.size() - 7u) == "/frames") {
-		return fmt::format("{}/{}", base_uri, frame_number);
+struct SplitBulkUri {
+	std::string_view path{};
+	std::string_view suffix{};
+};
+
+[[nodiscard]] SplitBulkUri split_bulk_uri_suffix(std::string_view uri) noexcept {
+	const auto query = uri.find('?');
+	const auto fragment = uri.find('#');
+	std::size_t suffix_pos = std::string_view::npos;
+	if (query != std::string_view::npos && fragment != std::string_view::npos) {
+		suffix_pos = std::min(query, fragment);
+	} else if (query != std::string_view::npos) {
+		suffix_pos = query;
+	} else if (fragment != std::string_view::npos) {
+		suffix_pos = fragment;
 	}
-	return fmt::format("{}/frames/{}", base_uri, frame_number);
+	if (suffix_pos == std::string_view::npos) {
+		return SplitBulkUri{uri, {}};
+	}
+	return SplitBulkUri{uri.substr(0u, suffix_pos), uri.substr(suffix_pos)};
+}
+
+[[nodiscard]] std::string frame_bulk_uri(std::string_view base_uri, std::size_t frame_index) {
+	const auto uri = split_bulk_uri_suffix(base_uri);
+	const auto frame_number = frame_index + 1u;
+	if (uri.path.size() >= 7u && uri.path.substr(uri.path.size() - 7u) == "/frames") {
+		return fmt::format("{}/{}{}", uri.path, frame_number, uri.suffix);
+	}
+	return fmt::format("{}/frames/{}{}", uri.path, frame_number, uri.suffix);
 }
 
 [[nodiscard]] std::optional<std::size_t> parse_frame_bulk_uri_index(std::string_view uri) {
-	const auto slash = uri.rfind('/');
-	if (slash == std::string_view::npos || slash + 1u >= uri.size()) {
+	const auto split_uri = split_bulk_uri_suffix(uri);
+	const auto slash = split_uri.path.rfind('/');
+	if (slash == std::string_view::npos || slash + 1u >= split_uri.path.size()) {
 		return std::nullopt;
 	}
 	std::size_t value = 0;
-	const auto index_text = uri.substr(slash + 1u);
+	const auto index_text = split_uri.path.substr(slash + 1u);
 	for (const char ch : index_text) {
 		if (ch < '0' || ch > '9') {
 			return std::nullopt;
@@ -437,7 +461,7 @@ constexpr Tag kTransferSyntaxUidTag{0x0002u, 0x0010u};
 	if (value == 0u) {
 		return std::nullopt;
 	}
-	const auto prefix = uri.substr(0, slash);
+	const auto prefix = split_uri.path.substr(0, slash);
 	if (prefix.size() >= 7u && prefix.substr(prefix.size() - 7u) == "/frames") {
 		return value - 1u;
 	}
@@ -445,21 +469,24 @@ constexpr Tag kTransferSyntaxUidTag{0x0002u, 0x0010u};
 }
 
 struct ParsedFrameBulkUriList {
-	std::string_view base_uri{};
+	std::string base_uri{};
 	std::vector<std::size_t> frame_indices{};
 };
 
 [[nodiscard]] std::optional<ParsedFrameBulkUriList> parse_frame_bulk_uri_list(
     std::string_view uri) {
+	const auto split_uri = split_bulk_uri_suffix(uri);
 	static constexpr std::string_view kMarker = "/frames/";
-	const auto marker = uri.rfind(kMarker);
-	if (marker == std::string_view::npos || marker + kMarker.size() >= uri.size()) {
+	const auto marker = split_uri.path.rfind(kMarker);
+	if (marker == std::string_view::npos || marker + kMarker.size() >= split_uri.path.size()) {
 		return std::nullopt;
 	}
 
 	ParsedFrameBulkUriList parsed{};
-	parsed.base_uri = uri.substr(0u, marker + kMarker.size() - 1u);
-	const auto suffix = uri.substr(marker + kMarker.size());
+	parsed.base_uri =
+	    std::string(split_uri.path.substr(0u, marker + kMarker.size() - 1u));
+	parsed.base_uri.append(split_uri.suffix);
+	const auto suffix = split_uri.path.substr(marker + kMarker.size());
 	std::size_t value = 0u;
 	bool saw_digit = false;
 	for (std::size_t i = 0; i <= suffix.size(); ++i) {
@@ -1453,7 +1480,7 @@ void JsonReadParser::postprocess_pending_bulk(
 					frame_ref.kind = JsonBulkTargetKind::pixel_frame;
 					frame_ref.path = ref.path;
 					frame_ref.frame_index = frame_index;
-					frame_ref.uri = fmt::format("{}/{}", parsed_list->base_uri, frame_index + 1u);
+					frame_ref.uri = frame_bulk_uri(parsed_list->base_uri, frame_index);
 					frame_ref.vr = ref.vr;
 					apply_bulk_ref_metadata(frame_ref, transfer_syntax);
 					expanded.push_back(std::move(frame_ref));
