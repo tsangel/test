@@ -1,6 +1,19 @@
 import dicomsdl as dicom
 import pathlib
 import pytest
+import struct
+
+
+def _build_encapsulated_value_field(frames: list[bytes]) -> bytes:
+    def _item(element: int, value: bytes) -> bytes:
+        return struct.pack("<HHI", 0xFFFE, element, len(value)) + value
+
+    payload = bytearray()
+    payload += _item(0xE000, b"")
+    for frame in frames:
+        payload += _item(0xE000, frame)
+    payload += struct.pack("<HHI", 0xFFFE, 0xE0DD, 0)
+    return bytes(payload)
 
 
 def test_read_json_native_multiframe_keeps_one_bulk_ref():
@@ -167,6 +180,14 @@ def test_read_json_keeps_opaque_signed_pixel_bulk_uri_as_element_ref():
     assert refs[0].uri == "https://example.test/instances/1?sig=abc"
     assert refs[0].media_type == "image/jpeg"
     assert refs[0].transfer_syntax_uid == "1.2.840.10008.1.2.4.50"
+    payload = _build_encapsulated_value_field(
+        [b"\x11\x22\xff\xd9", b"\x44\x55\xff\xd9", b"\x66\x77\x88\x99\xff\xd9"]
+    )
+    assert _df.set_bulk_data(refs[0], payload)
+    assert _df["PixelData"].vr.is_pixel_sequence()
+    assert _df.encoded_pixel_frame_view(0).tobytes() == b"\x11\x22\xff\xd9"
+    assert _df.encoded_pixel_frame_view(1).tobytes() == b"\x44\x55\xff\xd9"
+    assert _df.encoded_pixel_frame_view(2).tobytes() == b"\x66\x77\x88\x99\xff\xd9"
 
 
 def test_read_json_set_bulk_data_populates_targets():

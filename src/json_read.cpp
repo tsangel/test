@@ -2,6 +2,7 @@
 
 #include "diagnostics.h"
 #include "dicom_endian.h"
+#include "instream.h"
 
 #include <algorithm>
 #include <array>
@@ -1560,16 +1561,55 @@ JsonReadResult read_json_from_shared(
 	return parser.parse();
 }
 
+[[nodiscard]] bool is_root_pixel_data_target(std::string_view path) noexcept {
+	return path.empty() || path == "7FE00010" || path == "PixelData";
+}
+
+[[nodiscard]] std::optional<uid::WellKnown> transfer_syntax_uid_from_bulk_ref(
+    const JsonBulkRef& ref) {
+	if (ref.transfer_syntax_uid.empty()) {
+		return std::nullopt;
+	}
+	return uid::from_value(ref.transfer_syntax_uid);
+}
+
+void set_encapsulated_pixel_data_from_value_field(
+    DicomFile& file, uid::WellKnown transfer_syntax, std::span<const std::uint8_t> value_field) {
+	InStringStream payload_stream;
+	payload_stream.attach_memory(value_field.data(), value_field.size(), false);
+	payload_stream.set_identifier(
+	    file.path().empty() ? std::string{"<json-bulk-pixeldata>"}
+	                        : fmt::format("{}#json-bulk-pixeldata", file.path()));
+
+	PixelSequence parsed_sequence(&file.dataset(), transfer_syntax);
+	parsed_sequence.attach_to_stream(&payload_stream, value_field.size());
+	parsed_sequence.read_attached_stream();
+
+	file.reset_encapsulated_pixel_data(parsed_sequence.number_of_frames());
+	for (std::size_t frame_index = 0; frame_index < parsed_sequence.number_of_frames();
+	     ++frame_index) {
+		file.set_encoded_pixel_frame(frame_index, parsed_sequence.frame_encoded_span(frame_index));
+	}
+}
+
 bool DicomFile::set_bulk_data(const JsonBulkRef& ref, std::span<const std::uint8_t> bytes) {
 	switch (ref.kind) {
 	case JsonBulkTargetKind::element: {
+		if (is_root_pixel_data_target(ref.path)) {
+			if (const auto transfer_syntax = transfer_syntax_uid_from_bulk_ref(ref);
+			    transfer_syntax && transfer_syntax->is_encapsulated()) {
+				set_transfer_syntax_state_only(*transfer_syntax);
+				set_encapsulated_pixel_data_from_value_field(*this, *transfer_syntax, bytes);
+				return true;
+			}
+		}
 		DataElement& element = ref.vr != VR::None ? ensure_dataelement(ref.path, ref.vr)
 		                                          : ensure_dataelement(ref.path);
 		element.set_value_bytes(bytes);
 		return true;
 	}
 	case JsonBulkTargetKind::pixel_frame: {
-		if (!ref.path.empty() && ref.path != "7FE00010" && ref.path != "PixelData") {
+		if (!is_root_pixel_data_target(ref.path)) {
 			diag::error_and_throw(
 			    "DicomFile::set_bulk_data file={} reason=pixel-frame bulk refs currently "
 			    "support only PixelData targets",

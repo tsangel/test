@@ -19,6 +19,36 @@ void expect_true(bool condition, const std::string& message) {
 	}
 }
 
+std::vector<std::uint8_t> build_encapsulated_value_field(
+    const std::vector<std::vector<std::uint8_t>>& frames) {
+	std::vector<std::uint8_t> out;
+	auto append_u16 = [&](std::uint16_t value) {
+		out.push_back(static_cast<std::uint8_t>(value & 0xFFu));
+		out.push_back(static_cast<std::uint8_t>((value >> 8u) & 0xFFu));
+	};
+	auto append_u32 = [&](std::uint32_t value) {
+		out.push_back(static_cast<std::uint8_t>(value & 0xFFu));
+		out.push_back(static_cast<std::uint8_t>((value >> 8u) & 0xFFu));
+		out.push_back(static_cast<std::uint8_t>((value >> 16u) & 0xFFu));
+		out.push_back(static_cast<std::uint8_t>((value >> 24u) & 0xFFu));
+	};
+	auto append_item = [&](std::uint16_t element, const std::vector<std::uint8_t>& value) {
+		append_u16(0xFFFEu);
+		append_u16(element);
+		append_u32(static_cast<std::uint32_t>(value.size()));
+		out.insert(out.end(), value.begin(), value.end());
+	};
+
+	append_item(0xE000u, {});
+	for (const auto& frame : frames) {
+		append_item(0xE000u, frame);
+	}
+	append_u16(0xFFFEu);
+	append_u16(0xE0DDu);
+	append_u32(0u);
+	return out;
+}
+
 void test_read_json_empty_object_returns_empty_file() {
 	const std::string json = "{}";
 	auto result = dicom::read_json(
@@ -245,6 +275,30 @@ void test_read_json_keeps_opaque_signed_pixel_bulk_uri_as_element_ref() {
 	        result.items[0].pending_bulk_data[0].transfer_syntax_uid ==
 	            "1.2.840.10008.1.2.4.50",
 	    "opaque signed pixel URI should not be rewritten into guessed frame URLs");
+
+	auto& file = *result.items[0].file;
+	const auto payload = build_encapsulated_value_field({
+	    {0x11u, 0x22u, 0xFFu, 0xD9u},
+	    {0x44u, 0x55u, 0xFFu, 0xD9u},
+	    {0x66u, 0x77u, 0x88u, 0x99u, 0xFFu, 0xD9u},
+	});
+	expect_true(
+	    file.set_bulk_data(result.items[0].pending_bulk_data[0], payload),
+	    "opaque signed pixel URI should still be materializable through set_bulk_data");
+	expect_true(
+	    file["PixelData"].vr().is_pixel_sequence(),
+	    "opaque signed encapsulated PixelData should materialize as an encapsulated sequence");
+	const auto frame0 = file.encoded_pixel_frame_view(0u);
+	const auto frame1 = file.encoded_pixel_frame_view(1u);
+	const auto frame2 = file.encoded_pixel_frame_view(2u);
+	expect_true(
+	    std::vector<std::uint8_t>(frame0.begin(), frame0.end()) ==
+	            std::vector<std::uint8_t>({0x11u, 0x22u, 0xFFu, 0xD9u}) &&
+	        std::vector<std::uint8_t>(frame1.begin(), frame1.end()) ==
+	            std::vector<std::uint8_t>({0x44u, 0x55u, 0xFFu, 0xD9u}) &&
+	        std::vector<std::uint8_t>(frame2.begin(), frame2.end()) ==
+	            std::vector<std::uint8_t>({0x66u, 0x77u, 0x88u, 0x99u, 0xFFu, 0xD9u}),
+	    "opaque signed encapsulated PixelData should preserve parsed frame payloads");
 }
 
 void test_read_json_missing_vr_falls_back_for_uid_and_private_un() {
