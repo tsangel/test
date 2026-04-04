@@ -3,6 +3,9 @@ import pathlib
 import pytest
 import struct
 
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+DICOMJSON_FRAGS_ROOT = REPO_ROOT.parent / "sample" / "dicomjson" / "frags"
+
 
 def _build_encapsulated_value_field(frames: list[bytes]) -> bytes:
     def _item(element: int, value: bytes) -> bytes:
@@ -14,6 +17,13 @@ def _build_encapsulated_value_field(frames: list[bytes]) -> bytes:
         payload += _item(0xE000, frame)
     payload += struct.pack("<HHI", 0xFFFE, 0xE0DD, 0)
     return bytes(payload)
+
+
+def _require_dicomjson_fragment(name: str) -> pathlib.Path:
+    path = DICOMJSON_FRAGS_ROOT / name
+    if not path.is_file():
+        pytest.skip(f"DICOM JSON fragment sample is not available: {path}")
+    return path
 
 
 def test_read_json_native_multiframe_keeps_one_bulk_ref():
@@ -258,7 +268,7 @@ def test_read_json_missing_vr_falls_back_for_private_and_uid_like_values():
 
 
 def test_read_json_real_metadata_fragment_with_missing_private_vr():
-    path = pathlib.Path(__file__).resolve().parents[3] / "sample" / "dicomjson" / "frags" / (
+    path = _require_dicomjson_fragment(
         "dicomweb_studies_1.2.840.113619.2.290.3.3767434740.232.1619607454.466_"
         "series_2.16.840.1.114362.1.12114306.25269253871.637892509.989.444_metadata"
     )
