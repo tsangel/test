@@ -149,6 +149,25 @@ void test_read_json_encapsulated_generic_bulk_uri_expands_frame_refs() {
 	    "generic encapsulated PixelData URIs should expand to /frames/1 when reading JSON");
 }
 
+void test_read_json_preserves_existing_frame_specific_bulk_uri() {
+	const std::string json =
+	    R"({"00020010":{"vr":"UI","Value":["1.2.840.10008.1.2.4.50"]},"00280008":{"vr":"IS","Value":[1]},"7FE00010":{"vr":"OB","BulkDataURI":"instances/1/frames/1"}})";
+	auto result = dicom::read_json(
+	    reinterpret_cast<const std::uint8_t*>(json.data()), json.size());
+	expect_true(result.items.size() == 1u, "object JSON should produce one result item");
+	expect_true(
+	    result.items[0].pending_bulk_data.size() == 1u,
+	    "frame-specific encapsulated PixelData URI should stay as one frame ref");
+	expect_true(
+	    result.items[0].pending_bulk_data[0].kind == dicom::JsonBulkTargetKind::pixel_frame &&
+	        result.items[0].pending_bulk_data[0].frame_index == 0u &&
+	        result.items[0].pending_bulk_data[0].uri == "instances/1/frames/1" &&
+	        result.items[0].pending_bulk_data[0].media_type == "image/jpeg" &&
+	        result.items[0].pending_bulk_data[0].transfer_syntax_uid ==
+	            "1.2.840.10008.1.2.4.50",
+	    "existing frame-specific PixelData URIs should not be expanded again");
+}
+
 void test_read_json_missing_vr_falls_back_for_uid_and_private_un() {
 	const std::string json =
 	    R"({"00080018":{"Value":["1.2.840.10008.5.1.4.1.1.2"]},"00083002":{"Value":["1.2.840.10008.1.2.4.80"]},"00091110":{"Value":["ee51d3c338c9fa07dcdf8fab027dfd6136e21f002cef5916662dce0f614ce43f"]},"00091112":{"Value":["instance"]}})";
@@ -309,6 +328,7 @@ int main() {
 	test_read_json_encapsulated_multiframe_expands_frame_refs_when_file_meta_transfer_syntax_is_present();
 	test_read_json_available_transfer_syntax_uid_does_not_drive_bulk_expansion();
 	test_read_json_encapsulated_generic_bulk_uri_expands_frame_refs();
+	test_read_json_preserves_existing_frame_specific_bulk_uri();
 	test_read_json_missing_vr_falls_back_for_uid_and_private_un();
 	test_read_json_missing_charset_keeps_utf8_but_blocks_raw_materialization();
 	test_set_bulk_data_element_target_writes_raw_value_bytes();

@@ -421,6 +421,29 @@ constexpr Tag kTransferSyntaxUidTag{0x0002u, 0x0010u};
 	return fmt::format("{}/frames/{}", base_uri, frame_number);
 }
 
+[[nodiscard]] std::optional<std::size_t> parse_frame_bulk_uri_index(std::string_view uri) {
+	const auto slash = uri.rfind('/');
+	if (slash == std::string_view::npos || slash + 1u >= uri.size()) {
+		return std::nullopt;
+	}
+	std::size_t value = 0;
+	const auto index_text = uri.substr(slash + 1u);
+	for (const char ch : index_text) {
+		if (ch < '0' || ch > '9') {
+			return std::nullopt;
+		}
+		value = value * 10u + static_cast<std::size_t>(ch - '0');
+	}
+	if (value == 0u) {
+		return std::nullopt;
+	}
+	const auto prefix = uri.substr(0, slash);
+	if (prefix.size() >= 7u && prefix.substr(prefix.size() - 7u) == "/frames") {
+		return value - 1u;
+	}
+	return std::nullopt;
+}
+
 [[nodiscard]] std::string bulk_media_type_for_transfer_syntax(
     uid::WellKnown transfer_syntax, bool pixel_data) {
 	if (!pixel_data || !transfer_syntax.valid() || transfer_syntax.is_uncompressed()) {
@@ -1386,6 +1409,17 @@ void JsonReadParser::postprocess_pending_bulk(
 		if (ref.kind == JsonBulkTargetKind::element &&
 		    ref.path == "7FE00010" &&
 		    pixel_data_frames_are_encapsulated) {
+			if (const auto frame_index = parse_frame_bulk_uri_index(ref.uri)) {
+				JsonBulkRef frame_ref{};
+				frame_ref.kind = JsonBulkTargetKind::pixel_frame;
+				frame_ref.path = ref.path;
+				frame_ref.frame_index = *frame_index;
+				frame_ref.uri = ref.uri;
+				frame_ref.vr = ref.vr;
+				apply_bulk_ref_metadata(frame_ref, transfer_syntax);
+				expanded.push_back(std::move(frame_ref));
+				continue;
+			}
 			const auto number_of_frames =
 			    static_cast<std::size_t>(
 			        file.dataset().get_value<long>("NumberOfFrames").value_or(1));
