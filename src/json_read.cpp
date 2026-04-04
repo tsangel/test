@@ -444,6 +444,33 @@ struct SplitBulkUri {
 	return fmt::format("{}/frames/{}{}", uri.path, frame_number, uri.suffix);
 }
 
+[[nodiscard]] bool iequals_ascii(std::string_view lhs, std::string_view rhs) noexcept {
+	if (lhs.size() != rhs.size()) {
+		return false;
+	}
+	for (std::size_t i = 0; i < lhs.size(); ++i) {
+		const auto a = static_cast<unsigned char>(lhs[i]);
+		const auto b = static_cast<unsigned char>(rhs[i]);
+		if (std::tolower(a) != std::tolower(b)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+[[nodiscard]] bool can_synthesize_frame_bulk_uri(std::string_view uri) noexcept {
+	const auto split_uri = split_bulk_uri_suffix(uri);
+	if (split_uri.path.size() >= 7u &&
+	    split_uri.path.substr(split_uri.path.size() - 7u) == "/frames") {
+		return true;
+	}
+
+	const auto slash = split_uri.path.rfind('/');
+	const auto last_segment =
+	    slash == std::string_view::npos ? split_uri.path : split_uri.path.substr(slash + 1u);
+	return iequals_ascii(last_segment, "7FE00010");
+}
+
 [[nodiscard]] std::optional<std::size_t> parse_frame_bulk_uri_index(std::string_view uri) {
 	const auto split_uri = split_bulk_uri_suffix(uri);
 	const auto slash = split_uri.path.rfind('/');
@@ -1496,6 +1523,12 @@ void JsonReadParser::postprocess_pending_bulk(
 				frame_ref.vr = ref.vr;
 				apply_bulk_ref_metadata(frame_ref, transfer_syntax);
 				expanded.push_back(std::move(frame_ref));
+				continue;
+			}
+			if (!can_synthesize_frame_bulk_uri(ref.uri)) {
+				auto resolved_ref = ref;
+				apply_bulk_ref_metadata(resolved_ref, transfer_syntax);
+				expanded.push_back(std::move(resolved_ref));
 				continue;
 			}
 			const auto number_of_frames =

@@ -153,6 +153,22 @@ def test_read_json_preserves_existing_frame_list_bulk_uri_with_query_string():
     assert refs[2].uri == "https://example.test/instances/1/frames/3?sig=abc"
 
 
+def test_read_json_keeps_opaque_signed_pixel_bulk_uri_as_element_ref():
+    json_text = (
+        '{"00020010":{"vr":"UI","Value":["1.2.840.10008.1.2.4.50"]},'
+        '"00280008":{"vr":"IS","Value":[3]},'
+        '"7FE00010":{"vr":"OB","BulkDataURI":"https://example.test/instances/1?sig=abc"}}'
+    )
+
+    items = dicom.read_json(json_text)
+    _df, refs = items[0]
+    assert len(refs) == 1
+    assert refs[0].kind == dicom.JsonBulkTargetKind.element
+    assert refs[0].uri == "https://example.test/instances/1?sig=abc"
+    assert refs[0].media_type == "image/jpeg"
+    assert refs[0].transfer_syntax_uid == "1.2.840.10008.1.2.4.50"
+
+
 def test_read_json_set_bulk_data_populates_targets():
     native_json = '{"7FE00010":{"vr":"OW","BulkDataURI":"instances/1/frames"}}'
     native_items = dicom.read_json(native_json)
