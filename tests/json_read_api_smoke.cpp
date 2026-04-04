@@ -301,6 +301,38 @@ void test_read_json_keeps_opaque_signed_pixel_bulk_uri_as_element_ref() {
 	    "opaque signed encapsulated PixelData should preserve parsed frame payloads");
 }
 
+void test_read_json_keeps_signed_generic_pixel_bulk_uri_as_element_ref() {
+	const std::string json =
+	    R"({"00020010":{"vr":"UI","Value":["1.2.840.10008.1.2.4.50"]},"00280008":{"vr":"IS","Value":[3]},"7FE00010":{"vr":"OB","BulkDataURI":"https://example.test/studies/s/series/r/instances/i/bulk/7FE00010?sig=abc"}})";
+	auto result = dicom::read_json(
+	    reinterpret_cast<const std::uint8_t*>(json.data()), json.size());
+	expect_true(result.items.size() == 1u, "object JSON should produce one result item");
+	expect_true(
+	    result.items[0].pending_bulk_data.size() == 1u,
+	    "signed generic pixel URI should remain one element ref");
+	expect_true(
+	    result.items[0].pending_bulk_data[0].kind == dicom::JsonBulkTargetKind::element &&
+	        result.items[0].pending_bulk_data[0].uri ==
+	            "https://example.test/studies/s/series/r/instances/i/bulk/7FE00010?sig=abc" &&
+	        result.items[0].pending_bulk_data[0].media_type == "image/jpeg" &&
+	        result.items[0].pending_bulk_data[0].transfer_syntax_uid ==
+	            "1.2.840.10008.1.2.4.50",
+	    "signed generic pixel URI should not be rewritten into guessed frame URLs");
+
+	auto& file = *result.items[0].file;
+	const auto payload = build_encapsulated_value_field({
+	    {0x11u, 0x22u, 0xFFu, 0xD9u},
+	    {0x44u, 0x55u, 0xFFu, 0xD9u},
+	    {0x66u, 0x77u, 0x88u, 0x99u, 0xFFu, 0xD9u},
+	});
+	expect_true(
+	    file.set_bulk_data(result.items[0].pending_bulk_data[0], payload),
+	    "signed generic pixel URI should still be materializable through set_bulk_data");
+	expect_true(
+	    file["PixelData"].vr().is_pixel_sequence(),
+	    "signed generic encapsulated PixelData should materialize as an encapsulated sequence");
+}
+
 void test_read_json_missing_vr_falls_back_for_uid_and_private_un() {
 	const std::string json =
 	    R"({"00080018":{"Value":["1.2.840.10008.5.1.4.1.1.2"]},"00083002":{"Value":["1.2.840.10008.1.2.4.80"]},"00091110":{"Value":["ee51d3c338c9fa07dcdf8fab027dfd6136e21f002cef5916662dce0f614ce43f"]},"00091112":{"Value":["instance"]}})";
@@ -466,6 +498,7 @@ int main() {
 	test_read_json_preserves_existing_frame_specific_bulk_uri_with_query_string();
 	test_read_json_preserves_existing_frame_list_bulk_uri_with_query_string();
 	test_read_json_keeps_opaque_signed_pixel_bulk_uri_as_element_ref();
+	test_read_json_keeps_signed_generic_pixel_bulk_uri_as_element_ref();
 	test_read_json_missing_vr_falls_back_for_uid_and_private_un();
 	test_read_json_missing_charset_keeps_utf8_but_blocks_raw_materialization();
 	test_set_bulk_data_element_target_writes_raw_value_bytes();

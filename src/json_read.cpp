@@ -465,6 +465,9 @@ struct SplitBulkUri {
 	    split_uri.path.substr(split_uri.path.size() - 7u) == "/frames") {
 		return true;
 	}
+	if (!split_uri.suffix.empty()) {
+		return false;
+	}
 
 	const auto slash = split_uri.path.rfind('/');
 	const auto last_segment =
