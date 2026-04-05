@@ -523,51 +523,133 @@ void append_utf8_codepoint(std::string& out, std::uint32_t codepoint) {
 	return std::nullopt;
 }
 
+template <typename T>
+std::optional<std::vector<T>> parse_json_integral_array(std::string_view fragment);
+template <typename T>
+std::optional<std::vector<T>> parse_json_floating_array(std::string_view fragment);
+std::optional<std::vector<Tag>> parse_json_at_array(std::string_view fragment);
+template <typename T>
+void write_numeric_values_le(DataElement& element, std::span<const T> values);
+
 void materialize_json_stream_element(DataElement& element, std::size_t fragment_length) {
 	if (element.storage_kind() != DataElement::StorageKind::json_stream) {
 		return;
 	}
+	const auto fragment = json_fragment_text(element, fragment_length);
+	switch (static_cast<std::uint16_t>(element.vr())) {
+	case VR::AT_val: {
+		auto values = parse_json_at_array(fragment);
+		if (values && element.from_tag_vector(*values)) {
+			return;
+		}
+		break;
+	}
+	case VR::SS_val: {
+		auto values = parse_json_integral_array<std::int16_t>(fragment);
+		if (values) {
+			write_numeric_values_le(element, std::span<const std::int16_t>(*values));
+			return;
+		}
+		break;
+	}
+	case VR::US_val: {
+		auto values = parse_json_integral_array<std::uint16_t>(fragment);
+		if (values) {
+			write_numeric_values_le(element, std::span<const std::uint16_t>(*values));
+			return;
+		}
+		break;
+	}
+	case VR::SL_val: {
+		auto values = parse_json_integral_array<std::int32_t>(fragment);
+		if (values) {
+			write_numeric_values_le(element, std::span<const std::int32_t>(*values));
+			return;
+		}
+		break;
+	}
+	case VR::UL_val: {
+		auto values = parse_json_integral_array<std::uint32_t>(fragment);
+		if (values) {
+			write_numeric_values_le(element, std::span<const std::uint32_t>(*values));
+			return;
+		}
+		break;
+	}
+	case VR::SV_val: {
+		auto values = parse_json_integral_array<std::int64_t>(fragment);
+		if (values) {
+			write_numeric_values_le(element, std::span<const std::int64_t>(*values));
+			return;
+		}
+		break;
+	}
+	case VR::UV_val: {
+		auto values = parse_json_integral_array<std::uint64_t>(fragment);
+		if (values) {
+			write_numeric_values_le(element, std::span<const std::uint64_t>(*values));
+			return;
+		}
+		break;
+	}
+	case VR::FL_val: {
+		auto values = parse_json_floating_array<float>(fragment);
+		if (values) {
+			write_numeric_values_le(element, std::span<const float>(*values));
+			return;
+		}
+		break;
+	}
+	case VR::FD_val: {
+		auto values = parse_json_floating_array<double>(fragment);
+		if (values) {
+			write_numeric_values_le(element, std::span<const double>(*values));
+			return;
+		}
+		break;
+	}
+	default:
+		break;
+	}
+
 	auto values = parse_json_stream_utf8_values(element, fragment_length);
-	if (!values) {
-		diag::error_and_throw(
-		    "json_stream tag={} vr={} reason=failed to parse JSON Value fragment",
-		    element.tag().to_string(), element.vr().str());
-	}
-	std::vector<std::string_view> value_views;
-	value_views.reserve(values->size());
-	for (const auto& value : *values) {
-		value_views.push_back(value);
-	}
-	if (element.vr() == VR::UN) {
-		std::string raw_text;
-		std::size_t total_length = values->empty() ? 0u : values->size() - 1u;
+	if (values) {
+		std::vector<std::string_view> value_views;
+		value_views.reserve(values->size());
 		for (const auto& value : *values) {
-			total_length += value.size();
+			value_views.push_back(value);
 		}
-		raw_text.reserve(total_length);
-		for (std::size_t i = 0; i < values->size(); ++i) {
-			if (i != 0u) {
-				raw_text.push_back('\\');
+		if (element.vr() == VR::UN) {
+			std::string raw_text;
+			std::size_t total_length = values->empty() ? 0u : values->size() - 1u;
+			for (const auto& value : *values) {
+				total_length += value.size();
 			}
-			raw_text += (*values)[i];
+			raw_text.reserve(total_length);
+			for (std::size_t i = 0; i < values->size(); ++i) {
+				if (i != 0u) {
+					raw_text.push_back('\\');
+				}
+				raw_text += (*values)[i];
+			}
+			const auto* ptr = reinterpret_cast<const std::uint8_t*>(raw_text.data());
+			element.set_value_bytes(std::span<const std::uint8_t>(ptr, raw_text.size()));
+			return;
 		}
-		const auto* ptr = reinterpret_cast<const std::uint8_t*>(raw_text.data());
-		element.set_value_bytes(std::span<const std::uint8_t>(ptr, raw_text.size()));
-		return;
+		const auto* root = element.parent() ? element.parent()->root_dataset() : nullptr;
+		const auto charset_errors =
+		    root ? root->json_read_charset_errors_policy() : CharsetEncodeErrorPolicy::strict;
+		const bool ok = element.vr().uses_specific_character_set()
+		    ? element.from_utf8_views(value_views, charset_errors, nullptr)
+		    : element.from_string_views(value_views);
+		if (ok) {
+			return;
+		}
 	}
-	const auto* root = element.parent() ? element.parent()->root_dataset() : nullptr;
-	const auto charset_errors =
-	    root ? root->json_read_charset_errors_policy() : CharsetEncodeErrorPolicy::strict;
-	const bool ok = element.vr().uses_specific_character_set()
-	    ? element.from_utf8_views(value_views, charset_errors, nullptr)
-	    : element.from_string_views(value_views);
-	if (!ok) {
-		diag::error_and_throw(
-		    "json_stream tag={} vr={} reason=failed to materialize raw DICOM bytes "
-		    "from JSON UTF-8 values. Add (0008,0005) or choose an encodable charset "
-		    "before requesting raw bytes.",
-		    element.tag().to_string(), element.vr().str());
-	}
+
+	diag::error_and_throw(
+	    "json_stream tag={} vr={} reason=failed to materialize raw DICOM bytes from JSON Value fragment",
+	    element.tag().to_string(), element.vr().str());
 }
 
 bool report_from_assignment_failure(const DataElement& element, std::string_view reason,
@@ -963,6 +1045,154 @@ std::optional<std::vector<int>> make_int_vector_from_numbers(const std::vector<l
 		out.push_back(static_cast<int>(v));
 	}
 	return out;
+}
+
+template <typename IntT>
+std::optional<IntT> parse_integer_literal(std::string_view token) {
+	IntT value = 0;
+	const auto result = std::from_chars(token.data(), token.data() + token.size(), value, 10);
+	if (result.ec == std::errc() && result.ptr == token.data() + token.size()) {
+		return value;
+	}
+	return std::nullopt;
+}
+
+std::optional<double> parse_double_literal(std::string_view token) {
+	try {
+		size_t idx = 0;
+		double value = std::stod(std::string{token}, &idx);
+		if (idx == token.size()) {
+			return value;
+		}
+	} catch (...) {
+	}
+	return std::nullopt;
+}
+
+template <typename T>
+void write_numeric_values_le(DataElement& element, std::span<const T> values) {
+	element.reserve_value_bytes(values.size() * sizeof(T));
+	auto dst = element.value_span();
+	auto* out = const_cast<std::uint8_t*>(dst.data());
+	for (std::size_t i = 0; i < values.size(); ++i) {
+		if constexpr (std::is_floating_point_v<T>) {
+			using Bits = std::conditional_t<sizeof(T) == 4, std::uint32_t, std::uint64_t>;
+			endian::store_le<Bits>(out + (i * sizeof(T)), std::bit_cast<Bits>(values[i]));
+		} else {
+			endian::store_le<T>(out + (i * sizeof(T)), values[i]);
+		}
+	}
+}
+
+template <typename T>
+std::optional<std::vector<T>> parse_json_integral_array(std::string_view fragment) {
+	std::size_t pos = 0;
+	skip_json_whitespace(fragment, pos);
+	if (pos >= fragment.size() || fragment[pos] != '[') {
+		return std::nullopt;
+	}
+	++pos;
+	skip_json_whitespace(fragment, pos);
+	std::vector<T> values;
+	if (pos < fragment.size() && fragment[pos] == ']') {
+		return values;
+	}
+	while (pos < fragment.size()) {
+		std::string_view token{};
+		if (!skip_json_number_token(fragment, pos, token)) {
+			return std::nullopt;
+		}
+		auto parsed = parse_integer_literal<T>(token);
+		if (!parsed) {
+			return std::nullopt;
+		}
+		values.push_back(*parsed);
+		skip_json_whitespace(fragment, pos);
+		if (pos < fragment.size() && fragment[pos] == ',') {
+			++pos;
+			continue;
+		}
+		if (pos < fragment.size() && fragment[pos] == ']') {
+			return values;
+		}
+		return std::nullopt;
+	}
+	return std::nullopt;
+}
+
+template <typename T>
+std::optional<std::vector<T>> parse_json_floating_array(std::string_view fragment) {
+	std::size_t pos = 0;
+	skip_json_whitespace(fragment, pos);
+	if (pos >= fragment.size() || fragment[pos] != '[') {
+		return std::nullopt;
+	}
+	++pos;
+	skip_json_whitespace(fragment, pos);
+	std::vector<T> values;
+	if (pos < fragment.size() && fragment[pos] == ']') {
+		return values;
+	}
+	while (pos < fragment.size()) {
+		std::string_view token{};
+		if (!skip_json_number_token(fragment, pos, token)) {
+			return std::nullopt;
+		}
+		auto parsed = parse_double_literal(token);
+		if (!parsed) {
+			return std::nullopt;
+		}
+		values.push_back(static_cast<T>(*parsed));
+		skip_json_whitespace(fragment, pos);
+		if (pos < fragment.size() && fragment[pos] == ',') {
+			++pos;
+			continue;
+		}
+		if (pos < fragment.size() && fragment[pos] == ']') {
+			return values;
+		}
+		return std::nullopt;
+	}
+	return std::nullopt;
+}
+
+std::optional<std::vector<Tag>> parse_json_at_array(std::string_view fragment) {
+	std::size_t pos = 0;
+	skip_json_whitespace(fragment, pos);
+	if (pos >= fragment.size() || fragment[pos] != '[') {
+		return std::nullopt;
+	}
+	++pos;
+	skip_json_whitespace(fragment, pos);
+	std::vector<Tag> values;
+	if (pos < fragment.size() && fragment[pos] == ']') {
+		return values;
+	}
+	while (pos < fragment.size()) {
+		JsonStringToken token{};
+		if (!parse_json_string_token(fragment, pos, token)) {
+			return std::nullopt;
+		}
+		auto tag_text = decode_json_string_token(fragment, token);
+		if (!tag_text) {
+			return std::nullopt;
+		}
+		try {
+			values.emplace_back(*tag_text);
+		} catch (...) {
+			return std::nullopt;
+		}
+		skip_json_whitespace(fragment, pos);
+		if (pos < fragment.size() && fragment[pos] == ',') {
+			++pos;
+			continue;
+		}
+		if (pos < fragment.size() && fragment[pos] == ']') {
+			return values;
+		}
+		return std::nullopt;
+	}
+	return std::nullopt;
 }
 
 constexpr Tag kTransferSyntaxUidTag{0x0002u, 0x0010u};

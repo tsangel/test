@@ -311,3 +311,32 @@ def test_read_json_non_json_input_reports_expected_top_level_shape():
     message = str(exc_info.value)
     assert "not a DICOM JSON stream" in message
     assert "top-level JSON object or array" in message
+
+
+def test_read_json_bytes_keeps_source_buffer_alive():
+    payload = bytearray(
+        b'{"00080018":{"vr":"UI","Value":["1.2.840.10008.5.1.4.1.1.2"]},'
+        b'"00100010":{"vr":"LO","Value":["buffer-backed"]}}'
+    )
+    items = dicom.read_json(memoryview(payload))
+    del payload
+
+    df, refs = items[0]
+    assert refs == []
+    assert df["SOPInstanceUID"].to_string_view() == "1.2.840.10008.5.1.4.1.1.2"
+    assert df["PatientName"].to_utf8_string() == "buffer-backed"
+
+
+def test_read_json_lazy_numeric_values_materialize_on_access():
+    items = dicom.read_json(
+        b'{"00280010":{"vr":"US","Value":[512]},'
+        b'"00281050":{"vr":"FD","Value":[1.5,2.5]},'
+        b'"00080008":{"vr":"AT","Value":["00100010"]}}'
+    )
+
+    df, refs = items[0]
+    assert refs == []
+    assert df["Rows"].to_long() == 512
+    assert df["WindowCenter"].to_double_vector() == [1.5, 2.5]
+    assert df["00080008"].vr == dicom.VR.AT
+    assert df["00080008"].value_span().tobytes() == b"\x10\x00\x10\x00"

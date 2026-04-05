@@ -53,56 +53,6 @@ void skip_json_whitespace(std::string_view text, std::size_t& pos) noexcept {
 	return text;
 }
 
-[[nodiscard]] bool validate_json_stream_ascii_envelope(std::string_view text) noexcept {
-	bool in_string = false;
-	bool escaping = false;
-	for (std::size_t i = 0; i < text.size(); ++i) {
-		const unsigned char ch = static_cast<unsigned char>(text[i]);
-		if (!in_string) {
-			if (ch >= 0x80u) {
-				return false;
-			}
-			if (ch == '"') {
-				in_string = true;
-				continue;
-			}
-			if (ch < 0x20u && !std::isspace(ch)) {
-				return false;
-			}
-			continue;
-		}
-
-		if (escaping) {
-			if (ch == 'u') {
-				if (i + 4u >= text.size()) {
-					return false;
-				}
-				for (std::size_t j = 1; j <= 4u; ++j) {
-					const unsigned char hex = static_cast<unsigned char>(text[i + j]);
-					if (!std::isxdigit(hex)) {
-						return false;
-					}
-				}
-				i += 4u;
-			}
-			escaping = false;
-			continue;
-		}
-		if (ch == '\\') {
-			escaping = true;
-			continue;
-		}
-		if (ch == '"') {
-			in_string = false;
-			continue;
-		}
-		if (ch < 0x20u) {
-			return false;
-		}
-	}
-	return !in_string && !escaping;
-}
-
 [[nodiscard]] std::optional<std::uint32_t> parse_hex4(std::string_view text, std::size_t pos) {
 	if (pos + 4u > text.size()) {
 		return std::nullopt;
@@ -187,6 +137,16 @@ void append_utf8_codepoint(std::string& out, std::uint32_t codepoint) {
 		++pos;
 	}
 	return false;
+}
+
+[[nodiscard]] inline std::string_view json_string_token_view(
+    std::string_view text, const JsonStringToken& token) noexcept {
+	return text.substr(token.content_begin, token.content_end - token.content_begin);
+}
+
+[[nodiscard]] inline bool json_string_token_equals(
+    std::string_view text, const JsonStringToken& token, std::string_view value) noexcept {
+	return !token.has_escape && json_string_token_view(text, token) == value;
 }
 
 [[nodiscard]] std::optional<std::string> decode_json_string_token(
@@ -309,6 +269,7 @@ void append_utf8_codepoint(std::string& out, std::uint32_t codepoint) {
 }
 
 [[nodiscard]] bool skip_json_value(std::string_view text, std::size_t& pos);
+[[nodiscard]] bool skip_json_object(std::string_view text, std::size_t& pos);
 
 [[nodiscard]] bool skip_json_array(std::string_view text, std::size_t& pos);
 [[nodiscard]] bool skip_json_object(std::string_view text, std::size_t& pos);
@@ -403,8 +364,98 @@ void append_utf8_codepoint(std::string& out, std::uint32_t codepoint) {
 	       skip_json_literal(text, pos, "false");
 }
 
-[[nodiscard]] std::string tag_hex(Tag tag) {
-	return fmt::format("{:04X}{:04X}", tag.group(), tag.element());
+constexpr std::array<char, 16> kUpperHexDigits{
+    '0', '1', '2', '3', '4', '5', '6', '7',
+    '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
+
+void append_tag_hex(std::string& out, Tag tag) {
+	const auto value = tag.value();
+	out.push_back(kUpperHexDigits[(value >> 28) & 0x0Fu]);
+	out.push_back(kUpperHexDigits[(value >> 24) & 0x0Fu]);
+	out.push_back(kUpperHexDigits[(value >> 20) & 0x0Fu]);
+	out.push_back(kUpperHexDigits[(value >> 16) & 0x0Fu]);
+	out.push_back(kUpperHexDigits[(value >> 12) & 0x0Fu]);
+	out.push_back(kUpperHexDigits[(value >> 8) & 0x0Fu]);
+	out.push_back(kUpperHexDigits[(value >> 4) & 0x0Fu]);
+	out.push_back(kUpperHexDigits[value & 0x0Fu]);
+}
+
+void append_decimal(std::string& out, std::size_t value) {
+	char buffer[32];
+	auto [ptr, ec] = std::to_chars(std::begin(buffer), std::end(buffer), value);
+	if (ec != std::errc{}) {
+		diag::error_and_throw("read_json reason=failed to format decimal path component");
+	}
+	out.append(buffer, static_cast<std::size_t>(ptr - buffer));
+}
+
+[[nodiscard]] std::string make_tag_path(std::string_view prefix, Tag tag) {
+	std::string out;
+	out.reserve(prefix.size() + (prefix.empty() ? 0u : 1u) + 8u);
+	if (!prefix.empty()) {
+		out.append(prefix);
+		out.push_back('.');
+	}
+	append_tag_hex(out, tag);
+	return out;
+}
+
+[[nodiscard]] std::string make_item_path(std::string_view prefix, std::size_t item_index) {
+	std::string out;
+	out.reserve(prefix.size() + 24u);
+	out.append(prefix);
+	out.push_back('.');
+	append_decimal(out, item_index);
+	return out;
+}
+
+[[nodiscard]] const std::array<std::uint8_t, 256>& hex_nibble_lut() {
+	static const auto lut = []() {
+		std::array<std::uint8_t, 256> table{};
+		table.fill(0xF0u);
+		for (std::uint8_t i = 0; i <= 9u; ++i) {
+			table[static_cast<unsigned char>('0' + i)] = i;
+		}
+		for (std::uint8_t i = 0; i < 6u; ++i) {
+			table[static_cast<unsigned char>('A' + i)] = static_cast<std::uint8_t>(10u + i);
+			table[static_cast<unsigned char>('a' + i)] = static_cast<std::uint8_t>(10u + i);
+		}
+		return table;
+	}();
+	return lut;
+}
+
+[[nodiscard]] std::optional<Tag> parse_json_tag_key_fast(
+    std::string_view text, const JsonStringToken& token) {
+	if (token.has_escape) {
+		return std::nullopt;
+	}
+	const auto view = json_string_token_view(text, token);
+	if (view.size() != 8u) {
+		return std::nullopt;
+	}
+	const auto& lut = hex_nibble_lut();
+	const auto b0 = lut[static_cast<unsigned char>(view[0])];
+	const auto b1 = lut[static_cast<unsigned char>(view[1])];
+	const auto b2 = lut[static_cast<unsigned char>(view[2])];
+	const auto b3 = lut[static_cast<unsigned char>(view[3])];
+	const auto b4 = lut[static_cast<unsigned char>(view[4])];
+	const auto b5 = lut[static_cast<unsigned char>(view[5])];
+	const auto b6 = lut[static_cast<unsigned char>(view[6])];
+	const auto b7 = lut[static_cast<unsigned char>(view[7])];
+	if (((b0 | b1 | b2 | b3 | b4 | b5 | b6 | b7) & 0xF0u) != 0u) {
+		return std::nullopt;
+	}
+	const auto value =
+	    (static_cast<std::uint32_t>(b0) << 28) |
+	    (static_cast<std::uint32_t>(b1) << 24) |
+	    (static_cast<std::uint32_t>(b2) << 20) |
+	    (static_cast<std::uint32_t>(b3) << 16) |
+	    (static_cast<std::uint32_t>(b4) << 12) |
+	    (static_cast<std::uint32_t>(b5) << 8) |
+	    (static_cast<std::uint32_t>(b6) << 4) |
+	    static_cast<std::uint32_t>(b7);
+	return Tag(value);
 }
 
 constexpr Tag kTransferSyntaxUidTag{0x0002u, 0x0010u};
@@ -439,10 +490,19 @@ struct SplitBulkUri {
 [[nodiscard]] std::string frame_bulk_uri(std::string_view base_uri, std::size_t frame_index) {
 	const auto uri = split_bulk_uri_suffix(base_uri);
 	const auto frame_number = frame_index + 1u;
+	std::string out;
+	out.reserve(uri.path.size() + uri.suffix.size() + 24u);
+	out.append(uri.path);
 	if (uri.path.size() >= 7u && uri.path.substr(uri.path.size() - 7u) == "/frames") {
-		return fmt::format("{}/{}{}", uri.path, frame_number, uri.suffix);
+		out.push_back('/');
+		append_decimal(out, frame_number);
+		out.append(uri.suffix);
+		return out;
 	}
-	return fmt::format("{}/frames/{}{}", uri.path, frame_number, uri.suffix);
+	out.append("/frames/");
+	append_decimal(out, frame_number);
+	out.append(uri.suffix);
+	return out;
 }
 
 [[nodiscard]] bool iequals_ascii(std::string_view lhs, std::string_view rhs) noexcept {
@@ -774,6 +834,23 @@ template <typename IntT>
 	return true;
 }
 
+[[nodiscard]] bool vr_uses_lazy_json_value_materialization(VR vr) noexcept {
+	switch (static_cast<std::uint16_t>(vr)) {
+	case VR::AT_val:
+	case VR::SS_val:
+	case VR::US_val:
+	case VR::SL_val:
+	case VR::UL_val:
+	case VR::SV_val:
+	case VR::UV_val:
+	case VR::FL_val:
+	case VR::FD_val:
+		return true;
+	default:
+		return false;
+	}
+}
+
 template <typename T>
 void write_integral_values(DataElement& element, std::span<const T> values) {
 	element.reserve_value_bytes(values.size() * sizeof(T));
@@ -794,8 +871,12 @@ struct AttributeInfo {
 	bool has_value{false};
 	std::size_t value_offset{0};
 	std::size_t value_length{0};
-	std::optional<std::string> inline_binary{};
-	std::optional<std::string> bulk_data_uri{};
+	bool has_inline_binary{false};
+	std::string inline_binary_storage{};
+	std::string_view inline_binary{};
+	bool has_bulk_data_uri{false};
+	std::string bulk_data_uri_storage{};
+	std::string_view bulk_data_uri{};
 };
 
 }  // namespace
@@ -806,11 +887,24 @@ public:
 	    std::shared_ptr<const std::vector<std::uint8_t>> bytes,
 	    JsonReadOptions options)
 	    : name_(std::move(name)),
-	      bytes_(std::move(bytes)),
+	      bytes_owner_(std::move(bytes)),
+	      data_(bytes_owner_ ? bytes_owner_->data() : nullptr),
+	      size_(bytes_owner_ ? bytes_owner_->size() : 0u),
 	      text_(strip_utf8_bom(trim_ascii_whitespace(std::string_view(
-	          reinterpret_cast<const char*>(bytes_->data()), bytes_->size())))),
+	          reinterpret_cast<const char*>(data_), size_)))),
 	      base_offset_(static_cast<std::size_t>(
-	          text_.data() - reinterpret_cast<const char*>(bytes_->data()))),
+	          text_.data() - reinterpret_cast<const char*>(data_))),
+	      options_(options) {}
+
+	JsonReadParser(
+	    std::string name, const std::uint8_t* data, std::size_t size, JsonReadOptions options)
+	    : name_(std::move(name)),
+	      data_(data),
+	      size_(size),
+	      text_(strip_utf8_bom(trim_ascii_whitespace(std::string_view(
+	          reinterpret_cast<const char*>(data_), size_)))),
+	      base_offset_(static_cast<std::size_t>(
+	          text_.data() - reinterpret_cast<const char*>(data_))),
 	      options_(options) {}
 
 	[[nodiscard]] JsonReadResult parse();
@@ -827,11 +921,14 @@ private:
 	void parse_dataset_object(DataSet& dataset, std::vector<JsonBulkRef>& pending_bulk_data,
 	    std::string_view path_prefix, std::size_t& pos, bool finalize_after = true);
 	void parse_attribute_object(DataSet& dataset,
-	    std::vector<JsonBulkRef>& pending_bulk_data, Tag tag, std::string_view element_path,
+	    std::vector<JsonBulkRef>& pending_bulk_data, Tag tag, std::string_view path_prefix,
+	    std::size_t& pos);
+	[[nodiscard]] bool try_parse_attribute_object_fast(DataSet& dataset,
+	    std::vector<JsonBulkRef>& pending_bulk_data, Tag tag, std::string_view path_prefix,
 	    std::size_t& pos);
 	[[nodiscard]] VR resolve_attribute_vr(Tag tag, const AttributeInfo& attr) const;
 	DataElement& append_leaf_element(DataSet& dataset, Tag tag, VR vr);
-	void append_json_stream_string_element(
+	void append_json_stream_value_element(
 	    DataSet& dataset, Tag tag, VR vr, std::size_t offset, std::size_t length);
 	void parse_sequence_value(DataSet& dataset, Tag tag,
 	    std::vector<JsonBulkRef>& pending_bulk_data, std::string_view element_path,
@@ -843,16 +940,18 @@ private:
 	void parse_at_array_into(std::string_view fragment, std::vector<Tag>& out_values) const;
 	void assign_non_string_value_array(DataElement& element, std::string_view fragment) const;
 	void append_bulk_ref(std::vector<JsonBulkRef>& pending_bulk_data,
-	    std::string_view element_path, VR vr, const std::string& uri) const;
+	    std::string_view element_path, VR vr, std::string_view uri) const;
 	void finalize_attribute(DataSet& dataset,
-	    std::vector<JsonBulkRef>& pending_bulk_data, Tag tag, std::string_view element_path,
+	    std::vector<JsonBulkRef>& pending_bulk_data, Tag tag, std::string_view path_prefix,
 	    const AttributeInfo& attr);
 	void finalize_dataset(DataSet& dataset) const;
 	void postprocess_pending_bulk(
 	    DicomFile& file, std::vector<JsonBulkRef>& pending_bulk_data) const;
 
 	std::string name_;
-	std::shared_ptr<const std::vector<std::uint8_t>> bytes_;
+	std::shared_ptr<const std::vector<std::uint8_t>> bytes_owner_{};
+	const std::uint8_t* data_{nullptr};
+	std::size_t size_{0};
 	std::string_view text_;
 	std::size_t base_offset_{0};
 	JsonReadOptions options_{};
@@ -861,6 +960,8 @@ private:
 [[nodiscard]] JsonReadResult read_json_from_shared(
     std::string name, std::shared_ptr<const std::vector<std::uint8_t>> bytes,
     JsonReadOptions options);
+[[nodiscard]] JsonReadResult read_json_borrowed(
+    std::string name, const std::uint8_t* data, std::size_t size, JsonReadOptions options);
 
 JsonReadResult JsonReadParser::parse() {
 	JsonReadResult result{};
@@ -871,7 +972,8 @@ JsonReadResult JsonReadParser::parse() {
 		    "read_json name={} reason=input is not a DICOM JSON stream; empty input",
 		    display_name());
 	}
-	if (!validate_json_stream_ascii_envelope(text_)) {
+	const unsigned char first = static_cast<unsigned char>(text_[pos]);
+	if ((first < 0x20u && !std::isspace(first)) || first >= 0x80u) {
 		diag::error_and_throw(
 		    "read_json name={} reason=input is not a DICOM JSON stream; invalid JSON byte sequence",
 		    display_name());
@@ -909,9 +1011,9 @@ JsonReadResult JsonReadParser::parse() {
 
 std::unique_ptr<DicomFile> JsonReadParser::make_file() const {
 	auto file = std::make_unique<DicomFile>();
-	file->attach_to_memory(name_, bytes_->data(), bytes_->size(), false);
+	file->attach_to_memory(name_, data_, size_, false);
 	auto& dataset = file->dataset();
-	dataset.attached_memory_owner_ = bytes_;
+	dataset.attached_memory_owner_ = bytes_owner_;
 	dataset.json_read_charset_errors_ = options_.charset_errors;
 	dataset.last_tag_loaded_ = Tag(0xFFFFu, 0xFFFFu);
 	return file;
@@ -973,31 +1075,37 @@ void JsonReadParser::parse_dataset_object(DataSet& dataset,
 			    "read_json name={} reason=dataset key must be a JSON string",
 			    display_name());
 		}
-		auto key = decode_json_string_token(text_, key_token);
-		if (!key) {
-			diag::error_and_throw(
-			    "read_json name={} reason=failed to decode dataset key",
-			    display_name());
-		}
 		Tag tag;
-		try {
-			tag = Tag(*key);
-		} catch (...) {
-			diag::error_and_throw(
-			    "read_json name={} key={} reason=invalid DICOM JSON tag key",
-			    display_name(), *key);
+		if (const auto fast_tag = parse_json_tag_key_fast(text_, key_token)) {
+			tag = *fast_tag;
+		} else {
+			auto key = decode_json_string_token(text_, key_token);
+			if (!key) {
+				diag::error_and_throw(
+				    "read_json name={} reason=failed to decode dataset key",
+				    display_name());
+			}
+			try {
+				tag = Tag(*key);
+			} catch (...) {
+				diag::error_and_throw(
+				    "read_json name={} key={} reason=invalid DICOM JSON tag key",
+				    display_name(), *key);
+			}
 		}
 		skip_json_whitespace(text_, pos);
 		if (pos >= text_.size() || text_[pos] != ':') {
+			if (!key_token.has_escape) {
+				diag::error_and_throw(
+				    "read_json name={} key={} reason=expected ':' after dataset key",
+				    display_name(), json_string_token_view(text_, key_token));
+			}
 			diag::error_and_throw(
-			    "read_json name={} key={} reason=expected ':' after dataset key",
-			    display_name(), *key);
+			    "read_json name={} reason=expected ':' after dataset key",
+			    display_name());
 		}
 		++pos;
-		const auto element_path = path_prefix.empty()
-		    ? tag_hex(tag)
-		    : fmt::format("{}.{}", path_prefix, tag_hex(tag));
-		parse_attribute_object(dataset, pending_bulk_data, tag, element_path, pos);
+		parse_attribute_object(dataset, pending_bulk_data, tag, path_prefix, pos);
 		skip_json_whitespace(text_, pos);
 		if (pos < text_.size() && text_[pos] == ',') {
 			++pos;
@@ -1020,8 +1128,11 @@ void JsonReadParser::parse_dataset_object(DataSet& dataset,
 }
 
 void JsonReadParser::parse_attribute_object(DataSet& dataset,
-    std::vector<JsonBulkRef>& pending_bulk_data, Tag tag, std::string_view element_path,
+    std::vector<JsonBulkRef>& pending_bulk_data, Tag tag, std::string_view path_prefix,
     std::size_t& pos) {
+	if (try_parse_attribute_object_fast(dataset, pending_bulk_data, tag, path_prefix, pos)) {
+		return;
+	}
 	skip_json_whitespace(text_, pos);
 	if (pos >= text_.size() || text_[pos] != '{') {
 		diag::error_and_throw(
@@ -1033,7 +1144,7 @@ void JsonReadParser::parse_attribute_object(DataSet& dataset,
 	skip_json_whitespace(text_, pos);
 	if (pos < text_.size() && text_[pos] == '}') {
 		++pos;
-		finalize_attribute(dataset, pending_bulk_data, tag, element_path, attr);
+		finalize_attribute(dataset, pending_bulk_data, tag, path_prefix, attr);
 		return;
 	}
 	while (pos < text_.size()) {
@@ -1043,12 +1154,6 @@ void JsonReadParser::parse_attribute_object(DataSet& dataset,
 			    "read_json name={} tag={} reason=attribute member key must be a JSON string",
 			    display_name(), tag.to_string());
 		}
-		auto key = decode_json_string_token(text_, key_token);
-		if (!key) {
-			diag::error_and_throw(
-			    "read_json name={} tag={} reason=failed to decode attribute member key",
-			    display_name(), tag.to_string());
-		}
 		skip_json_whitespace(text_, pos);
 		if (pos >= text_.size() || text_[pos] != ':') {
 			diag::error_and_throw(
@@ -1056,21 +1161,25 @@ void JsonReadParser::parse_attribute_object(DataSet& dataset,
 			    display_name(), tag.to_string());
 		}
 		++pos;
-		if (*key == "vr") {
+		if (json_string_token_equals(text_, key_token, "vr")) {
 			JsonStringToken vr_token{};
 			if (!parse_json_string_token(text_, pos, vr_token)) {
 				diag::error_and_throw(
 				    "read_json name={} tag={} reason=vr must be a JSON string",
 				    display_name(), tag.to_string());
 			}
-			auto vr_text = decode_json_string_token(text_, vr_token);
-			if (!vr_text) {
-				diag::error_and_throw(
-				    "read_json name={} tag={} reason=failed to decode vr string",
-				    display_name(), tag.to_string());
+			if (!vr_token.has_escape) {
+				attr.vr = VR::from_string(json_string_token_view(text_, vr_token));
+			} else {
+				auto vr_text = decode_json_string_token(text_, vr_token);
+				if (!vr_text) {
+					diag::error_and_throw(
+					    "read_json name={} tag={} reason=failed to decode vr string",
+					    display_name(), tag.to_string());
+				}
+				attr.vr = VR::from_string(*vr_text);
 			}
-			attr.vr = VR::from_string(*vr_text);
-		} else if (*key == "Value") {
+		} else if (json_string_token_equals(text_, key_token, "Value")) {
 			skip_json_whitespace(text_, pos);
 			const auto begin = pos;
 			if (!skip_json_value(text_, pos)) {
@@ -1081,22 +1190,46 @@ void JsonReadParser::parse_attribute_object(DataSet& dataset,
 			attr.has_value = true;
 			attr.value_offset = absolute_offset(begin);
 			attr.value_length = pos - begin;
-		} else if (*key == "InlineBinary") {
+		} else if (json_string_token_equals(text_, key_token, "InlineBinary")) {
 			JsonStringToken token{};
 			if (!parse_json_string_token(text_, pos, token)) {
 				diag::error_and_throw(
 				    "read_json name={} tag={} reason=InlineBinary must be a JSON string",
 				    display_name(), tag.to_string());
 			}
-			attr.inline_binary = decode_json_string_token(text_, token);
-		} else if (*key == "BulkDataURI") {
+			if (!token.has_escape) {
+				attr.inline_binary = json_string_token_view(text_, token);
+			} else {
+				auto decoded = decode_json_string_token(text_, token);
+				if (!decoded) {
+					diag::error_and_throw(
+					    "read_json name={} tag={} reason=failed to decode InlineBinary string",
+					    display_name(), tag.to_string());
+				}
+				attr.inline_binary_storage = std::move(*decoded);
+				attr.inline_binary = attr.inline_binary_storage;
+			}
+			attr.has_inline_binary = true;
+		} else if (json_string_token_equals(text_, key_token, "BulkDataURI")) {
 			JsonStringToken token{};
 			if (!parse_json_string_token(text_, pos, token)) {
 				diag::error_and_throw(
 				    "read_json name={} tag={} reason=BulkDataURI must be a JSON string",
 				    display_name(), tag.to_string());
 			}
-			attr.bulk_data_uri = decode_json_string_token(text_, token);
+			if (!token.has_escape) {
+				attr.bulk_data_uri = json_string_token_view(text_, token);
+			} else {
+				auto decoded = decode_json_string_token(text_, token);
+				if (!decoded) {
+					diag::error_and_throw(
+					    "read_json name={} tag={} reason=failed to decode BulkDataURI string",
+					    display_name(), tag.to_string());
+				}
+				attr.bulk_data_uri_storage = std::move(*decoded);
+				attr.bulk_data_uri = attr.bulk_data_uri_storage;
+			}
+			attr.has_bulk_data_uri = true;
 		} else if (!skip_json_value(text_, pos)) {
 			diag::error_and_throw(
 			    "read_json name={} tag={} reason=failed to skip unsupported attribute member",
@@ -1109,7 +1242,7 @@ void JsonReadParser::parse_attribute_object(DataSet& dataset,
 		}
 		if (pos < text_.size() && text_[pos] == '}') {
 			++pos;
-			finalize_attribute(dataset, pending_bulk_data, tag, element_path, attr);
+			finalize_attribute(dataset, pending_bulk_data, tag, path_prefix, attr);
 			return;
 		}
 		diag::error_and_throw(
@@ -1121,6 +1254,133 @@ void JsonReadParser::parse_attribute_object(DataSet& dataset,
 	    display_name(), tag.to_string());
 }
 
+bool JsonReadParser::try_parse_attribute_object_fast(DataSet& dataset,
+    std::vector<JsonBulkRef>& pending_bulk_data, Tag tag, std::string_view path_prefix,
+    std::size_t& pos) {
+	std::size_t cursor = pos;
+	skip_json_whitespace(text_, cursor);
+	if (cursor >= text_.size() || text_[cursor] != '{') {
+		return false;
+	}
+	++cursor;
+
+	AttributeInfo attr{};
+	skip_json_whitespace(text_, cursor);
+	if (cursor < text_.size() && text_[cursor] == '}') {
+		++cursor;
+		pos = cursor;
+		finalize_attribute(dataset, pending_bulk_data, tag, path_prefix, attr);
+		return true;
+	}
+
+	JsonStringToken first_key{};
+	if (!parse_json_string_token(text_, cursor, first_key) ||
+	    !json_string_token_equals(text_, first_key, "vr")) {
+		return false;
+	}
+	skip_json_whitespace(text_, cursor);
+	if (cursor >= text_.size() || text_[cursor] != ':') {
+		return false;
+	}
+	++cursor;
+
+	JsonStringToken vr_token{};
+	if (!parse_json_string_token(text_, cursor, vr_token)) {
+		return false;
+	}
+	if (!vr_token.has_escape) {
+		attr.vr = VR::from_string(json_string_token_view(text_, vr_token));
+	} else {
+		auto vr_text = decode_json_string_token(text_, vr_token);
+		if (!vr_text) {
+			diag::error_and_throw(
+			    "read_json name={} tag={} reason=failed to decode vr string",
+			    display_name(), tag.to_string());
+		}
+		attr.vr = VR::from_string(*vr_text);
+	}
+
+	skip_json_whitespace(text_, cursor);
+	if (cursor < text_.size() && text_[cursor] == '}') {
+		++cursor;
+		pos = cursor;
+		finalize_attribute(dataset, pending_bulk_data, tag, path_prefix, attr);
+		return true;
+	}
+	if (cursor >= text_.size() || text_[cursor] != ',') {
+		return false;
+	}
+	++cursor;
+
+	JsonStringToken second_key{};
+	if (!parse_json_string_token(text_, cursor, second_key)) {
+		return false;
+	}
+	skip_json_whitespace(text_, cursor);
+	if (cursor >= text_.size() || text_[cursor] != ':') {
+		return false;
+	}
+	++cursor;
+
+	if (json_string_token_equals(text_, second_key, "Value")) {
+		skip_json_whitespace(text_, cursor);
+		const auto begin = cursor;
+		if (!skip_json_value(text_, cursor)) {
+			return false;
+		}
+		attr.has_value = true;
+		attr.value_offset = absolute_offset(begin);
+		attr.value_length = cursor - begin;
+	} else if (json_string_token_equals(text_, second_key, "InlineBinary")) {
+		JsonStringToken token{};
+		if (!parse_json_string_token(text_, cursor, token)) {
+			return false;
+		}
+		if (!token.has_escape) {
+			attr.inline_binary = json_string_token_view(text_, token);
+		} else {
+			auto decoded = decode_json_string_token(text_, token);
+			if (!decoded) {
+				diag::error_and_throw(
+				    "read_json name={} tag={} reason=failed to decode InlineBinary string",
+				    display_name(), tag.to_string());
+			}
+			attr.inline_binary_storage = std::move(*decoded);
+			attr.inline_binary = attr.inline_binary_storage;
+		}
+		attr.has_inline_binary = true;
+	} else if (json_string_token_equals(text_, second_key, "BulkDataURI")) {
+		JsonStringToken token{};
+		if (!parse_json_string_token(text_, cursor, token)) {
+			return false;
+		}
+		if (!token.has_escape) {
+			attr.bulk_data_uri = json_string_token_view(text_, token);
+		} else {
+			auto decoded = decode_json_string_token(text_, token);
+			if (!decoded) {
+				diag::error_and_throw(
+				    "read_json name={} tag={} reason=failed to decode BulkDataURI string",
+				    display_name(), tag.to_string());
+			}
+			attr.bulk_data_uri_storage = std::move(*decoded);
+			attr.bulk_data_uri = attr.bulk_data_uri_storage;
+		}
+		attr.has_bulk_data_uri = true;
+	} else {
+		return false;
+	}
+
+	skip_json_whitespace(text_, cursor);
+	if (cursor >= text_.size() || text_[cursor] != '}') {
+		return false;
+	}
+	++cursor;
+	pos = cursor;
+	finalize_attribute(dataset, pending_bulk_data, tag, path_prefix, attr);
+	return true;
+}
+
 VR JsonReadParser::resolve_attribute_vr(Tag tag, const AttributeInfo& attr) const {
 	if (attr.vr && attr.vr->is_known()) {
 		return *attr.vr;
@@ -1130,7 +1390,7 @@ VR JsonReadParser::resolve_attribute_vr(Tag tag, const AttributeInfo& attr) cons
 		return VR(vr_value);
 	}
 
-	if (attr.inline_binary || attr.bulk_data_uri) {
+	if (attr.has_inline_binary || attr.has_bulk_data_uri) {
 		return VR::UN;
 	}
 	if (attr.has_value) {
@@ -1160,15 +1420,14 @@ VR JsonReadParser::resolve_attribute_vr(Tag tag, const AttributeInfo& attr) cons
 }
 
 DataElement& JsonReadParser::append_leaf_element(DataSet& dataset, Tag tag, VR vr) {
-	dataset.elements_.emplace_back();
+	dataset.elements_.emplace_back(tag, vr, 0, 0, &dataset);
 	auto* element = &dataset.elements_.back();
-	element->reset_without_release(tag, vr, 0, 0, &dataset, false);
 	dataset.element_index_.emplace_back(tag, element);
 	++dataset.active_element_count_;
 	return *element;
 }
 
-void JsonReadParser::append_json_stream_string_element(
+void JsonReadParser::append_json_stream_value_element(
     DataSet& dataset, Tag tag, VR vr, std::size_t offset, std::size_t length) {
 	auto& element = append_leaf_element(dataset, tag, vr);
 	element.storage_kind_ = DataElement::StorageKind::json_stream;
@@ -1202,7 +1461,7 @@ void JsonReadParser::parse_sequence_value(DataSet& dataset, Tag tag,
 	std::size_t item_index = 0;
 	while (pos < end) {
 		DataSet* item = sequence->add_dataset();
-		const auto child_prefix = fmt::format("{}.{}", element_path, item_index);
+		const auto child_prefix = make_item_path(element_path, item_index);
 		parse_dataset_object(*item, pending_bulk_data, child_prefix, pos);
 		++item_index;
 		skip_json_whitespace(text_, pos);
@@ -1426,28 +1685,35 @@ void JsonReadParser::assign_non_string_value_array(
 
 void JsonReadParser::append_bulk_ref(
     std::vector<JsonBulkRef>& pending_bulk_data, std::string_view element_path,
-    VR vr, const std::string& uri) const {
+    VR vr, std::string_view uri) const {
 	JsonBulkRef ref{};
 	ref.kind = JsonBulkTargetKind::element;
 	ref.path = std::string(element_path);
-	ref.uri = uri;
+	ref.uri = std::string(uri);
 	ref.vr = vr;
 	pending_bulk_data.push_back(std::move(ref));
 }
 
 void JsonReadParser::finalize_attribute(DataSet& dataset,
-    std::vector<JsonBulkRef>& pending_bulk_data, Tag tag, std::string_view element_path,
+    std::vector<JsonBulkRef>& pending_bulk_data, Tag tag, std::string_view path_prefix,
     const AttributeInfo& attr) {
 	const VR vr = resolve_attribute_vr(tag, attr);
+	std::string element_path_storage;
+	const auto element_path = [&]() -> std::string_view {
+		if (element_path_storage.empty()) {
+			element_path_storage = make_tag_path(path_prefix, tag);
+		}
+		return element_path_storage;
+	};
 	if (attr.has_value) {
 		if (vr.is_sequence()) {
 			parse_sequence_value(
-			    dataset, tag, pending_bulk_data, element_path,
+			    dataset, tag, pending_bulk_data, element_path(),
 			    attr.value_offset, attr.value_length);
 			return;
 		}
-		if (vr.is_string() || vr == VR::UN) {
-			append_json_stream_string_element(
+		if (vr.is_string() || vr == VR::UN || vr_uses_lazy_json_value_materialization(vr)) {
+			append_json_stream_value_element(
 			    dataset, tag, vr, attr.value_offset, attr.value_length);
 			return;
 		}
@@ -1457,8 +1723,8 @@ void JsonReadParser::finalize_attribute(DataSet& dataset,
 		return;
 	}
 
-	if (attr.inline_binary) {
-		auto decoded = base64_decode(*attr.inline_binary);
+	if (attr.has_inline_binary) {
+		auto decoded = base64_decode(attr.inline_binary);
 		if (!decoded) {
 			diag::error_and_throw(
 			    "read_json name={} tag={} reason=invalid InlineBinary payload",
@@ -1469,9 +1735,10 @@ void JsonReadParser::finalize_attribute(DataSet& dataset,
 		return;
 	}
 
-	if (attr.bulk_data_uri) {
+	if (attr.has_bulk_data_uri) {
 		(void)append_leaf_element(dataset, tag, vr);
-		append_bulk_ref(pending_bulk_data, element_path, vr, *attr.bulk_data_uri);
+		const auto path = element_path();
+		append_bulk_ref(pending_bulk_data, path, vr, attr.bulk_data_uri);
 		return;
 	}
 
@@ -1479,10 +1746,15 @@ void JsonReadParser::finalize_attribute(DataSet& dataset,
 }
 
 void JsonReadParser::finalize_dataset(DataSet& dataset) const {
-	std::sort(dataset.element_index_.begin(), dataset.element_index_.end(),
-	    [](const ElementRef& lhs, const ElementRef& rhs) {
-		    return lhs.tag.value() < rhs.tag.value();
-	    });
+	if (!std::is_sorted(dataset.element_index_.begin(), dataset.element_index_.end(),
+	        [](const ElementRef& lhs, const ElementRef& rhs) {
+		        return lhs.tag.value() < rhs.tag.value();
+	        })) {
+		std::sort(dataset.element_index_.begin(), dataset.element_index_.end(),
+		    [](const ElementRef& lhs, const ElementRef& rhs) {
+			    return lhs.tag.value() < rhs.tag.value();
+		    });
+	}
 	for (std::size_t i = 1; i < dataset.element_index_.size(); ++i) {
 		if (dataset.element_index_[i - 1].tag.value() ==
 		    dataset.element_index_[i].tag.value()) {
@@ -1561,6 +1833,12 @@ JsonReadResult read_json_from_shared(
     std::string name, std::shared_ptr<const std::vector<std::uint8_t>> bytes,
     JsonReadOptions options) {
 	JsonReadParser parser(std::move(name), std::move(bytes), options);
+	return parser.parse();
+}
+
+JsonReadResult read_json_borrowed(
+    std::string name, const std::uint8_t* data, std::size_t size, JsonReadOptions options) {
+	JsonReadParser parser(std::move(name), data, size, options);
 	return parser.parse();
 }
 

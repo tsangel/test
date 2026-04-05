@@ -46,6 +46,11 @@ using Uid = dicom::uid::WellKnown;
 using EncoderContext = dicom::pixel::EncoderContext;
 namespace diag = dicom::diag;
 
+namespace dicom {
+JsonReadResult read_json_borrowed(
+    std::string name, const std::uint8_t* data, std::size_t size, JsonReadOptions options);
+}
+
 namespace {
 
 std::string_view vr_to_string_view(const VR& vr);
@@ -3026,14 +3031,19 @@ nb::object json_write_result_to_python(
 	    std::move(bulk_parts));
 }
 
-nb::object json_read_result_to_python(dicom::JsonReadResult&& result) {
+nb::object json_read_result_to_python(
+    dicom::JsonReadResult&& result, nb::handle buffer_owner = nb::handle()) {
 	nb::list items;
 	for (auto& item : result.items) {
+		nb::object py_file = nb::cast(std::move(item.file));
+		if (buffer_owner) {
+			py_file.attr("_buffer_owner") = buffer_owner;
+		}
 		nb::list pending_bulk_data;
 		for (const auto& ref : item.pending_bulk_data) {
 			pending_bulk_data.append(nb::cast(ref));
 		}
-		items.append(nb::make_tuple(nb::cast(std::move(item.file)), std::move(pending_bulk_data)));
+		items.append(nb::make_tuple(std::move(py_file), std::move(pending_bulk_data)));
 	}
 	return std::move(items);
 }
@@ -5562,10 +5572,31 @@ NB_MODULE(_dicomsdl, m) {
 
 	m.def("read_json",
 	    [](nb::handle source, const std::string& name, nb::handle charset_errors) {
-		    auto [buffer_name, buffer] = json_source_to_named_buffer(source, name);
-		    return json_read_result_to_python(dicom::read_json(
-		        std::move(buffer_name), std::move(buffer),
-		        make_json_read_options(charset_errors)));
+		    const auto options = make_json_read_options(charset_errors);
+		    if (nb::isinstance<nb::str>(source)) {
+			    auto [buffer_name, buffer] = json_source_to_named_buffer(source, name);
+			    return json_read_result_to_python(dicom::read_json(
+			        std::move(buffer_name), std::move(buffer), options));
+		    }
+
+		    PyBufferView view(source);
+		    const Py_buffer& info = view.view();
+		    if (info.ndim != 1) {
+			    throw std::invalid_argument("read_json expects a 1-D UTF-8 string or bytes-like object");
+		    }
+		    if (!PyBuffer_IsContiguous(&info, 'C')) {
+			    throw std::invalid_argument("read_json expects a contiguous bytes-like object");
+		    }
+		    const std::size_t elem_size =
+		        static_cast<std::size_t>(info.itemsize <= 0 ? 1 : info.itemsize);
+		    if (elem_size != 1) {
+			    throw std::invalid_argument(
+			        "read_json requires a byte-oriented buffer for bytes-like input");
+		    }
+		    const auto* data = static_cast<const std::uint8_t*>(info.buf);
+		    const auto size = static_cast<std::size_t>(info.len);
+		    return json_read_result_to_python(
+		        dicom::read_json_borrowed(name, data, size, options), source);
 	    },
 	    nb::arg("source"),
 	    nb::kw_only(),
