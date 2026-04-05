@@ -755,6 +755,13 @@ template <typename T, typename ConvertFn>
 			return false;
 		}
 		const auto number = yyjson_get_real(item);
+#if defined(__APPLE__) && defined(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__) && \
+    (__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ < 130300)
+		fmt::memory_buffer formatted;
+		fmt::format_to(std::back_inserter(formatted), FMT_STRING("{:g}"), number);
+		out.append(formatted.data(), formatted.size());
+		return true;
+#else
 		const auto result = std::to_chars(
 		    buffer, buffer + sizeof(buffer), number, std::chars_format::general);
 		if (result.ec != std::errc()) {
@@ -762,6 +769,7 @@ template <typename T, typename ConvertFn>
 		}
 		out.append(buffer, result.ptr);
 		return true;
+#endif
 	}
 	if (yyjson_is_uint(item)) {
 		const auto result =
