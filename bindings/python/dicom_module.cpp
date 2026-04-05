@@ -5571,9 +5571,13 @@ NB_MODULE(_dicomsdl, m) {
 	    "Apply a WindowTransform and return a NumPy array backed by owned output storage.");
 
 	m.def("read_json",
-	    [](nb::handle source, const std::string& name, nb::handle charset_errors) {
+	    [](nb::handle source, const std::string& name, nb::handle charset_errors, bool copy) {
 		    const auto options = make_json_read_options(charset_errors);
 		    if (nb::isinstance<nb::str>(source)) {
+			    if (!copy) {
+				    throw std::invalid_argument(
+				        "read_json(copy=False) requires a bytes-like source");
+			    }
 			    auto [buffer_name, buffer] = json_source_to_named_buffer(source, name);
 			    return json_read_result_to_python(dicom::read_json(
 			        std::move(buffer_name), std::move(buffer), options));
@@ -5593,8 +5597,17 @@ NB_MODULE(_dicomsdl, m) {
 			    throw std::invalid_argument(
 			        "read_json requires a byte-oriented buffer for bytes-like input");
 		    }
-		    const auto* data = static_cast<const std::uint8_t*>(info.buf);
 		    const auto size = static_cast<std::size_t>(info.len);
+		    if (copy || size == 0u) {
+			    std::vector<std::uint8_t> owned(size);
+			    if (size > 0u) {
+				    std::memcpy(owned.data(), info.buf, size);
+			    }
+			    return json_read_result_to_python(
+			        dicom::read_json(std::string{name}, std::move(owned), options));
+		    }
+
+		    const auto* data = static_cast<const std::uint8_t*>(info.buf);
 		    return json_read_result_to_python(
 		        dicom::read_json_borrowed(name, data, size, options), source);
 	    },
@@ -5602,6 +5615,7 @@ NB_MODULE(_dicomsdl, m) {
 	    nb::kw_only(),
 	    nb::arg("name") = "<memory>",
 	    nb::arg("charset_errors") = nb::str("strict"),
+	    nb::arg("copy") = true,
 	    "Read DICOM JSON from a UTF-8 string or bytes-like object.\n"
 	    "\n"
 	    "Returns\n"
@@ -5623,13 +5637,23 @@ NB_MODULE(_dicomsdl, m) {
 	    "charset_errors : {'strict', 'replace_qmark', 'replace_unicode_escape'}, optional\n"
 	    "    Policy used when lazy raw-byte materialization must encode UTF-8 JSON text\n"
 	    "    into a declared SpecificCharacterSet. Defaults to 'strict'.\n"
+	    "copy : bool, optional\n"
+	    "    When False, borrow a bytes-like source buffer instead of copying it. This is\n"
+	    "    only supported for bytes-like input and may improve speed, but the caller must\n"
+	    "    keep the source buffer alive. Defaults to True.\n"
 	    "\n"
 	    "Typical flow:\n"
 	    "    items = dicom.read_json(text)\n"
 	    "    for df, refs in items:\n"
 	    "        for ref in refs:\n"
 	    "            payload = download(ref.uri)\n"
-	    "            df.set_bulk_data(ref, payload)\n");
+	    "            df.set_bulk_data(ref, payload)\n"
+	    "\n"
+	    "Warning\n"
+	    "-------\n"
+	    "When copy=False, the binding borrows the caller's bytes-like buffer. The source\n"
+	    "must remain alive for as long as any returned DicomFile exists. If the borrowed\n"
+	    "buffer is mutable, later mutations can corrupt the dataset.\n");
 
 m.def("read_file",
     [](nb::handle path, std::optional<Tag> load_until, std::optional<bool> keep_on_error) {
