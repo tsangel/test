@@ -540,41 +540,12 @@ void append_maybe_null_array(std::string& out, const StringRange& values, Append
 	out.push_back(']');
 }
 
-[[nodiscard]] std::vector<std::string> string_values_for_json(
-    const DataElement& element, CharsetDecodeErrorPolicy errors) {
-	if (element.length() == 0u) {
-		return {};
-	}
-	if (element.vr().uses_specific_character_set()) {
-		auto values = element.to_utf8_strings(errors);
-		if (!values) {
-			diag::throw_exception(fmt::format(
-			    "DataSet::write_json reason=failed to decode text value tag={} vr={}",
-			    element.tag().to_string(), element.vr().str()));
-		}
-		return *values;
-	}
-	auto values = element.to_string_views();
-	if (!values) {
-		diag::throw_exception(fmt::format(
-		    "DataSet::write_json reason=failed to split string value tag={} vr={}",
-		    element.tag().to_string(), element.vr().str()));
-	}
-	std::vector<std::string> out;
-	out.reserve(values->size());
-	for (const auto value : *values) {
-		out.emplace_back(value);
-	}
-	return out;
-}
-
 void append_pn_value_array(
     std::string& out, const DataElement& element, CharsetDecodeErrorPolicy errors) {
-	const auto values = string_values_for_json(element, errors);
-	if (values.empty()) {
+	if (element.length() == 0u) {
 		return;
 	}
-	append_maybe_null_array(out, values, [&](const std::string& raw_value) {
+	const auto append_value = [&](std::string_view raw_value) {
 		const auto parsed = PersonName::parse(raw_value);
 		if (!parsed) {
 			diag::throw_exception(fmt::format(
@@ -600,16 +571,57 @@ void append_pn_value_array(
 		append_group("Ideographic", parsed->ideographic);
 		append_group("Phonetic", parsed->phonetic);
 		out.push_back('}');
+	};
+
+	if (element.vr().uses_specific_character_set()) {
+		auto values = element.to_utf8_strings(errors);
+		if (!values) {
+			diag::throw_exception(fmt::format(
+			    "DataSet::write_json reason=failed to decode text value tag={} vr={}",
+			    element.tag().to_string(), element.vr().str()));
+		}
+		append_maybe_null_array(out, *values, [&](const std::string& raw_value) {
+			append_value(raw_value);
+		});
+		return;
+	}
+
+	auto values = element.to_string_views();
+	if (!values) {
+		diag::throw_exception(fmt::format(
+		    "DataSet::write_json reason=failed to split string value tag={} vr={}",
+		    element.tag().to_string(), element.vr().str()));
+	}
+	append_maybe_null_array(out, *values, [&](std::string_view raw_value) {
+		append_value(raw_value);
 	});
 }
 
 void append_string_value_array(
     std::string& out, const DataElement& element, CharsetDecodeErrorPolicy errors) {
-	const auto values = string_values_for_json(element, errors);
-	if (values.empty()) {
+	if (element.length() == 0u) {
 		return;
 	}
-	append_maybe_null_array(out, values, [&](const std::string& value) {
+	if (element.vr().uses_specific_character_set()) {
+		auto values = element.to_utf8_strings(errors);
+		if (!values) {
+			diag::throw_exception(fmt::format(
+			    "DataSet::write_json reason=failed to decode text value tag={} vr={}",
+			    element.tag().to_string(), element.vr().str()));
+		}
+		append_maybe_null_array(out, *values, [&](const std::string& value) {
+			append_json_string(out, value);
+		});
+		return;
+	}
+
+	auto values = element.to_string_views();
+	if (!values) {
+		diag::throw_exception(fmt::format(
+		    "DataSet::write_json reason=failed to split string value tag={} vr={}",
+		    element.tag().to_string(), element.vr().str()));
+	}
+	append_maybe_null_array(out, *values, [&](std::string_view value) {
 		append_json_string(out, value);
 	});
 }
