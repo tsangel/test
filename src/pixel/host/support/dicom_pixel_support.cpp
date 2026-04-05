@@ -1,6 +1,7 @@
 #include "pixel/host/support/dicom_pixel_support.hpp"
 
 #include "pixel/host/error/codec_error.hpp"
+#include "photometric_text_detail.hpp"
 #include "diagnostics.h"
 
 #include <cstring>
@@ -18,51 +19,9 @@ using namespace dicom::literals;
 
 namespace {
 
-[[nodiscard]] char ascii_upper(char value) noexcept {
-	return (value >= 'a' && value <= 'z')
-	           ? static_cast<char>(value - ('a' - 'A'))
-	           : value;
-}
-
-[[nodiscard]] bool ascii_iequals(std::string_view lhs, std::string_view rhs) noexcept {
-	if (lhs.size() != rhs.size()) {
-		return false;
-	}
-	for (std::size_t index = 0; index < lhs.size(); ++index) {
-		if (ascii_upper(lhs[index]) != ascii_upper(rhs[index])) {
-			return false;
-		}
-	}
-	return true;
-}
-
 [[nodiscard]] std::optional<pixel::Photometric> parse_photometric_from_text(
     std::string_view text) noexcept {
-	if (ascii_iequals(text, "MONOCHROME1")) {
-		return pixel::Photometric::monochrome1;
-	}
-	if (ascii_iequals(text, "MONOCHROME2")) {
-		return pixel::Photometric::monochrome2;
-	}
-	if (ascii_iequals(text, "PALETTE COLOR")) {
-		return pixel::Photometric::palette_color;
-	}
-	if (ascii_iequals(text, "RGB")) {
-		return pixel::Photometric::rgb;
-	}
-	if (ascii_iequals(text, "YBR_FULL")) {
-		return pixel::Photometric::ybr_full;
-	}
-	if (ascii_iequals(text, "YBR_FULL_422")) {
-		return pixel::Photometric::ybr_full_422;
-	}
-	if (ascii_iequals(text, "YBR_RCT")) {
-		return pixel::Photometric::ybr_rct;
-	}
-	if (ascii_iequals(text, "YBR_ICT")) {
-		return pixel::Photometric::ybr_ict;
-	}
-	return std::nullopt;
+	return pixel::detail::parse_photometric_text(text);
 }
 
 struct EncapsulatedFrameSource {

@@ -44,6 +44,20 @@ For DICOM JSON Model read/write, see [DICOM JSON](../guide/dicom_json.md).
 - Malformed data outside the selected region may remain unseen, so `has_error`
   and `error_message` only describe the region that selected read actually visits.
 
+## Pixel decode metadata
+
+- `DecodeInfo` is the Python-side decode metadata object returned by
+  `to_array(..., with_info=True)` and `decode_into(..., with_info=True)`.
+- `DecodeInfo.photometric` is an optional `Photometric` value and may be `None`
+  when the successful decode result does not map cleanly to a DICOM photometric.
+- `DecodeInfo.encoded_lossy_state` is an `EncodedLossyState` enum describing whether
+  the encoded source is `lossless`, `lossy`, `near_lossless`, or `unknown`.
+- `DecodeInfo.dtype`, `DecodeInfo.planar`, and `DecodeInfo.bits_per_sample`
+  describe the decoded output buffer that was produced successfully.
+- For `frame=-1` on multi-frame input, Python `with_info=True` reports
+  frame-0/common decode metadata while still returning or filling the full
+  decoded volume.
+
 ## Supporting types
 
 ### Tag
@@ -85,5 +99,6 @@ Unknown values raise.
 ## Related docs
 
 - [Python DataSet Guide](../guide/python_dataset_guide.md)
+- [Pixel Decode](../guide/pixel_decode.md)
 - [Selected Read](../guide/selected_read.md)
 - [Charset and Person Name](../guide/charset_and_person_name.md)

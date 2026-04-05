@@ -8,6 +8,7 @@
 #include <type_traits>
 
 #include "../common/decode_fastpath.hpp"
+#include "../common/decode_info.hpp"
 #include "../common/integral_hotpath.hpp"
 #include "internal.hpp"
 
@@ -287,6 +288,50 @@ pixel_error_code write_openjpeg_image_to_output(
   return PIXEL_CODEC_ERR_OK;
 }
 
+uint8_t encoded_lossy_state_from_openjpeg_profile(uint32_t codec_profile_code) noexcept {
+  switch (codec_profile_code) {
+  case PIXEL_CODEC_PROFILE_JPEG2000_LOSSLESS:
+  case PIXEL_CODEC_PROFILE_HTJ2K_LOSSLESS:
+  case PIXEL_CODEC_PROFILE_HTJ2K_LOSSLESS_RPCL:
+    return PIXEL_ENCODED_LOSSY_STATE_LOSSLESS;
+  case PIXEL_CODEC_PROFILE_JPEG2000_LOSSY:
+  case PIXEL_CODEC_PROFILE_HTJ2K_LOSSY:
+    return PIXEL_ENCODED_LOSSY_STATE_LOSSY;
+  default:
+    return PIXEL_ENCODED_LOSSY_STATE_UNKNOWN;
+  }
+}
+
+uint16_t decoded_bits_per_sample_from_openjpeg_image(
+    const opj_image_t* image) noexcept {
+  if (image == nullptr) {
+    return 0;
+  }
+
+  uint32_t max_precision = 0;
+  for (uint32_t comp = 0; comp < image->numcomps; ++comp) {
+    if (image->comps[comp].prec > max_precision) {
+      max_precision = image->comps[comp].prec;
+    }
+  }
+  return max_precision <= 65535u
+      ? static_cast<uint16_t>(max_precision)
+      : uint16_t{0};
+}
+
+void set_openjpeg_decode_info(
+    const pixel_decoder_request* request, const opj_image_t* image) noexcept {
+  ::pixel::codec_common::set_decoder_info(
+      request,
+      ::pixel::codec_common::default_color_space_for_sample_count(
+          image != nullptr ? static_cast<int32_t>(image->numcomps) : 0),
+      encoded_lossy_state_from_openjpeg_profile(request->frame.codec_profile_code),
+      request->output.dst_dtype,
+      ::pixel::codec_common::decoded_planar_code_from_request(
+          request->output.dst_planar),
+      decoded_bits_per_sample_from_openjpeg_image(image));
+}
+
 }  // namespace
 
 
@@ -329,6 +374,7 @@ pixel_error_code decoder_decode_frame(
       return write_ec;
     }
 
+    set_openjpeg_decode_info(request, decoded_image.get());
     clear_detail(c);
     return PIXEL_CODEC_ERR_OK;
   } catch (const std::bad_alloc&) {

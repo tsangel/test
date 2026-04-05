@@ -1,7 +1,7 @@
 # Python API Reference
 
 ```{note}
-이 페이지 본문은 아직 영어 원문입니다. 필요하면 영문 페이지를 기준으로 읽어 주세요.
+???섏씠吏 蹂몃Ц? ?꾩쭅 ?곸뼱 ?먮Ц?낅땲?? ?꾩슂?섎㈃ ?곷Ц ?섏씠吏瑜?湲곗??쇰줈 ?쎌뼱 二쇱꽭??
 ```
 
 The user-facing Python guide lives in
@@ -15,39 +15,45 @@ Use that page for:
 - presence checks
 - explicit VR assignment for private tags
 
-DICOM JSON Model 읽기/쓰기에 대해서는
-[DICOM JSON](../guide/dicom_json.md)을 참고하세요.
+DICOM JSON Model ?쎄린/?곌린????댁꽌??[DICOM JSON](../guide/dicom_json.md)??李멸퀬?섏꽭??
 
 ## DICOM JSON
 
-- `read_json(source, name="<memory>", charset_errors="strict")`는 메모리에
-  이미 있는 UTF-8 DICOM JSON 텍스트 또는 바이트에서 top-level 데이터세트
-  객체 하나 또는 데이터세트 객체 배열 하나를 읽습니다.
-- Python에서 `DicomFile.write_json(...)`와 `DataSet.write_json(...)`는
-  `(json_text, bulk_parts)`를 반환합니다.
-- `JsonBulkRef`는 아직 다운로드해서 `set_bulk_data(...)`로
-  `DicomFile`에 채워 넣어야 하는 `BulkDataURI` payload를 설명합니다.
-- `read_json(...)`는 opaque presigned URL이나 토큰이 붙은 다운로드 URL은
-  그대로 보존하고, URI 모양이 frame 확장을 명확히 지원할 때만 frame URL을
-  합성합니다.
+- `read_json(source, name="<memory>", charset_errors="strict")`??硫붾え由ъ뿉
+  ?대? ?덈뒗 UTF-8 DICOM JSON ?띿뒪???먮뒗 諛붿씠?몄뿉??top-level ?곗씠?곗꽭??  媛앹껜 ?섎굹 ?먮뒗 ?곗씠?곗꽭??媛앹껜 諛곗뿴 ?섎굹瑜??쎌뒿?덈떎.
+- Python?먯꽌 `DicomFile.write_json(...)`? `DataSet.write_json(...)`??  `(json_text, bulk_parts)`瑜?諛섑솚?⑸땲??
+- `JsonBulkRef`???꾩쭅 ?ㅼ슫濡쒕뱶?댁꽌 `set_bulk_data(...)`濡?  `DicomFile`??梨꾩썙 ?ｌ뼱???섎뒗 `BulkDataURI` payload瑜??ㅻ챸?⑸땲??
+- `read_json(...)`??opaque presigned URL?대굹 ?좏겙??遺숈? ?ㅼ슫濡쒕뱶 URL?
+  洹몃?濡?蹂댁〈?섍퀬, URI 紐⑥뼇??frame ?뺤옣??紐낇솗??吏?먰븷 ?뚮쭔 frame URL??  ?⑹꽦?⑸땲??
 
 ## Selected read
 
-- `DataSetSelection([...])`는 canonicalized nested selection tree를 만듭니다.
-- `read_file_selected(path, selection, keep_on_error=None)`는 디스크에서 선택한 태그와 sequence 하위 항목만 담긴 `DicomFile`을 읽습니다.
-- `read_bytes_selected(data, selection, name="<memory>", keep_on_error=None, copy=True)`는
-  bytes-like object에서 같은 방식으로 선택한 부분만 읽습니다.
-- `selection`에는 재사용 가능한 `DataSetSelection`을 넘겨도 되고, one-shot 호출을
-  위해 leaf tag와 `(tag, children)` pair로 이루어진 raw nested Python sequence를
-  바로 넘겨도 됩니다.
-- `TransferSyntaxUID`와 `SpecificCharacterSet`는 selection에 없어도 root level에서
-  항상 고려됩니다.
-- `ReadOptions.load_until`은 selected-read API에 적용되지 않습니다.
-- private tag와 unknown tag도 selection 대상으로 사용할 수 있으며, `"70531000"` 같은 explicit tag string도 사용할 수 있습니다.
-- `SQ`만 선택해도 present한 sequence와 item count는 유지되지만, child item dataset은
-  비어 있을 수 있습니다.
-- 선택된 영역 밖의 malformed data는 보이지 않을 수 있으므로, `has_error`와
-  `error_message`는 selected read가 실제로 방문한 영역만 설명합니다.
+- `DataSetSelection([...])`??canonicalized nested selection tree瑜?留뚮벊?덈떎.
+- `read_file_selected(path, selection, keep_on_error=None)`???붿뒪?ъ뿉???좏깮???쒓렇? sequence ?섏쐞 ??ぉ留??닿릿 `DicomFile`???쎌뒿?덈떎.
+- `read_bytes_selected(data, selection, name="<memory>", keep_on_error=None, copy=True)`??  bytes-like object?먯꽌 媛숈? 諛⑹떇?쇰줈 ?좏깮??遺遺꾨쭔 ?쎌뒿?덈떎.
+- `selection`?먮뒗 ?ъ궗??媛?ν븳 `DataSetSelection`???섍꺼???섍퀬, one-shot ?몄텧??  ?꾪빐 leaf tag? `(tag, children)` pair濡??대（?댁쭊 raw nested Python sequence瑜?  諛붾줈 ?섍꺼???⑸땲??
+- `TransferSyntaxUID`? `SpecificCharacterSet`??selection???놁뼱??root level?먯꽌
+  ??긽 怨좊젮?⑸땲??
+- `ReadOptions.load_until`? selected-read API???곸슜?섏? ?딆뒿?덈떎.
+- private tag? unknown tag??selection ??곸쑝濡??ъ슜?????덉쑝硫? `"70531000"` 媛숈? explicit tag string???ъ슜?????덉뒿?덈떎.
+- `SQ`留??좏깮?대룄 present??sequence? item count???좎??섏?留? child item dataset?
+  鍮꾩뼱 ?덉쓣 ???덉뒿?덈떎.
+- ?좏깮???곸뿭 諛뽰쓽 malformed data??蹂댁씠吏 ?딆쓣 ???덉쑝誘濡? `has_error`?
+  `error_message`??selected read媛 ?ㅼ젣濡?諛⑸Ц???곸뿭留??ㅻ챸?⑸땲??
+
+## Pixel decode metadata
+
+- `DecodeInfo` is the Python-side decode metadata object returned by
+  `to_array(..., with_info=True)` and `decode_into(..., with_info=True)`.
+- `DecodeInfo.photometric` is an optional `Photometric` value and may be `None`
+  when the successful decode result does not map cleanly to a DICOM photometric.
+- `DecodeInfo.encoded_lossy_state` is an `EncodedLossyState` enum describing whether
+  the encoded source is `lossless`, `lossy`, `near_lossless`, or `unknown`.
+- `DecodeInfo.dtype`, `DecodeInfo.planar`, and `DecodeInfo.bits_per_sample`
+  describe the decoded output buffer that was produced successfully.
+- For `frame=-1` on multi-frame input, Python `with_info=True` reports
+  frame-0/common decode metadata while still returning or filling the full
+  decoded volume.
 
 ## Supporting types
 
@@ -90,5 +96,6 @@ Unknown values raise.
 ## Related docs
 
 - [Python DataSet Guide](../guide/python_dataset_guide.md)
+- [Pixel Decode](../guide/pixel_decode.md)
 - [Selected Read](../guide/selected_read.md)
 - [Charset and Person Name](../guide/charset_and_person_name.md)

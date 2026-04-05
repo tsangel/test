@@ -1,7 +1,7 @@
 # DicomFile Reference
 
 ```{note}
-이 페이지 본문은 아직 영어 원문입니다. 필요하면 영문 페이지를 기준으로 읽어 주세요.
+???섏씠吏 蹂몃Ц? ?꾩쭅 ?곸뼱 ?먮Ц?낅땲?? ?꾩슂?섎㈃ ?곷Ц ?섏씠吏瑜?湲곗??쇰줈 ?쎌뼱 二쇱꽭??
 ```
 
 `DicomFile` owns the root `DataSet` plus file/session state, serialization, transfer syntax, charset, and pixel decode/encode entrypoints.
@@ -22,6 +22,7 @@
 - write operations: `write_file(...)`, `write_with_transfer_syntax(...)`, `write_bytes(...)`, `rebuild_file_meta()`
 - transfer syntax and charset: `set_transfer_syntax(...)`, `set_declared_specific_charset(...)`, `set_specific_charset(...)`
 - pixel decode: `create_decode_plan(...)`, `decode_into(...)`, `to_array(...)`, `to_array_view(...)`, `pixel_array(...)`, `pixel_data(...)`, `encoded_pixel_frame_view(...)`, `encoded_pixel_frame_bytes(...)`
+- pixel decode metadata: `DecodeInfo`, `Photometric`, `EncodedLossyState`; use `to_array(..., with_info=True)` or `decode_into(..., with_info=True)`
 - pixel metadata helpers: `window_transform`, `window_transform_for_frame(...)`, `rescale_transform`, `rescale_transform_for_frame(...)`, `voi_lut`, `voi_lut_for_frame(...)`, `modality_lut`, `modality_lut_for_frame(...)`, `pixel_presentation`, `palette_lut`, `supplemental_palette`, `enhanced_palette`
 - pixel encode: `set_pixel_data(...)`, `reset_encapsulated_pixel_data(...)`, `set_encoded_pixel_frame(...)`, `add_encoded_pixel_frame(...)`
 
@@ -45,10 +46,12 @@
 - `set_encoded_pixel_frame(..., std::span<const uint8_t>)` and `add_encoded_pixel_frame(..., std::span<const uint8_t>)` copy from the caller buffer before `DicomFile` takes ownership. The `std::vector<uint8_t>&&` overloads are the move-based no-extra-copy path.
 - For large write-only transcodes, prefer `write_with_transfer_syntax(...)` over `set_transfer_syntax(...)` followed by `write_file(...)`. That path now exists in both C++ and Python for file output; C++ also provides `std::ostream` variants.
 - In Python, `has_error` and `error_message` are the file-level state you check after permissive reads that keep partial data.
-- `read_file_selected(...)`와 `read_bytes_selected(...)`는 선택한 태그와 sequence 하위 항목만 담긴 `DicomFile`을 반환합니다.
-- selected read는 root `TransferSyntaxUID`와 `SpecificCharacterSet`를 항상 고려하고, `ReadOptions.load_until`을 무시하며, selection tree에서 private/unknown tag와 `"70531000"` 같은 explicit tag string을 허용합니다.
-- selected read가 `SQ`만 선택하더라도, present한 sequence와 item count는 유지됩니다.
-- 선택/방문 영역 밖의 malformed data는 보이지 않을 수 있으므로, selected-read `has_error` / `error_message`는 실제로 방문한 영역만 설명합니다.
+- In Python, `to_array(..., with_info=True)` returns `(array, DecodeInfo)` and `decode_into(..., with_info=True)` returns `DecodeInfo` after writing into the supplied output buffer.
+- For `frame=-1` on multi-frame input, Python `with_info=True` reports frame-0/common decode metadata.
+- `read_file_selected(...)`? `read_bytes_selected(...)`???좏깮???쒓렇? sequence ?섏쐞 ??ぉ留??닿릿 `DicomFile`??諛섑솚?⑸땲??
+- selected read??root `TransferSyntaxUID`? `SpecificCharacterSet`瑜???긽 怨좊젮?섍퀬, `ReadOptions.load_until`??臾댁떆?섎ŉ, selection tree?먯꽌 private/unknown tag? `"70531000"` 媛숈? explicit tag string???덉슜?⑸땲??
+- selected read媛 `SQ`留??좏깮?섎뜑?쇰룄, present??sequence? item count???좎??⑸땲??
+- ?좏깮/諛⑸Ц ?곸뿭 諛뽰쓽 malformed data??蹂댁씠吏 ?딆쓣 ???덉쑝誘濡? selected-read `has_error` / `error_message`???ㅼ젣濡?諛⑸Ц???곸뿭留??ㅻ챸?⑸땲??
 
 ## Related docs
 

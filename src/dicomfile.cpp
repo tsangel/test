@@ -6,6 +6,7 @@
 #include "pixel/host/decode/decode_plan_compute.hpp"
 #include "pixel/host/encode/encode_set_pixel_data_runner.hpp"
 #include "pixel/host/support/dicom_pixel_support.hpp"
+#include "photometric_text_detail.hpp"
 
 #include <array>
 #include <cmath>
@@ -149,31 +150,7 @@ template <typename T>
 
 [[nodiscard]] std::optional<pixel::Photometric> parse_photometric_from_text(
     std::string_view text) noexcept {
-	if (ascii_iequals(text, "MONOCHROME1")) {
-		return pixel::Photometric::monochrome1;
-	}
-	if (ascii_iequals(text, "MONOCHROME2")) {
-		return pixel::Photometric::monochrome2;
-	}
-	if (ascii_iequals(text, "PALETTE COLOR")) {
-		return pixel::Photometric::palette_color;
-	}
-	if (ascii_iequals(text, "RGB")) {
-		return pixel::Photometric::rgb;
-	}
-	if (ascii_iequals(text, "YBR_FULL")) {
-		return pixel::Photometric::ybr_full;
-	}
-	if (ascii_iequals(text, "YBR_FULL_422")) {
-		return pixel::Photometric::ybr_full_422;
-	}
-	if (ascii_iequals(text, "YBR_RCT")) {
-		return pixel::Photometric::ybr_rct;
-	}
-	if (ascii_iequals(text, "YBR_ICT")) {
-		return pixel::Photometric::ybr_ict;
-	}
-	return std::nullopt;
+	return pixel::detail::parse_photometric_text(text);
 }
 
 [[nodiscard]] std::optional<pixel::PixelPresentation> parse_pixel_presentation_from_text(

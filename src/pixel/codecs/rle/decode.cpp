@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "../common/decode_fastpath.hpp"
+#include "../common/decode_info.hpp"
 #include "../common/integral_hotpath.hpp"
 #include "internal.hpp"
 
@@ -208,6 +209,20 @@ bool write_integer_sample(uint8_t dst_dtype, int32_t sample, uint8_t* dst) {
   default:
     return false;
   }
+}
+
+void set_rle_decode_info(const pixel_decoder_request* request) noexcept {
+  ::pixel::codec_common::set_decoder_info(
+      request,
+      ::pixel::codec_common::default_color_space_for_sample_count(
+          request->frame.samples_per_pixel),
+      PIXEL_ENCODED_LOSSY_STATE_LOSSLESS,
+      request->output.dst_dtype,
+      ::pixel::codec_common::decoded_planar_code_from_request(
+          request->output.dst_planar),
+      request->frame.bits_stored > 0
+          ? static_cast<uint16_t>(request->frame.bits_stored)
+          : uint16_t{0});
 }
 
 [[nodiscard]] bool integral_storage_is_already_normalized(
@@ -1055,10 +1070,21 @@ pixel_error_code decoder_decode_frame(
     return validate_ec;
   }
 
+  const auto finish_success = [&]() noexcept -> pixel_error_code {
+    set_rle_decode_info(request);
+    clear_detail(c);
+    return PIXEL_CODEC_ERR_OK;
+  };
+
   // Keep the dominant mono RLE case on a compact path inside the generic
   // decoder so host dispatch does not need a separate codec-specific bypass.
   if (request->frame.samples_per_pixel == 1) {
-    return decode_single_channel_frame_fast(c, request, source_dtype, dst_dtype, row_stride_u64);
+    const pixel_error_code fast_ec =
+        decode_single_channel_frame_fast(c, request, source_dtype, dst_dtype, row_stride_u64);
+    if (fast_ec != PIXEL_CODEC_ERR_OK) {
+      return fast_ec;
+    }
+    return finish_success();
   }
 
   std::size_t rows = 0;
@@ -1145,8 +1171,7 @@ pixel_error_code decoder_decode_frame(
           std::memcpy(dst_row, src_row, row_payload);
         }
       }
-      clear_detail(c);
-      return PIXEL_CODEC_ERR_OK;
+      return finish_success();
     }
 
     if ((sample_bytes == 1u || sample_bytes == 2u) &&
@@ -1168,8 +1193,7 @@ pixel_error_code decoder_decode_frame(
               decoded_planar.data(), dst, rows, cols, row_payload, row_stride);
         }
       }
-      clear_detail(c);
-      return PIXEL_CODEC_ERR_OK;
+      return finish_success();
     }
 
     for (std::size_t r = 0; r < rows; ++r) {
@@ -1183,8 +1207,7 @@ pixel_error_code decoder_decode_frame(
       }
     }
 
-    clear_detail(c);
-    return PIXEL_CODEC_ERR_OK;
+    return finish_success();
   }
 
   if (matching_integral_storage) {
@@ -1195,8 +1218,7 @@ pixel_error_code decoder_decode_frame(
       return fail_detail(c, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "decode_frame",
           "unsupported destination dtype");
     }
-    clear_detail(c);
-    return PIXEL_CODEC_ERR_OK;
+    return finish_success();
   }
 
   bool typed_load_failed = false;
@@ -1221,8 +1243,7 @@ pixel_error_code decoder_decode_frame(
         "failed to parse decoded RLE sample");
   }
   if (typed_status == ::pixel::codec_common::loaded_integral_write_status::ok) {
-      clear_detail(c);
-      return PIXEL_CODEC_ERR_OK;
+      return finish_success();
   }
 
   uint64_t dst_plane_bytes_u64 = 0;
@@ -1270,8 +1291,7 @@ pixel_error_code decoder_decode_frame(
     }
   }
 
-  clear_detail(c);
-  return PIXEL_CODEC_ERR_OK;
+  return finish_success();
 }
 
 }  // namespace pixel::rle_codec

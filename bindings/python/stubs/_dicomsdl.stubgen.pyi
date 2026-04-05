@@ -368,6 +368,44 @@ class Planar(enum.Enum):
 
     planar = 1
 
+class Photometric(enum.Enum):
+    monochrome1 = 0
+
+    monochrome2 = 1
+
+    palette_color = 2
+
+    rgb = 3
+
+    ybr_full = 4
+
+    ybr_full_422 = 5
+
+    ybr_rct = 6
+
+    ybr_ict = 7
+
+    ybr_partial_420 = 8
+
+    xyb = 9
+
+    hsv = 10
+
+    argb = 11
+
+    cmyk = 12
+
+    ybr_partial_422 = 13
+
+class EncodedLossyState(enum.Enum):
+    unknown = 0
+
+    lossless = 1
+
+    lossy = 2
+
+    near_lossless = 3
+
 class DecodeOptions:
     def __init__(self, *, alignment: int = ..., row_stride: int = ..., frame_stride: int = ..., planar_out: Planar = Planar.interleaved, decode_mct: bool = ..., worker_threads: int = ..., codec_threads: int = ...) -> None: ...
 
@@ -452,6 +490,24 @@ class DecodePlan:
     def shape(self, frame: int = ...) -> tuple: ...
 
     def required_bytes(self, frame: int = ...) -> int: ...
+
+    def __repr__(self) -> str: ...
+
+class DecodeInfo:
+    @property
+    def photometric(self) -> object: ...
+
+    @property
+    def encoded_lossy_state(self) -> EncodedLossyState: ...
+
+    @property
+    def dtype(self) -> object: ...
+
+    @property
+    def planar(self) -> object: ...
+
+    @property
+    def bits_per_sample(self) -> int: ...
 
     def __repr__(self) -> str: ...
 
@@ -936,13 +992,25 @@ class DicomFile:
     def set_encoded_pixel_frame(self, frame_index: int, source: object, /) -> None: ...
     def add_encoded_pixel_frame(self, source: object, /) -> None: ...
 
-    def to_array(self, frame: int = ..., decode_mct: bool = ..., *, worker_threads: int = ..., codec_threads: int = ..., plan: object | None = ...) -> object: ...
+    @overload
+    def to_array(self, frame: int = ..., decode_mct: bool = ..., *, worker_threads: int = ..., codec_threads: int = ..., plan: object | None = ..., with_info: Literal[False] = ...) -> object: ...
+
+    @overload
+    def to_array(self, frame: int = ..., decode_mct: bool = ..., *, worker_threads: int = ..., codec_threads: int = ..., plan: object | None = ..., with_info: Literal[True]) -> tuple[object, DecodeInfo]: ...
 
     def to_array_view(self, frame: int = ...) -> object: ...
 
-    def decode_into(self, out: object, frame: int = ..., decode_mct: bool = ..., *, worker_threads: int = ..., codec_threads: int = ..., plan: object | None = ...) -> object: ...
+    @overload
+    def decode_into(self, out: object, frame: int = ..., decode_mct: bool = ..., *, worker_threads: int = ..., codec_threads: int = ..., plan: object | None = ..., with_info: Literal[False] = ...) -> object: ...
 
-    def pixel_array(self, frame: int = ..., decode_mct: bool = ..., *, worker_threads: int = ..., codec_threads: int = ..., plan: object | None = ...) -> object: ...
+    @overload
+    def decode_into(self, out: object, frame: int = ..., decode_mct: bool = ..., *, worker_threads: int = ..., codec_threads: int = ..., plan: object | None = ..., with_info: Literal[True]) -> DecodeInfo: ...
+
+    @overload
+    def pixel_array(self, frame: int = ..., decode_mct: bool = ..., *, worker_threads: int = ..., codec_threads: int = ..., plan: object | None = ..., with_info: Literal[False] = ...) -> object: ...
+
+    @overload
+    def pixel_array(self, frame: int = ..., decode_mct: bool = ..., *, worker_threads: int = ..., codec_threads: int = ..., plan: object | None = ..., with_info: Literal[True]) -> tuple[object, DecodeInfo]: ...
 
     def __getitem__(self, key: object) -> DataElement: ...
 

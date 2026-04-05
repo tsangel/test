@@ -182,6 +182,41 @@ df.decode_into(out, frame=0, plan=plan)
 # `out` now contains one decoded frame with the layout requested by the plan.
 ```
 
+### Python: Return `DecodeInfo` together with decoded pixels
+
+```python
+import dicomsdl as dicom
+import numpy as np
+
+df = dicom.read_file("single_frame.dcm")
+
+# Ask to_array() for both the decoded NumPy array and decode metadata.
+arr, info = df.to_array(frame=0, with_info=True)
+print(arr.shape, arr.dtype)
+print(info.photometric, info.encoded_lossy_state, info.bits_per_sample)
+
+plan = df.create_decode_plan()
+out = np.empty(plan.shape(frame=0), dtype=plan.dtype)
+
+# decode_into() still writes into the caller-provided destination buffer.
+# When with_info=True, the return value changes from `out` to DecodeInfo.
+info2 = df.decode_into(out, frame=0, plan=plan, with_info=True)
+assert np.array_equal(arr, out)
+print(info2.photometric, info2.dtype, info2.planar)
+```
+
+`DecodeInfo` reports the successful decode result metadata:
+
+- `photometric`: DICOM-level pixel interpretation when one is available
+- `encoded_lossy_state`: `lossless`, `lossy`, `near_lossless`, or `unknown`
+- `dtype`: NumPy dtype of the decoded samples
+- `planar`: decoded planar/interleaved organization when known
+- `bits_per_sample`: decoded bits per sample, or `0` when unknown
+
+For `frame=-1` on multi-frame input, Python `with_info=True` reports frame-0/common
+decode metadata while returning the full decoded volume or filling the full destination
+buffer.
+
 ### Reuse one plan and one destination array across many frames
 
 ```python
@@ -439,6 +474,8 @@ The C++ decode message usually includes `status=...`, `stage=...`, and `reason=.
 - `decode_into()` is the right path for benchmark or hot-loop reuse scenarios, or when you want the same buffer-management flow for both single-frame and multi-frame inputs.
 - In Python, `to_array(plan=...)` may return a NumPy array with custom strides instead of a packed C-contiguous array when the plan requests explicit row or frame strides.
 - In Python, `decode_into()` requires a writable C-contiguous destination object. For custom-stride results, decode into contiguous backing storage and then expose it through a NumPy view with explicit strides.
+- In Python, `to_array(..., with_info=True)` returns `(array, decode_info)` instead of only the array.
+- In Python, `decode_into(..., with_info=True)` still writes into the supplied destination object, but returns `DecodeInfo` instead of echoing `out`.
 - `to_array()` is the right path for the quickest first success.
 
 ## Related docs

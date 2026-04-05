@@ -419,7 +419,7 @@ pixel_error_code configure_host_encoder_context(HostEncoderContext* ctx,
 pixel_error_code decode_frame_with_host_context(HostDecoderContext* ctx,
     const dicom::pixel::PixelLayout* source_layout, std::span<const uint8_t> prepared_source,
     std::span<uint8_t> destination, const dicom::pixel::PixelLayout* output_layout,
-    const dicom::pixel::DecodeOptions* options) {
+    const dicom::pixel::DecodeOptions* options, pixel_decoder_info* decode_info) {
   // Validate host-side invariants before constructing the ABI request handed to
   // builtin decoders or external plugins.
   if (ctx == nullptr || source_layout == nullptr || prepared_source.empty() ||
@@ -457,6 +457,12 @@ pixel_error_code decode_frame_with_host_context(HostDecoderContext* ctx,
           "unsupported destination dtype in PixelLayout");
   }
 
+  if (decode_info != nullptr) {
+    *decode_info = pixel_decoder_info{};
+    decode_info->struct_size = sizeof(pixel_decoder_info);
+    decode_info->abi_version = PIXEL_DECODER_PLUGIN_ABI;
+  }
+
   pixel_decoder_request request{};
   if (!build_decoder_request(ctx->codec_profile_code, source_dtype.code, *source_layout,
           prepared_source, destination, output_dtype.code,
@@ -464,6 +470,7 @@ pixel_error_code decode_frame_with_host_context(HostDecoderContext* ctx,
           static_cast<uint64_t>(normalized_output_layout.row_stride),
           static_cast<uint64_t>(normalized_output_layout.frame_stride),
           is_mct_capable_profile(ctx->codec_profile_code) && effective_options.decode_mct,
+          decode_info,
           &request)) {
     return fail_decoder(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
         "failed to build decoder ABI request");

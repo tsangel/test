@@ -20,11 +20,30 @@
 #include <vector>
 
 #include "../common/decoded_bytes_writeback.hpp"
+#include "../common/decode_info.hpp"
 #include "internal.hpp"
 
 namespace pixel::jpeg_codec {
 
 namespace {
+
+uint8_t decoded_color_space_from_jpeg(
+    uint64_t samples, int decoded_colorspace) noexcept {
+  switch (decoded_colorspace) {
+  case TJCS_GRAY:
+    return PIXEL_DECODED_COLOR_SPACE_MONOCHROME;
+  case TJCS_RGB:
+  case TJCS_YCbCr:
+    return samples == 3 ? PIXEL_DECODED_COLOR_SPACE_RGB
+                        : PIXEL_DECODED_COLOR_SPACE_UNKNOWN;
+  case TJCS_CMYK:
+  case TJCS_YCCK:
+    return PIXEL_DECODED_COLOR_SPACE_CMYK;
+  default:
+    return samples == 1 ? PIXEL_DECODED_COLOR_SPACE_MONOCHROME
+                        : PIXEL_DECODED_COLOR_SPACE_UNKNOWN;
+  }
+}
 
 class TurboJpegHandleGuard {
 public:
@@ -509,6 +528,15 @@ pixel_error_code decoder_decode_frame(
             (msg != nullptr && msg[0] != '\0') ? msg : "JPEG decode failed");
       }
 
+      ::pixel::codec_common::set_decoder_info(
+          request,
+          decoded_color_space_from_jpeg(samples, decoded_colorspace),
+          decoded_lossless != 0 ? PIXEL_ENCODED_LOSSY_STATE_LOSSLESS
+                                : PIXEL_ENCODED_LOSSY_STATE_LOSSY,
+          request->output.dst_dtype,
+          ::pixel::codec_common::decoded_planar_code_from_request(
+              request->output.dst_planar),
+          static_cast<uint16_t>(decoded_precision));
       clear_detail(c);
       return PIXEL_CODEC_ERR_OK;
     }
@@ -575,6 +603,15 @@ pixel_error_code decoder_decode_frame(
       return write_ec;
     }
 
+    ::pixel::codec_common::set_decoder_info(
+        request,
+        decoded_color_space_from_jpeg(samples, decoded_colorspace),
+        decoded_lossless != 0 ? PIXEL_ENCODED_LOSSY_STATE_LOSSLESS
+                              : PIXEL_ENCODED_LOSSY_STATE_LOSSY,
+        request->output.dst_dtype,
+        ::pixel::codec_common::decoded_planar_code_from_request(
+            request->output.dst_planar),
+        static_cast<uint16_t>(decoded_precision));
     clear_detail(c);
     return PIXEL_CODEC_ERR_OK;
   } catch (const std::bad_alloc&) {

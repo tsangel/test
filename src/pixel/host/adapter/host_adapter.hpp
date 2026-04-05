@@ -49,7 +49,8 @@ void destroy_host_encoder_context(HostEncoderContext* ctx) noexcept;
 pixel_error_code decode_frame_with_host_context(HostDecoderContext* ctx,
     const dicom::pixel::PixelLayout* source_layout, std::span<const uint8_t> prepared_source,
     std::span<uint8_t> destination, const dicom::pixel::PixelLayout* output_layout = nullptr,
-    const dicom::pixel::DecodeOptions* options = nullptr);
+    const dicom::pixel::DecodeOptions* options = nullptr,
+    pixel_decoder_info* decode_info = nullptr);
 
 pixel_error_code encode_frame_with_host_context(HostEncoderContext* ctx,
     const dicom::pixel::PixelLayout* source_layout, std::span<const uint8_t> source_frame,

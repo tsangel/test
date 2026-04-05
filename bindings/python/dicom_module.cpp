@@ -29,6 +29,7 @@
 #include <dicom.h>
 #include <dicom_endian.h>
 #include <diagnostics.h>
+#include <photometric_text_detail.hpp>
 #include "pixel/host/adapter/host_adapter.hpp"
 #include "pixel/host/support/dicom_pixel_support.hpp"
 #include "pixel/runtime/runtime_registry.hpp"
@@ -332,6 +333,80 @@ nb::object numpy_dtype_object(dicom::pixel::DataType data_type) {
 
 nb::object numpy_dtype_object(const dicom::pixel::DecodePlan& plan) {
 	return numpy_dtype_object(plan.output_layout.data_type);
+}
+
+std::string_view encoded_lossy_state_name(
+    dicom::pixel::EncodedLossyState state) noexcept {
+	switch (state) {
+	case dicom::pixel::EncodedLossyState::lossless:
+		return "lossless";
+	case dicom::pixel::EncodedLossyState::lossy:
+		return "lossy";
+	case dicom::pixel::EncodedLossyState::near_lossless:
+		return "near_lossless";
+	case dicom::pixel::EncodedLossyState::unknown:
+	default:
+		return "unknown";
+	}
+}
+
+std::string_view photometric_name(dicom::pixel::Photometric photometric) noexcept {
+	switch (photometric) {
+	case dicom::pixel::Photometric::monochrome1:
+		return "monochrome1";
+	case dicom::pixel::Photometric::monochrome2:
+		return "monochrome2";
+	case dicom::pixel::Photometric::palette_color:
+		return "palette_color";
+	case dicom::pixel::Photometric::rgb:
+		return "rgb";
+	case dicom::pixel::Photometric::ybr_full:
+		return "ybr_full";
+	case dicom::pixel::Photometric::ybr_full_422:
+		return "ybr_full_422";
+	case dicom::pixel::Photometric::ybr_rct:
+		return "ybr_rct";
+	case dicom::pixel::Photometric::ybr_ict:
+		return "ybr_ict";
+	case dicom::pixel::Photometric::ybr_partial_420:
+		return "ybr_partial_420";
+	case dicom::pixel::Photometric::xyb:
+		return "xyb";
+	case dicom::pixel::Photometric::hsv:
+		return "hsv";
+	case dicom::pixel::Photometric::argb:
+		return "argb";
+	case dicom::pixel::Photometric::cmyk:
+		return "cmyk";
+	case dicom::pixel::Photometric::ybr_partial_422:
+		return "ybr_partial_422";
+	default:
+		return "unknown";
+	}
+}
+
+std::string_view data_type_name(dicom::pixel::DataType data_type) noexcept {
+	switch (data_type) {
+	case dicom::pixel::DataType::u8:
+		return "uint8";
+	case dicom::pixel::DataType::s8:
+		return "int8";
+	case dicom::pixel::DataType::u16:
+		return "uint16";
+	case dicom::pixel::DataType::s16:
+		return "int16";
+	case dicom::pixel::DataType::u32:
+		return "uint32";
+	case dicom::pixel::DataType::s32:
+		return "int32";
+	case dicom::pixel::DataType::f32:
+		return "float32";
+	case dicom::pixel::DataType::f64:
+		return "float64";
+	case dicom::pixel::DataType::unknown:
+	default:
+		return "unknown";
+	}
 }
 
 nb::object uid_to_object(Uid uid) {
@@ -1526,6 +1601,28 @@ void decode_layout_into_unchecked(const DicomFile& self, const DecodedArrayLayou
 	self.decode_into(layout.frame_index, out, layout.plan);
 }
 
+void decode_layout_into_with_info_unchecked(const DicomFile& self,
+    const DecodedArrayLayout& layout, std::span<std::uint8_t> out,
+    dicom::pixel::DecodeInfo& decode_info) {
+	if (layout.decode_all_frames) {
+		self.decode_all_frames_into(out, layout.plan, decode_info);
+		return;
+	}
+	self.decode_into(layout.frame_index, out, layout.plan, decode_info);
+}
+
+DecodedArrayLayout resolve_decode_layout_or_throw(const DicomFile& self, long frame,
+    bool decode_mct, int worker_threads, int codec_threads, nb::handle plan_obj) {
+	if (!plan_obj.is_none()) {
+		// A reusable plan already fixes dtype, strides, and required byte counts.
+		return build_decode_layout_from_plan(
+		    nb::cast<dicom::pixel::DecodePlan>(plan_obj), frame);
+	}
+
+	validate_decode_thread_options_or_throw(worker_threads, codec_threads);
+	return build_decode_layout(self, frame, worker_threads, codec_threads, decode_mct);
+}
+
 void copy_direct_raw_array_access_unchecked(const DirectRawArrayAccess& access,
     std::span<std::uint8_t> dst) {
 	if (access.layout.required_bytes == 0) {
@@ -1694,6 +1791,32 @@ nb::object dicomfile_to_array(
 	return nb::cast(std::move(out.array));
 }
 
+nb::tuple dicomfile_to_array_with_info(
+    const DicomFile& self, long frame, bool decode_mct, int worker_threads,
+    int codec_threads, nb::handle plan_obj) {
+	const auto layout = resolve_decode_layout_or_throw(
+	    self, frame, decode_mct, worker_threads, codec_threads, plan_obj);
+	auto out = make_writable_numpy_array(
+	    layout.ndim, layout.shape, layout.strides, layout.spec.dtype, layout.required_bytes);
+	dicom::pixel::DecodeInfo decode_info{};
+	{
+		nb::gil_scoped_release release;
+		decode_layout_into_with_info_unchecked(self, layout, out.bytes, decode_info);
+	}
+	return nb::make_tuple(nb::cast(std::move(out.array)), std::move(decode_info));
+}
+
+nb::object dicomfile_to_array_maybe_with_info(const DicomFile& self, long frame,
+    bool decode_mct, int worker_threads, int codec_threads, nb::handle plan_obj,
+    bool with_info) {
+	if (with_info) {
+		return nb::cast(dicomfile_to_array_with_info(
+		    self, frame, decode_mct, worker_threads, codec_threads, plan_obj));
+	}
+	return dicomfile_to_array(
+	    self, frame, decode_mct, worker_threads, codec_threads, plan_obj);
+}
+
 class PyWritableBufferView {
 public:
 	explicit PyWritableBufferView(nb::handle obj) {
@@ -1763,6 +1886,54 @@ nb::object dicomfile_decode_into_array(const DicomFile& self, nb::handle out,
 		decode_layout_into_unchecked(self, layout, out_span);
 	}
 	return nb::borrow<nb::object>(out);
+}
+
+dicom::pixel::DecodeInfo dicomfile_decode_into_info(const DicomFile& self, nb::handle out,
+    long frame, bool decode_mct, int worker_threads, int codec_threads,
+    nb::handle plan_obj) {
+	const auto layout = resolve_decode_layout_or_throw(
+	    self, frame, decode_mct, worker_threads, codec_threads, plan_obj);
+
+	PyWritableBufferView writable(out);
+	const auto& view = writable.view();
+	if (view.itemsize <= 0) {
+		throw nb::value_error("decode_into requires a valid output itemsize");
+	}
+	const auto actual_itemsize = static_cast<std::size_t>(view.itemsize);
+	if (actual_itemsize != layout.spec.bytes_per_sample) {
+		throw nb::value_error("decode_into output itemsize does not match decoded sample size");
+	}
+	if (view.len < 0) {
+		throw nb::value_error("decode_into output buffer length is invalid");
+	}
+	const auto actual_bytes = static_cast<std::size_t>(view.len);
+	if (actual_bytes != layout.required_bytes) {
+		throw nb::value_error(
+		    "decode_into output buffer size does not match expected decoded size");
+	}
+	if (layout.required_bytes > 0 && view.buf == nullptr) {
+		throw nb::value_error("decode_into output buffer is null");
+	}
+
+	auto out_span = std::span<std::uint8_t>(
+	    static_cast<std::uint8_t*>(view.buf), actual_bytes);
+	dicom::pixel::DecodeInfo decode_info{};
+	{
+		nb::gil_scoped_release release;
+		decode_layout_into_with_info_unchecked(self, layout, out_span, decode_info);
+	}
+	return decode_info;
+}
+
+nb::object dicomfile_decode_into_maybe_with_info(const DicomFile& self, nb::handle out,
+    long frame, bool decode_mct, int worker_threads, int codec_threads,
+    nb::handle plan_obj, bool with_info) {
+	if (with_info) {
+		return nb::cast(dicomfile_decode_into_info(
+		    self, out, frame, decode_mct, worker_threads, codec_threads, plan_obj));
+	}
+	return dicomfile_decode_into_array(
+	    self, out, frame, decode_mct, worker_threads, codec_threads, plan_obj);
 }
 
 class PyBufferView {
@@ -4281,6 +4452,30 @@ NB_MODULE(_dicomsdl, m) {
 		    "current iteration step, and persist ``entry.path.to_string()`` if you\n"
 		    "need to keep it after the walker advances.");
 
+	nb::enum_<dicom::pixel::Photometric>(m, "Photometric",
+	    "DICOM Photometric Interpretation values used by DecodeInfo when representable.")
+		.value("monochrome1", dicom::pixel::Photometric::monochrome1)
+		.value("monochrome2", dicom::pixel::Photometric::monochrome2)
+		.value("palette_color", dicom::pixel::Photometric::palette_color)
+		.value("rgb", dicom::pixel::Photometric::rgb)
+		.value("ybr_full", dicom::pixel::Photometric::ybr_full)
+		.value("ybr_full_422", dicom::pixel::Photometric::ybr_full_422)
+		.value("ybr_rct", dicom::pixel::Photometric::ybr_rct)
+		.value("ybr_ict", dicom::pixel::Photometric::ybr_ict)
+		.value("ybr_partial_420", dicom::pixel::Photometric::ybr_partial_420)
+		.value("xyb", dicom::pixel::Photometric::xyb)
+		.value("hsv", dicom::pixel::Photometric::hsv)
+		.value("argb", dicom::pixel::Photometric::argb)
+		.value("cmyk", dicom::pixel::Photometric::cmyk)
+		.value("ybr_partial_422", dicom::pixel::Photometric::ybr_partial_422);
+
+	nb::enum_<dicom::pixel::EncodedLossyState>(m, "EncodedLossyState",
+	    "Whether the encoded source frame was lossless, lossy, or near-lossless.")
+		.value("unknown", dicom::pixel::EncodedLossyState::unknown)
+		.value("lossless", dicom::pixel::EncodedLossyState::lossless)
+		.value("lossy", dicom::pixel::EncodedLossyState::lossy)
+		.value("near_lossless", dicom::pixel::EncodedLossyState::near_lossless);
+
 	nb::enum_<dicom::pixel::Planar>(m, "Planar",
 	    "Pixel sample layout for multi-sample decode output.")
 		.value("interleaved", dicom::pixel::Planar::interleaved)
@@ -4402,6 +4597,72 @@ NB_MODULE(_dicomsdl, m) {
 			        << ", frames=" << self.output_layout.frames
 			        << ", samples_per_pixel=" << self.output_layout.samples_per_pixel
 			        << ", frame_stride=" << self.output_layout.frame_stride << ")";
+			    return oss.str();
+		    });
+
+	nb::class_<dicom::pixel::DecodeInfo>(m, "DecodeInfo",
+	    "Metadata reported by a successful decode operation.")
+		.def(nb::init<>())
+		.def_prop_ro("photometric",
+		    [](const dicom::pixel::DecodeInfo& self) -> nb::object {
+			    if (!self.photometric) {
+				    return nb::none();
+			    }
+			    return nb::cast(*self.photometric);
+		    },
+		    "Decoded output photometric when representable as a DICOM Photometric value, else None.")
+		.def_prop_ro("encoded_lossy_state",
+		    [](const dicom::pixel::DecodeInfo& self) {
+			    return self.encoded_lossy_state;
+		    },
+		    "Lossiness classification of the encoded source frame.")
+		.def_prop_ro("dtype",
+		    [](const dicom::pixel::DecodeInfo& self) -> nb::object {
+			    if (!self.data_type) {
+				    return nb::none();
+			    }
+			    return numpy_dtype_object(*self.data_type);
+		    },
+		    "NumPy dtype implied by the decoded output, or None when unknown.")
+		.def_prop_ro("planar",
+		    [](const dicom::pixel::DecodeInfo& self) -> nb::object {
+			    if (!self.planar) {
+				    return nb::none();
+			    }
+			    return nb::cast(*self.planar);
+		    },
+		    "Decoded sample layout, or None when unknown.")
+		.def_prop_ro("bits_per_sample",
+		    [](const dicom::pixel::DecodeInfo& self) {
+			    return static_cast<int>(self.bits_per_sample);
+		    },
+		    "Decoded bits per component, or 0 when unknown.")
+		.def("__repr__",
+		    [](const dicom::pixel::DecodeInfo& self) {
+			    std::ostringstream oss;
+			    oss << "DecodeInfo(photometric=";
+			    if (self.photometric) {
+				    oss << "Photometric." << photometric_name(*self.photometric);
+			    } else {
+				    oss << "None";
+			    }
+			    oss << ", encoded_lossy_state=EncodedLossyState."
+			        << encoded_lossy_state_name(self.encoded_lossy_state)
+			        << ", dtype=";
+			    if (self.data_type) {
+				    oss << data_type_name(*self.data_type);
+			    } else {
+				    oss << "None";
+			    }
+			    oss << ", planar=";
+			    if (self.planar) {
+				    oss << "Planar."
+				        << (*self.planar == dicom::pixel::Planar::planar ? "planar"
+				                                                          : "interleaved");
+			    } else {
+				    oss << "None";
+			    }
+			    oss << ", bits_per_sample=" << self.bits_per_sample << ")";
 			    return oss.str();
 		    });
 
@@ -5300,13 +5561,14 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::arg("source"),
 		    "Append one encapsulated PixelData frame from a contiguous buffer object.")
 		.def("to_array",
-		    &dicomfile_to_array,
+		    &dicomfile_to_array_maybe_with_info,
 		    nb::arg("frame") = -1,
 		    nb::arg("decode_mct") = true,
 		    nb::kw_only(),
 		    nb::arg("worker_threads") = -1,
 		    nb::arg("codec_threads") = -1,
 		    nb::arg("plan") = nb::none(),
+		    nb::arg("with_info") = false,
 		    "Decode pixel samples and return a NumPy array.\n"
 		    "\n"
 		    "Parameters\n"
@@ -5329,12 +5591,17 @@ NB_MODULE(_dicomsdl, m) {
 		    "    and >0 requests an explicit internal thread count.\n"
 		    "plan : DecodePlan, optional\n"
 		    "    Reuse a previously computed DecodePlan. When provided, plan options win.\n"
+		    "with_info : bool, optional\n"
+		    "    When True, return `(array, decode_info)` instead of just the array.\n"
+		    "    For frame=-1 on multi-frame input, DecodeInfo reports frame-0/common\n"
+		    "    decode metadata.\n"
 		    "\n"
 		    "Returns\n"
 		    "-------\n"
-		    "numpy.ndarray\n"
+		    "numpy.ndarray or tuple[numpy.ndarray, DecodeInfo]\n"
 		    "    Shape is (rows, cols) or (rows, cols, samples) for a single frame,\n"
-		    "    and (frames, rows, cols) or (frames, rows, cols, samples) when decoding all frames.")
+		    "    and (frames, rows, cols) or (frames, rows, cols, samples) when decoding all frames.\n"
+		    "    When `with_info=True`, returns `(array, decode_info)`.")
 		.def("to_array_view",
 		    &dicomfile_to_array_view,
 		    nb::arg("frame") = -1,
@@ -5344,7 +5611,7 @@ NB_MODULE(_dicomsdl, m) {
 		    "- uncompressed transfer syntax\n"
 		    "- frame layout compatible with interleaved output.")
 		.def("decode_into",
-		    &dicomfile_decode_into_array,
+		    &dicomfile_decode_into_maybe_with_info,
 		    nb::arg("out"),
 		    nb::arg("frame") = 0,
 		    nb::arg("decode_mct") = true,
@@ -5352,6 +5619,7 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::arg("worker_threads") = -1,
 		    nb::arg("codec_threads") = -1,
 		    nb::arg("plan") = nb::none(),
+		    nb::arg("with_info") = false,
 		    "Decode pixel samples into an existing writable C-contiguous buffer.\n"
 		    "\n"
 		    "Parameters\n"
@@ -5377,6 +5645,10 @@ NB_MODULE(_dicomsdl, m) {
 		    "    and >0 requests an explicit internal thread count.\n"
 		    "plan : DecodePlan, optional\n"
 		    "    Reuse a previously computed DecodePlan. When provided, plan options win.\n"
+		    "with_info : bool, optional\n"
+		    "    When True, return DecodeInfo instead of echoing `out`.\n"
+		    "    For frame=-1 on multi-frame input, DecodeInfo reports frame-0/common\n"
+		    "    decode metadata.\n"
 		    "\n"
 		    "Raises\n"
 		    "------\n"
@@ -5387,16 +5659,18 @@ NB_MODULE(_dicomsdl, m) {
 		    "\n"
 		    "Returns\n"
 		    "-------\n"
-		    "Same object as `out` for call chaining.")
+		    "Same object as `out` for call chaining, or DecodeInfo when `with_info=True`.")
 		.def("pixel_array",
-		    &dicomfile_to_array,
+		    &dicomfile_to_array_maybe_with_info,
 		    nb::arg("frame") = -1,
 		    nb::arg("decode_mct") = true,
 		    nb::kw_only(),
 		    nb::arg("worker_threads") = -1,
 		    nb::arg("codec_threads") = -1,
 		    nb::arg("plan") = nb::none(),
-		    "Alias of to_array(frame=-1, decode_mct=True).")
+		    nb::arg("with_info") = false,
+		    "Alias of to_array(frame=-1, decode_mct=True).\n"
+		    "When `with_info=True`, returns `(array, decode_info)` like to_array(...).")
 		.def("__getitem__",
 		    [](DicomFile& self, nb::object key) -> DataElement& {
 			    return dataset_lookup_dataelement_py(
@@ -6348,9 +6622,12 @@ m.def("generate_study_instance_uid",
 	    "set_default_reporter",
 	    "set_thread_reporter",
 	    "set_log_level",
+	    "Photometric",
+	    "EncodedLossyState",
 	    "Planar",
 	    "DecodeOptions",
 	    "DecodePlan",
+	    "DecodeInfo",
 	    "VoiLutFunction",
 	    "PixelPresentation",
 	    "WindowTransform",

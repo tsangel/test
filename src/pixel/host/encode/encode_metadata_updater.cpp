@@ -2,6 +2,7 @@
 
 #include "pixel/host/encode/encode_target_policy.hpp"
 #include "pixel/host/error/codec_error.hpp"
+#include "photometric_text_detail.hpp"
 #include "diagnostics.h"
 
 #include <algorithm>
@@ -14,33 +15,6 @@
 
 namespace dicom::pixel::detail {
 using namespace dicom::literals;
-
-namespace {
-
-[[nodiscard]] std::string_view to_photometric_text(pixel::Photometric photometric) noexcept {
-	switch (photometric) {
-	case pixel::Photometric::monochrome1:
-		return "MONOCHROME1";
-	case pixel::Photometric::monochrome2:
-		return "MONOCHROME2";
-	case pixel::Photometric::palette_color:
-		return "PALETTE COLOR";
-	case pixel::Photometric::rgb:
-		return "RGB";
-	case pixel::Photometric::ybr_full:
-		return "YBR_FULL";
-	case pixel::Photometric::ybr_full_422:
-		return "YBR_FULL_422";
-	case pixel::Photometric::ybr_rct:
-		return "YBR_RCT";
-	case pixel::Photometric::ybr_ict:
-		return "YBR_ICT";
-	default:
-		return "MONOCHROME2";
-	}
-}
-
-} // namespace
 
 std::size_t encoded_payload_size_from_pixel_sequence(const DataSet& dataset) {
 	const auto& pixel_data = dataset["PixelData"_tag];
@@ -178,7 +152,7 @@ void update_pixel_metadata_for_set_pixel_data(DataSet& dataset,
 	ok &= dataset.set_value(
 	    "PixelRepresentation"_tag, static_cast<long>(pixel_representation));
 
-	const auto photometric_text = to_photometric_text(output_photometric);
+	const auto photometric_text = pixel::detail::to_photometric_text(output_photometric);
 	ok &= dataset.set_value("PhotometricInterpretation"_tag, photometric_text);
 
 	if (source_layout.frames > 1u) {

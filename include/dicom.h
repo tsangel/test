@@ -1525,6 +1525,12 @@ enum class Photometric : std::uint8_t {
 	ybr_full_422,
 	ybr_rct,
 	ybr_ict,
+	ybr_partial_420,
+	xyb,
+	hsv,             // retired
+	argb,            // retired
+	cmyk,            // retired
+	ybr_partial_422, // retired
 };
 
 [[nodiscard]] inline constexpr bool is_signed_integer_dtype(DataType dtype) noexcept {
@@ -2030,6 +2036,24 @@ struct DecodePlan {
 	PixelLayout output_layout{};
 };
 
+enum class EncodedLossyState : std::uint8_t {
+	unknown = 0,
+	lossless = 1,
+	lossy = 2,
+	near_lossless = 3,
+};
+
+/// Metadata reported by one successful frame decode.
+/// Fields remain unknown/nullopt when the active backend does not report them
+/// or when the decoded output is not representable as a DICOM photometric.
+struct DecodeInfo {
+	std::optional<Photometric> photometric{};
+	EncodedLossyState encoded_lossy_state{EncodedLossyState::unknown};
+	std::optional<DataType> data_type{};
+	std::optional<Planar> planar{};
+	std::uint16_t bits_per_sample{0};
+};
+
 using ExecutionProgressCallback =
     void (*)(std::size_t completed, std::size_t total, void* user_data) noexcept;
 using ExecutionCancelCallback = bool (*)(void* user_data) noexcept;
@@ -2065,11 +2089,21 @@ struct ExecutionObserver {
 /// mismatched destination layout/size, unsupported decoder binding, or backend decode failure.
 void decode_frame_into(const DicomFile& df, std::size_t frame_index,
     std::span<std::uint8_t> dst, const DecodePlan& plan);
+/// Decode a single frame into caller-provided buffer and report backend decode metadata.
+/// `decode_info` is overwritten on success and left unchanged when decode throws.
+/// @throws diag::DicomException under the same conditions as decode_frame_into().
+void decode_frame_into(const DicomFile& df, std::size_t frame_index,
+    std::span<std::uint8_t> dst, const DecodePlan& plan, DecodeInfo& decode_info);
 /// Decode a single frame and return an owning PixelBuffer.
 /// The returned buffer always uses the single-frame variant of `plan.output_layout`.
 /// @throws diag::DicomException under the same conditions as decode_frame_into().
 [[nodiscard]] PixelBuffer decode_frame(
     const DicomFile& df, std::size_t frame_index, const DecodePlan& plan);
+/// Decode a single frame, return an owning PixelBuffer, and report backend decode metadata.
+/// @throws diag::DicomException under the same conditions as decode_frame_into(..., decode_info).
+[[nodiscard]] PixelBuffer decode_frame(
+    const DicomFile& df, std::size_t frame_index, const DecodePlan& plan,
+    DecodeInfo& decode_info);
 /// Decode every frame into one caller-provided contiguous output buffer.
 /// `dst.size()` must be at least `plan.output_layout.frames * plan.output_layout.frame_stride`.
 /// Frames are written in index order, each occupying one `plan.output_layout.frame_stride` span.
@@ -2077,11 +2111,22 @@ void decode_frame_into(const DicomFile& df, std::size_t frame_index,
 /// mismatched destination layout/size, unsupported decoder binding, or backend decode failure.
 void decode_all_frames_into(
     const DicomFile& df, std::span<std::uint8_t> dst, const DecodePlan& plan);
+/// Decode every frame into one caller-provided contiguous output buffer and report
+/// DecodeInfo for frame 0. DecodeInfo is intended to model common/frame-invariant
+/// decode properties; multi-frame callers should treat the reported values as the
+/// metadata observed while decoding the first frame.
+/// @throws diag::DicomException under the same conditions as decode_all_frames_into().
+void decode_all_frames_into(const DicomFile& df, std::span<std::uint8_t> dst,
+    const DecodePlan& plan, DecodeInfo& decode_info);
 /// Decode every frame and return one owning PixelBuffer for the full volume.
 /// The returned buffer uses `plan.output_layout` unchanged.
 /// @throws diag::DicomException under the same conditions as decode_all_frames_into().
 [[nodiscard]] PixelBuffer decode_all_frames(
     const DicomFile& df, const DecodePlan& plan);
+/// Decode every frame, return one owning PixelBuffer, and report DecodeInfo for frame 0.
+/// @throws diag::DicomException under the same conditions as decode_all_frames_into(..., decode_info).
+[[nodiscard]] PixelBuffer decode_all_frames(
+    const DicomFile& df, const DecodePlan& plan, DecodeInfo& decode_info);
 /// Decode every frame into one caller-provided contiguous output buffer.
 /// When `observer` is provided, progress is reported in frames and cancellation
 /// is polled cooperatively while scheduling work.
@@ -2090,12 +2135,21 @@ void decode_all_frames_into(
 /// or observer-requested cancellation.
 void decode_all_frames_into(const DicomFile& df, std::span<std::uint8_t> dst,
     const DecodePlan& plan, const ExecutionObserver* observer);
+/// Observer-aware batch decode that also reports DecodeInfo for frame 0.
+/// @throws diag::DicomException under the same conditions as decode_all_frames_into(..., observer).
+void decode_all_frames_into(const DicomFile& df, std::span<std::uint8_t> dst,
+    const DecodePlan& plan, DecodeInfo& decode_info, const ExecutionObserver* observer);
 /// Decode every frame and return one owning PixelBuffer for the full volume.
 /// When `observer` is provided, progress and cancellation behave like
 /// decode_all_frames_into(..., observer).
 /// @throws diag::DicomException under the same conditions as decode_all_frames_into(..., observer).
 [[nodiscard]] PixelBuffer decode_all_frames(
     const DicomFile& df, const DecodePlan& plan, const ExecutionObserver* observer);
+/// Observer-aware batch decode that also reports DecodeInfo for frame 0.
+/// @throws diag::DicomException under the same conditions as decode_all_frames_into(..., decode_info, observer).
+[[nodiscard]] PixelBuffer decode_all_frames(
+    const DicomFile& df, const DecodePlan& plan, DecodeInfo& decode_info,
+    const ExecutionObserver* observer);
 
 /// Build the default packed output layout for a rescale transform.
 /// Geometry, sample count, and planar arrangement are preserved from `src`.
@@ -3317,29 +3371,71 @@ public:
 	    const pixel::DecodePlan& plan) const {
 		pixel::decode_frame_into(*this, frame_index, dst, plan);
 	}
+	/// @throws diag::DicomException under the same conditions as pixel::decode_frame_into(..., decode_info).
+	void decode_into(std::size_t frame_index, std::span<std::uint8_t> dst,
+	    const pixel::DecodePlan& plan, pixel::DecodeInfo& decode_info) const {
+		pixel::decode_frame_into(*this, frame_index, dst, plan, decode_info);
+	}
 	/// @throws diag::DicomException under the same conditions as pixel::decode_frame().
 	[[nodiscard]] pixel::PixelBuffer pixel_buffer(
 	    std::size_t frame_index, const pixel::DecodePlan& plan) const {
 		return pixel::decode_frame(*this, frame_index, plan);
+	}
+	/// @throws diag::DicomException under the same conditions as pixel::decode_frame(..., decode_info).
+	[[nodiscard]] pixel::PixelBuffer pixel_buffer(std::size_t frame_index,
+	    const pixel::DecodePlan& plan, pixel::DecodeInfo& decode_info) const {
+		return pixel::decode_frame(*this, frame_index, plan, decode_info);
 	}
 	/// @throws diag::DicomException under the same conditions as pixel::decode_frame().
 	[[nodiscard]] pixel::PixelBuffer pixel_buffer(std::size_t frame_index = 0,
 	    const pixel::DecodeOptions& opt = {}) const {
 		return pixel_buffer(frame_index, create_decode_plan(opt));
 	}
+	/// @throws diag::DicomException under the same conditions as pixel::decode_frame(..., decode_info).
+	[[nodiscard]] pixel::PixelBuffer pixel_buffer(std::size_t frame_index,
+	    const pixel::DecodeOptions& opt, pixel::DecodeInfo& decode_info) const {
+		return pixel_buffer(frame_index, create_decode_plan(opt), decode_info);
+	}
 	/// @throws diag::DicomException under the same conditions as pixel::decode_frame_into().
 	void decode_into(std::span<std::uint8_t> dst, const pixel::DecodePlan& plan) const {
 		pixel::decode_frame_into(*this, 0, dst, plan);
+	}
+	/// @throws diag::DicomException under the same conditions as pixel::decode_frame_into(..., decode_info).
+	void decode_into(std::span<std::uint8_t> dst, const pixel::DecodePlan& plan,
+	    pixel::DecodeInfo& decode_info) const {
+		pixel::decode_frame_into(*this, 0, dst, plan, decode_info);
 	}
 	/// @throws diag::DicomException under the same conditions as pixel::decode_all_frames_into().
 	void decode_all_frames_into(std::span<std::uint8_t> dst,
 	    const pixel::DecodePlan& plan) const {
 		pixel::decode_all_frames_into(*this, dst, plan);
 	}
+	/// @throws diag::DicomException under the same conditions as pixel::decode_all_frames_into(..., decode_info).
+	void decode_all_frames_into(std::span<std::uint8_t> dst,
+	    const pixel::DecodePlan& plan, pixel::DecodeInfo& decode_info) const {
+		pixel::decode_all_frames_into(*this, dst, plan, decode_info);
+	}
 	/// @throws diag::DicomException under the same conditions as pixel::decode_all_frames_into().
 	void decode_all_frames_into(std::span<std::uint8_t> dst,
 	    const pixel::DecodePlan& plan, const pixel::ExecutionObserver* observer) const {
 		pixel::decode_all_frames_into(*this, dst, plan, observer);
+	}
+	/// @throws diag::DicomException under the same conditions as pixel::decode_all_frames_into(..., decode_info, observer).
+	void decode_all_frames_into(std::span<std::uint8_t> dst,
+	    const pixel::DecodePlan& plan, pixel::DecodeInfo& decode_info,
+	    const pixel::ExecutionObserver* observer) const {
+		pixel::decode_all_frames_into(*this, dst, plan, decode_info, observer);
+	}
+	/// @throws diag::DicomException under the same conditions as pixel::decode_all_frames(..., decode_info).
+	[[nodiscard]] pixel::PixelBuffer pixel_buffer_all_frames(
+	    const pixel::DecodePlan& plan, pixel::DecodeInfo& decode_info) const {
+		return pixel::decode_all_frames(*this, plan, decode_info);
+	}
+	/// @throws diag::DicomException under the same conditions as pixel::decode_all_frames(..., decode_info, observer).
+	[[nodiscard]] pixel::PixelBuffer pixel_buffer_all_frames(
+	    const pixel::DecodePlan& plan, pixel::DecodeInfo& decode_info,
+	    const pixel::ExecutionObserver* observer) const {
+		return pixel::decode_all_frames(*this, plan, decode_info, observer);
 	}
 	[[nodiscard]] std::vector<std::uint8_t> pixel_data(
 	    std::size_t frame_index, const pixel::DecodePlan& plan) const {

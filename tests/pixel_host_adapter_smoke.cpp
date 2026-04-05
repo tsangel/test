@@ -156,15 +156,31 @@ int main() {
   decode_options.decode_mct = false;
 
   std::vector<uint8_t> decoded_int(source_bytes.size(), uint8_t{0});
+  pixel_decoder_info decode_info{};
+  decode_info.struct_size = sizeof(pixel_decoder_info);
+  decode_info.abi_version = PIXEL_DECODER_PLUGIN_ABI;
   ec = pixel::runtime::decode_frame_with_host_context(&decoder_ctx, &source_decode_layout,
       std::span<const uint8_t>(encoded), std::span<uint8_t>(decoded_int), &int_layout,
-      &decode_options);
+      &decode_options, &decode_info);
   if (ec != PIXEL_CODEC_ERR_OK) {
     fail("decode_frame_with_host_context integer decode failed: " +
         decoder_detail(decoder_ctx));
   }
   expect_true(std::memcmp(decoded_int.data(), source_bytes.data(), source_bytes.size()) == 0,
       "native integer decode equality");
+  expect_eq(decode_info.actual_color_space,
+      static_cast<uint8_t>(PIXEL_DECODED_COLOR_SPACE_MONOCHROME),
+      "host decode actual color space");
+  expect_eq(decode_info.encoded_lossy_state,
+      static_cast<uint8_t>(PIXEL_ENCODED_LOSSY_STATE_LOSSLESS),
+      "host decode encoded lossy state");
+  expect_eq(decode_info.actual_dtype, static_cast<uint8_t>(PIXEL_DTYPE_U16),
+      "host decode actual dtype");
+  expect_eq(decode_info.actual_planar,
+      static_cast<uint8_t>(PIXEL_DECODED_PLANAR_INTERLEAVED),
+      "host decode actual planar");
+  expect_eq(decode_info.bits_per_sample, static_cast<uint16_t>(16),
+      "host decode bits per sample");
 
   pixel::runtime::destroy_host_decoder_context(&decoder_ctx);
   pixel::runtime::destroy_host_encoder_context(&encoder_ctx);

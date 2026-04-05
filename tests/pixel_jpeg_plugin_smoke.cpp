@@ -166,7 +166,7 @@ pixel_encoder_request make_encoder_request(
 
 pixel_decoder_request make_decoder_request(
     std::vector<uint8_t>& encoded, std::vector<uint8_t>& decoded,
-    uint32_t codec_profile_code) {
+    uint32_t codec_profile_code, pixel_decoder_info* decode_info = nullptr) {
   pixel_decoder_request request{};
   request.struct_size = sizeof(pixel_decoder_request);
   request.abi_version = PIXEL_DECODER_PLUGIN_ABI;
@@ -195,6 +195,7 @@ pixel_decoder_request make_decoder_request(
   request.output.frame_stride = 0;
   request.output.dst_dtype = PIXEL_DTYPE_U8;
   request.output.dst_planar = PIXEL_PLANAR_INTERLEAVED;
+  request.decode_info = decode_info;
 
   return request;
 }
@@ -295,8 +296,11 @@ int main(int argc, char** argv) {
   }
 
   std::vector<uint8_t> decoded(source.size(), uint8_t{0});
+  pixel_decoder_info decode_info{};
+  decode_info.struct_size = sizeof(pixel_decoder_info);
+  decode_info.abi_version = PIXEL_DECODER_PLUGIN_ABI;
   auto decode_request = make_decoder_request(
-      encoded, decoded, PIXEL_CODEC_PROFILE_JPEG_LOSSLESS);
+      encoded, decoded, PIXEL_CODEC_PROFILE_JPEG_LOSSLESS, &decode_info);
 
   const auto decode_ec = decoder_api.decode_frame(decoder_ctx.context, &decode_request);
   if (decode_ec != PIXEL_CODEC_ERR_OK) {
@@ -306,6 +310,19 @@ int main(int argc, char** argv) {
   expect_eq(decoded.size(), source.size(), "decoded size");
   expect_true(std::memcmp(decoded.data(), source.data(), source.size()) == 0,
       "JPEG lossless round-trip data equality");
+  expect_eq(decode_info.actual_color_space,
+      static_cast<uint8_t>(PIXEL_DECODED_COLOR_SPACE_MONOCHROME),
+      "JPEG lossless decoded color space");
+  expect_eq(decode_info.encoded_lossy_state,
+      static_cast<uint8_t>(PIXEL_ENCODED_LOSSY_STATE_LOSSLESS),
+      "JPEG lossless encoded lossy state");
+  expect_eq(decode_info.actual_dtype, static_cast<uint8_t>(PIXEL_DTYPE_U8),
+      "JPEG lossless actual dtype");
+  expect_eq(decode_info.actual_planar,
+      static_cast<uint8_t>(PIXEL_DECODED_PLANAR_INTERLEAVED),
+      "JPEG lossless actual planar");
+  expect_eq(decode_info.bits_per_sample, static_cast<uint16_t>(8),
+      "JPEG lossless bits per sample");
 
   const pixel_option_kv lossy_options[] = {
       {"quality", "20"},
@@ -358,8 +375,12 @@ int main(int argc, char** argv) {
   lossy_encoded.resize(static_cast<std::size_t>(second_lossy_encode_request.output.encoded_size));
 
   std::vector<uint8_t> lossy_decoded(source.size(), uint8_t{0});
+  pixel_decoder_info lossy_decode_info{};
+  lossy_decode_info.struct_size = sizeof(pixel_decoder_info);
+  lossy_decode_info.abi_version = PIXEL_DECODER_PLUGIN_ABI;
   auto lossy_decode_request = make_decoder_request(
-      lossy_encoded, lossy_decoded, PIXEL_CODEC_PROFILE_JPEG_LOSSY);
+      lossy_encoded, lossy_decoded, PIXEL_CODEC_PROFILE_JPEG_LOSSY,
+      &lossy_decode_info);
   const auto lossy_decode_ec = decoder_api.decode_frame(decoder_ctx.context, &lossy_decode_request);
   if (lossy_decode_ec != PIXEL_CODEC_ERR_OK) {
     fail("lossy decode failed: " + decoder_error_detail(decoder_api, decoder_ctx.context));
@@ -367,6 +388,19 @@ int main(int argc, char** argv) {
   expect_eq(lossy_decoded.size(), source.size(), "lossy decoded size");
   expect_true(has_non_zero_sample(lossy_decoded),
       "JPEG lossy decode should produce non-zero output");
+  expect_eq(lossy_decode_info.actual_color_space,
+      static_cast<uint8_t>(PIXEL_DECODED_COLOR_SPACE_MONOCHROME),
+      "JPEG lossy decoded color space");
+  expect_eq(lossy_decode_info.encoded_lossy_state,
+      static_cast<uint8_t>(PIXEL_ENCODED_LOSSY_STATE_LOSSY),
+      "JPEG lossy encoded lossy state");
+  expect_eq(lossy_decode_info.actual_dtype, static_cast<uint8_t>(PIXEL_DTYPE_U8),
+      "JPEG lossy actual dtype");
+  expect_eq(lossy_decode_info.actual_planar,
+      static_cast<uint8_t>(PIXEL_DECODED_PLANAR_INTERLEAVED),
+      "JPEG lossy actual planar");
+  expect_eq(lossy_decode_info.bits_per_sample, static_cast<uint16_t>(8),
+      "JPEG lossy bits per sample");
 
   bool lossy_differs = false;
   for (std::size_t i = 0; i < source.size(); ++i) {

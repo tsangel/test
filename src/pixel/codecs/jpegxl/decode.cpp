@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "../common/decoded_bytes_writeback.hpp"
+#include "../common/decode_info.hpp"
 #include "internal.hpp"
 
 namespace pixel::jpegxl_codec {
@@ -538,6 +539,43 @@ pixel_error_code write_decoded_pixels(DecoderCtx* ctx,
       "unsupported destination dtype");
 }
 
+uint8_t decoded_color_space_from_jpegxl(uint64_t samples_per_pixel) noexcept {
+  switch (samples_per_pixel) {
+  case 1:
+    return PIXEL_DECODED_COLOR_SPACE_MONOCHROME;
+  case 3:
+    return PIXEL_DECODED_COLOR_SPACE_RGB;
+  case 4:
+    return PIXEL_DECODED_COLOR_SPACE_RGBA;
+  default:
+    return PIXEL_DECODED_COLOR_SPACE_UNKNOWN;
+  }
+}
+
+uint8_t encoded_lossy_state_from_jpegxl_profile(uint32_t codec_profile_code) noexcept {
+  switch (codec_profile_code) {
+  case PIXEL_CODEC_PROFILE_JPEGXL_LOSSLESS:
+    return PIXEL_ENCODED_LOSSY_STATE_LOSSLESS;
+  case PIXEL_CODEC_PROFILE_JPEGXL_LOSSY:
+    return PIXEL_ENCODED_LOSSY_STATE_LOSSY;
+  default:
+    return PIXEL_ENCODED_LOSSY_STATE_UNKNOWN;
+  }
+}
+
+void set_jpegxl_decode_info(
+    const pixel_decoder_request* request, uint16_t bits_per_sample) noexcept {
+  ::pixel::codec_common::set_decoder_info(
+      request,
+      decoded_color_space_from_jpegxl(
+          static_cast<uint64_t>(request->frame.samples_per_pixel)),
+      encoded_lossy_state_from_jpegxl_profile(request->frame.codec_profile_code),
+      request->output.dst_dtype,
+      ::pixel::codec_common::decoded_planar_code_from_request(
+          request->output.dst_planar),
+      bits_per_sample);
+}
+
 }  // namespace
 
 pixel_error_code decoder_decode_frame(
@@ -579,6 +617,10 @@ pixel_error_code decoder_decode_frame(
       return write_ec;
     }
 
+    set_jpegxl_decode_info(
+        request, decoded.bits_per_sample > 0
+            ? static_cast<uint16_t>(decoded.bits_per_sample)
+            : uint16_t{0});
     clear_detail(c);
     return PIXEL_CODEC_ERR_OK;
   } catch (const std::bad_alloc&) {

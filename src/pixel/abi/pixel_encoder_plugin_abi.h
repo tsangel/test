@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-#define PIXEL_ENCODER_PLUGIN_ABI 0x00030000u
+#define PIXEL_ENCODER_PLUGIN_ABI 0x00040000u
 
 typedef struct pixel_encoder_source {
   uint32_t struct_size;

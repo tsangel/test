@@ -2,6 +2,7 @@
 #include "pixel/host/decode/decode_thread_policy.hpp"
 
 #include "diagnostics.h"
+#include "pixel_decoder_plugin_abi.h"
 #include "pixel/host/error/codec_error.hpp"
 #include "pixel/host/support/dicom_pixel_support.hpp"
 
@@ -179,6 +180,72 @@ namespace {
 
 constexpr int kNoThreadOption = std::numeric_limits<int>::min();
 
+void initialize_decoder_info(pixel_decoder_info* decode_info) noexcept {
+	if (decode_info == nullptr) {
+		return;
+	}
+	*decode_info = pixel_decoder_info{};
+	decode_info->struct_size = sizeof(pixel_decoder_info);
+	decode_info->abi_version = PIXEL_DECODER_PLUGIN_ABI;
+}
+
+[[nodiscard]] uint8_t decoded_color_space_from_layout(
+    const PixelLayout& layout) noexcept {
+	switch (layout.photometric) {
+	case Photometric::monochrome1:
+	case Photometric::monochrome2:
+		return PIXEL_DECODED_COLOR_SPACE_MONOCHROME;
+	case Photometric::rgb:
+		return layout.samples_per_pixel == std::uint16_t{3}
+		           ? PIXEL_DECODED_COLOR_SPACE_RGB
+		           : PIXEL_DECODED_COLOR_SPACE_UNKNOWN;
+	case Photometric::cmyk:
+		return layout.samples_per_pixel == std::uint16_t{4}
+		           ? PIXEL_DECODED_COLOR_SPACE_CMYK
+		           : PIXEL_DECODED_COLOR_SPACE_UNKNOWN;
+	case Photometric::ybr_full:
+		return PIXEL_DECODED_COLOR_SPACE_YBR_FULL;
+	case Photometric::ybr_full_422:
+		return PIXEL_DECODED_COLOR_SPACE_YBR_FULL_422;
+	case Photometric::ybr_partial_420:
+		return PIXEL_DECODED_COLOR_SPACE_YBR_PARTIAL_420;
+	case Photometric::ybr_partial_422:
+		return PIXEL_DECODED_COLOR_SPACE_YBR_PARTIAL_422;
+	default:
+		return layout.samples_per_pixel == std::uint16_t{1}
+		           ? PIXEL_DECODED_COLOR_SPACE_MONOCHROME
+		           : PIXEL_DECODED_COLOR_SPACE_UNKNOWN;
+	}
+}
+
+[[nodiscard]] uint8_t decoded_dtype_code_from_layout(
+    const PixelLayout& layout) noexcept {
+	::pixel::runtime::DtypeMeta dtype_meta{};
+	if (!::pixel::runtime::resolve_dtype_meta(layout.data_type, &dtype_meta)) {
+		return PIXEL_DTYPE_UNKNOWN;
+	}
+	return dtype_meta.code;
+}
+
+void synthesize_decoder_info_from_request(
+    pixel_decoder_info* decode_info,
+    const DecodeDispatchRequestView& request) noexcept {
+	if (decode_info == nullptr) {
+		return;
+	}
+	initialize_decoder_info(decode_info);
+	decode_info->actual_color_space =
+	    decoded_color_space_from_layout(request.output_layout);
+	decode_info->encoded_lossy_state = PIXEL_ENCODED_LOSSY_STATE_LOSSLESS;
+	decode_info->actual_dtype = decoded_dtype_code_from_layout(request.output_layout);
+	decode_info->actual_planar =
+	    request.output_layout.planar == Planar::planar &&
+	            request.output_layout.samples_per_pixel > std::uint16_t{1}
+	        ? PIXEL_DECODED_PLANAR_PLANAR
+	        : PIXEL_DECODED_PLANAR_INTERLEAVED;
+	decode_info->bits_per_sample = request.output_layout.bits_stored;
+}
+
 // Reuse one decoder context per thread to avoid paying full configure/create
 // cost on every frame decode when the registry/options are unchanged.
 struct DecoderContextCache {
@@ -249,7 +316,8 @@ struct ResolvedDecoderBinding {
 
 void build_direct_decode_request_for_core(pixel_decoder_request& request,
     uint32_t codec_profile_code, const DecodeDispatchRequestView& decode_request,
-    std::span<const uint8_t> prepared_source, std::span<uint8_t> destination) {
+    std::span<const uint8_t> prepared_source, std::span<uint8_t> destination,
+    pixel_decoder_info* decode_info) {
 	::pixel::runtime::DtypeMeta source_dtype{};
 	if (!::pixel::runtime::resolve_dtype_meta(
 	        decode_request.source_layout.data_type, &source_dtype)) {
@@ -271,6 +339,7 @@ void build_direct_decode_request_for_core(pixel_decoder_request& request,
 	    static_cast<uint64_t>(decode_request.output_layout.frame_stride),
 	    ::pixel::runtime::is_mct_capable_profile(codec_profile_code) &&
 	        decode_request.options.decode_mct,
+	    decode_info,
 	    &request);
 }
 
@@ -390,7 +459,8 @@ void parse_runtime_detail_or_default(
 [[nodiscard]] bool try_decode_frame_with_runtime_source(
     const DecodeDispatchRequestView& request,
     std::span<const std::uint8_t> prepared_source, std::size_t frame_index,
-    std::span<std::uint8_t> dst, int codec_threads_override) {
+    std::span<std::uint8_t> dst, int codec_threads_override,
+    pixel_decoder_info* decode_info) {
 	const auto* registry = get_runtime_registry();
 	const auto registry_generation = get_runtime_registry_generation();
 
@@ -460,7 +530,7 @@ void parse_runtime_detail_or_default(
 	const pixel_error_code decode_ec =
 	    ::pixel::runtime::decode_frame_with_host_context(
 	        ctx, &request.source_layout, prepared_source, dst, &request.output_layout,
-	        &request.options);
+	        &request.options, decode_info);
 
 	// Normalize runtime decode failures before they cross the public API boundary.
 	if (decode_ec == PIXEL_CODEC_ERR_UNSUPPORTED) {
@@ -477,16 +547,19 @@ void parse_runtime_detail_or_default(
 
 [[nodiscard]] bool try_decode_frame_with_runtime(const DicomFile& df,
     const DecodeDispatchRequestView& request, std::size_t frame_index,
-    std::span<std::uint8_t> dst, int codec_threads_override) {
+    std::span<std::uint8_t> dst, int codec_threads_override,
+    pixel_decoder_info* decode_info) {
 	const auto computed_source = prepare_runtime_frame_source_or_throw(
 	    df, request, frame_index);
 	return try_decode_frame_with_runtime_source(
-	    request, computed_source.bytes, frame_index, dst, codec_threads_override);
+	    request, computed_source.bytes, frame_index, dst, codec_threads_override,
+	    decode_info);
 }
 
 [[nodiscard]] bool try_copy_frame_with_builtin_native_fast_path(
     const DicomFile& df, const DecodeDispatchRequestView& request,
-    std::size_t frame_index, std::span<std::uint8_t> dst) {
+    std::size_t frame_index, std::span<std::uint8_t> dst,
+    pixel_decoder_info* decode_info) {
 	// REF-style raw frames can skip decode entirely and copy from the native source
 	// when the requested output layout already matches the stored layout.
 	if (!request.transfer_syntax.is_uncompressed() ||
@@ -538,6 +611,7 @@ void parse_runtime_detail_or_default(
 				return false;
 			}
 			std::memcpy(dst.data(), src.data(), copy_bytes);
+			synthesize_decoder_info_from_request(decode_info, request);
 			return true;
 		}
 
@@ -551,6 +625,7 @@ void parse_runtime_detail_or_default(
 			    src.data() + src_offset,
 			    row_payload);
 		}
+		synthesize_decoder_info_from_request(decode_info, request);
 		return true;
 	}
 
@@ -567,13 +642,14 @@ void parse_runtime_detail_or_default(
 			    src_plane + r * row_payload, row_payload);
 		}
 	}
+	synthesize_decoder_info_from_request(decode_info, request);
 	return true;
 }
 
 [[nodiscard]] bool try_decode_frame_with_builtin_uncompressed_core_source(
     const DecodeDispatchRequestView& decode_request,
     std::span<const std::uint8_t> prepared_source, std::size_t frame_index,
-    std::span<std::uint8_t> dst) {
+    std::span<std::uint8_t> dst, pixel_decoder_info* decode_info) {
 	// Fall back to the uncompressed core decoder when raw-copy is not enough,
 	// e.g. layout conversion, value transform, or encapsulated-uncompressed input.
 	if (!decode_request.transfer_syntax.is_uncompressed()) {
@@ -592,7 +668,8 @@ void parse_runtime_detail_or_default(
 	pixel_decoder_request core_request{};
 	// Build the core request only after backend selection says this path applies.
 	build_direct_decode_request_for_core(
-	    core_request, binding.codec_profile_code, decode_request, prepared_source, dst);
+	    core_request, binding.codec_profile_code, decode_request, prepared_source, dst,
+	    decode_info);
 	if (core_request.frame.source_dtype == PIXEL_DTYPE_UNKNOWN) {
 		return false;
 	}
@@ -609,16 +686,16 @@ void parse_runtime_detail_or_default(
 
 [[nodiscard]] bool try_decode_frame_with_builtin_uncompressed_core_path(const DicomFile& df,
     const DecodeDispatchRequestView& request, std::size_t frame_index,
-    std::span<std::uint8_t> dst) {
+    std::span<std::uint8_t> dst, pixel_decoder_info* decode_info) {
 	const auto computed_source =
 	    prepare_runtime_frame_source_or_throw(df, request, frame_index);
 	return try_decode_frame_with_builtin_uncompressed_core_source(
-	    request, computed_source.bytes, frame_index, dst);
+	    request, computed_source.bytes, frame_index, dst, decode_info);
 }
 
 [[nodiscard]] bool try_decode_frame_with_builtin_uncompressed_fast_paths(const DicomFile& df,
     const DecodeDispatchRequestView& request, std::size_t frame_index,
-    std::span<std::uint8_t> dst) {
+    std::span<std::uint8_t> dst, pixel_decoder_info* decode_info) {
 	if (!request.transfer_syntax.is_uncompressed()) {
 		return false;
 	}
@@ -628,11 +705,11 @@ void parse_runtime_detail_or_default(
 	// 2. uncompressed core decode
 	// Everything else falls through to the generic runtime path below.
 	if (try_copy_frame_with_builtin_native_fast_path(
-		        df, request, frame_index, dst)) {
+		        df, request, frame_index, dst, decode_info)) {
 		return true;
 	}
 	if (try_decode_frame_with_builtin_uncompressed_core_path(
-	        df, request, frame_index, dst)) {
+	        df, request, frame_index, dst, decode_info)) {
 		return true;
 	}
 	return false;
@@ -643,17 +720,20 @@ void parse_runtime_detail_or_default(
 
 void dispatch_decode_frame_with_codec_threads(const DicomFile& df,
     const DecodeDispatchRequestView& request, std::size_t frame_index,
-    std::span<std::uint8_t> dst, int codec_threads) {
+    std::span<std::uint8_t> dst, int codec_threads,
+    pixel_decoder_info* decode_info) {
 	validate_decode_frame_request_or_throw(request, frame_index);
 #if defined(DICOMSDL_PIXEL_RUNTIME_ENABLED)
+	initialize_decoder_info(decode_info);
 	// Try the narrow builtin hot paths first before paying the full runtime
 	// adapter/setup cost for general codec dispatch.
 	if (try_decode_frame_with_builtin_uncompressed_fast_paths(
-	        df, request, frame_index, dst)) {
+	        df, request, frame_index, dst, decode_info)) {
 		return;
 	}
 	// Prefer the runtime-backed path when that subsystem is compiled in and initialized.
-	if (try_decode_frame_with_runtime(df, request, frame_index, dst, codec_threads)) {
+	if (try_decode_frame_with_runtime(
+	        df, request, frame_index, dst, codec_threads, decode_info)) {
 		return;
 	}
 #endif
@@ -666,17 +746,19 @@ void dispatch_decode_frame_with_codec_threads(const DicomFile& df,
 
 // Dispatch one frame decode through the runtime path or fail with a stable unsupported error.
 void dispatch_decode_frame(const DicomFile& df, std::size_t frame_index,
-    std::span<std::uint8_t> dst, const DecodePlan& plan) {
+    std::span<std::uint8_t> dst, const DecodePlan& plan,
+    pixel_decoder_info* decode_info) {
 	const auto request = build_decode_dispatch_request_view(df, plan);
 	const auto settings = resolve_decode_frame_thread_settings(request);
 	dispatch_decode_frame_with_codec_threads(df, request, frame_index, dst,
-	    settings.codec_threads);
+	    settings.codec_threads, decode_info);
 }
 
 void dispatch_decode_prepared_frame(const DicomFile& df,
     const PixelLayout& source_layout,
     std::size_t frame_index, std::span<const std::uint8_t> prepared_source,
-	std::span<std::uint8_t> dst, const DecodePlan& plan) {
+	std::span<std::uint8_t> dst, const DecodePlan& plan,
+    pixel_decoder_info* decode_info) {
 	try {
 		const auto request = build_decode_dispatch_request_view(
 		    df.transfer_syntax_uid(), source_layout, plan);
@@ -684,16 +766,18 @@ void dispatch_decode_prepared_frame(const DicomFile& df,
 		validate_decode_frame_request_or_throw(request, frame_index);
 
 #if defined(DICOMSDL_PIXEL_RUNTIME_ENABLED)
+		initialize_decoder_info(decode_info);
 		// Prepared-frame dispatch skips the raw-copy shortcut because the caller already
 		// chose the source representation; builtin uncompressed decode is still worth trying.
 		if (request.transfer_syntax.is_uncompressed() &&
 		    try_decode_frame_with_builtin_uncompressed_core_source(
-		        request, prepared_source, frame_index, dst)) {
+		        request, prepared_source, frame_index, dst, decode_info)) {
 			return;
 		}
 		const auto settings = resolve_decode_frame_thread_settings(request);
 		if (try_decode_frame_with_runtime_source(
-		        request, prepared_source, frame_index, dst, settings.codec_threads)) {
+		        request, prepared_source, frame_index, dst, settings.codec_threads,
+		        decode_info)) {
 			return;
 		}
 #endif
@@ -708,13 +792,15 @@ void dispatch_decode_prepared_frame(const DicomFile& df,
 }
 
 void dispatch_decode_all_frames(
-    const DicomFile& df, std::span<std::uint8_t> dst, const DecodePlan& plan) {
-	dispatch_decode_all_frames(df, dst, plan, nullptr);
+    const DicomFile& df, std::span<std::uint8_t> dst, const DecodePlan& plan,
+    pixel_decoder_info* first_frame_decode_info) {
+	dispatch_decode_all_frames(df, dst, plan, nullptr, first_frame_decode_info);
 }
 
 void dispatch_decode_all_frames(const DicomFile& df,
     std::span<std::uint8_t> dst, const DecodePlan& plan,
-    const ExecutionObserver* observer) {
+    const ExecutionObserver* observer,
+    pixel_decoder_info* first_frame_decode_info) {
 	const auto request = build_decode_dispatch_request_view(df, plan);
 	validate_decode_all_frames_request_or_throw(request, dst);
 	const auto frames = static_cast<std::size_t>(request.output_layout.frames);
@@ -763,9 +849,10 @@ void dispatch_decode_all_frames(const DicomFile& df,
 			    frame_index * request.output_layout.frame_stride,
 			    request.output_layout.frame_stride);
 			try {
+				pixel_decoder_info* frame_decode_info =
+				    frame_index == std::size_t{0} ? first_frame_decode_info : nullptr;
 				dispatch_decode_frame_with_codec_threads(df, request, frame_index,
-				    frame_dst,
-				    settings.codec_threads);
+				    frame_dst, settings.codec_threads, frame_decode_info);
 			} catch (...) {
 				// Preserve only the first failure and ask the remaining workers to stop.
 				{

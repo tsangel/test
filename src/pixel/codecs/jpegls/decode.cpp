@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "../common/decoded_bytes_writeback.hpp"
+#include "../common/decode_info.hpp"
 #include "internal.hpp"
 
 namespace pixel::jpegls_codec {
@@ -201,6 +202,25 @@ pixel_error_code write_decoded_pixels(DecoderCtx* ctx,
       "unsupported destination dtype");
 }
 
+uint8_t encoded_lossy_state_from_profile(uint32_t codec_profile_code) noexcept {
+  return codec_profile_code == PIXEL_CODEC_PROFILE_JPEGLS_LOSSLESS
+      ? PIXEL_ENCODED_LOSSY_STATE_LOSSLESS
+      : PIXEL_ENCODED_LOSSY_STATE_NEAR_LOSSLESS;
+}
+
+void set_jpegls_decode_info(
+    const pixel_decoder_request* request, int bits_per_sample) noexcept {
+  ::pixel::codec_common::set_decoder_info(
+      request,
+      ::pixel::codec_common::default_color_space_for_sample_count(
+          request->frame.samples_per_pixel),
+      encoded_lossy_state_from_profile(request->frame.codec_profile_code),
+      request->output.dst_dtype,
+      ::pixel::codec_common::decoded_planar_code_from_request(
+          request->output.dst_planar),
+      bits_per_sample > 0 ? static_cast<uint16_t>(bits_per_sample) : uint16_t{0});
+}
+
 }  // namespace
 
 pixel_error_code decoder_decode_frame(
@@ -308,6 +328,7 @@ pixel_error_code decoder_decode_frame(
       decoder.decode(request->output.dst,
           static_cast<std::size_t>(frame_stride),
           static_cast<uint32_t>(row_stride));
+      set_jpegls_decode_info(request, frame_info.bits_per_sample);
       clear_detail(c);
       return PIXEL_CODEC_ERR_OK;
     }
@@ -347,6 +368,7 @@ pixel_error_code decoder_decode_frame(
       return write_ec;
     }
 
+    set_jpegls_decode_info(request, frame_info.bits_per_sample);
     clear_detail(c);
     return PIXEL_CODEC_ERR_OK;
   } catch (const std::bad_alloc&) {

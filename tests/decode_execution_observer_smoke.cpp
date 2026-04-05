@@ -26,6 +26,19 @@ void expect_contains(std::string_view haystack, std::string_view needle,
 	}
 }
 
+template <typename T>
+void expect_eq(const T& actual, const T& expected, std::string_view label) {
+	if (!(actual == expected)) {
+		fail(std::string(label) + " mismatch");
+	}
+}
+
+void expect_true(bool value, std::string_view label) {
+	if (!value) {
+		fail(std::string(label) + " expected true");
+	}
+}
+
 struct ProgressState {
 	std::atomic<std::size_t> calls{0};
 	std::atomic<std::size_t> last_completed{0};
@@ -98,6 +111,7 @@ int main() {
 		const auto plan = df.create_decode_plan(options);
 		std::vector<std::uint8_t> out(plan.output_layout.frame_stride * kFrames, 0);
 		ProgressState progress{};
+		dicom::pixel::DecodeInfo decode_info{};
 		const dicom::pixel::ExecutionObserver observer{
 		    .on_progress = &on_progress,
 		    .should_cancel = nullptr,
@@ -105,8 +119,8 @@ int main() {
 		    .notify_every = 2,
 		};
 
-		df.decode_all_frames_into(std::span<std::uint8_t>(out.data(), out.size()), plan,
-		    &observer);
+		df.decode_all_frames_into(
+		    std::span<std::uint8_t>(out.data(), out.size()), plan, decode_info, &observer);
 
 		if (progress.calls.load(std::memory_order_acquire) != 2) {
 			fail("progress callback should fire twice for 4 frames with notify_every=2");
@@ -120,6 +134,23 @@ int main() {
 		if (!std::equal(out.begin(), out.end(), expected_bytes.begin(), expected_bytes.end())) {
 			fail("decode_all_frames_into with observer should preserve pixel payload");
 		}
+		expect_true(decode_info.photometric.has_value(),
+		    "observer decode_all_frames_into photometric presence");
+		expect_eq(*decode_info.photometric, dicom::pixel::Photometric::monochrome2,
+		    "observer decode_all_frames_into photometric");
+		expect_eq(decode_info.encoded_lossy_state,
+		    dicom::pixel::EncodedLossyState::lossless,
+		    "observer decode_all_frames_into encoded lossy state");
+		expect_true(decode_info.data_type.has_value(),
+		    "observer decode_all_frames_into dtype presence");
+		expect_eq(*decode_info.data_type, dicom::pixel::DataType::u16,
+		    "observer decode_all_frames_into dtype");
+		expect_true(decode_info.planar.has_value(),
+		    "observer decode_all_frames_into planar presence");
+		expect_eq(*decode_info.planar, dicom::pixel::Planar::interleaved,
+		    "observer decode_all_frames_into planar");
+		expect_eq(decode_info.bits_per_sample, static_cast<std::uint16_t>(16),
+		    "observer decode_all_frames_into bits per sample");
 	}
 
 	{

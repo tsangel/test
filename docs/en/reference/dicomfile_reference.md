@@ -18,6 +18,7 @@
 - write operations: `write_file(...)`, `write_with_transfer_syntax(...)`, `write_bytes(...)`, `rebuild_file_meta()`
 - transfer syntax and charset: `set_transfer_syntax(...)`, `set_declared_specific_charset(...)`, `set_specific_charset(...)`
 - pixel decode: `create_decode_plan(...)`, `decode_into(...)`, `to_array(...)`, `to_array_view(...)`, `pixel_array(...)`, `pixel_data(...)`, `encoded_pixel_frame_view(...)`, `encoded_pixel_frame_bytes(...)`
+- pixel decode metadata: `DecodeInfo`, `Photometric`, `EncodedLossyState`; use `to_array(..., with_info=True)` or `decode_into(..., with_info=True)`
 - pixel metadata helpers: `window_transform`, `window_transform_for_frame(...)`, `rescale_transform`, `rescale_transform_for_frame(...)`, `voi_lut`, `voi_lut_for_frame(...)`, `modality_lut`, `modality_lut_for_frame(...)`, `pixel_presentation`, `palette_lut`, `supplemental_palette`, `enhanced_palette`
 - pixel encode: `set_pixel_data(...)`, `reset_encapsulated_pixel_data(...)`, `set_encoded_pixel_frame(...)`, `add_encoded_pixel_frame(...)`
 
@@ -41,6 +42,8 @@
 - `set_encoded_pixel_frame(..., std::span<const uint8_t>)` and `add_encoded_pixel_frame(..., std::span<const uint8_t>)` copy from the caller buffer before `DicomFile` takes ownership. The `std::vector<uint8_t>&&` overloads are the move-based no-extra-copy path.
 - For large write-only transcodes, prefer `write_with_transfer_syntax(...)` over `set_transfer_syntax(...)` followed by `write_file(...)`. That path now exists in both C++ and Python for file output; C++ also provides `std::ostream` variants.
 - In Python, `has_error` and `error_message` are the file-level state you check after permissive reads that keep partial data.
+- In Python, `to_array(..., with_info=True)` returns `(array, DecodeInfo)` and `decode_into(..., with_info=True)` returns `DecodeInfo` after writing into the supplied output buffer.
+- For `frame=-1` on multi-frame input, Python `with_info=True` reports frame-0/common decode metadata.
 - `read_file_selected(...)` and `read_bytes_selected(...)` return `DicomFile` objects that keep only the selected tags and nested sequence children.
 - Selected read always considers root `TransferSyntaxUID` and `SpecificCharacterSet`, ignores `ReadOptions.load_until`, and allows private/unknown tags in the selection tree, including explicit tag strings such as `"70531000"`.
 - If a selected read only names an `SQ`, that present sequence and its item count are still preserved.

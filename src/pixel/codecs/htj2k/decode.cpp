@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "../common/decode_fastpath.hpp"
+#include "../common/decode_info.hpp"
 #include "../common/integral_hotpath.hpp"
 #include "internal.hpp"
 
@@ -330,6 +331,46 @@ pixel_error_code decode_openjph_direct_to_output(DecoderCtx* ctx,
   return PIXEL_CODEC_ERR_OK;
 }
 
+uint8_t encoded_lossy_state_from_htj2k_profile(uint32_t codec_profile_code) noexcept {
+  switch (codec_profile_code) {
+  case PIXEL_CODEC_PROFILE_HTJ2K_LOSSLESS:
+  case PIXEL_CODEC_PROFILE_HTJ2K_LOSSLESS_RPCL:
+    return PIXEL_ENCODED_LOSSY_STATE_LOSSLESS;
+  case PIXEL_CODEC_PROFILE_HTJ2K_LOSSY:
+    return PIXEL_ENCODED_LOSSY_STATE_LOSSY;
+  default:
+    return PIXEL_ENCODED_LOSSY_STATE_UNKNOWN;
+  }
+}
+
+template <typename SizT>
+uint16_t decoded_bits_per_sample_from_openjph_siz(
+    const SizT& siz, uint32_t components) noexcept {
+  uint32_t max_precision = 0;
+  for (uint32_t comp = 0; comp < components; ++comp) {
+    const uint32_t bit_depth = siz.get_bit_depth(comp);
+    if (bit_depth > max_precision) {
+      max_precision = bit_depth;
+    }
+  }
+  return max_precision <= 65535u ? static_cast<uint16_t>(max_precision) : uint16_t{0};
+}
+
+template <typename SizT>
+void set_htj2k_decode_info(
+    const pixel_decoder_request* request, const SizT& siz,
+    uint32_t components) noexcept {
+  ::pixel::codec_common::set_decoder_info(
+      request,
+      ::pixel::codec_common::default_color_space_for_sample_count(
+          static_cast<int32_t>(components)),
+      encoded_lossy_state_from_htj2k_profile(request->frame.codec_profile_code),
+      request->output.dst_dtype,
+      ::pixel::codec_common::decoded_planar_code_from_request(
+          request->output.dst_planar),
+      decoded_bits_per_sample_from_openjph_siz(siz, components));
+}
+
 }  // namespace
 
 pixel_error_code decoder_decode_frame(
@@ -365,7 +406,7 @@ pixel_error_code decoder_decode_frame(
     codestream.set_planar(false);
     codestream.read_headers(&infile);
 
-    const auto siz = codestream.access_siz();
+    const auto& siz = codestream.access_siz();
     const uint32_t components = siz.get_num_components();
     const uint64_t rows = static_cast<uint64_t>(request->frame.rows);
     const uint64_t cols = static_cast<uint64_t>(request->frame.cols);
@@ -438,6 +479,7 @@ pixel_error_code decoder_decode_frame(
         return direct_ec;
       }
 
+      set_htj2k_decode_info(request, siz, components);
       clear_detail(c);
       return PIXEL_CODEC_ERR_OK;
     }
@@ -501,6 +543,7 @@ pixel_error_code decoder_decode_frame(
       return write_ec;
     }
 
+    set_htj2k_decode_info(request, siz, components);
     clear_detail(c);
     return PIXEL_CODEC_ERR_OK;
   } catch (const std::bad_alloc&) {

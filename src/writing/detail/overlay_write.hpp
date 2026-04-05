@@ -2,6 +2,7 @@
 
 #include "writing/detail/write_metadata.hpp"
 #include "pixel/host/encode/encode_target_policy.hpp"
+#include "photometric_text_detail.hpp"
 
 #include <cmath>
 #include <string>
@@ -109,26 +110,7 @@ struct LossyRatioBackpatchState {
 
 [[nodiscard]] inline std::string_view to_photometric_text_for_streaming_write(
     pixel::Photometric photometric) noexcept {
-	switch (photometric) {
-	case pixel::Photometric::monochrome1:
-		return "MONOCHROME1";
-	case pixel::Photometric::monochrome2:
-		return "MONOCHROME2";
-	case pixel::Photometric::palette_color:
-		return "PALETTE COLOR";
-	case pixel::Photometric::rgb:
-		return "RGB";
-	case pixel::Photometric::ybr_full:
-		return "YBR_FULL";
-	case pixel::Photometric::ybr_full_422:
-		return "YBR_FULL_422";
-	case pixel::Photometric::ybr_rct:
-		return "YBR_RCT";
-	case pixel::Photometric::ybr_ict:
-		return "YBR_ICT";
-	default:
-		return "MONOCHROME2";
-	}
+	return pixel::detail::to_photometric_text(photometric);
 }
 
 template <typename Builder>

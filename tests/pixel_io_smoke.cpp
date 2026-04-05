@@ -467,6 +467,53 @@ int main() {
 	}
 
 	{
+		const std::vector<std::uint8_t> cmyk_bytes{
+		    0x10u, 0x20u, 0x30u, 0x40u, 0x50u, 0x60u, 0x70u, 0x80u};
+		const auto cmyk_layout = make_layout(
+		    dicom::pixel::DataType::u8, 1, 1, 2, 4, dicom::pixel::Photometric::cmyk);
+		dicom::DicomFile cmyk_file;
+		cmyk_file.set_pixel_data("ExplicitVRLittleEndian"_uid,
+		    make_source_span(cmyk_bytes, cmyk_layout));
+		if (cmyk_file["PhotometricInterpretation"_tag].to_string_view().value_or("") !=
+		    std::string_view("CMYK")) {
+			fail("set_pixel_data should write CMYK PhotometricInterpretation");
+		}
+		if (!cmyk_file.set_value(
+		        "PhotometricInterpretation"_tag, std::string_view("cmyk"))) {
+			fail("failed to lowercase CMYK PhotometricInterpretation");
+		}
+		const auto cmyk_plan =
+		    cmyk_file.create_decode_plan(dicom::pixel::DecodeOptions{});
+		if (cmyk_plan.output_layout.photometric != dicom::pixel::Photometric::cmyk) {
+			fail("create_decode_plan should parse lowercase CMYK PhotometricInterpretation");
+		}
+	}
+
+	{
+		const std::vector<std::uint8_t> ybr_bytes{
+		    0x11u, 0x22u, 0x33u, 0x44u, 0x55u, 0x66u};
+		const auto ybr_layout = make_layout(dicom::pixel::DataType::u8, 1, 1, 2, 3,
+		    dicom::pixel::Photometric::ybr_partial_422);
+		dicom::DicomFile ybr_file;
+		ybr_file.set_pixel_data("ExplicitVRLittleEndian"_uid,
+		    make_source_span(ybr_bytes, ybr_layout));
+		if (ybr_file["PhotometricInterpretation"_tag].to_string_view().value_or("") !=
+		    std::string_view("YBR_PARTIAL_422")) {
+			fail("set_pixel_data should write YBR_PARTIAL_422 PhotometricInterpretation");
+		}
+		if (!ybr_file.set_value("PhotometricInterpretation"_tag,
+		        std::string_view("ybr_partial_422"))) {
+			fail("failed to lowercase YBR_PARTIAL_422 PhotometricInterpretation");
+		}
+		const auto ybr_plan =
+		    ybr_file.create_decode_plan(dicom::pixel::DecodeOptions{});
+		if (ybr_plan.output_layout.photometric !=
+		    dicom::pixel::Photometric::ybr_partial_422) {
+			fail("create_decode_plan should parse lowercase YBR_PARTIAL_422 PhotometricInterpretation");
+		}
+	}
+
+	{
 		auto [source_bytes, source_layout] = make_u16_source();
 		const std::vector<std::uint8_t> expected_frame0{
 		    0x01u, 0x00u, 0x02u, 0x00u, 0x03u, 0x00u,
@@ -993,7 +1040,10 @@ int main() {
 		if (generated["NumberOfFrames"_tag].to_long().value_or(0) != 1) {
 			fail("reset_encapsulated_pixel_data(1) should set NumberOfFrames");
 		}
-		generated.add_encoded_pixel_frame(std::span<const std::uint8_t>(initial_frame.data(), 2));
+		if (!generated.add_encoded_pixel_frame(
+		        std::span<const std::uint8_t>(initial_frame.data(), 2))) {
+			fail("add_encoded_pixel_frame(span) should succeed");
+		}
 		if (generated["NumberOfFrames"_tag].to_long().value_or(0) != 2) {
 			fail("add_encoded_pixel_frame(span) should update NumberOfFrames");
 		}
@@ -1030,10 +1080,12 @@ int main() {
 		    (tmp_dir / "dicomsdl_pixel_io_smoke_roundtrip.dcm").lexically_normal();
 		const std::string roundtrip_path_text = roundtrip_path.string();
 		generated.write_file(roundtrip_path_text, write_opts);
-		const auto generated_roundtrip_file = read_file(roundtrip_path_text);
-		if (!generated_roundtrip_file) fail("write_file roundtrip read returned null");
-		if (generated_roundtrip_file->get_dataelement("PixelData"_tag).is_missing()) {
-			fail("write_file roundtrip missing pixel data");
+		{
+			const auto generated_roundtrip_file = read_file(roundtrip_path_text);
+			if (!generated_roundtrip_file) fail("write_file roundtrip read returned null");
+			if (generated_roundtrip_file->get_dataelement("PixelData"_tag).is_missing()) {
+				fail("write_file roundtrip missing pixel data");
+			}
 		}
 		remove_file_or_fail(roundtrip_path, "roundtrip file");
 	}

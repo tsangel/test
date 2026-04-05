@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-#define PIXEL_DECODER_PLUGIN_ABI 0x00030000u
+#define PIXEL_DECODER_PLUGIN_ABI 0x00040000u
 
 typedef struct pixel_decoder_source {
   uint32_t struct_size;
@@ -47,6 +47,42 @@ typedef struct pixel_decoder_output {
   uint16_t reserved0;
 } pixel_decoder_output;
 
+typedef enum pixel_decoded_color_space_code {
+  PIXEL_DECODED_COLOR_SPACE_UNKNOWN = 0,
+  PIXEL_DECODED_COLOR_SPACE_MONOCHROME = 1,
+  PIXEL_DECODED_COLOR_SPACE_RGB = 2,
+  PIXEL_DECODED_COLOR_SPACE_CMYK = 3,
+  PIXEL_DECODED_COLOR_SPACE_YBR_FULL = 4,
+  PIXEL_DECODED_COLOR_SPACE_YBR_FULL_422 = 5,
+  PIXEL_DECODED_COLOR_SPACE_YBR_PARTIAL_420 = 6,
+  PIXEL_DECODED_COLOR_SPACE_YBR_PARTIAL_422 = 7,
+  PIXEL_DECODED_COLOR_SPACE_RGBA = 8
+} pixel_decoded_color_space_code;
+
+typedef enum pixel_encoded_lossy_state {
+  PIXEL_ENCODED_LOSSY_STATE_UNKNOWN = 0,
+  PIXEL_ENCODED_LOSSY_STATE_LOSSLESS = 1,
+  PIXEL_ENCODED_LOSSY_STATE_LOSSY = 2,
+  PIXEL_ENCODED_LOSSY_STATE_NEAR_LOSSLESS = 3
+} pixel_encoded_lossy_state;
+
+typedef enum pixel_decoded_planar_code {
+  PIXEL_DECODED_PLANAR_UNKNOWN = 0,
+  PIXEL_DECODED_PLANAR_INTERLEAVED = 1,
+  PIXEL_DECODED_PLANAR_PLANAR = 2
+} pixel_decoded_planar_code;
+
+typedef struct pixel_decoder_info {
+  uint32_t struct_size;
+  uint32_t abi_version;
+  uint8_t actual_color_space;
+  uint8_t encoded_lossy_state;
+  uint8_t actual_dtype;
+  uint8_t actual_planar;
+  uint16_t bits_per_sample;
+  uint16_t reserved0;
+} pixel_decoder_info;
+
 typedef struct pixel_decoder_request {
   uint32_t struct_size;
   uint32_t abi_version;
@@ -54,6 +90,7 @@ typedef struct pixel_decoder_request {
   pixel_decoder_source source;
   pixel_decoder_frame_info frame;
   pixel_decoder_output output;
+  pixel_decoder_info* decode_info;
 } pixel_decoder_request;
 
 typedef struct pixel_decoder_plugin_info {

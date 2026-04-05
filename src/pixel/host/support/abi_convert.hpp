@@ -78,7 +78,7 @@ inline bool build_decoder_request(uint32_t codec_profile_code,
     std::span<const uint8_t> prepared_source, std::span<uint8_t> destination,
     uint8_t destination_dtype_code, dicom::pixel::Planar destination_planar,
     uint64_t output_row_stride, uint64_t output_frame_stride, bool decode_mct,
-    pixel_decoder_request* out_request) {
+    pixel_decoder_info* decode_info, pixel_decoder_request* out_request) {
   if (out_request == nullptr) {
     return false;
   }
@@ -116,6 +116,7 @@ inline bool build_decoder_request(uint32_t codec_profile_code,
   request.output.frame_stride = output_frame_stride;
   request.output.dst_dtype = destination_dtype_code;
   request.output.dst_planar = to_planar_code(destination_planar);
+  request.decode_info = decode_info;
 
   *out_request = request;
   return true;

@@ -4,11 +4,24 @@
 
 #include "../common/decoded_bytes_writeback.hpp"
 #include "../common/decode_fastpath.hpp"
+#include "../common/decode_info.hpp"
 #include "support.hpp"
 
 namespace pixel::core {
 
 namespace {
+
+void set_uncompressed_decode_info(const pixel_decoder_request* request) noexcept {
+  ::pixel::codec_common::set_decoder_info(
+      request,
+      ::pixel::codec_common::default_color_space_for_sample_count(
+          request->frame.samples_per_pixel),
+      PIXEL_ENCODED_LOSSY_STATE_LOSSLESS,
+      request->output.dst_dtype,
+      ::pixel::codec_common::decoded_planar_code_from_request(
+          request->output.dst_planar),
+      static_cast<uint16_t>(request->frame.bits_stored));
+}
 
 pixel_error_code validate_decode_request(ErrorState* state,
     const pixel_decoder_request* request, DtypeInfo* out_source_dtype,
@@ -212,6 +225,7 @@ pixel_error_code decode_uncompressed_frame(
             "single-channel copy byte size overflow");
       }
       std::memcpy(dst, src, copy_bytes);
+      set_uncompressed_decode_info(request);
       clear_error(state);
       return PIXEL_CODEC_ERR_OK;
     }
@@ -221,6 +235,7 @@ pixel_error_code decode_uncompressed_frame(
       uint8_t* dst_row = dst + r * row_stride;
       std::memcpy(dst_row, src_row, source_row_bytes);
     }
+    set_uncompressed_decode_info(request);
     clear_error(state);
     return PIXEL_CODEC_ERR_OK;
   }
@@ -237,6 +252,7 @@ pixel_error_code decode_uncompressed_frame(
               "interleaved copy byte size overflow");
         }
         std::memcpy(dst, src, copy_bytes);
+        set_uncompressed_decode_info(request);
         clear_error(state);
         return PIXEL_CODEC_ERR_OK;
       }
@@ -246,6 +262,7 @@ pixel_error_code decode_uncompressed_frame(
         uint8_t* dst_row = dst + r * row_stride;
         std::memcpy(dst_row, src_row, source_row_bytes);
       }
+      set_uncompressed_decode_info(request);
       clear_error(state);
       return PIXEL_CODEC_ERR_OK;
     }
@@ -272,6 +289,7 @@ pixel_error_code decode_uncompressed_frame(
         std::memcpy(dst_row, src_row, row_payload);
       }
     }
+    set_uncompressed_decode_info(request);
     clear_error(state);
     return PIXEL_CODEC_ERR_OK;
   }
@@ -314,6 +332,7 @@ pixel_error_code decode_uncompressed_frame(
         "unsupported destination dtype");
   }
 
+  set_uncompressed_decode_info(request);
   clear_error(state);
   return PIXEL_CODEC_ERR_OK;
 }
