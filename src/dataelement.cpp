@@ -758,7 +758,9 @@ template <typename T, typename ConvertFn>
 #if defined(__APPLE__) && defined(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__) && \
     (__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ < 130300)
 		fmt::memory_buffer formatted;
-		fmt::format_to(std::back_inserter(formatted), FMT_STRING("{:g}"), number);
+		// Use fmt's default floating formatter here; {:g} defaults to precision 6
+		// and would silently round DS values on older Apple deployment targets.
+		fmt::format_to(std::back_inserter(formatted), FMT_STRING("{}"), number);
 		out.append(formatted.data(), formatted.size());
 		return true;
 #else
