@@ -389,10 +389,23 @@ void test_read_json_duplicate_tags_keep_last_value() {
 	auto result = dicom::read_json(
 	    reinterpret_cast<const std::uint8_t*>(json.data()), json.size());
 	expect_true(result.items.size() == 1u, "object JSON should produce one result item");
-	const auto& file = *result.items[0].file;
+	auto& file = *result.items[0].file;
 	expect_true(
 	    file["PatientName"].to_utf8_string().value_or("") == "second",
 	    "duplicate JSON tags should keep the last value");
+	expect_true(file.size() == 1u, "duplicate JSON tags should collapse to one active element");
+	std::size_t iterated = 0;
+	for ([[maybe_unused]] const auto& element : file.dataset()) {
+		++iterated;
+	}
+	expect_true(iterated == 1u, "dataset iteration should match duplicate-collapsed size");
+	file.remove_dataelement(dicom::Tag(0x0010u, 0x0010u));
+	expect_true(file.size() == 0u, "removing duplicate-collapsed element should leave zero active elements");
+	iterated = 0;
+	for ([[maybe_unused]] const auto& element : file.dataset()) {
+		++iterated;
+	}
+	expect_true(iterated == 0u, "dataset iteration should reflect removal after duplicate collapse");
 }
 
 void test_set_bulk_data_element_target_writes_raw_value_bytes() {

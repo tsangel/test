@@ -1458,6 +1458,12 @@ void JsonReadParser::finalize_dataset(DataSet& dataset) const {
 		}
 		dataset.element_index_.resize(write_index);
 	}
+	dataset.active_element_count_ = dataset.element_index_.size();
+	for (const auto& [_, element] : dataset.element_map_) {
+		if (element.is_present()) {
+			++dataset.active_element_count_;
+		}
+	}
 	dataset.last_tag_loaded_ = Tag(0xFFFFu, 0xFFFFu);
 }
 

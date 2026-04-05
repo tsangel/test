@@ -351,3 +351,9 @@ def test_read_json_duplicate_tags_keep_last_value():
     df, refs = items[0]
     assert refs == []
     assert df["PatientName"].to_utf8_string() == "second"
+    assert len(df) == 1
+    assert len(list(df.dataset)) == 1
+
+    df.remove_dataelement("PatientName")
+    assert len(df) == 0
+    assert len(list(df.dataset)) == 0
