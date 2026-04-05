@@ -854,17 +854,6 @@ struct AttributeInfo {
 
 class JsonReadParser {
 public:
-	JsonReadParser(std::string name,
-	    std::shared_ptr<const std::vector<std::uint8_t>> bytes,
-	    JsonReadOptions options)
-	    : name_(std::move(name)),
-	      bytes_owner_(std::move(bytes)),
-	      data_(bytes_owner_ ? bytes_owner_->data() : nullptr),
-	      size_(bytes_owner_ ? bytes_owner_->size() : 0u),
-	      text_(strip_utf8_bom(trim_ascii_whitespace(std::string_view(
-	          reinterpret_cast<const char*>(data_), size_)))),
-	      options_(options) {}
-
 	JsonReadParser(
 	    std::string name, const std::uint8_t* data, std::size_t size, JsonReadOptions options)
 	    : name_(std::move(name)),
@@ -907,16 +896,12 @@ private:
 	    DicomFile& file, std::vector<JsonBulkRef>& pending_bulk_data) const;
 
 	std::string name_;
-	std::shared_ptr<const std::vector<std::uint8_t>> bytes_owner_{};
 	const std::uint8_t* data_{nullptr};
 	std::size_t size_{0};
 	std::string_view text_;
 	JsonReadOptions options_{};
 };
 
-[[nodiscard]] JsonReadResult read_json_from_shared(
-    std::string name, std::shared_ptr<const std::vector<std::uint8_t>> bytes,
-    JsonReadOptions options);
 [[nodiscard]] JsonReadResult read_json_borrowed(
     std::string name, const std::uint8_t* data, std::size_t size, JsonReadOptions options);
 
@@ -945,9 +930,8 @@ JsonReadResult JsonReadParser::parse() {
 
 std::unique_ptr<DicomFile> JsonReadParser::make_file() const {
 	auto file = std::make_unique<DicomFile>();
-	file->attach_to_memory(name_, data_, size_, false);
+	file->attach_to_memory(name_, std::vector<std::uint8_t>{});
 	auto& dataset = file->dataset();
-	dataset.attached_memory_owner_ = bytes_owner_;
 	dataset.json_read_charset_errors_ = options_.charset_errors;
 	dataset.last_tag_loaded_ = Tag(0xFFFFu, 0xFFFFu);
 	return file;
@@ -1530,13 +1514,6 @@ void JsonReadParser::postprocess_pending_bulk(
 	pending_bulk_data = std::move(expanded);
 }
 
-JsonReadResult read_json_from_shared(
-    std::string name, std::shared_ptr<const std::vector<std::uint8_t>> bytes,
-    JsonReadOptions options) {
-	JsonReadParser parser(std::move(name), std::move(bytes), options);
-	return parser.parse();
-}
-
 JsonReadResult read_json_borrowed(
     std::string name, const std::uint8_t* data, std::size_t size, JsonReadOptions options) {
 	JsonReadParser parser(std::move(name), data, size, options);
@@ -1631,22 +1608,17 @@ bool DicomFile::set_bulk_data(const JsonBulkRef& ref, std::span<const std::uint8
 
 JsonReadResult read_json(
     const std::uint8_t* data, std::size_t size, JsonReadOptions options) {
-	auto bytes = std::make_shared<std::vector<std::uint8_t>>(data, data + size);
-	return read_json_from_shared("<memory>", std::move(bytes), options);
+	return read_json_borrowed("<memory>", data, size, options);
 }
 
 JsonReadResult read_json(const std::string& name, const std::uint8_t* data,
     std::size_t size, JsonReadOptions options) {
-	auto bytes = std::make_shared<std::vector<std::uint8_t>>(data, data + size);
-	return read_json_from_shared(name, std::move(bytes), options);
+	return read_json_borrowed(name, data, size, options);
 }
 
 JsonReadResult read_json(
     std::string name, std::vector<std::uint8_t>&& buffer, JsonReadOptions options) {
-	auto bytes =
-	    std::static_pointer_cast<const std::vector<std::uint8_t>>(
-	        std::make_shared<std::vector<std::uint8_t>>(std::move(buffer)));
-	return read_json_from_shared(std::move(name), std::move(bytes), options);
+	return read_json_borrowed(std::move(name), buffer.data(), buffer.size(), options);
 }
 
 }  // namespace dicom

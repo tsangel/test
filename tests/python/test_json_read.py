@@ -313,7 +313,7 @@ def test_read_json_non_json_input_reports_expected_top_level_shape():
     assert "top-level JSON object or array" in message
 
 
-def test_read_json_copies_mutable_buffer_input():
+def test_read_json_mutable_buffer_changes_do_not_affect_result():
     payload = bytearray(
         b'{"00080018":{"vr":"UI","Value":["1.2.840.10008.5.1.4.1.1.2"]},'
         b'"00100010":{"vr":"LO","Value":["buffer-backed"]}}'

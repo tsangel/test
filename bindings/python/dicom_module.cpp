@@ -5585,12 +5585,9 @@ NB_MODULE(_dicomsdl, m) {
 			        "read_json requires a byte-oriented buffer for bytes-like input");
 		    }
 		    const auto size = static_cast<std::size_t>(info.len);
-		    std::vector<std::uint8_t> owned(size);
-		    if (size > 0u) {
-			    std::memcpy(owned.data(), info.buf, size);
-		    }
 		    return json_read_result_to_python(
-		        dicom::read_json(std::string{name}, std::move(owned), options));
+		        dicom::read_json(std::string{name},
+		            reinterpret_cast<const std::uint8_t*>(info.buf), size, options));
 	    },
 	    nb::arg("source"),
 	    nb::kw_only(),
