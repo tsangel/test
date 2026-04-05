@@ -63,27 +63,21 @@ function(dicomsdl_fetch_fmt)
     FetchContent_MakeAvailable(dicomsdl_fmt)
 endfunction()
 
-function(dicomsdl_prepare_yyjson)
+function(dicomsdl_fetch_yyjson)
+    set(BUILD_SHARED_LIBS OFF)
+    set(YYJSON_BUILD_TESTS OFF)
+    set(YYJSON_BUILD_FUZZER OFF)
+    set(YYJSON_BUILD_MISC OFF)
+    set(YYJSON_BUILD_DOC OFF)
+    set(YYJSON_INSTALL OFF)
+
     FetchContent_Declare(dicomsdl_yyjson
         GIT_REPOSITORY "${DICOMSDL_YYJSON_GIT_REPOSITORY}"
         GIT_TAG "${DICOMSDL_YYJSON_GIT_TAG}"
         GIT_PROGRESS TRUE
         GIT_SHALLOW TRUE
     )
-
-    if(POLICY CMP0169)
-        cmake_policy(PUSH)
-        cmake_policy(SET CMP0169 OLD)
-    endif()
-    FetchContent_GetProperties(dicomsdl_yyjson)
-    if(NOT dicomsdl_yyjson_POPULATED)
-        FetchContent_Populate(dicomsdl_yyjson)
-    endif()
-    if(POLICY CMP0169)
-        cmake_policy(POP)
-    endif()
-
-    set(dicomsdl_yyjson_SOURCE_DIR "${dicomsdl_yyjson_SOURCE_DIR}" PARENT_SCOPE)
+    FetchContent_MakeAvailable(dicomsdl_yyjson)
 endfunction()
 
 function(dicomsdl_fetch_openjpeg)

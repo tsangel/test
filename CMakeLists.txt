@@ -110,7 +110,6 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 include(DicomsdlCompilerSetup)
 include(DicomsdlDependencies)
-dicomsdl_prepare_yyjson()
 
 add_library(dicomsdl STATIC
     src/dataset.cpp
@@ -172,11 +171,6 @@ target_include_directories(dicomsdl
         ${CMAKE_CURRENT_SOURCE_DIR}/src/pixel/abi
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${dicomsdl_yyjson_SOURCE_DIR}/src
-)
-
-target_sources(dicomsdl PRIVATE
-    ${dicomsdl_yyjson_SOURCE_DIR}/src/yyjson.c
 )
 
 option(DICOMSDL_ENABLE_OPENJPH "Enable OpenJPH backend for HTJ2K decoding" ON)
@@ -198,6 +192,7 @@ option(DICOMSDL_PIXEL_RUNTIME "Build src/pixel runtime registry target." ON)
 
 # Dependency graph setup.
 dicomsdl_fetch_fmt()
+dicomsdl_fetch_yyjson()
 dicomsdl_fetch_openjpeg()
 dicomsdl_fetch_charls()
 dicomsdl_fetch_libdeflate()
@@ -208,6 +203,7 @@ dicomsdl_prepare_libturbojpeg()
 add_dependencies(dicomsdl dicomsdl_libturbojpeg)
 
 target_link_libraries(dicomsdl PUBLIC fmt::fmt-header-only)
+target_link_libraries(dicomsdl PRIVATE yyjson)
 
 target_include_directories(dicomsdl PRIVATE
     ${dicomsdl_openjpeg_SOURCE_DIR}/src/lib/openjp2
