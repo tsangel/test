@@ -383,6 +383,18 @@ void test_read_json_missing_charset_keeps_utf8_but_blocks_raw_materialization() 
 	    "raw access should fail when non-ASCII text has no declared SpecificCharacterSet");
 }
 
+void test_read_json_duplicate_tags_keep_last_value() {
+	const std::string json =
+	    R"({"00100010":{"vr":"LO","Value":["first"]},"00100010":{"vr":"LO","Value":["second"]}})";
+	auto result = dicom::read_json(
+	    reinterpret_cast<const std::uint8_t*>(json.data()), json.size());
+	expect_true(result.items.size() == 1u, "object JSON should produce one result item");
+	const auto& file = *result.items[0].file;
+	expect_true(
+	    file["PatientName"].to_utf8_string().value_or("") == "second",
+	    "duplicate JSON tags should keep the last value");
+}
+
 void test_set_bulk_data_element_target_writes_raw_value_bytes() {
 	dicom::DicomFile file;
 	dicom::JsonBulkRef ref{};
@@ -501,6 +513,7 @@ int main() {
 	test_read_json_keeps_signed_generic_pixel_bulk_uri_as_element_ref();
 	test_read_json_missing_vr_falls_back_for_uid_and_private_un();
 	test_read_json_missing_charset_keeps_utf8_but_blocks_raw_materialization();
+	test_read_json_duplicate_tags_keep_last_value();
 	test_set_bulk_data_element_target_writes_raw_value_bytes();
 	test_set_bulk_data_pixel_frame_target_populates_encapsulated_frame_slot();
 	test_read_json_empty_input_reports_non_json_error();
