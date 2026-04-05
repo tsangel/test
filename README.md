@@ -43,6 +43,7 @@ Need more than the default path?
 - [Installation](docs/en/guide/installation.md)
 - [Build C++ From Source](docs/en/developer/cpp_build_from_source.md)
 - [Build Python From Source](docs/en/developer/build_python_from_source.md)
+- [Third-Party Licenses](THIRD_PARTY_LICENSES.md)
 
 CI regularly builds and checks DicomSDL on:
 
