@@ -341,3 +341,19 @@ def test_read_json_lazy_numeric_values_materialize_on_access():
     assert df["WindowCenter"].to_double_vector() == [1.5, 2.5]
     assert df["00080008"].vr == dicom.VR.AT
     assert df["00080008"].value_span().tobytes() == b"\x10\x00\x10\x00"
+
+
+def test_read_json_duplicate_tags_keep_last_value():
+    items = dicom.read_json(
+        b'{"00100010":{"vr":"LO","Value":["first"]},"00100010":{"vr":"LO","Value":["second"]}}'
+    )
+
+    df, refs = items[0]
+    assert refs == []
+    assert df["PatientName"].to_utf8_string() == "second"
+    assert len(df) == 1
+    assert len(list(df.dataset)) == 1
+
+    df.remove_dataelement("PatientName")
+    assert len(df) == 0
+    assert len(list(df.dataset)) == 0

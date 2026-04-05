@@ -1433,17 +1433,35 @@ void JsonReadParser::finalize_dataset(DataSet& dataset) const {
 	        [](const ElementRef& lhs, const ElementRef& rhs) {
 		        return lhs.tag.value() < rhs.tag.value();
 	        })) {
-		std::sort(dataset.element_index_.begin(), dataset.element_index_.end(),
+		std::stable_sort(dataset.element_index_.begin(), dataset.element_index_.end(),
 		    [](const ElementRef& lhs, const ElementRef& rhs) {
 			    return lhs.tag.value() < rhs.tag.value();
 		    });
 	}
-	for (std::size_t i = 1; i < dataset.element_index_.size(); ++i) {
-		if (dataset.element_index_[i - 1].tag.value() ==
-		    dataset.element_index_[i].tag.value()) {
-			diag::error_and_throw(
-			    "read_json name={} tag={} reason=duplicate tag in one dataset is not yet supported",
-			    display_name(), dataset.element_index_[i].tag.to_string());
+
+	// Duplicate keys are non-conformant JSON, but some real-world metadata
+	// producers emit them. Keep the last occurrence so callers can still
+	// inspect/view the dataset instead of failing the whole read.
+	if (!dataset.element_index_.empty()) {
+		std::size_t write_index = 0;
+		for (std::size_t read_index = 0; read_index < dataset.element_index_.size();
+		     ++read_index) {
+			if (write_index > 0 &&
+			    dataset.element_index_[write_index - 1].tag.value() ==
+			        dataset.element_index_[read_index].tag.value()) {
+				dataset.element_index_[write_index - 1] =
+				    dataset.element_index_[read_index];
+			} else {
+				dataset.element_index_[write_index++] =
+				    dataset.element_index_[read_index];
+			}
+		}
+		dataset.element_index_.resize(write_index);
+	}
+	dataset.active_element_count_ = dataset.element_index_.size();
+	for (const auto& [_, element] : dataset.element_map_) {
+		if (element.is_present()) {
+			++dataset.active_element_count_;
 		}
 	}
 	dataset.last_tag_loaded_ = Tag(0xFFFFu, 0xFFFFu);
