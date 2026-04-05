@@ -195,13 +195,23 @@ void initialize_decoder_info(pixel_decoder_info* decode_info) noexcept {
 	case Photometric::monochrome1:
 	case Photometric::monochrome2:
 		return PIXEL_DECODED_COLOR_SPACE_MONOCHROME;
+	case Photometric::palette_color:
+		return PIXEL_DECODED_COLOR_SPACE_PALETTE_COLOR;
 	case Photometric::rgb:
 		return layout.samples_per_pixel == std::uint16_t{3}
 		           ? PIXEL_DECODED_COLOR_SPACE_RGB
 		           : PIXEL_DECODED_COLOR_SPACE_UNKNOWN;
+	case Photometric::argb:
+		return layout.samples_per_pixel == std::uint16_t{4}
+		           ? PIXEL_DECODED_COLOR_SPACE_ARGB
+		           : PIXEL_DECODED_COLOR_SPACE_UNKNOWN;
 	case Photometric::cmyk:
 		return layout.samples_per_pixel == std::uint16_t{4}
 		           ? PIXEL_DECODED_COLOR_SPACE_CMYK
+		           : PIXEL_DECODED_COLOR_SPACE_UNKNOWN;
+	case Photometric::hsv:
+		return layout.samples_per_pixel == std::uint16_t{3}
+		           ? PIXEL_DECODED_COLOR_SPACE_HSV
 		           : PIXEL_DECODED_COLOR_SPACE_UNKNOWN;
 	case Photometric::ybr_full:
 		return PIXEL_DECODED_COLOR_SPACE_YBR_FULL;
@@ -211,6 +221,12 @@ void initialize_decoder_info(pixel_decoder_info* decode_info) noexcept {
 		return PIXEL_DECODED_COLOR_SPACE_YBR_PARTIAL_420;
 	case Photometric::ybr_partial_422:
 		return PIXEL_DECODED_COLOR_SPACE_YBR_PARTIAL_422;
+	case Photometric::ybr_rct:
+		return PIXEL_DECODED_COLOR_SPACE_YBR_RCT;
+	case Photometric::ybr_ict:
+		return PIXEL_DECODED_COLOR_SPACE_YBR_ICT;
+	case Photometric::xyb:
+		return PIXEL_DECODED_COLOR_SPACE_XYB;
 	default:
 		return layout.samples_per_pixel == std::uint16_t{1}
 		           ? PIXEL_DECODED_COLOR_SPACE_MONOCHROME
@@ -332,7 +348,8 @@ void build_direct_decode_request_for_core(pixel_decoder_request& request,
 	// Reuse the shared ABI request builder so builtin core-direct decode stays in lockstep
 	// with the plugin-backed request contract.
 	::pixel::runtime::build_decoder_request(codec_profile_code, source_dtype.code,
-	    decode_request.source_layout, prepared_source, destination,
+	    decode_request.source_layout, decode_request.output_layout.photometric,
+	    prepared_source, destination,
 	    dst_dtype.code == PIXEL_DTYPE_UNKNOWN ? source_dtype.code : dst_dtype.code,
 	    decode_request.output_layout.planar,
 	    static_cast<uint64_t>(decode_request.output_layout.row_stride),

@@ -22,6 +22,7 @@ typedef struct pixel_decoder_frame_info {
   uint32_t codec_profile_code;
   uint8_t source_dtype;
   uint8_t source_planar;
+  // Host-populated optional decoded color/photometric hint (low byte).
   uint16_t reserved0;
 
   int32_t rows;
@@ -56,7 +57,13 @@ typedef enum pixel_decoded_color_space_code {
   PIXEL_DECODED_COLOR_SPACE_YBR_FULL_422 = 5,
   PIXEL_DECODED_COLOR_SPACE_YBR_PARTIAL_420 = 6,
   PIXEL_DECODED_COLOR_SPACE_YBR_PARTIAL_422 = 7,
-  PIXEL_DECODED_COLOR_SPACE_RGBA = 8
+  PIXEL_DECODED_COLOR_SPACE_RGBA = 8,
+  PIXEL_DECODED_COLOR_SPACE_PALETTE_COLOR = 9,
+  PIXEL_DECODED_COLOR_SPACE_YBR_RCT = 10,
+  PIXEL_DECODED_COLOR_SPACE_YBR_ICT = 11,
+  PIXEL_DECODED_COLOR_SPACE_XYB = 12,
+  PIXEL_DECODED_COLOR_SPACE_HSV = 13,
+  PIXEL_DECODED_COLOR_SPACE_ARGB = 14
 } pixel_decoded_color_space_code;
 
 typedef enum pixel_encoded_lossy_state {

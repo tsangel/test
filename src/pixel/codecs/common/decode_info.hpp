@@ -36,10 +36,29 @@ inline uint8_t decoded_planar_code_from_request(uint8_t dst_planar) noexcept {
       : PIXEL_DECODED_PLANAR_INTERLEAVED;
 }
 
+inline uint8_t decoded_color_space_hint_from_request(
+    const pixel_decoder_request* request) noexcept {
+  if (request == nullptr) {
+    return PIXEL_DECODED_COLOR_SPACE_UNKNOWN;
+  }
+  return static_cast<uint8_t>(request->frame.reserved0 & 0x00FFu);
+}
+
 inline uint8_t default_color_space_for_sample_count(
     int32_t samples_per_pixel) noexcept {
   return samples_per_pixel == 1
       ? PIXEL_DECODED_COLOR_SPACE_MONOCHROME
+      : PIXEL_DECODED_COLOR_SPACE_UNKNOWN;
+}
+
+inline uint8_t default_color_space_from_request(
+    const pixel_decoder_request* request) noexcept {
+  const uint8_t hinted_color_space = decoded_color_space_hint_from_request(request);
+  if (hinted_color_space != PIXEL_DECODED_COLOR_SPACE_UNKNOWN) {
+    return hinted_color_space;
+  }
+  return request != nullptr
+      ? default_color_space_for_sample_count(request->frame.samples_per_pixel)
       : PIXEL_DECODED_COLOR_SPACE_UNKNOWN;
 }
 

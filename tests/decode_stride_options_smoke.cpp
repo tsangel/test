@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <dicom.h>
+#include "codec_builtin_flags.hpp"
 
 namespace {
 using namespace dicom::literals;
@@ -304,6 +305,146 @@ int main() {
 		    "ybr_partial_422 decode photometric presence");
 		expect_eq(*decode_info.photometric, dicom::pixel::Photometric::ybr_partial_422,
 		    "ybr_partial_422 decode photometric");
+	}
+
+	{
+		const std::vector<std::uint8_t> ybr_rct_bytes{
+		    0x21u, 0x31u, 0x41u, 0x51u, 0x61u, 0x71u};
+		const dicom::pixel::PixelLayout ybr_rct_layout{
+		    .data_type = dicom::pixel::DataType::u8,
+		    .photometric = dicom::pixel::Photometric::ybr_rct,
+		    .planar = dicom::pixel::Planar::interleaved,
+		    .reserved = 0,
+		    .rows = 1,
+		    .cols = 2,
+		    .frames = 1,
+		    .samples_per_pixel = 3,
+		    .bits_stored = 8,
+		    .row_stride = 6,
+		    .frame_stride = 6,
+		};
+		dicom::DicomFile ybr_rct_df{};
+		configure_native_file(ybr_rct_df, ybr_rct_bytes, ybr_rct_layout);
+		expect_true(ybr_rct_df.set_value("PhotometricInterpretation"_tag,
+		        std::string_view("ybr_rct")),
+		    "set lowercase ybr_rct photometric");
+		dicom::pixel::DecodeInfo decode_info{};
+		const auto decoded = ybr_rct_df.pixel_buffer(0, ybr_rct_df.create_decode_plan(), decode_info);
+		expect_true(decoded.bytes.size() == ybr_rct_bytes.size() &&
+		        std::memcmp(decoded.bytes.data(), ybr_rct_bytes.data(), ybr_rct_bytes.size()) == 0,
+		    "ybr_rct decode payload");
+		expect_true(decode_info.photometric.has_value(),
+		    "ybr_rct decode photometric presence");
+		expect_eq(*decode_info.photometric, dicom::pixel::Photometric::ybr_rct,
+		    "ybr_rct decode photometric");
+	}
+
+	{
+		const std::vector<std::uint8_t> argb_bytes{
+		    0x01u, 0x10u, 0x20u, 0x30u, 0x02u, 0x40u, 0x50u, 0x60u};
+		const dicom::pixel::PixelLayout argb_layout{
+		    .data_type = dicom::pixel::DataType::u8,
+		    .photometric = dicom::pixel::Photometric::argb,
+		    .planar = dicom::pixel::Planar::interleaved,
+		    .reserved = 0,
+		    .rows = 1,
+		    .cols = 2,
+		    .frames = 1,
+		    .samples_per_pixel = 4,
+		    .bits_stored = 8,
+		    .row_stride = 8,
+		    .frame_stride = 8,
+		};
+		dicom::DicomFile argb_df{};
+		configure_native_file(argb_df, argb_bytes, argb_layout);
+		expect_true(argb_df.set_value("PhotometricInterpretation"_tag,
+		        std::string_view("argb")),
+		    "set lowercase argb photometric");
+		dicom::pixel::DecodeInfo decode_info{};
+		const auto decoded = argb_df.pixel_buffer(0, argb_df.create_decode_plan(), decode_info);
+		expect_true(decoded.bytes.size() == argb_bytes.size() &&
+		        std::memcmp(decoded.bytes.data(), argb_bytes.data(), argb_bytes.size()) == 0,
+		    "argb decode payload");
+		expect_true(decode_info.photometric.has_value(),
+		    "argb decode photometric presence");
+		expect_eq(*decode_info.photometric, dicom::pixel::Photometric::argb,
+		    "argb decode photometric");
+	}
+
+	{
+		const std::vector<std::uint8_t> rgb_bytes{
+		    0x10u, 0x20u, 0x30u, 0x40u, 0x50u, 0x60u,
+		    0x70u, 0x80u, 0x90u, 0xA0u, 0xB0u, 0xC0u};
+		const dicom::pixel::PixelLayout rgb_layout{
+		    .data_type = dicom::pixel::DataType::u8,
+		    .photometric = dicom::pixel::Photometric::rgb,
+		    .planar = dicom::pixel::Planar::interleaved,
+		    .reserved = 0,
+		    .rows = 2,
+		    .cols = 2,
+		    .frames = 1,
+		    .samples_per_pixel = 3,
+		    .bits_stored = 8,
+		    .row_stride = 6,
+		    .frame_stride = 12,
+		};
+		dicom::DicomFile rgb_df{};
+		configure_native_file(rgb_df, rgb_bytes, rgb_layout);
+		dicom::pixel::DecodeOptions options{};
+		options.planar_out = dicom::pixel::Planar::planar;
+		const auto plan = rgb_df.create_decode_plan(options);
+		dicom::pixel::DecodeInfo decode_info{};
+		const auto decoded = rgb_df.pixel_buffer(0, plan, decode_info);
+		expect_true(!decoded.bytes.empty(), "rgb planar decode payload");
+		expect_true(decode_info.photometric.has_value(),
+		    "rgb planar decode photometric presence");
+		expect_eq(*decode_info.photometric, dicom::pixel::Photometric::rgb,
+		    "rgb planar decode photometric");
+	}
+
+	if (dicom::test::kJpegLsBuiltin || dicom::test::kJpeg2kBuiltin ||
+	    dicom::test::kHtj2kBuiltin) {
+		const std::vector<std::uint8_t> color_bytes{
+		    0x00u, 0x10u, 0x20u, 0x30u, 0x40u, 0x50u,
+		    0x60u, 0x70u, 0x80u, 0x90u, 0xA0u, 0xB0u};
+		const dicom::pixel::PixelLayout color_layout{
+		    .data_type = dicom::pixel::DataType::u8,
+		    .photometric = dicom::pixel::Photometric::rgb,
+		    .planar = dicom::pixel::Planar::interleaved,
+		    .reserved = 0,
+		    .rows = 2,
+		    .cols = 2,
+		    .frames = 1,
+		    .samples_per_pixel = 3,
+		    .bits_stored = 8,
+		    .row_stride = 6,
+		    .frame_stride = 12,
+		};
+
+		const auto expect_color_codec_photometric =
+		    [&](std::string_view label, dicom::uid::WellKnown ts) {
+			    dicom::DicomFile color_df{};
+			    configure_native_file(color_df, color_bytes, color_layout);
+			    color_df.set_transfer_syntax(ts);
+			    const auto plan = color_df.create_decode_plan();
+			    dicom::pixel::DecodeInfo decode_info{};
+			    const auto decoded = color_df.pixel_buffer(0, plan, decode_info);
+			    expect_true(!decoded.bytes.empty(), std::string(label) + " decode payload");
+			    expect_true(decode_info.photometric.has_value(),
+			        std::string(label) + " decode photometric presence");
+			    expect_eq(*decode_info.photometric, plan.output_layout.photometric,
+			        std::string(label) + " decode photometric");
+		    };
+
+		if (dicom::test::kJpegLsBuiltin) {
+			expect_color_codec_photometric("jpegls rgb", "JPEGLSLossless"_uid);
+		}
+		if (dicom::test::kJpeg2kBuiltin) {
+			expect_color_codec_photometric("jpeg2000 rgb", "JPEG2000Lossless"_uid);
+		}
+		if (dicom::test::kHtj2kBuiltin) {
+			expect_color_codec_photometric("htj2k rgb", "HTJ2KLossless"_uid);
+		}
 	}
 
 	return 0;

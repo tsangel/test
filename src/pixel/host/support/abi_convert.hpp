@@ -73,8 +73,44 @@ inline bool is_mct_capable_profile(uint32_t codec_profile_code) noexcept {
       codec_profile_code == PIXEL_CODEC_PROFILE_HTJ2K_LOSSY;
 }
 
+inline uint8_t decoded_color_space_code_from_photometric(
+    dicom::pixel::Photometric photometric) noexcept {
+  switch (photometric) {
+  case dicom::pixel::Photometric::monochrome1:
+  case dicom::pixel::Photometric::monochrome2:
+    return PIXEL_DECODED_COLOR_SPACE_MONOCHROME;
+  case dicom::pixel::Photometric::palette_color:
+    return PIXEL_DECODED_COLOR_SPACE_PALETTE_COLOR;
+  case dicom::pixel::Photometric::rgb:
+    return PIXEL_DECODED_COLOR_SPACE_RGB;
+  case dicom::pixel::Photometric::ybr_full:
+    return PIXEL_DECODED_COLOR_SPACE_YBR_FULL;
+  case dicom::pixel::Photometric::ybr_full_422:
+    return PIXEL_DECODED_COLOR_SPACE_YBR_FULL_422;
+  case dicom::pixel::Photometric::ybr_rct:
+    return PIXEL_DECODED_COLOR_SPACE_YBR_RCT;
+  case dicom::pixel::Photometric::ybr_ict:
+    return PIXEL_DECODED_COLOR_SPACE_YBR_ICT;
+  case dicom::pixel::Photometric::ybr_partial_420:
+    return PIXEL_DECODED_COLOR_SPACE_YBR_PARTIAL_420;
+  case dicom::pixel::Photometric::xyb:
+    return PIXEL_DECODED_COLOR_SPACE_XYB;
+  case dicom::pixel::Photometric::hsv:
+    return PIXEL_DECODED_COLOR_SPACE_HSV;
+  case dicom::pixel::Photometric::argb:
+    return PIXEL_DECODED_COLOR_SPACE_ARGB;
+  case dicom::pixel::Photometric::cmyk:
+    return PIXEL_DECODED_COLOR_SPACE_CMYK;
+  case dicom::pixel::Photometric::ybr_partial_422:
+    return PIXEL_DECODED_COLOR_SPACE_YBR_PARTIAL_422;
+  default:
+    return PIXEL_DECODED_COLOR_SPACE_UNKNOWN;
+  }
+}
+
 inline bool build_decoder_request(uint32_t codec_profile_code,
     uint8_t source_dtype_code, const dicom::pixel::PixelLayout& source_layout,
+    dicom::pixel::Photometric output_photometric,
     std::span<const uint8_t> prepared_source, std::span<uint8_t> destination,
     uint8_t destination_dtype_code, dicom::pixel::Planar destination_planar,
     uint64_t output_row_stride, uint64_t output_frame_stride, bool decode_mct,
@@ -101,6 +137,8 @@ inline bool build_decoder_request(uint32_t codec_profile_code,
   request.frame.codec_profile_code = codec_profile_code;
   request.frame.source_dtype = source_dtype_code;
   request.frame.source_planar = to_planar_code(source_layout.planar);
+  request.frame.reserved0 = static_cast<uint16_t>(
+      decoded_color_space_code_from_photometric(output_photometric));
   request.frame.rows = source_layout.rows;
   request.frame.cols = source_layout.cols;
   request.frame.samples_per_pixel = source_layout.samples_per_pixel;

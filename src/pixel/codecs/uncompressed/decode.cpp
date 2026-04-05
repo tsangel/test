@@ -14,8 +14,7 @@ namespace {
 void set_uncompressed_decode_info(const pixel_decoder_request* request) noexcept {
   ::pixel::codec_common::set_decoder_info(
       request,
-      ::pixel::codec_common::default_color_space_for_sample_count(
-          request->frame.samples_per_pixel),
+      ::pixel::codec_common::default_color_space_from_request(request),
       PIXEL_ENCODED_LOSSY_STATE_LOSSLESS,
       request->output.dst_dtype,
       ::pixel::codec_common::decoded_planar_code_from_request(

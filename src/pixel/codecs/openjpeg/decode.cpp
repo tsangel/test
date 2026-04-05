@@ -323,8 +323,7 @@ void set_openjpeg_decode_info(
     const pixel_decoder_request* request, const opj_image_t* image) noexcept {
   ::pixel::codec_common::set_decoder_info(
       request,
-      ::pixel::codec_common::default_color_space_for_sample_count(
-          image != nullptr ? static_cast<int32_t>(image->numcomps) : 0),
+      ::pixel::codec_common::default_color_space_from_request(request),
       encoded_lossy_state_from_openjpeg_profile(request->frame.codec_profile_code),
       request->output.dst_dtype,
       ::pixel::codec_common::decoded_planar_code_from_request(

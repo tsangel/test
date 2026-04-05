@@ -362,8 +362,7 @@ void set_htj2k_decode_info(
     uint32_t components) noexcept {
   ::pixel::codec_common::set_decoder_info(
       request,
-      ::pixel::codec_common::default_color_space_for_sample_count(
-          static_cast<int32_t>(components)),
+      ::pixel::codec_common::default_color_space_from_request(request),
       encoded_lossy_state_from_htj2k_profile(request->frame.codec_profile_code),
       request->output.dst_dtype,
       ::pixel::codec_common::decoded_planar_code_from_request(
