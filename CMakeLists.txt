@@ -203,7 +203,7 @@ dicomsdl_prepare_libturbojpeg()
 add_dependencies(dicomsdl dicomsdl_libturbojpeg)
 
 target_link_libraries(dicomsdl PUBLIC fmt::fmt-header-only)
-target_link_libraries(dicomsdl PRIVATE yyjson)
+target_link_libraries(dicomsdl PRIVATE ${DICOMSDL_YYJSON_TARGET})
 
 target_include_directories(dicomsdl PRIVATE
     ${dicomsdl_openjpeg_SOURCE_DIR}/src/lib/openjp2
