@@ -114,7 +114,10 @@ class BenchmarkRow:
 
 
 def _iter_candidate_files(root: Path) -> list[Path]:
-    return sorted(path for path in root.rglob("*") if path.is_file())
+    return sorted(
+        path for path in root.rglob("*")
+        if path.is_file() and dicom.is_dicom_file(path)
+    )
 
 
 def _prepare_cases(
