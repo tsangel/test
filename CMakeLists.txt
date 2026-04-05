@@ -176,19 +176,21 @@ target_include_directories(dicomsdl
 option(DICOMSDL_ENABLE_OPENJPH "Enable OpenJPH backend for HTJ2K decoding" ON)
 option(DICOMSDL_ENABLE_JPEGXL "Enable JPEG XL backend dependencies (libjxl) for codec development" OFF)
 
-option(DICOMSDL_PIXEL_HTJ2K_PLUGIN "Build src/pixel HTJ2K shared plugin target." OFF)
+option(DICOMSDL_PIXEL_CORE "Build src/pixel core uncompressed helpers." ON)
+option(DICOMSDL_PIXEL_RUNTIME "Build src/pixel runtime registry target." ON)
+
+option(DICOMSDL_PIXEL_JPEG_PLUGIN "Build src/pixel JPEG shared plugin target." OFF)
 option(DICOMSDL_PIXEL_JPEGLS_PLUGIN "Build src/pixel JPEG-LS shared plugin target." OFF)
 option(DICOMSDL_PIXEL_OPENJPEG_PLUGIN "Build src/pixel OpenJPEG shared plugin target." OFF)
-option(DICOMSDL_PIXEL_OPENJPEG_STATIC_PLUGIN "Build src/pixel OpenJPEG static plugin target." ON)
+option(DICOMSDL_PIXEL_HTJ2K_PLUGIN "Build src/pixel HTJ2K shared plugin target." OFF)
 option(DICOMSDL_PIXEL_JPEGXL_PLUGIN "Build src/pixel JPEG-XL shared plugin target." OFF)
-option(DICOMSDL_PIXEL_JPEGXL_STATIC_PLUGIN "Build src/pixel JPEG-XL static plugin target." ${DICOMSDL_ENABLE_JPEGXL})
-option(DICOMSDL_PIXEL_JPEG_PLUGIN "Build src/pixel JPEG shared plugin target." OFF)
+
+option(DICOMSDL_PIXEL_RLE_STATIC_PLUGIN "Build src/pixel static RLE plugin target." ON)
 option(DICOMSDL_PIXEL_JPEG_STATIC_PLUGIN "Build src/pixel JPEG static plugin target." ON)
 option(DICOMSDL_PIXEL_JPEGLS_STATIC_PLUGIN "Build src/pixel JPEG-LS static plugin target." ON)
+option(DICOMSDL_PIXEL_OPENJPEG_STATIC_PLUGIN "Build src/pixel OpenJPEG static plugin target." ON)
 option(DICOMSDL_PIXEL_HTJ2K_STATIC_PLUGIN "Build src/pixel HTJ2K static plugin target." ${DICOMSDL_ENABLE_OPENJPH})
-option(DICOMSDL_PIXEL_CORE "Build src/pixel core uncompressed helpers." ON)
-option(DICOMSDL_PIXEL_RLE_STATIC_PLUGIN "Build src/pixel static RLE plugin target." ON)
-option(DICOMSDL_PIXEL_RUNTIME "Build src/pixel runtime registry target." ON)
+option(DICOMSDL_PIXEL_JPEGXL_STATIC_PLUGIN "Build src/pixel JPEG-XL static plugin target." ${DICOMSDL_ENABLE_JPEGXL})
 
 # Dependency graph setup.
 dicomsdl_fetch_fmt()
@@ -202,48 +204,35 @@ dicomsdl_prepare_libturbojpeg()
 
 add_dependencies(dicomsdl dicomsdl_libturbojpeg)
 
-target_link_libraries(dicomsdl PUBLIC fmt::fmt-header-only)
-target_link_libraries(dicomsdl PRIVATE ${DICOMSDL_YYJSON_TARGET})
+target_link_libraries(dicomsdl PUBLIC ${DICOMSDL_FMT_TARGET})
+target_link_libraries(dicomsdl PRIVATE
+    ${DICOMSDL_YYJSON_TARGET}
+    ${DICOMSDL_OPENJPEG_TARGET}
+    ${DICOMSDL_CHARLS_TARGET}
+    dicomsdl_turbojpeg
+    ${DICOMSDL_LIBDEFLATE_TARGET}
+)
 
 target_include_directories(dicomsdl PRIVATE
-    ${dicomsdl_openjpeg_SOURCE_DIR}/src/lib/openjp2
-    ${dicomsdl_openjpeg_BINARY_DIR}/src/lib/openjp2
     ${dicomsdl_libjpeg_turbo_SOURCE_DIR}/src
     ${dicomsdl_libjpeg_turbo_BINARY_DIR}
 )
 
-if(TARGET openjp2_static)
-    target_link_libraries(dicomsdl PRIVATE openjp2_static)
-else()
-    target_link_libraries(dicomsdl PRIVATE openjp2)
-endif()
-
 if(DICOMSDL_ENABLE_OPENJPH)
-    target_link_libraries(dicomsdl PRIVATE openjph)
+    target_link_libraries(dicomsdl PRIVATE ${DICOMSDL_OPENJPH_TARGET})
     target_compile_definitions(dicomsdl PRIVATE DICOMSDL_HAS_OPENJPH=1)
 else()
     target_compile_definitions(dicomsdl PRIVATE DICOMSDL_HAS_OPENJPH=0)
 endif()
 
 if(DICOMSDL_ENABLE_JPEGXL)
-    if(NOT TARGET jxl OR NOT TARGET jxl_threads OR NOT TARGET jxl_cms)
-        message(FATAL_ERROR "libjxl targets (jxl/jxl_threads/jxl_cms) were not generated")
+    if(NOT DICOMSDL_LIBJXL_TARGET)
+        message(FATAL_ERROR "libjxl dependency wrapper target was not generated")
     endif()
-    target_link_libraries(dicomsdl PRIVATE jxl jxl_threads jxl_cms)
+    target_link_libraries(dicomsdl PRIVATE ${DICOMSDL_LIBJXL_TARGET})
     target_compile_definitions(dicomsdl PRIVATE DICOMSDL_HAS_JPEGXL=1)
 else()
     target_compile_definitions(dicomsdl PRIVATE DICOMSDL_HAS_JPEGXL=0)
-endif()
-
-target_link_libraries(dicomsdl PRIVATE charls)
-target_link_libraries(dicomsdl PRIVATE dicomsdl_turbojpeg)
-
-if(TARGET libdeflate::libdeflate_static)
-    target_link_libraries(dicomsdl PRIVATE libdeflate::libdeflate_static)
-elseif(TARGET libdeflate_static)
-    target_link_libraries(dicomsdl PRIVATE libdeflate_static)
-else()
-    message(FATAL_ERROR "libdeflate static target was not generated")
 endif()
 
 target_compile_definitions(dicomsdl PRIVATE DICOMSDL_HAS_LIBDEFLATE=1)

@@ -121,14 +121,8 @@ if(DICOMSDL_PIXEL_OPENJPEG_STATIC_PLUGIN)
     target_include_directories(dicomsdl_pixel_openjpeg_plugin_static
         PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/src/pixel/abi
-            ${dicomsdl_openjpeg_SOURCE_DIR}/src/lib/openjp2
-            ${dicomsdl_openjpeg_BINARY_DIR}/src/lib/openjp2
     )
-    if(TARGET openjp2_static)
-        target_link_libraries(dicomsdl_pixel_openjpeg_plugin_static PRIVATE openjp2_static)
-    else()
-        target_link_libraries(dicomsdl_pixel_openjpeg_plugin_static PRIVATE openjp2)
-    endif()
+    target_link_libraries(dicomsdl_pixel_openjpeg_plugin_static PRIVATE ${DICOMSDL_OPENJPEG_TARGET})
     target_compile_features(dicomsdl_pixel_openjpeg_plugin_static PRIVATE cxx_std_20)
     dicomsdl_set_target_output_dirs(dicomsdl_pixel_openjpeg_plugin_static)
     set_target_properties(dicomsdl_pixel_openjpeg_plugin_static PROPERTIES
@@ -168,7 +162,7 @@ if(DICOMSDL_PIXEL_JPEGLS_STATIC_PLUGIN)
         PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/src/pixel/abi
     )
-    target_link_libraries(dicomsdl_pixel_jpegls_plugin_static PRIVATE charls)
+    target_link_libraries(dicomsdl_pixel_jpegls_plugin_static PRIVATE ${DICOMSDL_CHARLS_TARGET})
     target_compile_features(dicomsdl_pixel_jpegls_plugin_static PRIVATE cxx_std_20)
     dicomsdl_set_target_output_dirs(dicomsdl_pixel_jpegls_plugin_static)
     set_target_properties(dicomsdl_pixel_jpegls_plugin_static PROPERTIES
@@ -177,8 +171,8 @@ if(DICOMSDL_PIXEL_JPEGLS_STATIC_PLUGIN)
 endif()
 
 if(DICOMSDL_PIXEL_HTJ2K_STATIC_PLUGIN)
-    if(NOT TARGET openjph)
-        message(FATAL_ERROR "DICOMSDL_PIXEL_HTJ2K_STATIC_PLUGIN requires OpenJPH (target openjph).")
+    if(NOT DICOMSDL_OPENJPH_TARGET)
+        message(FATAL_ERROR "DICOMSDL_PIXEL_HTJ2K_STATIC_PLUGIN requires OpenJPH.")
     endif()
     add_library(dicomsdl_pixel_htj2k_plugin_static STATIC
         src/pixel/codecs/htj2k/common.cpp
@@ -190,7 +184,7 @@ if(DICOMSDL_PIXEL_HTJ2K_STATIC_PLUGIN)
         PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/src/pixel/abi
     )
-    target_link_libraries(dicomsdl_pixel_htj2k_plugin_static PRIVATE openjph)
+    target_link_libraries(dicomsdl_pixel_htj2k_plugin_static PRIVATE ${DICOMSDL_OPENJPH_TARGET})
     target_compile_features(dicomsdl_pixel_htj2k_plugin_static PRIVATE cxx_std_20)
     dicomsdl_set_target_output_dirs(dicomsdl_pixel_htj2k_plugin_static)
     set_target_properties(dicomsdl_pixel_htj2k_plugin_static PROPERTIES
@@ -199,8 +193,8 @@ if(DICOMSDL_PIXEL_HTJ2K_STATIC_PLUGIN)
 endif()
 
 if(DICOMSDL_PIXEL_JPEGXL_STATIC_PLUGIN)
-    if(NOT TARGET jxl OR NOT TARGET jxl_threads OR NOT TARGET jxl_cms)
-        message(FATAL_ERROR "DICOMSDL_PIXEL_JPEGXL_STATIC_PLUGIN requires libjxl targets (jxl/jxl_threads/jxl_cms).")
+    if(NOT DICOMSDL_LIBJXL_TARGET)
+        message(FATAL_ERROR "DICOMSDL_PIXEL_JPEGXL_STATIC_PLUGIN requires libjxl.")
     endif()
     add_library(dicomsdl_pixel_jpegxl_plugin_static STATIC
         src/pixel/codecs/jpegxl/common.cpp
@@ -212,7 +206,7 @@ if(DICOMSDL_PIXEL_JPEGXL_STATIC_PLUGIN)
         PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/src/pixel/abi
     )
-    target_link_libraries(dicomsdl_pixel_jpegxl_plugin_static PRIVATE jxl jxl_threads jxl_cms)
+    target_link_libraries(dicomsdl_pixel_jpegxl_plugin_static PRIVATE ${DICOMSDL_LIBJXL_TARGET})
     target_compile_features(dicomsdl_pixel_jpegxl_plugin_static PRIVATE cxx_std_20)
     dicomsdl_set_target_output_dirs(dicomsdl_pixel_jpegxl_plugin_static)
     set_target_properties(dicomsdl_pixel_jpegxl_plugin_static PROPERTIES
@@ -295,14 +289,8 @@ if(DICOMSDL_PIXEL_OPENJPEG_PLUGIN)
     target_include_directories(dicomsdl_pixel_openjpeg_plugin
         PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/src/pixel/abi
-            ${dicomsdl_openjpeg_SOURCE_DIR}/src/lib/openjp2
-            ${dicomsdl_openjpeg_BINARY_DIR}/src/lib/openjp2
     )
-    if(TARGET openjp2_static)
-        target_link_libraries(dicomsdl_pixel_openjpeg_plugin PRIVATE openjp2_static)
-    else()
-        target_link_libraries(dicomsdl_pixel_openjpeg_plugin PRIVATE openjp2)
-    endif()
+    target_link_libraries(dicomsdl_pixel_openjpeg_plugin PRIVATE ${DICOMSDL_OPENJPEG_TARGET})
     target_compile_features(dicomsdl_pixel_openjpeg_plugin PRIVATE cxx_std_20)
     dicomsdl_set_target_output_dirs(dicomsdl_pixel_openjpeg_plugin)
     set_target_properties(dicomsdl_pixel_openjpeg_plugin PROPERTIES
@@ -344,7 +332,7 @@ if(DICOMSDL_PIXEL_JPEGLS_PLUGIN)
         PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/src/pixel/abi
     )
-    target_link_libraries(dicomsdl_pixel_jpegls_plugin PRIVATE charls)
+    target_link_libraries(dicomsdl_pixel_jpegls_plugin PRIVATE ${DICOMSDL_CHARLS_TARGET})
     target_compile_features(dicomsdl_pixel_jpegls_plugin PRIVATE cxx_std_20)
     dicomsdl_set_target_output_dirs(dicomsdl_pixel_jpegls_plugin)
     set_target_properties(dicomsdl_pixel_jpegls_plugin PROPERTIES
@@ -354,8 +342,8 @@ if(DICOMSDL_PIXEL_JPEGLS_PLUGIN)
 endif()
 
 if(DICOMSDL_PIXEL_HTJ2K_PLUGIN)
-    if(NOT TARGET openjph)
-        message(FATAL_ERROR "DICOMSDL_PIXEL_HTJ2K_PLUGIN requires OpenJPH (target openjph).")
+    if(NOT DICOMSDL_OPENJPH_TARGET)
+        message(FATAL_ERROR "DICOMSDL_PIXEL_HTJ2K_PLUGIN requires OpenJPH.")
     endif()
     add_library(dicomsdl_pixel_htj2k_plugin SHARED
         src/pixel/codecs/htj2k/common.cpp
@@ -367,7 +355,7 @@ if(DICOMSDL_PIXEL_HTJ2K_PLUGIN)
         PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/src/pixel/abi
     )
-    target_link_libraries(dicomsdl_pixel_htj2k_plugin PRIVATE openjph)
+    target_link_libraries(dicomsdl_pixel_htj2k_plugin PRIVATE ${DICOMSDL_OPENJPH_TARGET})
     target_compile_features(dicomsdl_pixel_htj2k_plugin PRIVATE cxx_std_20)
     dicomsdl_set_target_output_dirs(dicomsdl_pixel_htj2k_plugin)
     set_target_properties(dicomsdl_pixel_htj2k_plugin PROPERTIES
@@ -377,8 +365,8 @@ if(DICOMSDL_PIXEL_HTJ2K_PLUGIN)
 endif()
 
 if(DICOMSDL_PIXEL_JPEGXL_PLUGIN)
-    if(NOT TARGET jxl OR NOT TARGET jxl_threads OR NOT TARGET jxl_cms)
-        message(FATAL_ERROR "DICOMSDL_PIXEL_JPEGXL_PLUGIN requires libjxl targets (jxl/jxl_threads/jxl_cms).")
+    if(NOT DICOMSDL_LIBJXL_TARGET)
+        message(FATAL_ERROR "DICOMSDL_PIXEL_JPEGXL_PLUGIN requires libjxl.")
     endif()
     add_library(dicomsdl_pixel_jpegxl_plugin SHARED
         src/pixel/codecs/jpegxl/common.cpp
@@ -390,7 +378,7 @@ if(DICOMSDL_PIXEL_JPEGXL_PLUGIN)
         PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/src/pixel/abi
     )
-    target_link_libraries(dicomsdl_pixel_jpegxl_plugin PRIVATE jxl jxl_threads jxl_cms)
+    target_link_libraries(dicomsdl_pixel_jpegxl_plugin PRIVATE ${DICOMSDL_LIBJXL_TARGET})
     target_compile_features(dicomsdl_pixel_jpegxl_plugin PRIVATE cxx_std_20)
     dicomsdl_set_target_output_dirs(dicomsdl_pixel_jpegxl_plugin)
     set_target_properties(dicomsdl_pixel_jpegxl_plugin PROPERTIES

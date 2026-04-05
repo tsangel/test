@@ -4,14 +4,16 @@ option(DICOM_PYTHON_STABLE_ABI "Build Python bindings with nanobind STABLE_ABI (
 if(DICOM_BUILD_PYTHON)
     find_package(Python REQUIRED COMPONENTS Interpreter Development.Module OPTIONAL_COMPONENTS Development.SABIModule)
 
-    FetchContent_Declare(dicomsdl_nanobind
-        GIT_REPOSITORY "${DICOMSDL_NANOBIND_GIT_REPOSITORY}"
-        GIT_TAG "${DICOMSDL_NANOBIND_GIT_TAG}"
-        GIT_PROGRESS TRUE
-        GIT_SUBMODULES "ext/robin_map"
-        GIT_SUBMODULES_RECURSE FALSE
-    )
-    FetchContent_MakeAvailable(dicomsdl_nanobind)
+    if(NOT COMMAND nanobind_add_module)
+        FetchContent_Declare(dicomsdl_nanobind
+            GIT_REPOSITORY "${DICOMSDL_NANOBIND_GIT_REPOSITORY}"
+            GIT_TAG "${DICOMSDL_NANOBIND_GIT_TAG}"
+            GIT_PROGRESS TRUE
+            GIT_SUBMODULES "ext/robin_map"
+            GIT_SUBMODULES_RECURSE FALSE
+        )
+        FetchContent_MakeAvailable(dicomsdl_nanobind)
+    endif()
 
     if(DICOM_PYTHON_STABLE_ABI)
         nanobind_add_module(_dicomsdl STABLE_ABI NOMINSIZE
@@ -26,7 +28,7 @@ if(DICOM_BUILD_PYTHON)
     target_include_directories(_dicomsdl PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
     )
-    target_link_libraries(_dicomsdl PRIVATE dicomsdl fmt::fmt-header-only)
+    target_link_libraries(_dicomsdl PRIVATE dicomsdl ${DICOMSDL_FMT_TARGET})
     dicomsdl_apply_pixel_static_plugin_defines(_dicomsdl)
     if(DICOMSDL_PIXEL_RUNTIME)
         target_link_libraries(_dicomsdl PRIVATE dicomsdl_pixel_runtime)

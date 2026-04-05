@@ -54,13 +54,70 @@ set(DICOMSDL_YYJSON_GIT_REPOSITORY "https://github.com/ibireme/yyjson.git"
 set(DICOMSDL_YYJSON_GIT_TAG "0.12.0"
     CACHE STRING "yyjson git ref used by FetchContent (use branch/tag/SHA).")
 
+function(dicomsdl_ensure_interface_wrapper TARGET_NAME)
+    if(NOT TARGET "${TARGET_NAME}")
+        add_library("${TARGET_NAME}" INTERFACE)
+    endif()
+endfunction()
+
 function(dicomsdl_fetch_fmt)
+    if(TARGET dicomsdl_fmt)
+        set(DICOMSDL_FMT_TARGET dicomsdl_fmt PARENT_SCOPE)
+        return()
+    endif()
+
+    if(TARGET fmt::fmt-header-only)
+        dicomsdl_ensure_interface_wrapper(dicomsdl_fmt)
+        target_link_libraries(dicomsdl_fmt INTERFACE fmt::fmt-header-only)
+        set(DICOMSDL_FMT_TARGET dicomsdl_fmt PARENT_SCOPE)
+        return()
+    endif()
+
+    if(TARGET fmt-header-only)
+        dicomsdl_ensure_interface_wrapper(dicomsdl_fmt)
+        target_link_libraries(dicomsdl_fmt INTERFACE fmt-header-only)
+        set(DICOMSDL_FMT_TARGET dicomsdl_fmt PARENT_SCOPE)
+        return()
+    endif()
+
+    if(TARGET fmt::fmt)
+        dicomsdl_ensure_interface_wrapper(dicomsdl_fmt)
+        target_link_libraries(dicomsdl_fmt INTERFACE fmt::fmt)
+        set(DICOMSDL_FMT_TARGET dicomsdl_fmt PARENT_SCOPE)
+        return()
+    endif()
+
+    if(TARGET fmt)
+        dicomsdl_ensure_interface_wrapper(dicomsdl_fmt)
+        target_link_libraries(dicomsdl_fmt INTERFACE fmt)
+        set(DICOMSDL_FMT_TARGET dicomsdl_fmt PARENT_SCOPE)
+        return()
+    endif()
+
     FetchContent_Declare(dicomsdl_fmt
         GIT_REPOSITORY "${DICOMSDL_FMT_GIT_REPOSITORY}"
         GIT_TAG "${DICOMSDL_FMT_GIT_TAG}"
         GIT_PROGRESS TRUE
     )
     FetchContent_MakeAvailable(dicomsdl_fmt)
+
+    if(TARGET fmt::fmt-header-only)
+        dicomsdl_ensure_interface_wrapper(dicomsdl_fmt)
+        target_link_libraries(dicomsdl_fmt INTERFACE fmt::fmt-header-only)
+    elseif(TARGET fmt-header-only)
+        dicomsdl_ensure_interface_wrapper(dicomsdl_fmt)
+        target_link_libraries(dicomsdl_fmt INTERFACE fmt-header-only)
+    elseif(TARGET fmt::fmt)
+        dicomsdl_ensure_interface_wrapper(dicomsdl_fmt)
+        target_link_libraries(dicomsdl_fmt INTERFACE fmt::fmt)
+    elseif(TARGET fmt)
+        dicomsdl_ensure_interface_wrapper(dicomsdl_fmt)
+        target_link_libraries(dicomsdl_fmt INTERFACE fmt)
+    else()
+        message(FATAL_ERROR "fmt target was not generated")
+    endif()
+
+    set(DICOMSDL_FMT_TARGET dicomsdl_fmt PARENT_SCOPE)
 endfunction()
 
 function(dicomsdl_fetch_yyjson)
@@ -112,6 +169,22 @@ function(dicomsdl_fetch_yyjson)
 endfunction()
 
 function(dicomsdl_fetch_openjpeg)
+    if(TARGET dicomsdl_openjpeg)
+        set(DICOMSDL_OPENJPEG_TARGET dicomsdl_openjpeg PARENT_SCOPE)
+        return()
+    endif()
+
+    if(TARGET openjp2_static OR TARGET openjp2)
+        dicomsdl_ensure_interface_wrapper(dicomsdl_openjpeg)
+        if(TARGET openjp2_static)
+            target_link_libraries(dicomsdl_openjpeg INTERFACE openjp2_static)
+        else()
+            target_link_libraries(dicomsdl_openjpeg INTERFACE openjp2)
+        endif()
+        set(DICOMSDL_OPENJPEG_TARGET dicomsdl_openjpeg PARENT_SCOPE)
+        return()
+    endif()
+
     # Keep third-party tests/tools off without mutating top-level BUILD_TESTING.
     set(BUILD_TESTING OFF)
     set(BUILD_CODEC OFF)
@@ -128,11 +201,37 @@ function(dicomsdl_fetch_openjpeg)
     )
     FetchContent_MakeAvailable(dicomsdl_openjpeg)
 
+    dicomsdl_ensure_interface_wrapper(dicomsdl_openjpeg)
+    if(TARGET openjp2_static)
+        target_link_libraries(dicomsdl_openjpeg INTERFACE openjp2_static)
+    elseif(TARGET openjp2)
+        target_link_libraries(dicomsdl_openjpeg INTERFACE openjp2)
+    else()
+        message(FATAL_ERROR "openjpeg target was not generated")
+    endif()
+    target_include_directories(dicomsdl_openjpeg INTERFACE
+        "${dicomsdl_openjpeg_SOURCE_DIR}/src/lib/openjp2"
+        "${dicomsdl_openjpeg_BINARY_DIR}/src/lib/openjp2"
+    )
+
     set(dicomsdl_openjpeg_SOURCE_DIR "${dicomsdl_openjpeg_SOURCE_DIR}" PARENT_SCOPE)
     set(dicomsdl_openjpeg_BINARY_DIR "${dicomsdl_openjpeg_BINARY_DIR}" PARENT_SCOPE)
+    set(DICOMSDL_OPENJPEG_TARGET dicomsdl_openjpeg PARENT_SCOPE)
 endfunction()
 
 function(dicomsdl_fetch_charls)
+    if(TARGET dicomsdl_charls)
+        set(DICOMSDL_CHARLS_TARGET dicomsdl_charls PARENT_SCOPE)
+        return()
+    endif()
+
+    if(TARGET charls)
+        dicomsdl_ensure_interface_wrapper(dicomsdl_charls)
+        target_link_libraries(dicomsdl_charls INTERFACE charls)
+        set(DICOMSDL_CHARLS_TARGET dicomsdl_charls PARENT_SCOPE)
+        return()
+    endif()
+
     set(BUILD_SHARED_LIBS OFF)
 
     FetchContent_Declare(dicomsdl_charls
@@ -142,9 +241,37 @@ function(dicomsdl_fetch_charls)
         GIT_PROGRESS TRUE
     )
     FetchContent_MakeAvailable(dicomsdl_charls)
+
+    if(TARGET charls)
+        dicomsdl_ensure_interface_wrapper(dicomsdl_charls)
+        target_link_libraries(dicomsdl_charls INTERFACE charls)
+    else()
+        message(FATAL_ERROR "CharLS target was not generated")
+    endif()
+
+    set(DICOMSDL_CHARLS_TARGET dicomsdl_charls PARENT_SCOPE)
 endfunction()
 
 function(dicomsdl_fetch_libdeflate)
+    if(TARGET dicomsdl_libdeflate)
+        set(DICOMSDL_LIBDEFLATE_TARGET dicomsdl_libdeflate PARENT_SCOPE)
+        return()
+    endif()
+
+    if(TARGET libdeflate::libdeflate_static)
+        dicomsdl_ensure_interface_wrapper(dicomsdl_libdeflate)
+        target_link_libraries(dicomsdl_libdeflate INTERFACE libdeflate::libdeflate_static)
+        set(DICOMSDL_LIBDEFLATE_TARGET dicomsdl_libdeflate PARENT_SCOPE)
+        return()
+    endif()
+
+    if(TARGET libdeflate_static)
+        dicomsdl_ensure_interface_wrapper(dicomsdl_libdeflate)
+        target_link_libraries(dicomsdl_libdeflate INTERFACE libdeflate_static)
+        set(DICOMSDL_LIBDEFLATE_TARGET dicomsdl_libdeflate PARENT_SCOPE)
+        return()
+    endif()
+
     set(LIBDEFLATE_BUILD_STATIC_LIB ON)
     set(LIBDEFLATE_BUILD_SHARED_LIB OFF)
     set(LIBDEFLATE_BUILD_GZIP OFF)
@@ -159,10 +286,35 @@ function(dicomsdl_fetch_libdeflate)
         GIT_PROGRESS TRUE
     )
     FetchContent_MakeAvailable(dicomsdl_libdeflate)
+
+    if(TARGET libdeflate::libdeflate_static)
+        dicomsdl_ensure_interface_wrapper(dicomsdl_libdeflate)
+        target_link_libraries(dicomsdl_libdeflate INTERFACE libdeflate::libdeflate_static)
+    elseif(TARGET libdeflate_static)
+        dicomsdl_ensure_interface_wrapper(dicomsdl_libdeflate)
+        target_link_libraries(dicomsdl_libdeflate INTERFACE libdeflate_static)
+    else()
+        message(FATAL_ERROR "libdeflate static target was not generated")
+    endif()
+
+    set(DICOMSDL_LIBDEFLATE_TARGET dicomsdl_libdeflate PARENT_SCOPE)
 endfunction()
 
 function(dicomsdl_fetch_openjph)
     if(NOT (DICOMSDL_ENABLE_OPENJPH OR DICOMSDL_PIXEL_HTJ2K_PLUGIN))
+        set(DICOMSDL_OPENJPH_TARGET "" PARENT_SCOPE)
+        return()
+    endif()
+
+    if(TARGET dicomsdl_openjph)
+        set(DICOMSDL_OPENJPH_TARGET dicomsdl_openjph PARENT_SCOPE)
+        return()
+    endif()
+
+    if(TARGET openjph)
+        dicomsdl_ensure_interface_wrapper(dicomsdl_openjph)
+        target_link_libraries(dicomsdl_openjph INTERFACE openjph)
+        set(DICOMSDL_OPENJPH_TARGET dicomsdl_openjph PARENT_SCOPE)
         return()
     endif()
 
@@ -184,10 +336,32 @@ function(dicomsdl_fetch_openjph)
         GIT_PROGRESS TRUE
     )
     FetchContent_MakeAvailable(dicomsdl_openjph)
+
+    if(TARGET openjph)
+        dicomsdl_ensure_interface_wrapper(dicomsdl_openjph)
+        target_link_libraries(dicomsdl_openjph INTERFACE openjph)
+    else()
+        message(FATAL_ERROR "OpenJPH target was not generated")
+    endif()
+
+    set(DICOMSDL_OPENJPH_TARGET dicomsdl_openjph PARENT_SCOPE)
 endfunction()
 
 function(dicomsdl_fetch_libjxl)
     if(NOT (DICOMSDL_ENABLE_JPEGXL OR DICOMSDL_PIXEL_JPEGXL_PLUGIN))
+        set(DICOMSDL_LIBJXL_TARGET "" PARENT_SCOPE)
+        return()
+    endif()
+
+    if(TARGET dicomsdl_libjxl)
+        set(DICOMSDL_LIBJXL_TARGET dicomsdl_libjxl PARENT_SCOPE)
+        return()
+    endif()
+
+    if(TARGET jxl AND TARGET jxl_threads AND TARGET jxl_cms)
+        dicomsdl_ensure_interface_wrapper(dicomsdl_libjxl)
+        target_link_libraries(dicomsdl_libjxl INTERFACE jxl jxl_threads jxl_cms)
+        set(DICOMSDL_LIBJXL_TARGET dicomsdl_libjxl PARENT_SCOPE)
         return()
     endif()
 
@@ -219,6 +393,15 @@ function(dicomsdl_fetch_libjxl)
         GIT_SUBMODULES_RECURSE FALSE
     )
     FetchContent_MakeAvailable(dicomsdl_libjxl)
+
+    if(TARGET jxl AND TARGET jxl_threads AND TARGET jxl_cms)
+        dicomsdl_ensure_interface_wrapper(dicomsdl_libjxl)
+        target_link_libraries(dicomsdl_libjxl INTERFACE jxl jxl_threads jxl_cms)
+    else()
+        message(FATAL_ERROR "libjxl targets (jxl/jxl_threads/jxl_cms) were not generated")
+    endif()
+
+    set(DICOMSDL_LIBJXL_TARGET dicomsdl_libjxl PARENT_SCOPE)
 endfunction()
 
 function(dicomsdl_prepare_libturbojpeg)
