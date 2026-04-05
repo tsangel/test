@@ -4687,7 +4687,8 @@ NB_MODULE(_dicomsdl, m) {
 
 	nb::class_<DicomFile>(m, "DicomFile",
 	    "DICOM file/session object that owns the root DataSet.",
-	    nb::type_slots(dicomfile_type_slots))
+	    nb::type_slots(dicomfile_type_slots),
+	    nb::dynamic_attr())
 		.def(nb::init<>())
 		.def_prop_ro("path", &DicomFile::path,
 		    "Identifier of the attached root stream (file path or provided memory name)")

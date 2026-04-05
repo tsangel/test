@@ -3,6 +3,7 @@ import pathlib
 import shutil
 import struct
 import sys
+import gc
 
 import dicomsdl as dicom
 import pytest
@@ -124,6 +125,38 @@ def test_literal_and_file(tmp_path):
 
 	mem = dicom.read_bytes(b"TEST", name="memory-buffer")
 	assert mem.path == "memory-buffer"
+
+
+def test_read_bytes_copy_false_keeps_source_buffer_alive(tmp_path):
+	encap_path = tmp_path / "nocopy-sequence-sample.dcm"
+	encap_path.write_bytes(_build_sequence_pixel_sample())
+	source = bytearray(encap_path.read_bytes())
+
+	obj = dicom.read_bytes(source, name="nocopy-buffer", copy=False)
+	del source
+	gc.collect()
+
+	assert obj.path == "nocopy-buffer"
+	assert obj.get_value("SOPInstanceUID") == "1.2.3.4.5.6.7.8.9"
+	assert obj.encoded_pixel_frame_bytes(0) == b"\x01\x02\x03\x04"
+
+
+def test_read_bytes_selected_copy_false_keeps_source_buffer_alive(tmp_path):
+	encap_path = tmp_path / "nocopy-selected-sequence-sample.dcm"
+	encap_path.write_bytes(_build_sequence_pixel_sample())
+	source = bytearray(encap_path.read_bytes())
+	selection = ["SOPInstanceUID", ("ReferencedStudySequence", ["ReferencedSOPInstanceUID"])]
+
+	obj = dicom.read_bytes_selected(source, selection, name="nocopy-selected", copy=False)
+	del source
+	gc.collect()
+
+	assert obj.path == "nocopy-selected"
+	assert obj.get_value("SOPInstanceUID") == "1.2.3.4.5.6.7.8.9"
+	assert (
+		obj.get_value("ReferencedStudySequence.0.ReferencedSOPInstanceUID")
+		== "1.2.3.4.5.6"
+	)
 
 
 def test_is_dicom_file(tmp_path):
