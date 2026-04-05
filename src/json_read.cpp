@@ -150,6 +150,12 @@ struct SplitBulkUri {
 	std::string_view suffix{};
 };
 
+struct FrameBulkUriTemplate {
+	std::string_view path{};
+	std::string_view suffix{};
+	bool path_is_frames_base{false};
+};
+
 [[nodiscard]] SplitBulkUri split_bulk_uri_suffix(std::string_view uri) noexcept {
 	const auto query = uri.find('?');
 	const auto fragment = uri.find('#');
@@ -182,6 +188,33 @@ struct SplitBulkUri {
 	out.append("/frames/");
 	append_decimal(out, frame_number);
 	out.append(uri.suffix);
+	return out;
+}
+
+[[nodiscard]] FrameBulkUriTemplate make_frame_bulk_uri_template(
+    std::string_view base_uri) noexcept {
+	const auto uri = split_bulk_uri_suffix(base_uri);
+	return FrameBulkUriTemplate{
+	    .path = uri.path,
+	    .suffix = uri.suffix,
+	    .path_is_frames_base = uri.path.size() >= 7u &&
+	                           uri.path.substr(uri.path.size() - 7u) == "/frames",
+	};
+}
+
+[[nodiscard]] std::string frame_bulk_uri(
+    const FrameBulkUriTemplate& base_uri, std::size_t frame_index) {
+	const auto frame_number = frame_index + 1u;
+	std::string out;
+	out.reserve(base_uri.path.size() + base_uri.suffix.size() + 24u);
+	out.append(base_uri.path);
+	if (base_uri.path_is_frames_base) {
+		out.push_back('/');
+	} else {
+		out.append("/frames/");
+	}
+	append_decimal(out, frame_number);
+	out.append(base_uri.suffix);
 	return out;
 }
 
@@ -240,7 +273,7 @@ struct SplitBulkUri {
 }
 
 struct ParsedFrameBulkUriList {
-	std::string base_uri{};
+	FrameBulkUriTemplate base_uri{};
 	std::vector<std::size_t> frame_indices{};
 };
 
@@ -254,9 +287,11 @@ struct ParsedFrameBulkUriList {
 	}
 
 	ParsedFrameBulkUriList parsed{};
-	parsed.base_uri =
-	    std::string(split_uri.path.substr(0u, marker + kMarker.size() - 1u));
-	parsed.base_uri.append(split_uri.suffix);
+	parsed.base_uri = FrameBulkUriTemplate{
+	    .path = split_uri.path.substr(0u, marker + kMarker.size() - 1u),
+	    .suffix = split_uri.suffix,
+	    .path_is_frames_base = true,
+	};
 	const auto suffix = split_uri.path.substr(marker + kMarker.size());
 	std::size_t value = 0u;
 	bool saw_digit = false;
@@ -1146,7 +1181,19 @@ void JsonReadParser::postprocess_pending_bulk(
 	const auto transfer_syntax = file_transfer_syntax_uid_for_bulk(file);
 	const bool pixel_data_frames_are_encapsulated = transfer_syntax.valid() &&
 	                                                transfer_syntax.is_encapsulated();
+	const auto number_of_frames = static_cast<std::size_t>(
+	    file.dataset().get_value<long>("NumberOfFrames").value_or(1));
+	const auto synthesized_frame_count = std::max<std::size_t>(number_of_frames, 1u);
+	const std::string pixel_media_type =
+	    bulk_media_type_for_transfer_syntax(transfer_syntax, true);
+	const std::string pixel_transfer_syntax_uid =
+	    transfer_syntax.valid() ? std::string(transfer_syntax.value()) : std::string{};
 	std::vector<JsonBulkRef> expanded;
+	expanded.reserve(
+	    pending_bulk_data.size() +
+	    ((pixel_data_frames_are_encapsulated && synthesized_frame_count > 0u)
+	            ? (synthesized_frame_count - 1u)
+	            : 0u));
 	for (const auto& ref : pending_bulk_data) {
 		if (ref.kind == JsonBulkTargetKind::element &&
 		    ref.path == "7FE00010" &&
@@ -1158,8 +1205,9 @@ void JsonReadParser::postprocess_pending_bulk(
 					frame_ref.path = ref.path;
 					frame_ref.frame_index = frame_index;
 					frame_ref.uri = frame_bulk_uri(parsed_list->base_uri, frame_index);
+					frame_ref.media_type = pixel_media_type;
+					frame_ref.transfer_syntax_uid = pixel_transfer_syntax_uid;
 					frame_ref.vr = ref.vr;
-					apply_bulk_ref_metadata(frame_ref, transfer_syntax);
 					expanded.push_back(std::move(frame_ref));
 				}
 				continue;
@@ -1170,8 +1218,9 @@ void JsonReadParser::postprocess_pending_bulk(
 				frame_ref.path = ref.path;
 				frame_ref.frame_index = *frame_index;
 				frame_ref.uri = ref.uri;
+				frame_ref.media_type = pixel_media_type;
+				frame_ref.transfer_syntax_uid = pixel_transfer_syntax_uid;
 				frame_ref.vr = ref.vr;
-				apply_bulk_ref_metadata(frame_ref, transfer_syntax);
 				expanded.push_back(std::move(frame_ref));
 				continue;
 			}
@@ -1181,17 +1230,16 @@ void JsonReadParser::postprocess_pending_bulk(
 				expanded.push_back(std::move(resolved_ref));
 				continue;
 			}
-			const auto number_of_frames =
-			    static_cast<std::size_t>(
-			        file.dataset().get_value<long>("NumberOfFrames").value_or(1));
-			for (std::size_t i = 0; i < std::max<std::size_t>(number_of_frames, 1u); ++i) {
+			const auto base_uri = make_frame_bulk_uri_template(ref.uri);
+			for (std::size_t i = 0; i < synthesized_frame_count; ++i) {
 				JsonBulkRef frame_ref{};
 				frame_ref.kind = JsonBulkTargetKind::pixel_frame;
 				frame_ref.path = ref.path;
 				frame_ref.frame_index = i;
-				frame_ref.uri = frame_bulk_uri(ref.uri, i);
+				frame_ref.uri = frame_bulk_uri(base_uri, i);
+				frame_ref.media_type = pixel_media_type;
+				frame_ref.transfer_syntax_uid = pixel_transfer_syntax_uid;
 				frame_ref.vr = ref.vr;
-				apply_bulk_ref_metadata(frame_ref, transfer_syntax);
 				expanded.push_back(std::move(frame_ref));
 			}
 			continue;
