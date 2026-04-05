@@ -20,9 +20,9 @@ DICOM JSON Model 읽기/쓰기에 대해서는
 
 ## DICOM JSON
 
-- `read_json(source, name="<memory>", charset_errors="strict")`는 UTF-8
-  DICOM JSON 텍스트에서 top-level 데이터세트 객체 하나 또는 데이터세트 객체
-  배열 하나를 읽습니다.
+- `read_json(source, name="<memory>", charset_errors="strict")`는 메모리에
+  이미 있는 UTF-8 DICOM JSON 텍스트 또는 바이트에서 top-level 데이터세트
+  객체 하나 또는 데이터세트 객체 배열 하나를 읽습니다.
 - Python에서 `DicomFile.write_json(...)`와 `DataSet.write_json(...)`는
   `(json_text, bulk_parts)`를 반환합니다.
 - `JsonBulkRef`는 아직 다운로드해서 `set_bulk_data(...)`로

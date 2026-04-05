@@ -20,9 +20,9 @@ Use that page for:
 
 ## DICOM JSON
 
-- `read_json(source, name="<memory>", charset_errors="strict")` 从 UTF-8
-  DICOM JSON 文本中读取一个 top-level dataset object，或一个 dataset object
-  数组。
+- `read_json(source, name="<memory>", charset_errors="strict")` 从内存中已有的
+  UTF-8 DICOM JSON 文本或字节中读取一个 top-level dataset object，或一个
+  dataset object 数组。
 - 在 Python 中，`DicomFile.write_json(...)` 和 `DataSet.write_json(...)`
   返回 `(json_text, bulk_parts)`。
 - `JsonBulkRef` 描述仍需下载并通过 `set_bulk_data(...)` 回填到

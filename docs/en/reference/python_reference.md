@@ -17,7 +17,7 @@ For DICOM JSON Model read/write, see [DICOM JSON](../guide/dicom_json.md).
 
 - `read_json(source, name="<memory>", charset_errors="strict")` reads one
   top-level dataset object or a top-level array of dataset objects from UTF-8
-  DICOM JSON text.
+  DICOM JSON text or bytes already in memory.
 - `DicomFile.write_json(...)` and `DataSet.write_json(...)` return
   `(json_text, bulk_parts)` in Python.
 - `JsonBulkRef` describes unresolved `BulkDataURI` payloads that still need to
