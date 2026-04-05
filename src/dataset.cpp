@@ -452,6 +452,9 @@ void DataSet::attach_to_stream(std::string identifier, std::unique_ptr<InStream>
 	}
 	stream->set_identifier(std::move(identifier));
 	stream_ = std::move(stream);
+	if (this == root_dataset_ && root_file_) {
+		root_file_->clear_json_doc_owner();
+	}
 	last_tag_loaded_ = stream_->is_valid() ? Tag::from_value(0) : Tag(0xFFFFu, 0xFFFFu);
 }
 

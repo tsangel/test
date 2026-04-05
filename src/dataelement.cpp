@@ -5,6 +5,7 @@
 #include "charset/charset_mutation.hpp"
 #include "charset/text_validation.hpp"
 #include <diagnostics.h>
+#include <yyjson.h>
 
 #include <cctype>
 #include <charconv>
@@ -24,6 +25,10 @@
 namespace dicom {
 
 namespace {
+
+[[nodiscard]] inline yyjson_val* yyjson_mut(const yyjson_val* value) noexcept {
+	return const_cast<yyjson_val*>(value);
+}
 
 inline std::string_view trim(std::string_view s) {
 	while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) s.remove_prefix(1);
@@ -358,20 +363,6 @@ void append_utf8_codepoint(std::string& out, std::uint32_t codepoint) {
 	       skip_json_literal(text, pos, "false");
 }
 
-[[nodiscard]] std::string_view json_fragment_text(
-    const DataElement& element, std::size_t fragment_length) {
-	const auto* parent = element.parent();
-	const auto* root = parent ? parent->root_dataset() : nullptr;
-	if (!root) {
-		diag::error_and_throw(
-		    "json_stream tag={} vr={} reason=no root dataset context",
-		    element.tag().to_string(), element.vr().str());
-	}
-	const auto& stream = root->stream();
-	const auto span = stream.get_span(element.offset(), fragment_length);
-	return std::string_view(reinterpret_cast<const char*>(span.data()), span.size());
-}
-
 [[nodiscard]] std::optional<std::string> parse_json_person_name_object(
     std::string_view text, std::size_t& pos) {
 	skip_json_whitespace(text, pos);
@@ -456,9 +447,8 @@ void append_utf8_codepoint(std::string& out, std::uint32_t codepoint) {
 	return out;
 }
 
-[[nodiscard]] std::optional<std::vector<std::string>> parse_json_stream_utf8_values(
-    const DataElement& element, std::size_t fragment_length) {
-	const auto fragment = json_fragment_text(element, fragment_length);
+[[nodiscard]] std::optional<std::vector<std::string>> parse_json_utf8_values_from_fragment(
+    const DataElement& element, std::string_view fragment) {
 	std::size_t pos = 0;
 	skip_json_whitespace(fragment, pos);
 	if (pos >= fragment.size() || fragment[pos] != '[') {
@@ -523,6 +513,365 @@ void append_utf8_codepoint(std::string& out, std::uint32_t codepoint) {
 	return std::nullopt;
 }
 
+[[nodiscard]] std::optional<std::string> parse_json_tree_person_name_object(
+    const yyjson_val* object_value) {
+	if (!object_value || !yyjson_is_obj(yyjson_mut(object_value))) {
+		return std::nullopt;
+	}
+
+	bool have_alphabetic = false;
+	bool have_ideographic = false;
+	bool have_phonetic = false;
+	std::string alphabetic;
+	std::string ideographic;
+	std::string phonetic;
+
+	yyjson_obj_iter iter = yyjson_obj_iter_with(yyjson_mut(object_value));
+	yyjson_val* key = nullptr;
+	while ((key = yyjson_obj_iter_next(&iter))) {
+		auto* value = yyjson_obj_iter_get_val(key);
+		if (!yyjson_is_str(key) || !yyjson_is_str(value)) {
+			continue;
+		}
+		const std::string_view key_text{yyjson_get_str(key), yyjson_get_len(key)};
+		const std::string_view value_text{yyjson_get_str(value), yyjson_get_len(value)};
+		if (key_text == "Alphabetic") {
+			have_alphabetic = true;
+			alphabetic.assign(value_text);
+		} else if (key_text == "Ideographic") {
+			have_ideographic = true;
+			ideographic.assign(value_text);
+		} else if (key_text == "Phonetic") {
+			have_phonetic = true;
+			phonetic.assign(value_text);
+		}
+	}
+
+	std::string out;
+	if (have_alphabetic) {
+		out += alphabetic;
+	}
+	if (have_ideographic || have_phonetic) {
+		out.push_back('=');
+		if (have_ideographic) {
+			out += ideographic;
+		}
+	}
+	if (have_phonetic) {
+		out.push_back('=');
+		out += phonetic;
+	}
+	return out;
+}
+
+[[nodiscard]] std::optional<std::string> yyjson_scalar_to_text(const yyjson_val* value) {
+	if (!value) {
+		return std::nullopt;
+	}
+	if (yyjson_is_str(yyjson_mut(value))) {
+		return std::string(yyjson_get_str(yyjson_mut(value)), yyjson_get_len(yyjson_mut(value)));
+	}
+	if (yyjson_is_num(yyjson_mut(value))) {
+		char* text = yyjson_val_write(value, 0, nullptr);
+		if (!text) {
+			return std::nullopt;
+		}
+		std::string out{text};
+		std::free(text);
+		return out;
+	}
+	return std::nullopt;
+}
+
+template <typename IntT>
+[[nodiscard]] std::optional<IntT> yyjson_integral_to_value(const yyjson_val* value) {
+	if (!value) {
+		return std::nullopt;
+	}
+	auto* item = yyjson_mut(value);
+	if (!yyjson_is_num(item) || yyjson_is_real(item)) {
+		return std::nullopt;
+	}
+	if constexpr (std::is_signed_v<IntT>) {
+		if (yyjson_is_uint(item)) {
+			const auto raw = yyjson_get_uint(item);
+			if (raw > static_cast<std::uint64_t>(std::numeric_limits<IntT>::max())) {
+				return std::nullopt;
+			}
+			return static_cast<IntT>(raw);
+		}
+		const auto raw = yyjson_get_sint(item);
+		if (raw < static_cast<std::int64_t>(std::numeric_limits<IntT>::min()) ||
+		    raw > static_cast<std::int64_t>(std::numeric_limits<IntT>::max())) {
+			return std::nullopt;
+		}
+		return static_cast<IntT>(raw);
+	}
+	if (yyjson_is_uint(item)) {
+		const auto raw = yyjson_get_uint(item);
+		if (raw > static_cast<std::uint64_t>(std::numeric_limits<IntT>::max())) {
+			return std::nullopt;
+		}
+		return static_cast<IntT>(raw);
+	}
+	const auto raw = yyjson_get_sint(item);
+	if (raw < 0 ||
+	    static_cast<std::uint64_t>(raw) > static_cast<std::uint64_t>(std::numeric_limits<IntT>::max())) {
+		return std::nullopt;
+	}
+	return static_cast<IntT>(raw);
+}
+
+template <typename FloatT>
+[[nodiscard]] std::optional<FloatT> yyjson_floating_to_value(const yyjson_val* value) {
+	if (!value) {
+		return std::nullopt;
+	}
+	auto* item = yyjson_mut(value);
+	if (!yyjson_is_num(item)) {
+		return std::nullopt;
+	}
+	if (yyjson_is_real(item)) {
+		return static_cast<FloatT>(yyjson_get_real(item));
+	}
+	if (yyjson_is_uint(item)) {
+		return static_cast<FloatT>(yyjson_get_uint(item));
+	}
+	return static_cast<FloatT>(yyjson_get_sint(item));
+}
+
+template <typename T, typename ConvertFn>
+[[nodiscard]] bool materialize_json_tree_numeric_array(
+    DataElement& element, const yyjson_val* value, ConvertFn&& convert) {
+	if (!value || !yyjson_is_arr(yyjson_mut(value))) {
+		return false;
+	}
+	const auto count = yyjson_arr_size(yyjson_mut(value));
+	element.reserve_value_bytes(count * sizeof(T));
+	auto dst = element.value_span();
+	auto* out = const_cast<std::uint8_t*>(dst.data());
+	yyjson_arr_iter iter = yyjson_arr_iter_with(yyjson_mut(value));
+	yyjson_val* item = nullptr;
+	std::size_t index = 0;
+	while ((item = yyjson_arr_iter_next(&iter))) {
+		auto parsed = convert(item);
+		if (!parsed) {
+			return false;
+		}
+		if constexpr (std::is_floating_point_v<T>) {
+			using Bits = std::conditional_t<sizeof(T) == 4, std::uint32_t, std::uint64_t>;
+			endian::store_le<Bits>(
+			    out + index * sizeof(T), std::bit_cast<Bits>(*parsed));
+		} else {
+			endian::store_le<T>(out + index * sizeof(T), *parsed);
+		}
+		++index;
+	}
+	return true;
+}
+
+[[nodiscard]] bool collect_json_tree_string_views(const yyjson_val* value,
+    std::vector<std::string_view>& out_views, bool* out_all_ascii = nullptr) {
+	if (!value || !yyjson_is_arr(yyjson_mut(value))) {
+		return false;
+	}
+	out_views.clear();
+	out_views.reserve(yyjson_arr_size(yyjson_mut(value)));
+	bool all_ascii = true;
+	yyjson_arr_iter iter = yyjson_arr_iter_with(yyjson_mut(value));
+	yyjson_val* item = nullptr;
+	while ((item = yyjson_arr_iter_next(&iter))) {
+		if (yyjson_is_null(item)) {
+			out_views.emplace_back();
+			continue;
+		}
+		if (!yyjson_is_str(item)) {
+			return false;
+		}
+		const std::string_view text{yyjson_get_str(item), yyjson_get_len(item)};
+		if (!charset::validate_ascii(text)) {
+			all_ascii = false;
+		}
+		out_views.push_back(text);
+	}
+	if (out_all_ascii) {
+		*out_all_ascii = all_ascii;
+	}
+	return true;
+}
+
+[[nodiscard]] bool materialize_json_tree_string_views(
+    DataElement& element, const yyjson_val* value) {
+	std::vector<std::string_view> views;
+	bool all_ascii = true;
+	if (!collect_json_tree_string_views(value, views, &all_ascii)) {
+		return false;
+	}
+	if (element.vr() == VR::UN) {
+		std::string raw_text;
+		std::size_t total_length = views.empty() ? 0u : views.size() - 1u;
+		for (const auto view : views) {
+			total_length += view.size();
+		}
+		raw_text.reserve(total_length);
+		for (std::size_t i = 0; i < views.size(); ++i) {
+			if (i != 0u) {
+				raw_text.push_back('\\');
+			}
+			raw_text.append(views[i].data(), views[i].size());
+		}
+		const auto* ptr = reinterpret_cast<const std::uint8_t*>(raw_text.data());
+		element.set_value_bytes(std::span<const std::uint8_t>(ptr, raw_text.size()));
+		return true;
+	}
+	if (!element.vr().uses_specific_character_set() || all_ascii) {
+		return element.from_string_views(views);
+	}
+	const auto* root = element.parent() ? element.parent()->root_dataset() : nullptr;
+	const auto charset_errors =
+	    root ? root->json_read_charset_errors_policy() : CharsetEncodeErrorPolicy::strict;
+	return element.from_utf8_views(views, charset_errors, nullptr);
+}
+
+[[nodiscard]] bool append_json_tree_number_text(
+    std::string& out, const yyjson_val* value, VR vr) {
+	if (!value) {
+		return false;
+	}
+	auto* item = yyjson_mut(value);
+	if (yyjson_is_null(item)) {
+		return true;
+	}
+	if (yyjson_is_str(item)) {
+		out.append(yyjson_get_str(item), yyjson_get_len(item));
+		return true;
+	}
+	if (!yyjson_is_num(item)) {
+		return false;
+	}
+	char buffer[64];
+	if (yyjson_is_real(item)) {
+		if (vr == VR::IS) {
+			return false;
+		}
+		const auto number = yyjson_get_real(item);
+		const auto result = std::to_chars(
+		    buffer, buffer + sizeof(buffer), number, std::chars_format::general);
+		if (result.ec != std::errc()) {
+			return false;
+		}
+		out.append(buffer, result.ptr);
+		return true;
+	}
+	if (yyjson_is_uint(item)) {
+		const auto result =
+		    std::to_chars(buffer, buffer + sizeof(buffer), yyjson_get_uint(item), 10);
+		if (result.ec != std::errc()) {
+			return false;
+		}
+		out.append(buffer, result.ptr);
+		return true;
+	}
+	const auto result =
+	    std::to_chars(buffer, buffer + sizeof(buffer), yyjson_get_sint(item), 10);
+	if (result.ec != std::errc()) {
+		return false;
+	}
+	out.append(buffer, result.ptr);
+	return true;
+}
+
+[[nodiscard]] bool materialize_json_tree_delimited_text(
+    DataElement& element, const yyjson_val* value) {
+	if (!value || !yyjson_is_arr(yyjson_mut(value))) {
+		return false;
+	}
+	const auto count = yyjson_arr_size(yyjson_mut(value));
+	std::string text;
+	text.reserve(count * 24);
+	yyjson_arr_iter iter = yyjson_arr_iter_with(yyjson_mut(value));
+	yyjson_val* item = nullptr;
+	std::size_t index = 0;
+	while ((item = yyjson_arr_iter_next(&iter))) {
+		if (index++ != 0u) {
+			text.push_back('\\');
+		}
+		if (!append_json_tree_number_text(text, item, element.vr())) {
+			return false;
+		}
+	}
+	const auto* ptr = reinterpret_cast<const std::uint8_t*>(text.data());
+	element.set_value_bytes(std::span<const std::uint8_t>(ptr, text.size()));
+	return true;
+}
+
+[[nodiscard]] bool materialize_json_tree_direct(
+    DataElement& element, const yyjson_val* value) {
+	switch (static_cast<std::uint16_t>(element.vr())) {
+	case VR::AE_val:
+	case VR::AS_val:
+	case VR::CS_val:
+	case VR::DA_val:
+	case VR::DT_val:
+	case VR::LO_val:
+	case VR::LT_val:
+	case VR::SH_val:
+	case VR::ST_val:
+	case VR::TM_val:
+	case VR::UC_val:
+	case VR::UI_val:
+	case VR::UR_val:
+	case VR::UT_val:
+	case VR::UN_val:
+		return materialize_json_tree_string_views(element, value);
+	case VR::DS_val:
+	case VR::IS_val:
+		return materialize_json_tree_delimited_text(element, value);
+	case VR::SS_val:
+		return materialize_json_tree_numeric_array<std::int16_t>(
+		    element, value, [](const yyjson_val* item) {
+			    return yyjson_integral_to_value<std::int16_t>(item);
+		    });
+	case VR::US_val:
+		return materialize_json_tree_numeric_array<std::uint16_t>(
+		    element, value, [](const yyjson_val* item) {
+			    return yyjson_integral_to_value<std::uint16_t>(item);
+		    });
+	case VR::SL_val:
+		return materialize_json_tree_numeric_array<std::int32_t>(
+		    element, value, [](const yyjson_val* item) {
+			    return yyjson_integral_to_value<std::int32_t>(item);
+		    });
+	case VR::UL_val:
+		return materialize_json_tree_numeric_array<std::uint32_t>(
+		    element, value, [](const yyjson_val* item) {
+			    return yyjson_integral_to_value<std::uint32_t>(item);
+		    });
+	case VR::SV_val:
+		return materialize_json_tree_numeric_array<std::int64_t>(
+		    element, value, [](const yyjson_val* item) {
+			    return yyjson_integral_to_value<std::int64_t>(item);
+		    });
+	case VR::UV_val:
+		return materialize_json_tree_numeric_array<std::uint64_t>(
+		    element, value, [](const yyjson_val* item) {
+			    return yyjson_integral_to_value<std::uint64_t>(item);
+		    });
+	case VR::FL_val:
+		return materialize_json_tree_numeric_array<float>(
+		    element, value, [](const yyjson_val* item) {
+			    return yyjson_floating_to_value<float>(item);
+		    });
+	case VR::FD_val:
+		return materialize_json_tree_numeric_array<double>(
+		    element, value, [](const yyjson_val* item) {
+			    return yyjson_floating_to_value<double>(item);
+		    });
+	default:
+		return false;
+	}
+}
+
 template <typename T>
 std::optional<std::vector<T>> parse_json_integral_array(std::string_view fragment);
 template <typename T>
@@ -531,125 +880,118 @@ std::optional<std::vector<Tag>> parse_json_at_array(std::string_view fragment);
 template <typename T>
 void write_numeric_values_le(DataElement& element, std::span<const T> values);
 
-void materialize_json_stream_element(DataElement& element, std::size_t fragment_length) {
-	if (element.storage_kind() != DataElement::StorageKind::json_stream) {
-		return;
-	}
-	const auto fragment = json_fragment_text(element, fragment_length);
+[[nodiscard]] bool materialize_json_element_from_fragment(
+    DataElement& element, std::string_view fragment) {
 	switch (static_cast<std::uint16_t>(element.vr())) {
 	case VR::AT_val: {
 		auto values = parse_json_at_array(fragment);
 		if (values && element.from_tag_vector(*values)) {
-			return;
+			return true;
 		}
-		break;
+		return false;
 	}
 	case VR::SS_val: {
 		auto values = parse_json_integral_array<std::int16_t>(fragment);
 		if (values) {
 			write_numeric_values_le(element, std::span<const std::int16_t>(*values));
-			return;
+			return true;
 		}
-		break;
+		return false;
 	}
 	case VR::US_val: {
 		auto values = parse_json_integral_array<std::uint16_t>(fragment);
 		if (values) {
 			write_numeric_values_le(element, std::span<const std::uint16_t>(*values));
-			return;
+			return true;
 		}
-		break;
+		return false;
 	}
 	case VR::SL_val: {
 		auto values = parse_json_integral_array<std::int32_t>(fragment);
 		if (values) {
 			write_numeric_values_le(element, std::span<const std::int32_t>(*values));
-			return;
+			return true;
 		}
-		break;
+		return false;
 	}
 	case VR::UL_val: {
 		auto values = parse_json_integral_array<std::uint32_t>(fragment);
 		if (values) {
 			write_numeric_values_le(element, std::span<const std::uint32_t>(*values));
-			return;
+			return true;
 		}
-		break;
+		return false;
 	}
 	case VR::SV_val: {
 		auto values = parse_json_integral_array<std::int64_t>(fragment);
 		if (values) {
 			write_numeric_values_le(element, std::span<const std::int64_t>(*values));
-			return;
+			return true;
 		}
-		break;
+		return false;
 	}
 	case VR::UV_val: {
 		auto values = parse_json_integral_array<std::uint64_t>(fragment);
 		if (values) {
 			write_numeric_values_le(element, std::span<const std::uint64_t>(*values));
-			return;
+			return true;
 		}
-		break;
+		return false;
 	}
 	case VR::FL_val: {
 		auto values = parse_json_floating_array<float>(fragment);
 		if (values) {
 			write_numeric_values_le(element, std::span<const float>(*values));
-			return;
+			return true;
 		}
-		break;
+		return false;
 	}
 	case VR::FD_val: {
 		auto values = parse_json_floating_array<double>(fragment);
 		if (values) {
 			write_numeric_values_le(element, std::span<const double>(*values));
-			return;
+			return true;
 		}
-		break;
+		return false;
 	}
 	default:
 		break;
 	}
 
-	auto values = parse_json_stream_utf8_values(element, fragment_length);
-	if (values) {
-		std::vector<std::string_view> value_views;
-		value_views.reserve(values->size());
-		for (const auto& value : *values) {
-			value_views.push_back(value);
-		}
-		if (element.vr() == VR::UN) {
-			std::string raw_text;
-			std::size_t total_length = values->empty() ? 0u : values->size() - 1u;
-			for (const auto& value : *values) {
-				total_length += value.size();
-			}
-			raw_text.reserve(total_length);
-			for (std::size_t i = 0; i < values->size(); ++i) {
-				if (i != 0u) {
-					raw_text.push_back('\\');
-				}
-				raw_text += (*values)[i];
-			}
-			const auto* ptr = reinterpret_cast<const std::uint8_t*>(raw_text.data());
-			element.set_value_bytes(std::span<const std::uint8_t>(ptr, raw_text.size()));
-			return;
-		}
-		const auto* root = element.parent() ? element.parent()->root_dataset() : nullptr;
-		const auto charset_errors =
-		    root ? root->json_read_charset_errors_policy() : CharsetEncodeErrorPolicy::strict;
-		const bool ok = element.vr().uses_specific_character_set()
-		    ? element.from_utf8_views(value_views, charset_errors, nullptr)
-		    : element.from_string_views(value_views);
-		if (ok) {
-			return;
-		}
+	auto values = parse_json_utf8_values_from_fragment(element, fragment);
+	if (!values) {
+		return false;
 	}
 
-	diag::error_and_throw(
-	    "json_stream tag={} vr={} reason=failed to materialize raw DICOM bytes from JSON Value fragment",
-	    element.tag().to_string(), element.vr().str());
+	std::vector<std::string_view> value_views;
+	value_views.reserve(values->size());
+	for (const auto& value : *values) {
+		value_views.push_back(value);
+	}
+	if (element.vr() == VR::UN) {
+		std::string raw_text;
+		std::size_t total_length = values->empty() ? 0u : values->size() - 1u;
+		for (const auto& value : *values) {
+			total_length += value.size();
+		}
+		raw_text.reserve(total_length);
+		for (std::size_t i = 0; i < values->size(); ++i) {
+			if (i != 0u) {
+				raw_text.push_back('\\');
+			}
+			raw_text += (*values)[i];
+		}
+		const auto* ptr = reinterpret_cast<const std::uint8_t*>(raw_text.data());
+		element.set_value_bytes(std::span<const std::uint8_t>(ptr, raw_text.size()));
+		return true;
+	}
+
+	const auto* root = element.parent() ? element.parent()->root_dataset() : nullptr;
+	const auto charset_errors =
+	    root ? root->json_read_charset_errors_policy() : CharsetEncodeErrorPolicy::strict;
+	return element.vr().uses_specific_character_set()
+	    ? element.from_utf8_views(value_views, charset_errors, nullptr)
+	    : element.from_string_views(value_views);
 }
 
 bool report_from_assignment_failure(const DataElement& element, std::string_view reason,
@@ -1272,6 +1614,71 @@ std::optional<uid::WellKnown> well_known_uid_from_element_value(const DataElemen
 
 }  // namespace
 
+std::optional<std::vector<std::string>> DataElement::parse_json_tree_utf8_values() const {
+	if (storage_kind_ != StorageKind::json_tree) {
+		return std::nullopt;
+	}
+	const auto* value = reinterpret_cast<const yyjson_val*>(storage_.ptr);
+	if (!value || !yyjson_is_arr(yyjson_mut(value))) {
+		return std::nullopt;
+	}
+
+	std::vector<std::string> values;
+	yyjson_arr_iter iter = yyjson_arr_iter_with(yyjson_mut(value));
+	yyjson_val* item = nullptr;
+	while ((item = yyjson_arr_iter_next(&iter))) {
+		if (yyjson_is_null(item)) {
+			values.emplace_back();
+		} else if (vr_ == VR::PN) {
+			auto pn = parse_json_tree_person_name_object(item);
+			if (!pn) {
+				return std::nullopt;
+			}
+			values.push_back(std::move(*pn));
+		} else if (yyjson_is_str(item)) {
+			values.emplace_back(yyjson_get_str(item), yyjson_get_len(item));
+		} else if ((vr_ == VR::DS || vr_ == VR::IS || vr_ == VR::UN) && yyjson_is_num(item)) {
+			auto number = yyjson_scalar_to_text(item);
+			if (!number) {
+				return std::nullopt;
+			}
+			values.push_back(std::move(*number));
+		} else {
+			return std::nullopt;
+		}
+	}
+	return values;
+}
+
+void DataElement::materialize_json_tree() {
+	if (storage_kind_ != StorageKind::json_tree) {
+		return;
+	}
+	const auto* value = reinterpret_cast<const yyjson_val*>(storage_.ptr);
+	if (!value) {
+		diag::error_and_throw(
+		    "json_tree tag={} vr={} reason=missing yyjson value tree",
+		    tag_.to_string(), vr_.str());
+	}
+	if (materialize_json_tree_direct(*this, value)) {
+		return;
+	}
+	char* fragment = yyjson_val_write(value, 0, nullptr);
+	if (!fragment) {
+		diag::error_and_throw(
+		    "json_tree tag={} vr={} reason=failed to serialize JSON Value tree",
+		    tag_.to_string(), vr_.str());
+	}
+	const std::string_view fragment_view{fragment, std::strlen(fragment)};
+	const bool ok = materialize_json_element_from_fragment(*this, fragment_view);
+	std::free(fragment);
+	if (!ok) {
+		diag::error_and_throw(
+		    "json_tree tag={} vr={} reason=failed to materialize raw DICOM bytes from yyjson Value tree",
+		    tag_.to_string(), vr_.str());
+	}
+}
+
 DataElement* NullElement() {
 	static DataElement null(Tag(0x0000, 0x0000), VR::None, 0, 0, nullptr);
 	return &null;
@@ -1298,9 +1705,9 @@ std::span<const std::uint8_t> DataElement::value_span() const {
 			return {};
 		}
 		return parent_->stream().get_span(storage_.offset_, length_);
-	case StorageKind::json_stream: {
+	case StorageKind::json_tree: {
 		auto* self = const_cast<DataElement*>(this);
-		materialize_json_stream_element(*self, length_);
+		self->materialize_json_tree();
 		return self->value_span();
 	}
 	case StorageKind::none:
@@ -1312,9 +1719,9 @@ std::span<const std::uint8_t> DataElement::value_span() const {
 }
 
 std::size_t DataElement::length() const {
-	if (storage_kind_ == StorageKind::json_stream) {
+	if (storage_kind_ == StorageKind::json_tree) {
 		auto* self = const_cast<DataElement*>(this);
-		materialize_json_stream_element(*self, length_);
+		self->materialize_json_tree();
 	}
 	return length_;
 }
@@ -1899,7 +2306,7 @@ bool DataElement::from_sop_class_uid(uid::WellKnown uid) {
 }
 
 int DataElement::vm() const {
-	if (storage_kind_ == StorageKind::json_stream) {
+	if (storage_kind_ == StorageKind::json_tree) {
 		(void)value_span();
 	}
 	// PS 3.5, 6.4 VALUE MULTIPLICITY (VM) AND DELIMITATION
@@ -2619,11 +3026,11 @@ std::optional<std::vector<std::string_view>> DataElement::to_string_views() cons
 
 std::optional<std::string> DataElement::to_utf8_string(
     CharsetDecodeErrorPolicy errors, bool* out_replaced) const {
-	if (storage_kind_ == StorageKind::json_stream) {
+	if (storage_kind_ == StorageKind::json_tree) {
 		if (out_replaced) {
 			*out_replaced = false;
 		}
-		auto values = parse_json_stream_utf8_values(*this, length_);
+		auto values = parse_json_tree_utf8_values();
 		if (!values) {
 			return std::nullopt;
 		}
@@ -2634,11 +3041,11 @@ std::optional<std::string> DataElement::to_utf8_string(
 
 std::optional<std::vector<std::string>> DataElement::to_utf8_strings(
     CharsetDecodeErrorPolicy errors, bool* out_replaced) const {
-	if (storage_kind_ == StorageKind::json_stream) {
+	if (storage_kind_ == StorageKind::json_tree) {
 		if (out_replaced) {
 			*out_replaced = false;
 		}
-		return parse_json_stream_utf8_values(*this, length_);
+		return parse_json_tree_utf8_values();
 	}
 	if (!vr_.is_string()) {
 		if (out_replaced) {

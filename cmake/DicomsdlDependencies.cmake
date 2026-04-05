@@ -48,6 +48,12 @@ set(DICOMSDL_NANOBIND_GIT_REPOSITORY "https://github.com/wjakob/nanobind.git"
 set(DICOMSDL_NANOBIND_GIT_TAG "v2.12.0"
     CACHE STRING "nanobind git ref used by FetchContent (use branch/tag/SHA).")
 
+set(DICOMSDL_YYJSON_GIT_REPOSITORY "https://github.com/ibireme/yyjson.git"
+    CACHE STRING "yyjson upstream git repository used by FetchContent.")
+# Release: yyjson 0.12.0 (GitHub latest release, checked 2026-04-05)
+set(DICOMSDL_YYJSON_GIT_TAG "0.12.0"
+    CACHE STRING "yyjson git ref used by FetchContent (use branch/tag/SHA).")
+
 function(dicomsdl_fetch_fmt)
     FetchContent_Declare(dicomsdl_fmt
         GIT_REPOSITORY "${DICOMSDL_FMT_GIT_REPOSITORY}"
@@ -55,6 +61,29 @@ function(dicomsdl_fetch_fmt)
         GIT_PROGRESS TRUE
     )
     FetchContent_MakeAvailable(dicomsdl_fmt)
+endfunction()
+
+function(dicomsdl_prepare_yyjson)
+    FetchContent_Declare(dicomsdl_yyjson
+        GIT_REPOSITORY "${DICOMSDL_YYJSON_GIT_REPOSITORY}"
+        GIT_TAG "${DICOMSDL_YYJSON_GIT_TAG}"
+        GIT_PROGRESS TRUE
+        GIT_SHALLOW TRUE
+    )
+
+    if(POLICY CMP0169)
+        cmake_policy(PUSH)
+        cmake_policy(SET CMP0169 OLD)
+    endif()
+    FetchContent_GetProperties(dicomsdl_yyjson)
+    if(NOT dicomsdl_yyjson_POPULATED)
+        FetchContent_Populate(dicomsdl_yyjson)
+    endif()
+    if(POLICY CMP0169)
+        cmake_policy(POP)
+    endif()
+
+    set(dicomsdl_yyjson_SOURCE_DIR "${dicomsdl_yyjson_SOURCE_DIR}" PARENT_SCOPE)
 endfunction()
 
 function(dicomsdl_fetch_openjpeg)

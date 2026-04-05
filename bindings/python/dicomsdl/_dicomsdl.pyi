@@ -1229,7 +1229,6 @@ def read_json(
     *,
     name: str = ...,
     charset_errors: Literal["strict", "replace_qmark", "replace_unicode_escape"] = ...,
-    copy: bool = ...,
 ) -> list[tuple[DicomFile, list[JsonBulkRef]]]: ...
 
 def read_file_selected(

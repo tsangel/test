@@ -110,6 +110,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 include(DicomsdlCompilerSetup)
 include(DicomsdlDependencies)
+dicomsdl_prepare_yyjson()
 
 add_library(dicomsdl STATIC
     src/dataset.cpp
@@ -171,6 +172,11 @@ target_include_directories(dicomsdl
         ${CMAKE_CURRENT_SOURCE_DIR}/src/pixel/abi
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${dicomsdl_yyjson_SOURCE_DIR}/src
+)
+
+target_sources(dicomsdl PRIVATE
+    ${dicomsdl_yyjson_SOURCE_DIR}/src/yyjson.c
 )
 
 option(DICOMSDL_ENABLE_OPENJPH "Enable OpenJPH backend for HTJ2K decoding" ON)

@@ -313,21 +313,7 @@ def test_read_json_non_json_input_reports_expected_top_level_shape():
     assert "top-level JSON object or array" in message
 
 
-def test_read_json_copy_false_keeps_source_buffer_alive():
-    payload = (
-        b'{"00080018":{"vr":"UI","Value":["1.2.840.10008.5.1.4.1.1.2"]},'
-        b'"00100010":{"vr":"LO","Value":["buffer-backed"]}}'
-    )
-    items = dicom.read_json(payload, copy=False)
-    del payload
-
-    df, refs = items[0]
-    assert refs == []
-    assert df["SOPInstanceUID"].to_string_view() == "1.2.840.10008.5.1.4.1.1.2"
-    assert df["PatientName"].to_utf8_string() == "buffer-backed"
-
-
-def test_read_json_default_copy_protects_mutable_buffer():
+def test_read_json_copies_mutable_buffer_input():
     payload = bytearray(
         b'{"00080018":{"vr":"UI","Value":["1.2.840.10008.5.1.4.1.1.2"]},'
         b'"00100010":{"vr":"LO","Value":["buffer-backed"]}}'
@@ -340,13 +326,6 @@ def test_read_json_default_copy_protects_mutable_buffer():
     assert refs == []
     assert df["SOPInstanceUID"].to_string_view() == "1.2.840.10008.5.1.4.1.1.2"
     assert df["PatientName"].to_utf8_string() == "buffer-backed"
-
-
-def test_read_json_copy_false_requires_bytes_like_source():
-    with pytest.raises(ValueError) as exc_info:
-        dicom.read_json('{"00100010":{"vr":"LO","Value":["x"]}}', copy=False)
-
-    assert "read_json(copy=False) requires a bytes-like source" in str(exc_info.value)
 
 
 def test_read_json_lazy_numeric_values_materialize_on_access():

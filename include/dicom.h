@@ -33,6 +33,9 @@
 #include "dicom_const.h"
 #include "uid_lookup_detail.hpp"
 
+struct yyjson_doc;
+struct yyjson_val;
+
 namespace dicom {
 
 class DataSet;
@@ -2205,7 +2208,7 @@ public:
 	enum class StorageKind : std::uint16_t {
 		none = 0,
 		stream,
-		json_stream,
+		json_tree,
 		inline_bytes,
 		heap,
 		owned_bytes,
@@ -2495,6 +2498,8 @@ private:
 	void adopt_value_bytes_nocheck(std::vector<std::uint8_t>&& bytes);
 	void adopt_value_bytes_impl(
 	    std::vector<std::uint8_t>&& bytes, bool notify_charset_parent);
+	void materialize_json_tree();
+	[[nodiscard]] std::optional<std::vector<std::string>> parse_json_tree_utf8_values() const;
 };
 
 namespace detail {
@@ -3349,6 +3354,7 @@ public:
 private:
 	friend class SelectedReadParser;
 	friend class DataSet;
+	friend class JsonReadParser;
 	friend void pixel::set_pixel_data(
 	    DicomFile& file, pixel::ConstPixelSpan source,
 	    const pixel::EncoderContext& encoder_ctx);
@@ -3360,8 +3366,10 @@ private:
 	    std::span<const pixel::CodecOptionTextKv> codec_opt_override);
 	void clear_error_state() noexcept;
 	void set_error_state(std::string message);
+	void clear_json_doc_owner() noexcept { json_doc_owner_.reset(); }
 
 	DataSet root_dataset_;
+	std::shared_ptr<yyjson_doc> json_doc_owner_{};
 	uid::WellKnown transfer_syntax_uid_{};
 	bool has_error_{false};
 	std::string error_message_{};
@@ -3856,7 +3864,7 @@ inline void DataElement::release_storage() noexcept {
 		break;
 	case StorageKind::none:
 	case StorageKind::stream:
-	case StorageKind::json_stream:
+	case StorageKind::json_tree:
 	case StorageKind::inline_bytes:
 		break;
 	}
@@ -3867,8 +3875,9 @@ inline void DataElement::release_storage() noexcept {
 inline std::size_t DataElement::offset() const noexcept {
 	switch (storage_kind_) {
 	case StorageKind::stream:
-	case StorageKind::json_stream:
 		return storage_.offset_;
+	case StorageKind::json_tree:
+		return 0;
 	case StorageKind::sequence:
 		return storage_.seq ? storage_.seq->value_offset() : 0;
 	case StorageKind::pixel_sequence:
