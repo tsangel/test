@@ -81,10 +81,6 @@ std::vector<CodecOptionKv> default_codec_options_for_transfer_syntax_or_throw(
 		    .key = "threads",
 		    .value = CodecOptionValue{std::int64_t{-1}},
 		});
-		options.push_back(CodecOptionKv{
-		    .key = "color_transform",
-		    .value = CodecOptionValue{true},
-		});
 		return options;
 	case PIXEL_CODEC_PROFILE_JPEGXL_LOSSLESS:
 	case PIXEL_CODEC_PROFILE_JPEGXL_LOSSY:

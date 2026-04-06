@@ -1200,7 +1200,9 @@ nb::object apply_window_to_numpy_array(
 			out.add("target_bpp", format_encoder_option_double(fields.target_bpp));
 			out.add("target_psnr", format_encoder_option_double(fields.target_psnr));
 			out.add("threads", std::to_string(fields.threads));
-			out.add("color_transform", fields.color_transform ? "true" : "false");
+			if (fields.has_color_transform) {
+				out.add("color_transform", fields.color_transform ? "true" : "false");
+			}
 			out.finalize();
 			return out;
 		}
@@ -1222,7 +1224,9 @@ nb::object apply_window_to_numpy_array(
 			out.add("target_bpp", format_encoder_option_double(fields.target_bpp));
 			out.add("target_psnr", format_encoder_option_double(fields.target_psnr));
 			out.add("threads", std::to_string(fields.threads));
-			out.add("color_transform", fields.color_transform ? "true" : "false");
+			if (fields.has_color_transform) {
+				out.add("color_transform", fields.color_transform ? "true" : "false");
+			}
 			out.finalize();
 			return out;
 		}

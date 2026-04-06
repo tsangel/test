@@ -692,11 +692,11 @@ void validate_single_frame_target_transfer_syntax_or_throw(
 	    current_transfer_syntax.value(), transfer_syntax.value());
 }
 
-void validate_single_frame_target_layout_or_throw(const DicomFile& file,
+void validate_single_frame_target_layout_or_throw(
+    const std::optional<pixel::PixelLayout>& target_layout,
     const pixel::PixelLayout& source_layout, int normalized_bits_stored,
     uint32_t codec_profile_code, pixel::Photometric output_photometric,
     std::size_t frame_index) {
-	const auto target_layout = file.native_pixel_layout();
 	if (!target_layout.has_value()) {
 		throw_frame_codec_stage_exception(frame_index,
 		    CodecStatusCode::invalid_argument, "validate_target",
@@ -864,12 +864,23 @@ void run_set_pixel_data_frame_with_computed_codec_options(DicomFile& file,
 	}
 	validate_encode_profile_source_constraints(codec_profile_code,
 	    source_layout.bits_allocated, source_layout.bits_stored);
+	const auto target_layout = file.native_pixel_layout();
+	const auto effective_codec_options =
+	    target_layout.has_value()
+	        ? build_single_frame_effective_codec_options_for_target_or_throw(
+	              transfer_syntax, codec_profile_code, codec_options,
+	              source.layout.photometric, target_layout->photometric,
+	              source_layout.samples_per_pixel)
+	        : std::vector<CodecOptionKv>(codec_options.begin(), codec_options.end());
+	const auto effective_codec_options_span =
+	    std::span<const CodecOptionKv>(effective_codec_options);
 	const bool use_multicomponent_transform =
 	    should_use_multicomponent_transform(transfer_syntax, codec_profile_code,
-	        codec_options, source_layout.samples_per_pixel);
+	        effective_codec_options_span, source_layout.samples_per_pixel);
 	const pixel::Photometric output_photometric =
 	    compute_output_photometric_for_encode_profile(transfer_syntax,
-	        codec_profile_code, codec_options, use_multicomponent_transform,
+	        codec_profile_code, effective_codec_options_span,
+	        use_multicomponent_transform,
 	        source.layout.photometric, source_layout.samples_per_pixel);
 
 	auto* pixel_sequence =
@@ -877,13 +888,13 @@ void run_set_pixel_data_frame_with_computed_codec_options(DicomFile& file,
 	validate_single_frame_target_transfer_syntax_or_throw(
 	    file, *pixel_sequence, transfer_syntax, frame_index);
 	validate_single_frame_target_layout_or_throw(
-	    file, source.layout, source_layout.bits_stored, codec_profile_code,
+	    target_layout, source.layout, source_layout.bits_stored, codec_profile_code,
 	    output_photometric, frame_index);
 
 	std::vector<std::uint8_t> encoded_frame{};
 #if defined(DICOMSDL_PIXEL_RUNTIME_ENABLED)
 	encoded_frame = encode_single_frame_with_runtime_or_throw(transfer_syntax,
-	    source.layout, codec_profile_code, codec_options,
+	    source.layout, codec_profile_code, effective_codec_options_span,
 	    use_multicomponent_transform,
 	    std::span<const std::uint8_t>(source.bytes.data(),
 	        source_layout.source_frame_size_bytes),

@@ -6,6 +6,7 @@
 #include <optional>
 #include <span>
 #include <string_view>
+#include <vector>
 
 namespace dicom::pixel::detail {
 
@@ -26,6 +27,12 @@ void validate_encode_profile_source_constraints(uint32_t codec_profile_code,
     bool use_multicomponent_transform, pixel::Photometric source_photometric,
     std::size_t samples_per_pixel,
     bool decoded_source_is_rgb_domain_for_jpeg = false);
+[[nodiscard]] std::vector<CodecOptionKv>
+build_single_frame_effective_codec_options_for_target_or_throw(
+    uid::WellKnown transfer_syntax, uint32_t codec_profile_code,
+    std::span<const CodecOptionKv> codec_options,
+    pixel::Photometric source_photometric, pixel::Photometric target_photometric,
+    std::size_t samples_per_pixel);
 
 [[nodiscard]] bool encode_profile_uses_lossy_compression(
     uint32_t codec_profile_code) noexcept;

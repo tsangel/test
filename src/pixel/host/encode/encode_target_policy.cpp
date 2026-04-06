@@ -1,5 +1,6 @@
 #include "pixel/host/encode/encode_target_policy.hpp"
 
+#include "pixel/host/encode/multicomponent_transform_policy.hpp"
 #include "pixel/host/error/codec_error.hpp"
 #include "diagnostics.h"
 
@@ -35,6 +36,34 @@ struct JpegColorOptionState {
 [[nodiscard]] bool is_jpeg_encode_profile(uint32_t codec_profile_code) noexcept {
 	return codec_profile_code == PIXEL_CODEC_PROFILE_JPEG_LOSSLESS ||
 	    codec_profile_code == PIXEL_CODEC_PROFILE_JPEG_LOSSY;
+}
+
+[[nodiscard]] bool is_jpeg2000_or_htj2k_encode_profile(
+    uint32_t codec_profile_code) noexcept {
+	return codec_profile_code == PIXEL_CODEC_PROFILE_JPEG2000_LOSSLESS ||
+	    codec_profile_code == PIXEL_CODEC_PROFILE_JPEG2000_LOSSY ||
+	    codec_profile_code == PIXEL_CODEC_PROFILE_HTJ2K_LOSSLESS ||
+	    codec_profile_code == PIXEL_CODEC_PROFILE_HTJ2K_LOSSLESS_RPCL ||
+	    codec_profile_code == PIXEL_CODEC_PROFILE_HTJ2K_LOSSY;
+}
+
+[[nodiscard]] bool is_lossless_multicomponent_transform_profile(
+    uint32_t codec_profile_code) noexcept {
+	return codec_profile_code == PIXEL_CODEC_PROFILE_JPEG2000_LOSSLESS ||
+	    codec_profile_code == PIXEL_CODEC_PROFILE_HTJ2K_LOSSLESS ||
+	    codec_profile_code == PIXEL_CODEC_PROFILE_HTJ2K_LOSSLESS_RPCL;
+}
+
+[[nodiscard]] bool is_lossy_multicomponent_transform_profile(
+    uint32_t codec_profile_code) noexcept {
+	return codec_profile_code == PIXEL_CODEC_PROFILE_JPEG2000_LOSSY ||
+	    codec_profile_code == PIXEL_CODEC_PROFILE_HTJ2K_LOSSY;
+}
+
+[[nodiscard]] bool is_jpeg2000_mc_transfer_syntax(uid::WellKnown transfer_syntax) noexcept {
+	using namespace dicom::literals;
+	return transfer_syntax == "JPEG2000MCLossless"_uid ||
+	    transfer_syntax == "JPEG2000MC"_uid;
 }
 
 [[nodiscard]] bool option_key_matches_exact(
@@ -226,6 +255,156 @@ struct JpegColorOptionState {
 	return pixel::Photometric::ybr_full_422;
 }
 
+[[nodiscard]] std::vector<CodecOptionKv>
+build_single_frame_effective_jpeg_codec_options_for_target_or_throw(
+    uid::WellKnown transfer_syntax, uint32_t codec_profile_code,
+    std::span<const CodecOptionKv> codec_options,
+    pixel::Photometric source_photometric, pixel::Photometric target_photometric,
+    std::size_t samples_per_pixel) {
+	using namespace dicom::literals;
+
+	std::vector<CodecOptionKv> effective_options(
+	    codec_options.begin(), codec_options.end());
+	if (transfer_syntax != "JPEGBaseline8Bit"_uid ||
+	    codec_profile_code != PIXEL_CODEC_PROFILE_JPEG_LOSSY ||
+	    source_photometric != pixel::Photometric::rgb ||
+	    samples_per_pixel != std::size_t{3}) {
+		return effective_options;
+	}
+
+	const auto jpeg_options = lookup_jpeg_color_options(codec_options);
+	if (!jpeg_options.valid_color_space) {
+		throw_codec_stage_exception(CodecStatusCode::invalid_argument,
+		    "validate_options",
+		    "jpeg color_space option must be 'rgb' or 'ybr'");
+	}
+	if (!jpeg_options.valid_subsampling) {
+		throw_codec_stage_exception(CodecStatusCode::invalid_argument,
+		    "validate_options",
+		    "jpeg subsampling option must be '444' or '422'");
+	}
+
+	if (target_photometric == pixel::Photometric::rgb) {
+		if (jpeg_options.has_subsampling) {
+			throw_codec_stage_exception(CodecStatusCode::invalid_argument,
+			    "validate_target",
+			    "target photometric RGB is incompatible with jpeg subsampling option");
+		}
+		if (jpeg_options.has_color_space &&
+		    jpeg_options.color_space != JpegColorSpaceOption::rgb) {
+			throw_codec_stage_exception(CodecStatusCode::invalid_argument,
+			    "validate_target",
+			    "target photometric RGB is incompatible with jpeg color_space option");
+		}
+		if (!jpeg_options.has_color_space) {
+			effective_options.push_back(
+			    CodecOptionKv{.key = "color_space", .value = std::string("rgb")});
+		}
+		return effective_options;
+	}
+
+	if (target_photometric == pixel::Photometric::ybr_full_422) {
+		if (jpeg_options.has_color_space &&
+		    jpeg_options.color_space != JpegColorSpaceOption::ybr) {
+			throw_codec_stage_exception(CodecStatusCode::invalid_argument,
+			    "validate_target",
+			    "target photometric YBR_FULL_422 is incompatible with jpeg color_space option");
+		}
+		if (jpeg_options.has_subsampling &&
+		    jpeg_options.subsampling != JpegSubsamplingOption::s422) {
+			throw_codec_stage_exception(CodecStatusCode::invalid_argument,
+			    "validate_target",
+			    "target photometric YBR_FULL_422 is incompatible with jpeg subsampling option");
+		}
+		if (!jpeg_options.has_color_space) {
+			effective_options.push_back(
+			    CodecOptionKv{.key = "color_space", .value = std::string("ybr")});
+		}
+		return effective_options;
+	}
+
+	return effective_options;
+}
+
+[[nodiscard]] std::vector<CodecOptionKv>
+build_single_frame_effective_mct_codec_options_for_target_or_throw(
+    uid::WellKnown transfer_syntax, uint32_t codec_profile_code,
+    std::span<const CodecOptionKv> codec_options,
+    pixel::Photometric source_photometric, pixel::Photometric target_photometric,
+    std::size_t samples_per_pixel) {
+	std::vector<CodecOptionKv> effective_options(
+	    codec_options.begin(), codec_options.end());
+	if (!is_jpeg2000_or_htj2k_encode_profile(codec_profile_code) ||
+	    source_photometric != pixel::Photometric::rgb ||
+	    samples_per_pixel != std::size_t{3}) {
+		return effective_options;
+	}
+
+	const auto mct_option =
+	    lookup_multicomponent_transform_option(codec_options);
+	if (mct_option.found && !mct_option.valid) {
+		throw_codec_stage_exception(CodecStatusCode::invalid_argument,
+		    "validate_options",
+		    "color_transform/mct option must be bool (or 0/1)");
+	}
+
+	bool desired_color_transform = false;
+	switch (target_photometric) {
+	case pixel::Photometric::rgb:
+		if (is_jpeg2000_mc_transfer_syntax(transfer_syntax)) {
+			throw_codec_stage_exception(CodecStatusCode::invalid_argument,
+			    "validate_target",
+			    "target photometric RGB is incompatible with JPEG2000 MC transfer syntax");
+		}
+		desired_color_transform = false;
+		break;
+	case pixel::Photometric::ybr_rct:
+		if (!is_lossless_multicomponent_transform_profile(codec_profile_code)) {
+			throw_codec_stage_exception(CodecStatusCode::invalid_argument,
+			    "validate_target",
+			    "target photometric YBR_RCT requires lossless JPEG2000/HTJ2K transfer syntax");
+		}
+		desired_color_transform = true;
+		break;
+	case pixel::Photometric::ybr_ict:
+		if (!is_lossy_multicomponent_transform_profile(codec_profile_code)) {
+			throw_codec_stage_exception(CodecStatusCode::invalid_argument,
+			    "validate_target",
+			    "target photometric YBR_ICT requires lossy JPEG2000/HTJ2K transfer syntax");
+		}
+		desired_color_transform = true;
+		break;
+	default:
+		return effective_options;
+	}
+
+	if (mct_option.found && mct_option.value != desired_color_transform) {
+		switch (target_photometric) {
+		case pixel::Photometric::rgb:
+			throw_codec_stage_exception(CodecStatusCode::invalid_argument,
+			    "validate_target",
+			    "target photometric RGB is incompatible with color_transform option");
+		case pixel::Photometric::ybr_rct:
+			throw_codec_stage_exception(CodecStatusCode::invalid_argument,
+			    "validate_target",
+			    "target photometric YBR_RCT is incompatible with color_transform option");
+		case pixel::Photometric::ybr_ict:
+			throw_codec_stage_exception(CodecStatusCode::invalid_argument,
+			    "validate_target",
+			    "target photometric YBR_ICT is incompatible with color_transform option");
+		default:
+			break;
+		}
+	}
+	if (!mct_option.found) {
+		effective_options.push_back(CodecOptionKv{
+		    .key = "color_transform",
+		    .value = CodecOptionValue{desired_color_transform},
+		});
+	}
+	return effective_options;
+}
+
 } // namespace
 
 bool is_native_uncompressed_encode_profile(uint32_t codec_profile_code) noexcept {
@@ -274,6 +453,21 @@ pixel::Photometric compute_output_photometric_for_encode_profile(
 		return pixel::Photometric::ybr_rct;
 	}
 	return pixel::Photometric::ybr_ict;
+}
+
+std::vector<CodecOptionKv> build_single_frame_effective_codec_options_for_target_or_throw(
+    uid::WellKnown transfer_syntax, uint32_t codec_profile_code,
+    std::span<const CodecOptionKv> codec_options,
+    pixel::Photometric source_photometric, pixel::Photometric target_photometric,
+    std::size_t samples_per_pixel) {
+	if (!is_jpeg_encode_profile(codec_profile_code)) {
+		return build_single_frame_effective_mct_codec_options_for_target_or_throw(
+		    transfer_syntax, codec_profile_code, codec_options,
+		    source_photometric, target_photometric, samples_per_pixel);
+	}
+	return build_single_frame_effective_jpeg_codec_options_for_target_or_throw(
+	    transfer_syntax, codec_profile_code, codec_options, source_photometric,
+	    target_photometric, samples_per_pixel);
 }
 
 bool encode_profile_uses_lossy_compression(uint32_t codec_profile_code) noexcept {
