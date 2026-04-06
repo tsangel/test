@@ -25,7 +25,9 @@ def _qimage_to_rgb_array(image):
         buffer = ptr[:size]
     array = np.frombuffer(buffer, dtype=np.uint8)
     array = array.reshape(image.height(), image.bytesPerLine())
-    return array[:, : image.width() * 3].reshape(image.height(), image.width(), 3)
+    return (
+        array[:, : image.width() * 3].reshape(image.height(), image.width(), 3).copy()
+    )
 
 
 def test_render_loaded_dicom_uses_decoded_photometric_for_color_display():
