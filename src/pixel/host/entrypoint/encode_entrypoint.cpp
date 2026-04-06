@@ -85,4 +85,37 @@ void pixel::set_pixel_data(
 	}
 }
 
+void pixel::set_pixel_data(DicomFile& file, pixel::ConstPixelSpan source,
+    std::size_t frame_index, const pixel::EncoderContext& encoder_ctx) {
+	try {
+		if (!encoder_ctx.configured()) {
+			pixel::detail::throw_codec_stage_exception(
+			    pixel::detail::CodecStatusCode::invalid_argument,
+			    "validate_encoder_context",
+			    "encoder context is not configured");
+		}
+		if (!encoder_ctx.transfer_syntax_uid().valid()) {
+			pixel::detail::throw_codec_stage_exception(
+			    pixel::detail::CodecStatusCode::invalid_argument,
+			    "validate_encoder_context",
+			    "encoder context transfer syntax is invalid");
+		}
+		pixel::detail::run_set_pixel_data_frame_with_computed_codec_options(
+		    file, encoder_ctx.transfer_syntax_uid(), source, frame_index,
+		    encoder_ctx.codec_options());
+		file.set_transfer_syntax_state_only(encoder_ctx.transfer_syntax_uid());
+		if (!file.set_value(Tag(0x0002u, 0x0010u), VR::UI,
+		        encoder_ctx.transfer_syntax_uid().value())) {
+			pixel::detail::throw_codec_stage_exception(
+			    pixel::detail::CodecStatusCode::internal_error,
+			    "finalize_transfer_syntax",
+			    "failed to update (0002,0010) TransferSyntaxUID");
+		}
+	} catch (const diag::DicomException& ex) {
+		pixel::detail::rethrow_codec_exception_at_boundary_or_throw(
+		    "DicomFile::set_pixel_data", file,
+		    encoder_ctx.transfer_syntax_uid(), ex);
+	}
+}
+
 } // namespace dicom

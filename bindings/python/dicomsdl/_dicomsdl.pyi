@@ -665,19 +665,43 @@ class DicomFile:
     ) -> bool: ...
     @overload
     def set_pixel_data(
-        self, transfer_syntax: Uid, source: Any, /, *, options: object = ...
+        self,
+        transfer_syntax: Uid,
+        source: Any,
+        /,
+        *,
+        frame_index: int | None = ...,
+        options: object = ...,
     ) -> None: ...
     @overload
     def set_pixel_data(
-        self, transfer_syntax: str, source: Any, /, *, options: object = ...
+        self,
+        transfer_syntax: str,
+        source: Any,
+        /,
+        *,
+        frame_index: int | None = ...,
+        options: object = ...,
     ) -> None: ...
     @overload
     def set_pixel_data(
-        self, transfer_syntax: Uid, source: Any, /, *, encoder_context: EncoderContext
+        self,
+        transfer_syntax: Uid,
+        source: Any,
+        /,
+        *,
+        frame_index: int | None = ...,
+        encoder_context: EncoderContext,
     ) -> None: ...
     @overload
     def set_pixel_data(
-        self, transfer_syntax: str, source: Any, /, *, encoder_context: EncoderContext
+        self,
+        transfer_syntax: str,
+        source: Any,
+        /,
+        *,
+        frame_index: int | None = ...,
+        encoder_context: EncoderContext,
     ) -> None: ...
     def write_file(
         self,

@@ -22,6 +22,7 @@ DicomSDL keeps pixel decode, pixel encode, and frame-aware pixel metadata on `Di
 ## Encode and transcode surface
 
 - `set_pixel_data(...)`: replace pixel payload from normalized native source bytes plus metadata
+- `set_pixel_data(..., frame_index=...)` in Python / `set_pixel_data(..., frame_index)` in C++: encode one single-frame native source buffer into an existing encapsulated `PixelData` frame slot
 - `set_transfer_syntax(...)`: mutate the in-memory file to a new transfer syntax
 - `write_with_transfer_syntax(...)` in C++: stream a target transfer syntax without keeping the transcoded payload on the source object
 - low-level C++ helpers: `set_native_pixel_data(...)`, `reset_encapsulated_pixel_data(...)`, `set_encoded_pixel_frame(...)`, `add_encoded_pixel_frame(...)`

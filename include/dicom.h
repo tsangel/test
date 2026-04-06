@@ -1875,6 +1875,9 @@ class EncoderContext;
 /// Replace PixelData using the transfer syntax and codec options captured in `encoder_ctx`.
 void set_pixel_data(
     DicomFile& file, ConstPixelSpan source, const EncoderContext& encoder_ctx);
+/// Encode one native source frame and replace one encapsulated PixelData frame slot.
+void set_pixel_data(DicomFile& file, ConstPixelSpan source, std::size_t frame_index,
+    const EncoderContext& encoder_ctx);
 
 class EncoderContext {
 public:
@@ -3337,6 +3340,13 @@ public:
 	    pixel::ConstPixelSpan source, const pixel::EncoderContext& encoder_ctx);
 	void set_pixel_data(uid::WellKnown transfer_syntax, pixel::ConstPixelSpan source,
 	    std::span<const pixel::CodecOptionTextKv> codec_opt);
+	/// Replace one encapsulated PixelData frame by encoding a single-frame native source.
+	void set_pixel_data(uid::WellKnown transfer_syntax,
+	    pixel::ConstPixelSpan source, std::size_t frame_index);
+	void set_pixel_data(uid::WellKnown transfer_syntax, pixel::ConstPixelSpan source,
+	    std::size_t frame_index, const pixel::EncoderContext& encoder_ctx);
+	void set_pixel_data(uid::WellKnown transfer_syntax, pixel::ConstPixelSpan source,
+	    std::size_t frame_index, std::span<const pixel::CodecOptionTextKv> codec_opt);
 	/// Replace PixelData with native bytes (OB/OW) by moving ownership from `native_pixel_data`.
 	/// If `vr` is None, OB/OW is inferred from BitsAllocated (<=8 -> OB, otherwise OW).
 	void set_native_pixel_data(std::vector<std::uint8_t>&& native_pixel_data, VR vr = VR::None);
@@ -3453,6 +3463,9 @@ private:
 	friend class JsonReadParser;
 	friend void pixel::set_pixel_data(
 	    DicomFile& file, pixel::ConstPixelSpan source,
+	    const pixel::EncoderContext& encoder_ctx);
+	friend void pixel::set_pixel_data(
+	    DicomFile& file, pixel::ConstPixelSpan source, std::size_t frame_index,
 	    const pixel::EncoderContext& encoder_ctx);
 	void set_transfer_syntax_state_only(uid::WellKnown transfer_syntax);
 	void apply_transfer_syntax(uid::WellKnown transfer_syntax);
@@ -3855,6 +3868,10 @@ class PixelSequence {
 	[[nodiscard]] DataSet* root_dataset() const noexcept { return root_dataset_; }
 	/// Transfer syntax associated with this pixel sequence.
 	[[nodiscard]] uid::WellKnown transfer_syntax_uid() const noexcept { return transfer_syntax_; }
+	/// Synchronize the in-memory transfer syntax label carried by this pixel sequence.
+	void set_transfer_syntax_uid(uid::WellKnown transfer_syntax) noexcept {
+		transfer_syntax_ = transfer_syntax;
+	}
 	/// Absolute offset of this pixel sequence value in the root stream.
 	[[nodiscard]] std::size_t value_offset() const noexcept { return value_offset_; }
 	/// Set absolute offset of this pixel sequence value in the root stream.

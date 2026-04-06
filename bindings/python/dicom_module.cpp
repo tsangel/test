@@ -1443,23 +1443,39 @@ void write_with_transfer_syntax_with_encoder_context(DicomFile& self, nb::handle
 }
 
 void set_pixel_data_with_options(DicomFile& self, Uid transfer_syntax,
-    nb::handle source_obj, nb::handle options) {
+    nb::handle source_obj, std::optional<std::size_t> frame_index,
+    nb::handle options) {
 	PyReadOnlyBufferView source_view(source_obj);
 	const auto source = build_pixel_span_or_throw(source_view.view());
 	const auto text_options =
 	    parse_encoder_options_to_text_storage(options, transfer_syntax);
 	if (text_options.auto_mode) {
-		self.set_pixel_data(transfer_syntax, source);
+		if (frame_index.has_value()) {
+			self.set_pixel_data(transfer_syntax, source, *frame_index);
+		} else {
+			self.set_pixel_data(transfer_syntax, source);
+		}
 		return;
 	}
-	self.set_pixel_data(transfer_syntax, source, text_options.span());
+	if (frame_index.has_value()) {
+		self.set_pixel_data(transfer_syntax, source, *frame_index,
+		    text_options.span());
+	} else {
+		self.set_pixel_data(transfer_syntax, source, text_options.span());
+	}
 }
 
 void set_pixel_data_with_encoder_context(DicomFile& self, Uid transfer_syntax,
-    nb::handle source_obj, const EncoderContext& encoder_context) {
+    nb::handle source_obj, std::optional<std::size_t> frame_index,
+    const EncoderContext& encoder_context) {
 	PyReadOnlyBufferView source_view(source_obj);
 	const auto source = build_pixel_span_or_throw(source_view.view());
-	self.set_pixel_data(transfer_syntax, source, encoder_context);
+	if (frame_index.has_value()) {
+		self.set_pixel_data(transfer_syntax, source, *frame_index,
+		    encoder_context);
+	} else {
+		self.set_pixel_data(transfer_syntax, source, encoder_context);
+	}
 }
 
 [[nodiscard]] EncoderContext create_encoder_context_with_options(
@@ -5293,12 +5309,14 @@ NB_MODULE(_dicomsdl, m) {
 		    "When return_replaced=True, returns whether replacement occurred.")
 		.def("set_pixel_data",
 		    [](DicomFile& self, const Uid& transfer_syntax, nb::handle source,
-		        nb::handle options) {
-			    set_pixel_data_with_options(self, transfer_syntax, source, options);
+		        std::optional<std::size_t> frame_index, nb::handle options) {
+			    set_pixel_data_with_options(
+			        self, transfer_syntax, source, frame_index, options);
 		    },
 		    nb::arg("transfer_syntax"),
 		    nb::arg("source"),
 		    nb::kw_only(),
+		    nb::arg("frame_index") = nb::none(),
 		    nb::arg("options") = nb::none(),
 		    "Set PixelData from a C-contiguous numeric buffer.\n"
 		    "\n"
@@ -5308,40 +5326,48 @@ NB_MODULE(_dicomsdl, m) {
 		    "- (frames, rows, cols)               -> multi-frame monochrome\n"
 		    "- (frames, rows, cols, samples[1|3]) -> multi-frame interleaved\n"
 		    "\n"
-		    "Supported dtypes: int8/uint8/int16/uint16/int32/uint32/float32/float64.")
+		    "Supported dtypes: int8/uint8/int16/uint16/int32/uint32/float32/float64.\n"
+		    "\n"
+		    "When frame_index is provided, encode one single-frame source buffer into an existing encapsulated PixelData slot.")
 		.def("set_pixel_data",
 		    [](DicomFile& self, const std::string& transfer_syntax_text,
-		        nb::handle source, nb::handle options) {
+		        nb::handle source, std::optional<std::size_t> frame_index,
+		        nb::handle options) {
 			    set_pixel_data_with_options(self,
 			        parse_transfer_syntax_text_or_throw(transfer_syntax_text),
-			        source, options);
+			        source, frame_index, options);
 		    },
 		    nb::arg("transfer_syntax"),
 		    nb::arg("source"),
 		    nb::kw_only(),
+		    nb::arg("frame_index") = nb::none(),
 		    nb::arg("options") = nb::none(),
 		    "Set PixelData from transfer syntax text and a C-contiguous numeric buffer.")
 		.def("set_pixel_data",
 		    [](DicomFile& self, const Uid& transfer_syntax, nb::handle source,
+		        std::optional<std::size_t> frame_index,
 		        const EncoderContext& encoder_context) {
 			    set_pixel_data_with_encoder_context(
-			        self, transfer_syntax, source, encoder_context);
+			        self, transfer_syntax, source, frame_index, encoder_context);
 		    },
 		    nb::arg("transfer_syntax"),
 		    nb::arg("source"),
 		    nb::kw_only(),
+		    nb::arg("frame_index") = nb::none(),
 		    nb::arg("encoder_context"),
 		    "Set PixelData using a preconfigured EncoderContext.")
 		.def("set_pixel_data",
 		    [](DicomFile& self, const std::string& transfer_syntax_text,
-		        nb::handle source, const EncoderContext& encoder_context) {
+		        nb::handle source, std::optional<std::size_t> frame_index,
+		        const EncoderContext& encoder_context) {
 			    set_pixel_data_with_encoder_context(self,
 			        parse_transfer_syntax_text_or_throw(transfer_syntax_text),
-			        source, encoder_context);
+			        source, frame_index, encoder_context);
 		    },
 		    nb::arg("transfer_syntax"),
 		    nb::arg("source"),
 		    nb::kw_only(),
+		    nb::arg("frame_index") = nb::none(),
 		    nb::arg("encoder_context"),
 		    "Set PixelData from transfer syntax text using a preconfigured EncoderContext.")
 		.def("write_file",

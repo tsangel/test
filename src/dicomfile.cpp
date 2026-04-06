@@ -2045,6 +2045,13 @@ PixelFrame* DicomFile::add_encoded_pixel_frame(std::vector<std::uint8_t>&& encod
 void DicomFile::set_transfer_syntax_state_only(uid::WellKnown transfer_syntax) {
 	transfer_syntax_uid_ = transfer_syntax.valid() ? transfer_syntax : uid::WellKnown{};
 	root_dataset_.explicit_vr_ = transfer_syntax_uid_.uses_explicit_vr();
+	root_dataset_.ensure_loaded("PixelData"_tag);
+	auto& pixel_data = root_dataset_["PixelData"_tag];
+	if (pixel_data.is_present() && pixel_data.vr().is_pixel_sequence()) {
+		if (auto* pixel_sequence = pixel_data.as_pixel_sequence()) {
+			pixel_sequence->set_transfer_syntax_uid(transfer_syntax_uid_);
+		}
+	}
 }
 
 void DicomFile::apply_transfer_syntax(uid::WellKnown transfer_syntax) {

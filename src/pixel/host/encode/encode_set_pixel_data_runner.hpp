@@ -11,6 +11,9 @@ namespace dicom::pixel::detail {
 void run_set_pixel_data_with_computed_codec_options(DicomFile& file,
     uid::WellKnown transfer_syntax, pixel::ConstPixelSpan source,
     std::span<const CodecOptionKv> codec_options);
+void run_set_pixel_data_frame_with_computed_codec_options(DicomFile& file,
+    uid::WellKnown transfer_syntax, pixel::ConstPixelSpan source,
+    std::size_t frame_index, std::span<const CodecOptionKv> codec_options);
 void run_set_pixel_data_from_frame_provider_with_computed_codec_options(
     DicomFile& file, uid::WellKnown transfer_syntax,
     const pixel::PixelLayout& source_layout,

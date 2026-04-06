@@ -580,6 +580,174 @@ void encode_frames_with_runtime_or_throw_impl(uid::WellKnown transfer_syntax,
 	return true;
 }
 
+[[nodiscard]] bool pixel_frame_has_materialized_payload(
+    const PixelFrame* frame) noexcept {
+	return frame != nullptr &&
+	    (frame->encoded_data_size() != 0 || !frame->fragments().empty());
+}
+
+[[nodiscard]] bool pixel_sequence_has_any_materialized_payload(
+    const PixelSequence& pixel_sequence) noexcept {
+	for (std::size_t frame_index = 0; frame_index < pixel_sequence.number_of_frames();
+	     ++frame_index) {
+		if (pixel_frame_has_materialized_payload(pixel_sequence.frame(frame_index))) {
+			return true;
+		}
+	}
+	return false;
+}
+
+[[nodiscard]] bool pixel_sequence_frames_are_complete(
+    const PixelSequence& pixel_sequence) noexcept {
+	if (pixel_sequence.number_of_frames() == 0) {
+		return false;
+	}
+	for (std::size_t frame_index = 0; frame_index < pixel_sequence.number_of_frames();
+	     ++frame_index) {
+		if (!pixel_frame_has_materialized_payload(pixel_sequence.frame(frame_index))) {
+			return false;
+		}
+	}
+	return true;
+}
+
+#if defined(DICOMSDL_PIXEL_RUNTIME_ENABLED)
+[[nodiscard]] std::vector<std::uint8_t> encode_single_frame_with_runtime_or_throw(
+    uid::WellKnown transfer_syntax, const pixel::PixelLayout& source_layout,
+    uint32_t codec_profile_code, std::span<const CodecOptionKv> codec_options,
+    bool use_multicomponent_transform, std::span<const std::uint8_t> source_frame,
+    std::size_t frame_index) {
+	const auto* registry = get_runtime_registry();
+	if (registry == nullptr) {
+		throw_codec_stage_exception(CodecStatusCode::unsupported,
+		    "plugin_lookup", "runtime registry is not available");
+	}
+
+	CodecError option_error{};
+	RuntimeOptionListStorage option_storage{};
+	if (!build_runtime_option_list_from_pairs(
+	        codec_options, codec_profile_code, option_storage, option_error)) {
+		throw_codec_exception(std::nullopt, option_error);
+	}
+	const pixel_option_list* option_ptr =
+	    option_storage.list.count == 0 ? nullptr : &option_storage.list;
+
+	::pixel::runtime::HostEncoderContext encoder_ctx{};
+	const EncoderContextGuard guard(&encoder_ctx);
+	const pixel_error_code configure_ec =
+	    ::pixel::runtime::configure_host_encoder_context(
+	        &encoder_ctx, registry, transfer_syntax, option_ptr);
+	const std::string configure_detail = copy_encoder_error_detail(encoder_ctx);
+	if (configure_ec == PIXEL_CODEC_ERR_UNSUPPORTED) {
+		throw_codec_stage_exception(CodecStatusCode::unsupported,
+		    "plugin_lookup",
+		    "encoder binding is not registered in runtime registry");
+	}
+	if (configure_ec != PIXEL_CODEC_ERR_OK) {
+		throw_runtime_encode_error(std::nullopt, configure_ec, configure_detail);
+	}
+
+	return encode_frame_with_runtime_or_throw(encoder_ctx, codec_profile_code,
+	    source_layout, source_frame, use_multicomponent_transform, frame_index,
+	    nullptr);
+}
+#endif
+
+[[nodiscard]] PixelSequence* require_encapsulated_target_pixel_sequence_or_throw(
+    DicomFile& file, std::size_t frame_index) {
+	auto& dataset = file.dataset();
+	const auto pixel_data_tag = Tag(0x7FE0u, 0x0010u);
+	dataset.ensure_loaded(pixel_data_tag);
+	auto& pixel_data = dataset[pixel_data_tag];
+	if (!pixel_data || !pixel_data.vr().is_pixel_sequence()) {
+		throw_frame_codec_stage_exception(frame_index,
+		    CodecStatusCode::invalid_argument, "validate_target",
+		    "target PixelData is not an encapsulated sequence; call reset_encapsulated_pixel_data(frame_count) first");
+	}
+	auto* pixel_sequence = pixel_data.as_pixel_sequence();
+	if (pixel_sequence == nullptr) {
+		throw_frame_codec_stage_exception(frame_index,
+		    CodecStatusCode::invalid_argument, "validate_target",
+		    "target PixelData is not an encapsulated sequence");
+	}
+	if (frame_index >= pixel_sequence->number_of_frames()) {
+		throw_frame_codec_stage_exception(frame_index,
+		    CodecStatusCode::invalid_argument, "validate_target",
+		    "target frame index is out of range for encapsulated PixelData");
+	}
+	return pixel_sequence;
+}
+
+void validate_single_frame_target_transfer_syntax_or_throw(
+    const DicomFile& file, const PixelSequence& pixel_sequence,
+    uid::WellKnown transfer_syntax, std::size_t frame_index) {
+	const auto current_transfer_syntax = file.transfer_syntax_uid();
+	if (!current_transfer_syntax.valid() || current_transfer_syntax == transfer_syntax ||
+	    !pixel_sequence_has_any_materialized_payload(pixel_sequence)) {
+		return;
+	}
+	throw_frame_codec_stage_exception(frame_index,
+	    CodecStatusCode::invalid_argument, "validate_target",
+	    "target transfer syntax mismatch with existing encapsulated PixelData payload (current_ts={} target_ts={})",
+	    current_transfer_syntax.value(), transfer_syntax.value());
+}
+
+void validate_single_frame_target_layout_or_throw(const DicomFile& file,
+    const pixel::PixelLayout& source_layout, int normalized_bits_stored,
+    uint32_t codec_profile_code, pixel::Photometric output_photometric,
+    std::size_t frame_index) {
+	const auto target_layout = file.native_pixel_layout();
+	if (!target_layout.has_value()) {
+		throw_frame_codec_stage_exception(frame_index,
+		    CodecStatusCode::invalid_argument, "validate_target",
+		    "target pixel metadata is incomplete; populate Rows/Columns/SamplesPerPixel/Bits*/PhotometricInterpretation before single-frame encode");
+	}
+
+	const auto expected_planar = is_rle_encode_profile(codec_profile_code)
+	                                 ? pixel::Planar::planar
+	                                 : source_layout.planar;
+	const auto& layout = *target_layout;
+	const bool compare_planar = source_layout.samples_per_pixel > 1u;
+	if (layout.rows != source_layout.rows || layout.cols != source_layout.cols ||
+	    layout.samples_per_pixel != source_layout.samples_per_pixel ||
+	    layout.data_type != source_layout.data_type ||
+	    layout.bits_stored != normalized_bits_stored ||
+	    (compare_planar && layout.planar != expected_planar) ||
+	    layout.photometric != output_photometric) {
+		throw_frame_codec_stage_exception(frame_index,
+		    CodecStatusCode::invalid_argument, "validate_target",
+		    "single-frame source layout does not match target pixel metadata (target rows={} cols={} spp={} dtype_code={} bits_stored={} planar={} photometric_code={} expected rows={} cols={} spp={} dtype_code={} bits_stored={} planar={} photometric_code={})",
+		    layout.rows, layout.cols, layout.samples_per_pixel,
+		    static_cast<int>(layout.data_type), layout.bits_stored,
+		    layout.planar == pixel::Planar::planar ? "planar" : "interleaved",
+		    static_cast<int>(layout.photometric), source_layout.rows,
+		    source_layout.cols, source_layout.samples_per_pixel,
+		    static_cast<int>(source_layout.data_type), normalized_bits_stored,
+		    expected_planar == pixel::Planar::planar ? "planar" : "interleaved",
+		    static_cast<int>(output_photometric));
+	}
+}
+
+void maybe_update_lossy_metadata_after_single_frame_encode_or_throw(
+    DataSet& dataset, const PixelSequence& pixel_sequence,
+    uint32_t codec_profile_code, const pixel::PixelLayout& target_layout) {
+	if (!pixel_sequence_frames_are_complete(pixel_sequence)) {
+		return;
+	}
+
+	std::size_t uncompressed_payload_bytes = 0;
+	if (!pixel::try_pixel_storage_size(target_layout, uncompressed_payload_bytes)) {
+		throw_codec_stage_exception(CodecStatusCode::internal_error,
+		    "update_lossy_metadata",
+		    "target uncompressed payload size overflow while updating single-frame encode metadata");
+	}
+	const auto encoded_payload_bytes = encode_profile_uses_lossy_compression(codec_profile_code)
+	                                       ? encoded_payload_size_from_pixel_sequence(dataset)
+	                                       : std::size_t{0};
+	update_lossy_compression_metadata_for_set_pixel_data(
+	    dataset, codec_profile_code, uncompressed_payload_bytes, encoded_payload_bytes);
+}
+
 }  // namespace
 
 void encode_frames_from_frame_provider_with_runtime_or_throw(
@@ -673,6 +841,63 @@ void run_set_pixel_data_with_computed_codec_options(DicomFile& file,
 	update_lossy_compression_metadata_for_set_pixel_data(dataset,
 	    codec_profile_code, source_layout.destination_total_bytes,
 	    encoded_payload_bytes);
+}
+
+void run_set_pixel_data_frame_with_computed_codec_options(DicomFile& file,
+    uid::WellKnown transfer_syntax, pixel::ConstPixelSpan source,
+    std::size_t frame_index, std::span<const CodecOptionKv> codec_options) {
+	const auto codec_profile_code =
+	    encode_codec_profile_code_from_transfer_syntax_or_throw(transfer_syntax);
+	if (is_native_uncompressed_encode_profile(codec_profile_code)) {
+		throw_frame_codec_stage_exception(frame_index,
+		    CodecStatusCode::invalid_argument, "validate_target",
+		    "single-frame set_pixel_data requires an encapsulated target transfer syntax");
+	}
+
+	const auto source_layout =
+	    support_detail::compute_encode_source_layout_or_throw(source);
+	if (source_layout.frames != 1u || source.layout.frames != 1u) {
+		throw_frame_codec_stage_exception(frame_index,
+		    CodecStatusCode::invalid_argument, "validate_source",
+		    "single-frame set_pixel_data requires source.layout.frames == 1");
+	}
+	validate_encode_profile_source_constraints(codec_profile_code,
+	    source_layout.bits_allocated, source_layout.bits_stored);
+	const bool use_multicomponent_transform =
+	    should_use_multicomponent_transform(transfer_syntax, codec_profile_code,
+	        codec_options, source_layout.samples_per_pixel);
+	const pixel::Photometric output_photometric =
+	    compute_output_photometric_for_encode_profile(codec_profile_code,
+	        use_multicomponent_transform, source.layout.photometric);
+
+	auto* pixel_sequence =
+	    require_encapsulated_target_pixel_sequence_or_throw(file, frame_index);
+	validate_single_frame_target_transfer_syntax_or_throw(
+	    file, *pixel_sequence, transfer_syntax, frame_index);
+	validate_single_frame_target_layout_or_throw(
+	    file, source.layout, source_layout.bits_stored, codec_profile_code,
+	    output_photometric, frame_index);
+
+	std::vector<std::uint8_t> encoded_frame{};
+#if defined(DICOMSDL_PIXEL_RUNTIME_ENABLED)
+	encoded_frame = encode_single_frame_with_runtime_or_throw(transfer_syntax,
+	    source.layout, codec_profile_code, codec_options,
+	    use_multicomponent_transform,
+	    std::span<const std::uint8_t>(source.bytes.data(),
+	        source_layout.source_frame_size_bytes),
+	    frame_index);
+#else
+	throw_codec_stage_exception(CodecStatusCode::unsupported,
+	    "plugin_lookup", "runtime is disabled at build time");
+#endif
+
+	file.set_encoded_pixel_frame(frame_index, std::move(encoded_frame));
+	pixel_sequence =
+	    require_encapsulated_target_pixel_sequence_or_throw(file, frame_index);
+	if (const auto target_layout = file.native_pixel_layout(); target_layout.has_value()) {
+		maybe_update_lossy_metadata_after_single_frame_encode_or_throw(
+		    file.dataset(), *pixel_sequence, codec_profile_code, *target_layout);
+	}
 }
 
 void run_set_pixel_data_from_frame_provider_with_computed_codec_options_impl(

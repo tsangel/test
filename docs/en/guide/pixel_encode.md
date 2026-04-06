@@ -8,6 +8,8 @@ Use `set_pixel_data()` when you already have native stored pixels to encode. Use
 
 - `set_pixel_data(...)`
   - Replace Pixel Data from a native source buffer whose layout you describe explicitly with `pixel::ConstPixelSpan`.
+- `set_pixel_data(..., frame_index)`
+  - Encode one single-frame native source buffer into an existing encapsulated `PixelData` frame slot while keeping the surrounding multi-frame payload in place.
 - `create_encoder_context(...)` + `set_pixel_data(...)` / `set_transfer_syntax(...)`
   - Keep one configured transfer syntax and option set outside a repeated encode or transcode loop.
 - `write_with_transfer_syntax(...)`
@@ -17,6 +19,8 @@ Use `set_pixel_data()` when you already have native stored pixels to encode. Use
 
 - `set_pixel_data(...)`
   - Replace Pixel Data from a C-contiguous NumPy array or other contiguous numeric buffer.
+- `set_pixel_data(..., frame_index=...)`
+  - Encode one single-frame array into an existing encapsulated `PixelData` frame slot.
 - `create_encoder_context(...)` + `set_pixel_data(...)` / `set_transfer_syntax(...)`
   - Parse and validate one Python `options` object up front, then reuse the resulting context across repeated calls.
 - `write_with_transfer_syntax(...)`

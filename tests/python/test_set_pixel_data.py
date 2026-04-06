@@ -103,3 +103,78 @@ def test_set_pixel_data_rejects_encoder_context_transfer_syntax_mismatch():
         dicom_file.set_pixel_data(
             "ExplicitVRLittleEndian", source, encoder_context=ctx
         )
+
+
+def test_set_pixel_data_replaces_one_encapsulated_frame_with_frame_index():
+    supported = {
+        uid.keyword or uid.value for uid in dicom.transfer_syntax_uids_encode_supported()
+    }
+    if "RLELossless" not in supported:
+        pytest.skip("RLELossless encoder is not available in this build")
+
+    dicom_file = dicom.read_file(_test_file())
+    frame0 = np.full((4, 4), 3, dtype=np.int16)
+    frame1 = np.full((4, 4), 7, dtype=np.int16)
+    dicom_file.set_pixel_data("RLELossless", np.stack([frame0, frame1], axis=0))
+
+    replacement = np.full((4, 4), 19, dtype=np.int16)
+    dicom_file.set_pixel_data("RLELossless", replacement, frame_index=1)
+
+    decoded = dicom_file.to_array(frame=-1)
+    assert decoded.shape == (2, 4, 4)
+    assert np.array_equal(decoded[0], frame0)
+    assert np.array_equal(decoded[1], replacement)
+    assert dicom_file.transfer_syntax_uid.keyword == "RLELossless"
+
+
+def test_set_pixel_data_frame_index_supports_encoder_context():
+    supported = {
+        uid.keyword or uid.value for uid in dicom.transfer_syntax_uids_encode_supported()
+    }
+    if "RLELossless" not in supported:
+        pytest.skip("RLELossless encoder is not available in this build")
+
+    dicom_file = dicom.read_file(_test_file())
+    frame0 = np.arange(16, dtype=np.int16).reshape(4, 4)
+    frame1 = np.full((4, 4), 5, dtype=np.int16)
+    dicom_file.set_pixel_data("RLELossless", np.stack([frame0, frame1], axis=0))
+
+    ctx = dicom.create_encoder_context("RLELossless")
+    replacement = np.full((4, 4), 23, dtype=np.int16)
+    dicom_file.set_pixel_data(
+        "RLELossless", replacement, frame_index=0, encoder_context=ctx
+    )
+
+    decoded = dicom_file.to_array(frame=-1)
+    assert np.array_equal(decoded[0], replacement)
+    assert np.array_equal(decoded[1], frame1)
+
+
+def test_set_pixel_data_frame_index_rejects_multi_frame_source():
+    supported = {
+        uid.keyword or uid.value for uid in dicom.transfer_syntax_uids_encode_supported()
+    }
+    if "RLELossless" not in supported:
+        pytest.skip("RLELossless encoder is not available in this build")
+
+    dicom_file = dicom.read_file(_test_file())
+    frame0 = np.full((4, 4), 1, dtype=np.int16)
+    frame1 = np.full((4, 4), 2, dtype=np.int16)
+    dicom_file.set_pixel_data("RLELossless", np.stack([frame0, frame1], axis=0))
+
+    with pytest.raises(RuntimeError, match="single-frame set_pixel_data"):
+        dicom_file.set_pixel_data(
+            "RLELossless", np.stack([frame0, frame1], axis=0), frame_index=0
+        )
+
+
+def test_set_pixel_data_frame_index_rejects_native_transfer_syntax():
+    dicom_file = dicom.read_file(_test_file())
+    source = np.arange(16, dtype=np.int16).reshape(4, 4)
+
+    with pytest.raises(
+        RuntimeError, match="requires an encapsulated target transfer syntax"
+    ):
+        dicom_file.set_pixel_data(
+            "ExplicitVRLittleEndian", source, frame_index=0
+        )

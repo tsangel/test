@@ -550,6 +550,18 @@ int main() {
 			fail("set_pixel_data with reusable encoder context mismatch");
 		}
 
+		const std::vector<std::uint8_t> replacement_frame1{
+		    0x21u, 0x00u, 0x22u, 0x00u, 0x23u, 0x00u,
+		    0x24u, 0x00u, 0x25u, 0x00u, 0x26u, 0x00u};
+		const auto replacement_layout = source_layout.single_frame().packed();
+		with_context_file.set_pixel_data("RLELossless"_uid,
+		    make_source_span(replacement_frame1, replacement_layout),
+		    1, rle_encoder_context);
+		if (with_context_file.pixel_data(0) != expected_frame0 ||
+		    with_context_file.pixel_data(1) != replacement_frame1) {
+			fail("single-frame set_pixel_data should replace only the requested encapsulated frame");
+		}
+
 		if (dicom::test::kJpeg2kBuiltin) {
 			dicom::DicomFile transcode_chain_file;
 			transcode_chain_file.set_pixel_data("RLELossless"_uid,
