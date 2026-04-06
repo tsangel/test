@@ -61,6 +61,13 @@ def _build_sequence_pixel_sample() -> bytes:
 	return b"\x00" * 128 + b"DICM" + meta_group_length + meta_version + meta_ts + sop_class + sop_instance + seq_elem + pixel_elem
 
 
+def _build_poisoned_preamble_sequence_pixel_sample() -> bytes:
+	sample = _build_sequence_pixel_sample()
+	poison_prefix = struct.pack("<HH", 0x0010, 0x0010) + b"PN" + struct.pack("<H", 0xFFFF)
+	poison_preamble = poison_prefix + b"\xFF" * (128 - len(poison_prefix))
+	return poison_preamble + sample[128:]
+
+
 def _build_malformed_sample() -> bytes:
 	malformed_elem = struct.pack("<HH", 0x0010, 0x0010) + b"PN" + struct.pack("<H", 8) + b"AB"
 	return b"\x00" * 128 + b"DICM" + malformed_elem
@@ -157,6 +164,33 @@ def test_read_bytes_selected_copy_false_keeps_source_buffer_alive(tmp_path):
 		obj.get_value("ReferencedStudySequence.0.ReferencedSOPInstanceUID")
 		== "1.2.3.4.5.6"
 	)
+
+
+def test_read_file_ignores_poisoned_preamble_before_initial_state_sync(tmp_path):
+	encap_path = tmp_path / "poisoned-preamble-sequence-sample.dcm"
+	encap_path.write_bytes(_build_poisoned_preamble_sequence_pixel_sample())
+
+	obj = dicom.read_file(encap_path)
+
+	assert obj.get_value("SOPInstanceUID") == "1.2.3.4.5.6.7.8.9"
+	assert obj.encoded_pixel_frame_bytes(0) == b"\x01\x02\x03\x04"
+
+
+def test_read_file_selected_ignores_poisoned_preamble_before_initial_state_sync(
+	tmp_path,
+):
+	encap_path = tmp_path / "poisoned-preamble-selected-sequence-sample.dcm"
+	encap_path.write_bytes(_build_poisoned_preamble_sequence_pixel_sample())
+	selection = ["SOPInstanceUID", ("ReferencedStudySequence", ["ReferencedSOPInstanceUID"])]
+
+	obj = dicom.read_file_selected(encap_path, selection)
+
+	assert obj.get_value("SOPInstanceUID") == "1.2.3.4.5.6.7.8.9"
+	assert (
+		obj.get_value("ReferencedStudySequence.0.ReferencedSOPInstanceUID")
+		== "1.2.3.4.5.6"
+	)
+	assert not obj["PixelData"]
 
 
 def test_is_dicom_file(tmp_path):
