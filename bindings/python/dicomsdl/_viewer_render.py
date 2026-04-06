@@ -6,7 +6,11 @@ from pathlib import Path
 import numpy as np
 
 from . import Tag, Uid, apply_rescale, is_dicom_file, read_file
-from ._image import _get_tag_upper_text, _render_display_array
+from ._image import (
+    _decode_array_with_photometric,
+    _get_tag_upper_text,
+    _render_display_array,
+)
 from ._viewer_display import DisplaySettings, format_display_value, modality_group
 from ._qt_compat import QtGui
 
@@ -146,7 +150,7 @@ def _normalize_range_to_uint8(
 
 
 def _decoded_display_array(dicom_file, frame_index: int) -> np.ndarray:
-    array = dicom_file.to_array(frame=frame_index)
+    array, _ = _decode_array_with_photometric(dicom_file, frame_index)
     if array.ndim != 2:
         return array
     transform = dicom_file.rescale_transform_for_frame(frame_index)
@@ -299,7 +303,9 @@ def render_loaded_dicom(
     frame_count = _tag_int(dicom_file, "NumberOfFrames", 1) or 1
     frame_index = max(0, min(frame_index, frame_count - 1))
     display = display or DisplaySettings.auto()
-    photometric = _get_tag_upper_text(dicom_file.dataset, "PhotometricInterpretation")
+    stored_photometric = _get_tag_upper_text(
+        dicom_file.dataset, "PhotometricInterpretation"
+    )
 
     display_min: float | None = None
     display_max: float | None = None
@@ -307,7 +313,9 @@ def render_loaded_dicom(
     display_adjustable = False
 
     try:
-        raw_source = dicom_file.to_array(frame=frame_index)
+        raw_source, decoded_photometric = _decode_array_with_photometric(
+            dicom_file, frame_index
+        )
         raw_dtype = str(raw_source.dtype)
         raw_min, raw_max = _finite_min_max(np.asarray(raw_source))
         source = raw_source
@@ -316,7 +324,7 @@ def render_loaded_dicom(
             if transform is not None:
                 source = apply_rescale(raw_source, transform)
         source_min, source_max = _finite_min_max(np.asarray(source))
-        if source.ndim == 2 and photometric != "PALETTE COLOR":
+        if source.ndim == 2 and decoded_photometric != "PALETTE COLOR":
             lower, upper, display_text = _resolve_display_range(
                 dicom_file,
                 frame_index,
@@ -325,7 +333,7 @@ def render_loaded_dicom(
                 modality,
             )
             rendered = _normalize_range_to_uint8(source, lower, upper)
-            if photometric == "MONOCHROME1":
+            if decoded_photometric == "MONOCHROME1":
                 rendered = 255 - rendered
             display_min = lower
             display_max = upper
@@ -371,7 +379,7 @@ def render_loaded_dicom(
         source_max=source_max,
         sop_class=sop_class,
         sop_class_uid_value=sop_class_uid_value,
-        photometric=photometric or "-",
+        photometric=stored_photometric or "-",
         transfer_syntax=transfer_syntax,
         transfer_syntax_uid_value=transfer_syntax_uid_value,
         dicom_window_text=dicom_window_text,

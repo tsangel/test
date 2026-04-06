@@ -20,6 +20,35 @@ def _get_tag_upper_text(ds: _dicomsdl.DataSet, keyword: str) -> str | None:
     return text.upper()
 
 
+def _decode_info_photometric_text(info) -> str | None:
+    if info is None:
+        return None
+    photometric = getattr(info, "photometric", None)
+    if photometric is None:
+        return None
+    name = getattr(photometric, "name", None)
+    if not isinstance(name, str) or not name:
+        return None
+    if name == "palette_color":
+        return "PALETTE COLOR"
+    return name.upper()
+
+
+def _decode_array_with_photometric(
+    dicom_file: _dicomsdl.DicomFile,
+    frame: int,
+):
+    stored_photometric = _get_tag_upper_text(dicom_file.dataset, "PhotometricInterpretation")
+    try:
+        decoded = dicom_file.to_array(frame=frame, with_info=True)
+    except TypeError:
+        return dicom_file.to_array(frame=frame), stored_photometric
+    if not isinstance(decoded, tuple) or len(decoded) != 2:
+        return decoded, stored_photometric
+    array, info = decoded
+    return array, (_decode_info_photometric_text(info) or stored_photometric)
+
+
 def _resolve_window_transform(
     dicom_file: _dicomsdl.DicomFile,
     frame: int,
@@ -343,9 +372,7 @@ def _render_display_array(
     if frame < 0:
         raise ValueError("frame must be >= 0")
 
-    ds = self.dataset
-    array = self.to_array(frame=frame)
-    photometric = _get_tag_upper_text(ds, "PhotometricInterpretation")
+    array, photometric = _decode_array_with_photometric(self, frame)
     if array.ndim == 2:
         display_palette = _resolve_display_palette(self, photometric)
         if display_palette is not None:

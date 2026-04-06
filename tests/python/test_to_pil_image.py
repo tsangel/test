@@ -11,6 +11,13 @@ def _test_file(name: str = "test_le.dcm") -> str:
     return str(Path(__file__).resolve().parent.parent / name)
 
 
+def _supports_encode(keyword: str) -> bool:
+    for uid in dicom.transfer_syntax_uids_encode_supported():
+        if (uid.keyword or uid.value) == keyword:
+            return True
+    return False
+
+
 _GDCM_PALETTE_SAMPLE = (
     Path(__file__).resolve().parents[2]
     .parent
@@ -296,3 +303,31 @@ def test_to_pil_image_converts_partial_ybr_to_full_display_range(photometric: st
     assert image.mode == "RGB"
     assert arr.dtype == np.uint8
     assert np.array_equal(arr, expected)
+
+
+def test_to_pil_image_uses_decoded_photometric_for_jpeg_baseline_color_output():
+    if not _supports_encode("JPEGBaseline8Bit"):
+        pytest.skip("JPEGBaseline8Bit encoder is not available in this build")
+
+    dicom_file = dicom.DicomFile()
+    source = np.array(
+        [
+            [[255, 0, 0], [0, 255, 0]],
+            [[0, 0, 255], [255, 255, 0]],
+        ],
+        dtype=np.uint8,
+    )
+    dicom_file.set_pixel_data("JPEGBaseline8Bit", source)
+
+    # Simulate DICOMweb metadata reconstruction where the stored photometric stays
+    # YBR_FULL_422 even though the JPEG decoder already returns RGB-domain pixels.
+    dicom_file.PhotometricInterpretation = "YBR_FULL_422"
+
+    decoded, info = dicom_file.to_array(frame=0, with_info=True)
+    image = dicom_file.to_pil_image(frame=0, auto_window=True)
+
+    arr = np.asarray(image)
+    assert info.photometric == dicom.Photometric.rgb
+    assert image.mode == "RGB"
+    assert arr.dtype == np.uint8
+    assert np.array_equal(arr, decoded)
