@@ -14,12 +14,6 @@ using namespace dicom::literals;
 
 namespace {
 
-struct BoolOptionLookupResult {
-	bool found{false};
-	bool valid{true};
-	bool value{false};
-};
-
 [[nodiscard]] bool is_jpeg2000_mc_transfer_syntax(uid::WellKnown transfer_syntax) noexcept {
 	return transfer_syntax == "JPEG2000MCLossless"_uid ||
 	    transfer_syntax == "JPEG2000MC"_uid;
@@ -118,7 +112,9 @@ struct BoolOptionLookupResult {
 	return false;
 }
 
-[[nodiscard]] BoolOptionLookupResult lookup_use_mct_option(
+} // namespace
+
+MulticomponentTransformOptionState lookup_multicomponent_transform_option(
     std::span<const CodecOptionKv> codec_options) noexcept {
 	for (const auto& option : codec_options) {
 		if (!option_key_matches_exact(option.key, "color_transform") &&
@@ -126,22 +122,20 @@ struct BoolOptionLookupResult {
 		    !option_key_matches_exact(option.key, "use_mct")) {
 			continue;
 		}
-		BoolOptionLookupResult result{};
+		MulticomponentTransformOptionState result{};
 		result.found = true;
 		bool parsed = false;
 		result.valid = try_decode_codec_bool_option(option.value, parsed);
 		result.value = parsed;
 		return result;
 	}
-	return BoolOptionLookupResult{};
+	return MulticomponentTransformOptionState{};
 }
-
-} // namespace
 
 bool should_use_multicomponent_transform(uid::WellKnown transfer_syntax,
     uint32_t codec_profile_code, std::span<const CodecOptionKv> codec_options,
     std::size_t samples_per_pixel) {
-	const auto mct_option = lookup_use_mct_option(codec_options);
+	const auto mct_option = lookup_multicomponent_transform_option(codec_options);
 	if (mct_option.found && !mct_option.valid) {
 		throw_codec_stage_exception(CodecStatusCode::invalid_argument,
 		    "validate_options",

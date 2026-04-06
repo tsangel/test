@@ -182,6 +182,151 @@ def test_set_pixel_data_frame_index_recomputes_lossy_ratio_for_fragment_backed_f
     assert ratios[-1] == pytest.approx(source.nbytes / encoded_total, rel=1e-6)
 
 
+def test_set_pixel_data_frame_index_uses_target_j2k_photometric_for_mct():
+    supported = {
+        uid.keyword or uid.value for uid in dicom.transfer_syntax_uids_encode_supported()
+    }
+    if "JPEG2000Lossless" not in supported:
+        pytest.skip("JPEG2000Lossless encoder is not available in this build")
+
+    source = np.stack(
+        [
+            np.arange(4 * 4 * 3, dtype=np.uint8).reshape(4, 4, 3),
+            np.full((4, 4, 3), 91, dtype=np.uint8),
+        ],
+        axis=0,
+    )
+    replacement = np.full((4, 4, 3), 17, dtype=np.uint8)
+
+    dicom_file = dicom.read_file(_test_file())
+    dicom_file.set_pixel_data("JPEG2000Lossless", source)
+    assert (
+        dicom_file.get_dataelement("PhotometricInterpretation").to_string_view()
+        == "YBR_RCT"
+    )
+    original_frame1 = dicom_file.encoded_pixel_frame_bytes(1)
+    dicom_file.set_pixel_data("JPEG2000Lossless", replacement, frame_index=1)
+    assert (
+        dicom_file.get_dataelement("PhotometricInterpretation").to_string_view()
+        == "YBR_RCT"
+    )
+    assert dicom_file.encoded_pixel_frame_bytes(1) != original_frame1
+
+    with pytest.raises(
+        RuntimeError,
+        match="target photometric YBR_RCT is incompatible",
+    ):
+        dicom_file.set_pixel_data(
+            "JPEG2000Lossless",
+            replacement,
+            frame_index=0,
+            options={"type": "j2k", "color_transform": False},
+        )
+
+    rgb_target = dicom.read_file(_test_file())
+    rgb_target.set_pixel_data(
+        "JPEG2000Lossless",
+        source,
+        options={"type": "j2k", "color_transform": False},
+    )
+    assert (
+        rgb_target.get_dataelement("PhotometricInterpretation").to_string_view()
+        == "RGB"
+    )
+    original_frame0 = rgb_target.encoded_pixel_frame_bytes(0)
+    replacement0 = np.full((4, 4, 3), 29, dtype=np.uint8)
+    rgb_target.set_pixel_data("JPEG2000Lossless", replacement0, frame_index=0)
+    assert (
+        rgb_target.get_dataelement("PhotometricInterpretation").to_string_view()
+        == "RGB"
+    )
+    assert rgb_target.encoded_pixel_frame_bytes(0) != original_frame0
+
+    with pytest.raises(
+        RuntimeError,
+        match="target photometric RGB is incompatible",
+    ):
+        rgb_target.set_pixel_data(
+            "JPEG2000Lossless",
+            replacement0,
+            frame_index=1,
+            options={"type": "j2k", "color_transform": True},
+        )
+
+
+def test_set_pixel_data_frame_index_uses_target_htj2k_photometric_for_mct():
+    supported = {
+        uid.keyword or uid.value for uid in dicom.transfer_syntax_uids_encode_supported()
+    }
+    if "HTJ2K" not in supported:
+        pytest.skip("HTJ2K encoder is not available in this build")
+
+    source = np.stack(
+        [
+            np.arange(4 * 4 * 3, dtype=np.uint8).reshape(4, 4, 3),
+            np.full((4, 4, 3), 77, dtype=np.uint8),
+        ],
+        axis=0,
+    )
+    replacement = np.full((4, 4, 3), 31, dtype=np.uint8)
+    lossy_options = {"type": "htj2k", "target_psnr": 45}
+
+    dicom_file = dicom.read_file(_test_file())
+    dicom_file.set_pixel_data("HTJ2K", source, options=lossy_options)
+    assert (
+        dicom_file.get_dataelement("PhotometricInterpretation").to_string_view()
+        == "YBR_ICT"
+    )
+    original_frame1 = dicom_file.encoded_pixel_frame_bytes(1)
+    dicom_file.set_pixel_data("HTJ2K", replacement, frame_index=1)
+    assert (
+        dicom_file.get_dataelement("PhotometricInterpretation").to_string_view()
+        == "YBR_ICT"
+    )
+    assert dicom_file.encoded_pixel_frame_bytes(1) != original_frame1
+
+    with pytest.raises(
+        RuntimeError,
+        match="target photometric YBR_ICT is incompatible",
+    ):
+        dicom_file.set_pixel_data(
+            "HTJ2K",
+            replacement,
+            frame_index=0,
+            options={"type": "htj2k", "target_psnr": 45, "color_transform": False},
+        )
+
+    rgb_target = dicom.read_file(_test_file())
+    rgb_target.set_pixel_data(
+        "HTJ2K",
+        source,
+        options={"type": "htj2k", "target_psnr": 45, "color_transform": False},
+    )
+    assert (
+        rgb_target.get_dataelement("PhotometricInterpretation").to_string_view()
+        == "RGB"
+    )
+    original_frame0 = rgb_target.encoded_pixel_frame_bytes(0)
+    replacement0 = np.full((4, 4, 3), 43, dtype=np.uint8)
+    rgb_target.set_pixel_data("HTJ2K", replacement0, frame_index=0)
+    assert (
+        rgb_target.get_dataelement("PhotometricInterpretation").to_string_view()
+        == "RGB"
+    )
+    assert rgb_target.encoded_pixel_frame_bytes(0) != original_frame0
+
+    with pytest.raises(
+        RuntimeError,
+        match="target photometric RGB is incompatible",
+    ):
+        rgb_target.set_pixel_data(
+            "HTJ2K",
+            replacement0,
+            frame_index=1,
+            options={"type": "htj2k", "target_psnr": 45, "color_transform": True},
+        )
+
+
 def test_set_pixel_data_frame_index_rejects_multi_frame_source():
     supported = {
         uid.keyword or uid.value for uid in dicom.transfer_syntax_uids_encode_supported()

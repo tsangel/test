@@ -625,15 +625,81 @@ int main() {
 		const std::vector<std::uint8_t> rgb_source{
 		    0x10u, 0x20u, 0x30u, 0x40u, 0x50u, 0x60u,
 		    0x70u, 0x80u, 0x90u, 0xA0u, 0xB0u, 0xC0u};
+		const std::vector<std::uint8_t> multiframe_rgb_source{
+		    0x10u, 0x20u, 0x30u, 0x40u, 0x50u, 0x60u,
+		    0x70u, 0x80u, 0x90u, 0xA0u, 0xB0u, 0xC0u,
+		    0x11u, 0x21u, 0x31u, 0x41u, 0x51u, 0x61u,
+		    0x71u, 0x81u, 0x91u, 0xA1u, 0xB1u, 0xC1u};
+		const std::vector<std::uint8_t> replacement_rgb_source{
+		    0x21u, 0x31u, 0x41u, 0x51u, 0x61u, 0x71u,
+		    0x81u, 0x91u, 0xA1u, 0xB1u, 0xC1u, 0xD1u};
 		const auto color_layout = make_layout(dicom::pixel::DataType::u8, 1, 2, 2, 3,
 		    dicom::pixel::Photometric::rgb);
+		const auto multi_color_layout = make_layout(dicom::pixel::DataType::u8, 2, 2, 2, 3,
+		    dicom::pixel::Photometric::rgb);
 		const auto color_source = make_source_span(rgb_source, color_layout);
+		const auto multi_color_source = make_source_span(multiframe_rgb_source, multi_color_layout);
+		const auto replacement_color_source = make_source_span(replacement_rgb_source, color_layout);
 
 		if (dicom::test::kJpeg2kBuiltin) {
 			dicom::DicomFile j2k_file;
 			j2k_file.set_pixel_data("JPEG2000Lossless"_uid, color_source);
 			if (j2k_file["PhotometricInterpretation"_tag].to_string_view().value_or("") != std::string_view("YBR_RCT")) {
 				fail("J2K default color transform should update PhotometricInterpretation to YBR_RCT");
+			}
+
+			dicom::DicomFile j2k_frame_file;
+			j2k_frame_file.set_pixel_data("JPEG2000Lossless"_uid, multi_color_source);
+			const auto original_j2k_frame1 = j2k_frame_file.encoded_pixel_frame_bytes(1);
+			j2k_frame_file.set_pixel_data(
+			    "JPEG2000Lossless"_uid, replacement_color_source, std::size_t{1});
+			if (j2k_frame_file["PhotometricInterpretation"_tag].to_string_view().value_or("") != std::string_view("YBR_RCT")) {
+				fail("single-frame J2K replacement should preserve YBR_RCT target photometric");
+			}
+			if (j2k_frame_file.encoded_pixel_frame_bytes(1) == original_j2k_frame1) {
+				fail("single-frame J2K replacement should re-encode the requested frame");
+			}
+			bool j2k_ybr_rct_conflict_threw = false;
+			try {
+				const std::array<dicom::pixel::CodecOptionTextKv, 1> no_mct_options{{{"color_transform", "false"}}};
+				j2k_frame_file.set_pixel_data(
+				    "JPEG2000Lossless"_uid, replacement_color_source, std::size_t{0},
+				    std::span<const dicom::pixel::CodecOptionTextKv>(no_mct_options));
+			} catch (const std::exception&) {
+				j2k_ybr_rct_conflict_threw = true;
+			}
+			if (!j2k_ybr_rct_conflict_threw) {
+				fail("single-frame J2K replacement should reject color_transform=false for YBR_RCT target");
+			}
+
+			const std::array<dicom::pixel::CodecOptionTextKv, 1> no_mct_options{{{"color_transform", "false"}}};
+			dicom::DicomFile j2k_rgb_file;
+			j2k_rgb_file.set_pixel_data(
+			    "JPEG2000Lossless"_uid, multi_color_source,
+			    std::span<const dicom::pixel::CodecOptionTextKv>(no_mct_options));
+			if (j2k_rgb_file["PhotometricInterpretation"_tag].to_string_view().value_or("") != std::string_view("RGB")) {
+				fail("J2K color_transform=false should preserve RGB PhotometricInterpretation");
+			}
+			const auto original_j2k_rgb_frame0 = j2k_rgb_file.encoded_pixel_frame_bytes(0);
+			j2k_rgb_file.set_pixel_data(
+			    "JPEG2000Lossless"_uid, replacement_color_source, std::size_t{0});
+			if (j2k_rgb_file["PhotometricInterpretation"_tag].to_string_view().value_or("") != std::string_view("RGB")) {
+				fail("single-frame J2K replacement should preserve RGB target photometric when MCT is disabled");
+			}
+			if (j2k_rgb_file.encoded_pixel_frame_bytes(0) == original_j2k_rgb_frame0) {
+				fail("single-frame J2K RGB replacement should re-encode the requested frame");
+			}
+			bool j2k_rgb_conflict_threw = false;
+			try {
+				const std::array<dicom::pixel::CodecOptionTextKv, 1> mct_options{{{"color_transform", "true"}}};
+				j2k_rgb_file.set_pixel_data(
+				    "JPEG2000Lossless"_uid, replacement_color_source, std::size_t{1},
+				    std::span<const dicom::pixel::CodecOptionTextKv>(mct_options));
+			} catch (const std::exception&) {
+				j2k_rgb_conflict_threw = true;
+			}
+			if (!j2k_rgb_conflict_threw) {
+				fail("single-frame J2K replacement should reject color_transform=true for RGB target");
 			}
 
 			const std::array<dicom::pixel::CodecOptionTextKv, 1> lossy_options{{{"target_psnr", "45"}}};
@@ -660,6 +726,74 @@ int main() {
 			    std::span<const dicom::pixel::CodecOptionTextKv>(lossy_options));
 			if (htj2k_lossy_file["LossyImageCompression"_tag].to_string_view().value_or("") != std::string_view("01")) {
 				fail("HTJ2K lossy set_pixel_data should set LossyImageCompression to 01");
+			}
+
+			dicom::DicomFile htj2k_frame_file;
+			htj2k_frame_file.set_pixel_data(
+			    "HTJ2K"_uid, multi_color_source,
+			    std::span<const dicom::pixel::CodecOptionTextKv>(lossy_options));
+			if (htj2k_frame_file["PhotometricInterpretation"_tag].to_string_view().value_or("") != std::string_view("YBR_ICT")) {
+				fail("HTJ2K lossy default color transform should update PhotometricInterpretation to YBR_ICT");
+			}
+			const auto original_htj2k_frame1 = htj2k_frame_file.encoded_pixel_frame_bytes(1);
+			htj2k_frame_file.set_pixel_data(
+			    "HTJ2K"_uid, replacement_color_source, std::size_t{1});
+			if (htj2k_frame_file["PhotometricInterpretation"_tag].to_string_view().value_or("") != std::string_view("YBR_ICT")) {
+				fail("single-frame HTJ2K replacement should preserve YBR_ICT target photometric");
+			}
+			if (htj2k_frame_file.encoded_pixel_frame_bytes(1) == original_htj2k_frame1) {
+				fail("single-frame HTJ2K replacement should re-encode the requested frame");
+			}
+			bool htj2k_ybr_ict_conflict_threw = false;
+			try {
+				const std::array<dicom::pixel::CodecOptionTextKv, 2> lossy_no_mct_options{{
+				    {"target_psnr", "45"},
+				    {"color_transform", "false"},
+				}};
+				htj2k_frame_file.set_pixel_data(
+				    "HTJ2K"_uid, replacement_color_source, std::size_t{0},
+				    std::span<const dicom::pixel::CodecOptionTextKv>(lossy_no_mct_options));
+			} catch (const std::exception&) {
+				htj2k_ybr_ict_conflict_threw = true;
+			}
+			if (!htj2k_ybr_ict_conflict_threw) {
+				fail("single-frame HTJ2K replacement should reject color_transform=false for YBR_ICT target");
+			}
+
+			const std::array<dicom::pixel::CodecOptionTextKv, 2> lossy_no_mct_options{{
+			    {"target_psnr", "45"},
+			    {"color_transform", "false"},
+			}};
+			dicom::DicomFile htj2k_rgb_file;
+			htj2k_rgb_file.set_pixel_data(
+			    "HTJ2K"_uid, multi_color_source,
+			    std::span<const dicom::pixel::CodecOptionTextKv>(lossy_no_mct_options));
+			if (htj2k_rgb_file["PhotometricInterpretation"_tag].to_string_view().value_or("") != std::string_view("RGB")) {
+				fail("HTJ2K lossy color_transform=false should preserve RGB PhotometricInterpretation");
+			}
+			const auto original_htj2k_rgb_frame0 = htj2k_rgb_file.encoded_pixel_frame_bytes(0);
+			htj2k_rgb_file.set_pixel_data(
+			    "HTJ2K"_uid, replacement_color_source, std::size_t{0});
+			if (htj2k_rgb_file["PhotometricInterpretation"_tag].to_string_view().value_or("") != std::string_view("RGB")) {
+				fail("single-frame HTJ2K replacement should preserve RGB target photometric when MCT is disabled");
+			}
+			if (htj2k_rgb_file.encoded_pixel_frame_bytes(0) == original_htj2k_rgb_frame0) {
+				fail("single-frame HTJ2K RGB replacement should re-encode the requested frame");
+			}
+			bool htj2k_rgb_conflict_threw = false;
+			try {
+				const std::array<dicom::pixel::CodecOptionTextKv, 2> lossy_mct_options{{
+				    {"target_psnr", "45"},
+				    {"color_transform", "true"},
+				}};
+				htj2k_rgb_file.set_pixel_data(
+				    "HTJ2K"_uid, replacement_color_source, std::size_t{1},
+				    std::span<const dicom::pixel::CodecOptionTextKv>(lossy_mct_options));
+			} catch (const std::exception&) {
+				htj2k_rgb_conflict_threw = true;
+			}
+			if (!htj2k_rgb_conflict_threw) {
+				fail("single-frame HTJ2K replacement should reject color_transform=true for RGB target");
 			}
 
 			std::vector<std::uint8_t> s32_source_bytes;
