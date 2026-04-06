@@ -471,6 +471,8 @@ void transcode_encapsulated_pixel_data_to_encapsulated(DicomFile& file,
 	}
 	const auto original_number_of_frames =
 	    file.dataset()["NumberOfFrames"_tag].to_long();
+	const bool decoded_source_is_rgb_domain_for_jpeg =
+	    file.transfer_syntax_uid().is_jpeg_family();
 
 	auto source_layout = resolve_decoded_source_layout_or_throw(
 	    file, target_transfer_syntax, decode_plan);
@@ -510,7 +512,8 @@ void transcode_encapsulated_pixel_data_to_encapsulated(DicomFile& file,
 			    source_pixel_sequence_snapshot->clear_frame_encoded_data(frame_index);
 			    return std::span<const std::uint8_t>(
 			        frame_span.data(), frame_span.size());
-		    });
+		    },
+		    decoded_source_is_rgb_domain_for_jpeg);
 		source_pixel_sequence_snapshot.reset();
 	} catch (...) {
 		restore_encapsulated_pixel_sequence_after_failed_transcode_or_throw(

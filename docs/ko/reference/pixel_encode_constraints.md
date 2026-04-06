@@ -132,6 +132,14 @@ Additional JPEG lossy rule:
   - `bits_stored <= 8` -> 1 byte
   - `bits_stored > 8` -> 2 bytes
 - `quality` must be in `[1, 100]` (`dicomconv -h` and registry schema).
+- `JPEGBaseline8Bit`에서는 추가로 다음 옵션을 받을 수 있습니다:
+  - `color_space = rgb | ybr`
+  - `color_space = ybr`이면 DICOM `YBR_FULL_422`로 기록됩니다
+  - `subsampling = 422`만 YBR override로 허용됩니다
+- `color_space` / `subsampling`은 현재 다음 조건이 필요합니다:
+  - `JPEGBaseline8Bit`
+  - `samples_per_pixel = 3`
+  - RGB 도메인 source pixel
 - Encoder path also clamps to `[1, 100]` as a defensive guard for direct/internal calls.
 
 ### JPEG-LS (CharLS)
@@ -195,6 +203,9 @@ When MCT is used, `PhotometricInterpretation` is updated to:
 
 - lossless JPEG2000/HTJ2K -> `YBR_RCT`
 - lossy JPEG2000/HTJ2K -> `YBR_ICT`
+
+`JPEGBaseline8Bit`에서 명시적으로 `color_space=ybr`를 사용하면
+`PhotometricInterpretation`은 `YBR_FULL_422`로 바뀝니다.
 
 When MCT is not used, source photometric is preserved.
 

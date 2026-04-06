@@ -216,6 +216,22 @@ pixel_error_code validate_encoder_request(
         "lossy JPEG supports precision up to 12 bits");
   }
 
+  if (ctx->has_colorspace || ctx->has_subsampling) {
+    if (request->frame.codec_profile_code != PIXEL_CODEC_PROFILE_JPEG_LOSSY) {
+      return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
+          "color_space/subsampling options require lossy JPEG");
+    }
+    if (samples != 3) {
+      return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
+          "color_space/subsampling options require samples_per_pixel=3");
+    }
+    if (ctx->has_subsampling &&
+        (!ctx->has_colorspace || ctx->colorspace != TJCS_YCbCr)) {
+      return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "validate",
+          "subsampling option requires color_space=ybr");
+    }
+  }
+
   const bool source_planar = is_planar_code(request->frame.source_planar) && samples > 1;
   const uint64_t row_components = source_planar ? 1 : samples;
 
@@ -464,7 +480,8 @@ pixel_error_code encoder_encode_frame_to_context_buffer(
           "unsupported samples_per_pixel");
     }
 
-    const int colorspace = colorspace_for_samples(samples_sz, lossless);
+    const int colorspace =
+        c->has_colorspace ? c->colorspace : colorspace_for_samples(samples_sz, lossless);
     if (colorspace < 0) {
       return fail_detail(c, PIXEL_CODEC_ERR_UNSUPPORTED, "encode_frame",
           "unsupported JPEG colorspace for samples_per_pixel");
@@ -514,7 +531,14 @@ pixel_error_code encoder_encode_frame_to_context_buffer(
       }
     }
     {
-      const int subsamp = (samples_sz == std::size_t{1}) ? TJSAMP_GRAY : TJSAMP_444;
+      const int subsamp = (samples_sz == std::size_t{1})
+          ? TJSAMP_GRAY
+          : (c->has_subsampling
+                    ? c->subsamp
+                    : ((!lossless && c->has_colorspace &&
+                           c->colorspace == TJCS_YCbCr)
+                              ? TJSAMP_422
+                              : TJSAMP_444));
       const pixel_error_code ec =
           set_turbojpeg_param(c, handle.get(), TJPARAM_SUBSAMP, subsamp, "SUBSAMP");
       if (ec != PIXEL_CODEC_ERR_OK) {

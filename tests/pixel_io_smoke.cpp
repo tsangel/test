@@ -755,6 +755,162 @@ int main() {
 		if (jpeg_lossy_file["LossyImageCompression"_tag].to_string_view().value_or("") != std::string_view("01")) {
 			fail("JPEG lossy should set LossyImageCompression to 01");
 		}
+
+		const std::vector<std::uint8_t> rgb_source{
+		    0x10u, 0x20u, 0x30u, 0x40u, 0x50u, 0x60u,
+		    0x70u, 0x80u, 0x90u, 0xA0u, 0xB0u, 0xC0u};
+		const auto color_source = make_source_span(rgb_source,
+		    make_layout(dicom::pixel::DataType::u8, 1, 2, 2, 3,
+		        dicom::pixel::Photometric::rgb));
+		const std::array<dicom::pixel::CodecOptionTextKv, 2> jpeg_ybr_full_options{{
+		    {"quality", "90"},
+		    {"color_space", "ybr"},
+		}};
+		dicom::DicomFile jpeg_ybr_full_file;
+		jpeg_ybr_full_file.set_pixel_data(
+		    "JPEGBaseline8Bit"_uid, color_source,
+		    std::span<const dicom::pixel::CodecOptionTextKv>(jpeg_ybr_full_options));
+		if (jpeg_ybr_full_file["PhotometricInterpretation"_tag].to_string_view().value_or("") != std::string_view("YBR_FULL_422")) {
+			fail("JPEG color_space=ybr should default PhotometricInterpretation to YBR_FULL_422");
+		}
+
+		const std::array<dicom::pixel::CodecOptionTextKv, 3> jpeg_ybr_422_options{{
+		    {"quality", "90"},
+		    {"color_space", "ybr"},
+		    {"subsampling", "422"},
+		}};
+		dicom::DicomFile jpeg_ybr_422_file;
+		jpeg_ybr_422_file.set_pixel_data(
+		    "JPEGBaseline8Bit"_uid, color_source,
+		    std::span<const dicom::pixel::CodecOptionTextKv>(jpeg_ybr_422_options));
+		if (jpeg_ybr_422_file["PhotometricInterpretation"_tag].to_string_view().value_or("") != std::string_view("YBR_FULL_422")) {
+			fail("JPEG color_space=ybr subsampling=422 should update PhotometricInterpretation to YBR_FULL_422");
+		}
+
+		const std::array<dicom::pixel::CodecOptionTextKv, 3> jpeg_ybr_444_options{{
+		    {"quality", "90"},
+		    {"color_space", "ybr"},
+		    {"subsampling", "444"},
+		}};
+		bool jpeg_ybr_444_threw = false;
+		try {
+			dicom::DicomFile invalid_jpeg_ybr_444_file;
+			invalid_jpeg_ybr_444_file.set_pixel_data(
+			    "JPEGBaseline8Bit"_uid, color_source,
+			    std::span<const dicom::pixel::CodecOptionTextKv>(jpeg_ybr_444_options));
+		} catch (const std::exception&) {
+			jpeg_ybr_444_threw = true;
+		}
+		if (!jpeg_ybr_444_threw) {
+			fail("JPEG color_space=ybr subsampling=444 should be rejected");
+		}
+
+		bool jpeg_extended_ybr_threw = false;
+		try {
+			dicom::DicomFile invalid_jpeg_extended_ybr_file;
+			invalid_jpeg_extended_ybr_file.set_pixel_data(
+			    "JPEGExtended12Bit"_uid, color_source,
+			    std::span<const dicom::pixel::CodecOptionTextKv>(jpeg_ybr_full_options));
+		} catch (const std::exception&) {
+			jpeg_extended_ybr_threw = true;
+		}
+		if (!jpeg_extended_ybr_threw) {
+			fail("JPEGExtended12Bit should reject jpeg color_space/subsampling options");
+		}
+	}
+
+	{
+		const std::vector<std::uint8_t> rgb_source{
+		    0x10u, 0x20u, 0x30u, 0x40u, 0x50u, 0x60u,
+		    0x70u, 0x80u, 0x90u, 0xA0u, 0xB0u, 0xC0u};
+		const auto color_source = make_source_span(rgb_source,
+		    make_layout(dicom::pixel::DataType::u8, 1, 2, 2, 3,
+		        dicom::pixel::Photometric::rgb));
+		const std::array<dicom::pixel::CodecOptionTextKv, 2> jpeg_ybr_options{{
+		    {"quality", "90"},
+		    {"color_space", "ybr"},
+		}};
+
+		dicom::DicomFile native_color_file;
+		native_color_file.set_pixel_data("ExplicitVRLittleEndian"_uid, color_source);
+
+		std::ostringstream os(std::ios::binary);
+		native_color_file.write_with_transfer_syntax(
+		    os, "JPEGBaseline8Bit"_uid,
+		    std::span<const dicom::pixel::CodecOptionTextKv>(jpeg_ybr_options));
+		const auto encoded = os.str();
+		auto roundtrip = read_bytes(
+		    "write-with-ts-jpeg-ybr",
+		    reinterpret_cast<const std::uint8_t*>(encoded.data()), encoded.size());
+		if (!roundtrip) fail("write_with_transfer_syntax JPEG baseline ybr returned null");
+		if (roundtrip->get_dataelement("PhotometricInterpretation"_tag)
+		        .to_string_view().value_or("") != std::string_view("YBR_FULL_422")) {
+			fail("write_with_transfer_syntax JPEG baseline ybr should write YBR_FULL_422");
+		}
+		if (native_color_file["PhotometricInterpretation"_tag].to_string_view().value_or("") != std::string_view("RGB")) {
+			fail("write_with_transfer_syntax JPEG baseline ybr should not mutate source DicomFile");
+		}
+
+		native_color_file.set_transfer_syntax(
+		    "JPEGBaseline8Bit"_uid,
+		    std::span<const dicom::pixel::CodecOptionTextKv>(jpeg_ybr_options));
+		if (native_color_file["PhotometricInterpretation"_tag].to_string_view().value_or("") != std::string_view("YBR_FULL_422")) {
+			fail("set_transfer_syntax JPEG baseline ybr should update PhotometricInterpretation to YBR_FULL_422");
+		}
+	}
+
+	{
+		const std::vector<std::uint8_t> rgb_source{
+		    0x10u, 0x20u, 0x30u, 0x40u, 0x50u, 0x60u,
+		    0x70u, 0x80u, 0x90u, 0xA0u, 0xB0u, 0xC0u};
+		const auto color_source = make_source_span(rgb_source,
+		    make_layout(dicom::pixel::DataType::u8, 1, 2, 2, 3,
+		        dicom::pixel::Photometric::rgb));
+		const std::array<dicom::pixel::CodecOptionTextKv, 1> jpeg_quality_options{{
+		    {"quality", "90"},
+		}};
+		const std::array<dicom::pixel::CodecOptionTextKv, 2> jpeg_ybr_options{{
+		    {"quality", "90"},
+		    {"color_space", "ybr"},
+		}};
+
+		dicom::DicomFile jpeg_family_source_file;
+		jpeg_family_source_file.set_pixel_data(
+		    "JPEGExtended12Bit"_uid, color_source,
+		    std::span<const dicom::pixel::CodecOptionTextKv>(jpeg_quality_options));
+		if (!jpeg_family_source_file.set_value(
+		        "PhotometricInterpretation"_tag, std::string_view("YBR_FULL_422"))) {
+			fail("failed to force JPEG family source PhotometricInterpretation to YBR_FULL_422");
+		}
+
+		std::ostringstream os(std::ios::binary);
+		jpeg_family_source_file.write_with_transfer_syntax(
+		    os, "JPEGBaseline8Bit"_uid,
+		    std::span<const dicom::pixel::CodecOptionTextKv>(jpeg_ybr_options));
+		const auto encoded = os.str();
+		auto roundtrip = read_bytes(
+		    "write-with-ts-jpeg-family-ybr-to-baseline",
+		    reinterpret_cast<const std::uint8_t*>(encoded.data()), encoded.size());
+		if (!roundtrip) fail("write_with_transfer_syntax JPEG family ybr source returned null");
+		if (roundtrip->transfer_syntax_uid().value() != "JPEGBaseline8Bit"_uid.value()) {
+			fail("write_with_transfer_syntax JPEG family ybr source should target JPEGBaseline8Bit");
+		}
+		if (roundtrip->get_dataelement("PhotometricInterpretation"_tag)
+		        .to_string_view().value_or("") != std::string_view("YBR_FULL_422")) {
+			fail("write_with_transfer_syntax JPEG family ybr source should preserve YBR_FULL_422 target metadata");
+		}
+
+		jpeg_family_source_file.set_transfer_syntax(
+		    "JPEGBaseline8Bit"_uid,
+		    std::span<const dicom::pixel::CodecOptionTextKv>(jpeg_ybr_options));
+		if (jpeg_family_source_file.transfer_syntax_uid().value() !=
+		    "JPEGBaseline8Bit"_uid.value()) {
+			fail("set_transfer_syntax JPEG family ybr source should target JPEGBaseline8Bit");
+		}
+		if (jpeg_family_source_file["PhotometricInterpretation"_tag]
+		        .to_string_view().value_or("") != std::string_view("YBR_FULL_422")) {
+			fail("set_transfer_syntax JPEG family ybr source should preserve YBR_FULL_422 target metadata");
+		}
 	}
 
 	{

@@ -6,7 +6,10 @@
 #include <cstring>
 #include <limits>
 #include <new>
+#include <string_view>
 #include <type_traits>
+
+#include <turbojpeg.h>
 
 #include "internal.hpp"
 
@@ -85,6 +88,79 @@ T clamp_from_i32(int32_t v) {
 template <typename T>
 void write_scalar(uint8_t* dst, T value) {
   std::memcpy(dst, &value, sizeof(T));
+}
+
+bool equals_ascii_case_insensitive(std::string_view lhs, std::string_view rhs) {
+  if (lhs.size() != rhs.size()) {
+    return false;
+  }
+  for (std::size_t index = 0; index < lhs.size(); ++index) {
+    char left = lhs[index];
+    char right = rhs[index];
+    if (left >= 'A' && left <= 'Z') {
+      left = static_cast<char>(left - 'A' + 'a');
+    }
+    if (right >= 'A' && right <= 'Z') {
+      right = static_cast<char>(right - 'A' + 'a');
+    }
+    if (left != right) {
+      return false;
+    }
+  }
+  return true;
+}
+
+std::string_view trim_ascii_space(std::string_view text) {
+  while (!text.empty() &&
+      (text.front() == ' ' || text.front() == '\t' ||
+          text.front() == '\n' || text.front() == '\r')) {
+    text.remove_prefix(1);
+  }
+  while (!text.empty() &&
+      (text.back() == ' ' || text.back() == '\t' ||
+          text.back() == '\n' || text.back() == '\r')) {
+    text.remove_suffix(1);
+  }
+  return text;
+}
+
+bool parse_jpeg_colorspace_option(const char* value, int* out_colorspace) {
+  if (value == nullptr || out_colorspace == nullptr) {
+    return false;
+  }
+  const std::string_view text = trim_ascii_space(value);
+  if (text.empty()) {
+    return false;
+  }
+  if (equals_ascii_case_insensitive(text, "rgb")) {
+    *out_colorspace = TJCS_RGB;
+    return true;
+  }
+  if (equals_ascii_case_insensitive(text, "ybr") ||
+      equals_ascii_case_insensitive(text, "ycbcr")) {
+    *out_colorspace = TJCS_YCbCr;
+    return true;
+  }
+  return false;
+}
+
+bool parse_jpeg_subsampling_option(const char* value, int* out_subsamp) {
+  if (value == nullptr || out_subsamp == nullptr) {
+    return false;
+  }
+  const std::string_view text = trim_ascii_space(value);
+  if (text.empty()) {
+    return false;
+  }
+  if (text == "444" || text == "4:4:4") {
+    *out_subsamp = TJSAMP_444;
+    return true;
+  }
+  if (text == "422" || text == "4:2:2") {
+    *out_subsamp = TJSAMP_422;
+    return true;
+  }
+  return false;
 }
 
 }  // namespace
@@ -445,6 +521,26 @@ pixel_error_code parse_encoder_options(
       ctx->quality = parsed;
       continue;
     }
+    if (std::strcmp(kv.key, "color_space") == 0) {
+      int parsed = -1;
+      if (!parse_jpeg_colorspace_option(kv.value, &parsed)) {
+        return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "parse_options",
+            "color_space must be 'rgb' or 'ybr'");
+      }
+      ctx->colorspace = parsed;
+      ctx->has_colorspace = true;
+      continue;
+    }
+    if (std::strcmp(kv.key, "subsampling") == 0) {
+      int parsed = TJSAMP_444;
+      if (!parse_jpeg_subsampling_option(kv.value, &parsed)) {
+        return fail_detail(ctx, PIXEL_CODEC_ERR_INVALID_ARGUMENT, "parse_options",
+            "subsampling must be '444' or '422'");
+      }
+      ctx->subsamp = parsed;
+      ctx->has_subsampling = true;
+      continue;
+    }
 
     char reason[256];
     std::snprintf(reason, sizeof(reason),
@@ -513,6 +609,10 @@ pixel_error_code encoder_configure(void* ctx, uint32_t codec_profile_code,
   }
 
   c->quality = 90;
+  c->colorspace = -1;
+  c->subsamp = TJSAMP_444;
+  c->has_colorspace = false;
+  c->has_subsampling = false;
 
   const pixel_error_code ec = parse_encoder_options(c, options);
   if (ec != PIXEL_CODEC_ERR_OK) {

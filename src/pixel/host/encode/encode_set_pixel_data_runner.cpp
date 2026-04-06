@@ -776,8 +776,9 @@ void run_set_pixel_data_with_computed_codec_options(DicomFile& file,
 	    should_use_multicomponent_transform(transfer_syntax, codec_profile_code,
 	        codec_options, source_layout.samples_per_pixel);
 	const pixel::Photometric output_photometric =
-	    compute_output_photometric_for_encode_profile(codec_profile_code,
-	        use_multicomponent_transform, source.layout.photometric);
+	    compute_output_photometric_for_encode_profile(transfer_syntax,
+	        codec_profile_code, codec_options, use_multicomponent_transform,
+	        source.layout.photometric, source_layout.samples_per_pixel);
 
 	auto& dataset = file.dataset();
 	dataset.ensure_loaded(Tag(0xFFFFu, 0xFFFFu));
@@ -867,8 +868,9 @@ void run_set_pixel_data_frame_with_computed_codec_options(DicomFile& file,
 	    should_use_multicomponent_transform(transfer_syntax, codec_profile_code,
 	        codec_options, source_layout.samples_per_pixel);
 	const pixel::Photometric output_photometric =
-	    compute_output_photometric_for_encode_profile(codec_profile_code,
-	        use_multicomponent_transform, source.layout.photometric);
+	    compute_output_photometric_for_encode_profile(transfer_syntax,
+	        codec_profile_code, codec_options, use_multicomponent_transform,
+	        source.layout.photometric, source_layout.samples_per_pixel);
 
 	auto* pixel_sequence =
 	    require_encapsulated_target_pixel_sequence_or_throw(file, frame_index);
@@ -905,7 +907,7 @@ void run_set_pixel_data_from_frame_provider_with_computed_codec_options_impl(
     const pixel::PixelLayout& source_layout,
     std::span<const CodecOptionKv> codec_options,
     const std::function<std::span<const std::uint8_t>(std::size_t)>& frame_provider,
-    bool stream_output_frames) {
+    bool stream_output_frames, bool decoded_source_is_rgb_domain_for_jpeg) {
 	const auto codec_profile_code =
 	    encode_codec_profile_code_from_transfer_syntax_or_throw(transfer_syntax);
 	const auto encode_source_layout =
@@ -917,8 +919,10 @@ void run_set_pixel_data_from_frame_provider_with_computed_codec_options_impl(
 	    should_use_multicomponent_transform(transfer_syntax, codec_profile_code,
 	        codec_options, encode_source_layout.samples_per_pixel);
 	const pixel::Photometric output_photometric =
-	    compute_output_photometric_for_encode_profile(codec_profile_code,
-	        use_multicomponent_transform, source_layout.photometric);
+	    compute_output_photometric_for_encode_profile(transfer_syntax,
+	        codec_profile_code, codec_options, use_multicomponent_transform,
+	        source_layout.photometric, encode_source_layout.samples_per_pixel,
+	        decoded_source_is_rgb_domain_for_jpeg);
 
 	auto& dataset = file.dataset();
 	dataset.ensure_loaded(Tag(0xFFFFu, 0xFFFFu));
@@ -980,20 +984,22 @@ void run_set_pixel_data_from_frame_provider_with_computed_codec_options(
     DicomFile& file, uid::WellKnown transfer_syntax,
     const pixel::PixelLayout& source_layout,
     std::span<const CodecOptionKv> codec_options,
-    const std::function<std::span<const std::uint8_t>(std::size_t)>& frame_provider) {
+    const std::function<std::span<const std::uint8_t>(std::size_t)>& frame_provider,
+    bool decoded_source_is_rgb_domain_for_jpeg) {
 	run_set_pixel_data_from_frame_provider_with_computed_codec_options_impl(
 	    file, transfer_syntax, source_layout, codec_options, frame_provider,
-	    false);
+	    false, decoded_source_is_rgb_domain_for_jpeg);
 }
 
 void run_set_pixel_data_from_frame_provider_streaming_with_computed_codec_options(
     DicomFile& file, uid::WellKnown transfer_syntax,
     const pixel::PixelLayout& source_layout,
     std::span<const CodecOptionKv> codec_options,
-    const std::function<std::span<const std::uint8_t>(std::size_t)>& frame_provider) {
+    const std::function<std::span<const std::uint8_t>(std::size_t)>& frame_provider,
+    bool decoded_source_is_rgb_domain_for_jpeg) {
 	run_set_pixel_data_from_frame_provider_with_computed_codec_options_impl(
 	    file, transfer_syntax, source_layout, codec_options, frame_provider,
-	    true);
+	    true, decoded_source_is_rgb_domain_for_jpeg);
 }
 
 } // namespace dicom::pixel::detail
