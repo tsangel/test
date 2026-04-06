@@ -128,6 +128,13 @@ Additional JPEG lossy rule:
   - `bits_stored <= 8` -> 1 byte
   - `bits_stored > 8` -> 2 bytes
 - `quality` must be in `[1, 100]` (`dicomconv -h` and registry schema).
+- Lossy JPEG also accepts:
+  - `color_space = rgb | ybr`
+  - `subsampling = 444 | 422` when `color_space = ybr`
+- `color_space` / `subsampling` currently require:
+  - a lossy JPEG transfer syntax
+  - `samples_per_pixel = 3`
+  - RGB-domain source pixels
 - Encoder path also clamps to `[1, 100]` as a defensive guard for direct/internal calls.
 
 ### JPEG-LS (CharLS)
@@ -191,6 +198,11 @@ When MCT is used, `PhotometricInterpretation` is updated to:
 
 - lossless JPEG2000/HTJ2K -> `YBR_RCT`
 - lossy JPEG2000/HTJ2K -> `YBR_ICT`
+
+When lossy JPEG uses explicit `color_space=ybr`, `PhotometricInterpretation` is updated to:
+
+- `subsampling = 444` (or omitted) -> `YBR_FULL`
+- `subsampling = 422` -> `YBR_FULL_422`
 
 When MCT is not used, source photometric is preserved.
 

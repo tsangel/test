@@ -777,7 +777,8 @@ void run_set_pixel_data_with_computed_codec_options(DicomFile& file,
 	        codec_options, source_layout.samples_per_pixel);
 	const pixel::Photometric output_photometric =
 	    compute_output_photometric_for_encode_profile(codec_profile_code,
-	        use_multicomponent_transform, source.layout.photometric);
+	        codec_options, use_multicomponent_transform, source.layout.photometric,
+	        source_layout.samples_per_pixel);
 
 	auto& dataset = file.dataset();
 	dataset.ensure_loaded(Tag(0xFFFFu, 0xFFFFu));
@@ -868,7 +869,8 @@ void run_set_pixel_data_frame_with_computed_codec_options(DicomFile& file,
 	        codec_options, source_layout.samples_per_pixel);
 	const pixel::Photometric output_photometric =
 	    compute_output_photometric_for_encode_profile(codec_profile_code,
-	        use_multicomponent_transform, source.layout.photometric);
+	        codec_options, use_multicomponent_transform, source.layout.photometric,
+	        source_layout.samples_per_pixel);
 
 	auto* pixel_sequence =
 	    require_encapsulated_target_pixel_sequence_or_throw(file, frame_index);
@@ -918,7 +920,8 @@ void run_set_pixel_data_from_frame_provider_with_computed_codec_options_impl(
 	        codec_options, encode_source_layout.samples_per_pixel);
 	const pixel::Photometric output_photometric =
 	    compute_output_photometric_for_encode_profile(codec_profile_code,
-	        use_multicomponent_transform, source_layout.photometric);
+	        codec_options, use_multicomponent_transform, source_layout.photometric,
+	        encode_source_layout.samples_per_pixel);
 
 	auto& dataset = file.dataset();
 	dataset.ensure_loaded(Tag(0xFFFFu, 0xFFFFu));

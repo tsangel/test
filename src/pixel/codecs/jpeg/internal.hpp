@@ -26,6 +26,10 @@ struct DecoderCtx {
 struct EncoderCtx {
   uint32_t codec_profile_code{PIXEL_CODEC_PROFILE_UNKNOWN};
   int quality{90};
+  int colorspace{-1};
+  int subsamp{-1};
+  bool has_colorspace{false};
+  bool has_subsampling{false};
   bool configured{false};
   std::vector<std::uint8_t> encoded_buffer{};
   char last_error_detail[kLastErrorDetailCapacity]{};

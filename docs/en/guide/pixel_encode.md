@@ -199,6 +199,19 @@ df.set_pixel_data(
     arr,
     options={"type": "j2k", "target_psnr": 45.0},
 )
+
+rgb = np.arange(2 * 2 * 3, dtype=np.uint8).reshape(2, 2, 3)
+df.set_pixel_data(
+    "JPEGBaseline8Bit",
+    rgb,
+    options={
+        "type": "jpeg",
+        "quality": 90,
+        "color_space": "ybr",
+        "subsampling": "422",
+    },
+)
+# The resulting DICOM metadata uses PhotometricInterpretation=YBR_FULL_422.
 ```
 
 ### Parse and validate a Python options dict once, then reuse the context

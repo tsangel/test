@@ -1078,6 +1078,8 @@ nb::object apply_window_to_numpy_array(
 		bool has_target_psnr{false};
 		bool has_threads{false};
 		bool has_color_transform{false};
+		bool has_color_space{false};
+		bool has_subsampling{false};
 		bool has_distance{false};
 		bool has_effort{false};
 		bool has_quality{false};
@@ -1086,6 +1088,8 @@ nb::object apply_window_to_numpy_array(
 		double target_psnr{0.0};
 		int threads{-1};
 		bool color_transform{true};
+		std::string color_space{"rgb"};
+		std::string subsampling{"444"};
 		double distance{1.0};
 		int effort{7};
 		int quality{90};
@@ -1107,11 +1111,44 @@ nb::object apply_window_to_numpy_array(
 	                                 const CodecOptionFields& fields) -> CodecOptionTextStorage {
 		CodecOptionTextStorage out{};
 		const auto normalized = normalize_encoder_option_name(std::move(option_name));
+		const auto normalize_jpeg_color_space = [](const std::string& value) {
+			const auto normalized_value = normalize_encoder_option_name(value);
+			if (normalized_value == "rgb") {
+				return std::string("rgb");
+			}
+			if (normalized_value == "ybr" || normalized_value == "ycbcr") {
+				return std::string("ybr");
+			}
+			throw nb::value_error(
+			    "options color_space must be one of: rgb, ybr");
+			return std::string{};
+		};
+		const auto normalize_jpeg_subsampling = [](const std::string& value) {
+			std::string normalized_value{};
+			normalized_value.reserve(value.size());
+			for (const unsigned char ch : value) {
+				if (ch == '_' || ch == '-' || ch == ':' || ch == ' ' ||
+				    ch == '\t') {
+					continue;
+				}
+				normalized_value.push_back(static_cast<char>(ch));
+			}
+			if (normalized_value == "444") {
+				return std::string("444");
+			}
+			if (normalized_value == "422") {
+				return std::string("422");
+			}
+			throw nb::value_error(
+			    "options subsampling must be one of: 444, 422");
+			return std::string{};
+		};
 		const bool has_j2k_fields =
 		    fields.has_target_bpp || fields.has_target_psnr || fields.has_color_transform;
 		const bool has_thread_field = fields.has_threads;
 		const bool has_jpegxl_fields = fields.has_distance || fields.has_effort;
-		const bool has_jpeg_fields = fields.has_quality;
+		const bool has_jpeg_fields =
+		    fields.has_quality || fields.has_color_space || fields.has_subsampling;
 		const bool has_jpegls_fields = fields.has_near_lossless_error;
 
 		const auto ensure_no_fields = [&](std::string_view codec_name) {
@@ -1229,8 +1266,32 @@ nb::object apply_window_to_numpy_array(
 			if (transfer_syntax && !transfer_syntax->is_jpeg_family()) {
 				throw_incompatible("jpeg");
 			}
-			out.entries.reserve(1);
+			const auto color_space =
+			    fields.has_color_space
+			        ? normalize_jpeg_color_space(fields.color_space)
+			        : std::string{};
+			const auto subsampling =
+			    fields.has_subsampling
+			        ? normalize_jpeg_subsampling(fields.subsampling)
+			        : std::string{};
+			if (fields.has_subsampling &&
+			    (!fields.has_color_space || color_space != "ybr")) {
+				throw nb::value_error(
+				    "jpeg options subsampling requires color_space='ybr'");
+			}
+			if (transfer_syntax && transfer_syntax->is_lossless() &&
+			    (fields.has_color_space || fields.has_subsampling)) {
+				throw nb::value_error(
+				    "lossless JPEG transfer syntax does not accept options color_space/subsampling");
+			}
+			out.entries.reserve(3);
 			out.add("quality", std::to_string(fields.quality));
+			if (fields.has_color_space) {
+				out.add("color_space", color_space);
+			}
+			if (fields.has_subsampling) {
+				out.add("subsampling", subsampling);
+			}
 			out.finalize();
 			return out;
 		}
@@ -1300,7 +1361,8 @@ nb::object apply_window_to_numpy_array(
 	nb::dict codec_dict = nb::borrow<nb::dict>(options_obj);
 	static const std::unordered_set<std::string> allowed_keys{
 	    "type", "target_bpp", "target_psnr", "threads", "color_transform", "use_mct",
-	    "mct", "quality", "near_lossless_error", "distance", "effort"};
+	    "mct", "quality", "color_space", "subsampling",
+	    "near_lossless_error", "distance", "effort"};
 	PyObject* key_obj = nullptr;
 	PyObject* value_obj = nullptr;
 	Py_ssize_t pos = 0;
@@ -1357,6 +1419,23 @@ nb::object apply_window_to_numpy_array(
 		fields.has_quality = true;
 		fields.quality = nb::cast<int>(nb::handle(value));
 	}
+	if (PyObject* value = PyDict_GetItemString(codec_dict.ptr(), "color_space")) {
+		if (!PyUnicode_Check(value)) {
+			throw nb::type_error("options color_space must be str");
+		}
+		fields.has_color_space = true;
+		fields.color_space = nb::cast<std::string>(nb::handle(value));
+	}
+	if (PyObject* value = PyDict_GetItemString(codec_dict.ptr(), "subsampling")) {
+		fields.has_subsampling = true;
+		if (PyUnicode_Check(value)) {
+			fields.subsampling = nb::cast<std::string>(nb::handle(value));
+		} else if (PyLong_Check(value)) {
+			fields.subsampling = std::to_string(nb::cast<int>(nb::handle(value)));
+		} else {
+			throw nb::type_error("options subsampling must be str or int");
+		}
+	}
 	if (PyObject* value = PyDict_GetItemString(codec_dict.ptr(), "distance")) {
 		fields.has_distance = true;
 		fields.distance = nb::cast<double>(nb::handle(value));
@@ -1375,7 +1454,7 @@ nb::object apply_window_to_numpy_array(
 			fields.type_name = "j2k";
 		} else if (fields.has_distance || fields.has_effort) {
 			fields.type_name = "jpegxl";
-		} else if (fields.has_quality) {
+		} else if (fields.has_quality || fields.has_color_space || fields.has_subsampling) {
 			fields.type_name = "jpeg";
 		} else if (fields.has_near_lossless_error) {
 			fields.type_name = "jpegls";

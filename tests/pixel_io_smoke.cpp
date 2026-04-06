@@ -755,6 +755,37 @@ int main() {
 		if (jpeg_lossy_file["LossyImageCompression"_tag].to_string_view().value_or("") != std::string_view("01")) {
 			fail("JPEG lossy should set LossyImageCompression to 01");
 		}
+
+		const std::vector<std::uint8_t> rgb_source{
+		    0x10u, 0x20u, 0x30u, 0x40u, 0x50u, 0x60u,
+		    0x70u, 0x80u, 0x90u, 0xA0u, 0xB0u, 0xC0u};
+		const auto color_source = make_source_span(rgb_source,
+		    make_layout(dicom::pixel::DataType::u8, 1, 2, 2, 3,
+		        dicom::pixel::Photometric::rgb));
+		const std::array<dicom::pixel::CodecOptionTextKv, 2> jpeg_ybr_full_options{{
+		    {"quality", "90"},
+		    {"color_space", "ybr"},
+		}};
+		dicom::DicomFile jpeg_ybr_full_file;
+		jpeg_ybr_full_file.set_pixel_data(
+		    "JPEGBaseline8Bit"_uid, color_source,
+		    std::span<const dicom::pixel::CodecOptionTextKv>(jpeg_ybr_full_options));
+		if (jpeg_ybr_full_file["PhotometricInterpretation"_tag].to_string_view().value_or("") != std::string_view("YBR_FULL")) {
+			fail("JPEG color_space=ybr should update PhotometricInterpretation to YBR_FULL");
+		}
+
+		const std::array<dicom::pixel::CodecOptionTextKv, 3> jpeg_ybr_422_options{{
+		    {"quality", "90"},
+		    {"color_space", "ybr"},
+		    {"subsampling", "422"},
+		}};
+		dicom::DicomFile jpeg_ybr_422_file;
+		jpeg_ybr_422_file.set_pixel_data(
+		    "JPEGBaseline8Bit"_uid, color_source,
+		    std::span<const dicom::pixel::CodecOptionTextKv>(jpeg_ybr_422_options));
+		if (jpeg_ybr_422_file["PhotometricInterpretation"_tag].to_string_view().value_or("") != std::string_view("YBR_FULL_422")) {
+			fail("JPEG color_space=ybr subsampling=422 should update PhotometricInterpretation to YBR_FULL_422");
+		}
 	}
 
 	{

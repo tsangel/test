@@ -270,8 +270,9 @@ void prepare_streaming_encode_policy_or_throw(
 	        state.encode_source_layout.samples_per_pixel);
 	state.output_photometric =
 	    pixel::detail::compute_output_photometric_for_encode_profile(
-	        state.codec_profile_code, state.use_multicomponent_transform,
-	        state.source_layout.photometric);
+	        state.codec_profile_code, state.active_encoder_ctx->codec_options(),
+	        state.use_multicomponent_transform, state.source_layout.photometric,
+	        state.encode_source_layout.samples_per_pixel);
 }
 
 // Runs the lossy size prepass only when backpatching is unavailable.

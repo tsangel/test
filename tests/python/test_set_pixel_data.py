@@ -210,3 +210,67 @@ def test_set_pixel_data_frame_index_rejects_native_transfer_syntax():
         dicom_file.set_pixel_data(
             "ExplicitVRLittleEndian", source, frame_index=0
         )
+
+
+def test_set_pixel_data_jpeg_ybr_full_updates_photometric():
+    supported = {
+        uid.keyword or uid.value for uid in dicom.transfer_syntax_uids_encode_supported()
+    }
+    if "JPEGBaseline8Bit" not in supported:
+        pytest.skip("JPEGBaseline8Bit encoder is not available in this build")
+
+    dicom_file = dicom.read_file(_test_file())
+    source = np.arange(2 * 3 * 3, dtype=np.uint8).reshape(2, 3, 3)
+
+    dicom_file.set_pixel_data(
+        "JPEGBaseline8Bit",
+        source,
+        options={"type": "jpeg", "quality": 90, "color_space": "ybr"},
+    )
+
+    assert (
+        dicom_file.get_dataelement("PhotometricInterpretation").to_string_view()
+        == "YBR_FULL"
+    )
+
+
+def test_set_pixel_data_frame_index_supports_jpeg_ybr_full_422_target():
+    supported = {
+        uid.keyword or uid.value for uid in dicom.transfer_syntax_uids_encode_supported()
+    }
+    if "JPEGBaseline8Bit" not in supported:
+        pytest.skip("JPEGBaseline8Bit encoder is not available in this build")
+
+    dicom_file = dicom.read_file(_test_file())
+    frame0 = np.arange(4 * 4 * 3, dtype=np.uint8).reshape(4, 4, 3)
+    frame1 = np.full((4, 4, 3), 91, dtype=np.uint8)
+    options = {
+        "type": "jpeg",
+        "quality": 90,
+        "color_space": "ybr",
+        "subsampling": "422",
+    }
+
+    dicom_file.set_pixel_data(
+        "JPEGBaseline8Bit", np.stack([frame0, frame1], axis=0), options=options
+    )
+    original_frame1 = dicom_file.encoded_pixel_frame_bytes(1)
+    replacement = np.full((4, 4, 3), 17, dtype=np.uint8)
+    dicom_file.set_pixel_data(
+        "JPEGBaseline8Bit", replacement, frame_index=1, options=options
+    )
+
+    assert (
+        dicom_file.get_dataelement("PhotometricInterpretation").to_string_view()
+        == "YBR_FULL_422"
+    )
+    assert dicom_file.encoded_pixel_frame_bytes(1) != original_frame1
+    assert dicom_file.to_array(frame=-1).shape == (2, 4, 4, 3)
+
+    with pytest.raises(RuntimeError, match="target pixel metadata"):
+        dicom_file.set_pixel_data(
+            "JPEGBaseline8Bit",
+            replacement,
+            frame_index=0,
+            options={"type": "jpeg", "quality": 90},
+        )
