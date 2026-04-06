@@ -226,6 +226,77 @@ struct JpegColorOptionState {
 	return pixel::Photometric::ybr_full_422;
 }
 
+[[nodiscard]] std::vector<CodecOptionKv>
+build_single_frame_effective_jpeg_codec_options_for_target_or_throw(
+    uid::WellKnown transfer_syntax, uint32_t codec_profile_code,
+    std::span<const CodecOptionKv> codec_options,
+    pixel::Photometric source_photometric, pixel::Photometric target_photometric,
+    std::size_t samples_per_pixel) {
+	using namespace dicom::literals;
+
+	std::vector<CodecOptionKv> effective_options(
+	    codec_options.begin(), codec_options.end());
+	if (transfer_syntax != "JPEGBaseline8Bit"_uid ||
+	    codec_profile_code != PIXEL_CODEC_PROFILE_JPEG_LOSSY ||
+	    source_photometric != pixel::Photometric::rgb ||
+	    samples_per_pixel != std::size_t{3}) {
+		return effective_options;
+	}
+
+	const auto jpeg_options = lookup_jpeg_color_options(codec_options);
+	if (!jpeg_options.valid_color_space) {
+		throw_codec_stage_exception(CodecStatusCode::invalid_argument,
+		    "validate_options",
+		    "jpeg color_space option must be 'rgb' or 'ybr'");
+	}
+	if (!jpeg_options.valid_subsampling) {
+		throw_codec_stage_exception(CodecStatusCode::invalid_argument,
+		    "validate_options",
+		    "jpeg subsampling option must be '444' or '422'");
+	}
+
+	if (target_photometric == pixel::Photometric::rgb) {
+		if (jpeg_options.has_subsampling) {
+			throw_codec_stage_exception(CodecStatusCode::invalid_argument,
+			    "validate_target",
+			    "target photometric RGB is incompatible with jpeg subsampling option");
+		}
+		if (jpeg_options.has_color_space &&
+		    jpeg_options.color_space != JpegColorSpaceOption::rgb) {
+			throw_codec_stage_exception(CodecStatusCode::invalid_argument,
+			    "validate_target",
+			    "target photometric RGB is incompatible with jpeg color_space option");
+		}
+		if (!jpeg_options.has_color_space) {
+			effective_options.push_back(
+			    CodecOptionKv{.key = "color_space", .value = std::string("rgb")});
+		}
+		return effective_options;
+	}
+
+	if (target_photometric == pixel::Photometric::ybr_full_422) {
+		if (jpeg_options.has_color_space &&
+		    jpeg_options.color_space != JpegColorSpaceOption::ybr) {
+			throw_codec_stage_exception(CodecStatusCode::invalid_argument,
+			    "validate_target",
+			    "target photometric YBR_FULL_422 is incompatible with jpeg color_space option");
+		}
+		if (jpeg_options.has_subsampling &&
+		    jpeg_options.subsampling != JpegSubsamplingOption::s422) {
+			throw_codec_stage_exception(CodecStatusCode::invalid_argument,
+			    "validate_target",
+			    "target photometric YBR_FULL_422 is incompatible with jpeg subsampling option");
+		}
+		if (!jpeg_options.has_color_space) {
+			effective_options.push_back(
+			    CodecOptionKv{.key = "color_space", .value = std::string("ybr")});
+		}
+		return effective_options;
+	}
+
+	return effective_options;
+}
+
 } // namespace
 
 bool is_native_uncompressed_encode_profile(uint32_t codec_profile_code) noexcept {
@@ -274,6 +345,19 @@ pixel::Photometric compute_output_photometric_for_encode_profile(
 		return pixel::Photometric::ybr_rct;
 	}
 	return pixel::Photometric::ybr_ict;
+}
+
+std::vector<CodecOptionKv> build_single_frame_effective_codec_options_for_target_or_throw(
+    uid::WellKnown transfer_syntax, uint32_t codec_profile_code,
+    std::span<const CodecOptionKv> codec_options,
+    pixel::Photometric source_photometric, pixel::Photometric target_photometric,
+    std::size_t samples_per_pixel) {
+	if (!is_jpeg_encode_profile(codec_profile_code)) {
+		return std::vector<CodecOptionKv>(codec_options.begin(), codec_options.end());
+	}
+	return build_single_frame_effective_jpeg_codec_options_for_target_or_throw(
+	    transfer_syntax, codec_profile_code, codec_options, source_photometric,
+	    target_photometric, samples_per_pixel);
 }
 
 bool encode_profile_uses_lossy_compression(uint32_t codec_profile_code) noexcept {

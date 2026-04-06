@@ -266,13 +266,24 @@ def test_set_pixel_data_frame_index_supports_jpeg_ybr_full_422_target():
     )
     assert dicom_file.encoded_pixel_frame_bytes(1) != original_frame1
     assert dicom_file.to_array(frame=-1).shape == (2, 4, 4, 3)
+    replacement0 = np.full((4, 4, 3), 29, dtype=np.uint8)
+    dicom_file.set_pixel_data(
+        "JPEGBaseline8Bit",
+        replacement0,
+        frame_index=0,
+        options={"type": "jpeg", "quality": 90},
+    )
+    assert dicom_file.get_dataelement("PhotometricInterpretation").to_string_view() == "YBR_FULL_422"
 
-    with pytest.raises(RuntimeError, match="target pixel metadata"):
+    with pytest.raises(
+        RuntimeError,
+        match="target photometric YBR_FULL_422 is incompatible",
+    ):
         dicom_file.set_pixel_data(
             "JPEGBaseline8Bit",
             replacement,
             frame_index=0,
-            options={"type": "jpeg", "quality": 90},
+            options={"type": "jpeg", "quality": 90, "color_space": "rgb"},
         )
 
 

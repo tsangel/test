@@ -786,6 +786,37 @@ int main() {
 		if (jpeg_ybr_422_file["PhotometricInterpretation"_tag].to_string_view().value_or("") != std::string_view("YBR_FULL_422")) {
 			fail("JPEG color_space=ybr subsampling=422 should update PhotometricInterpretation to YBR_FULL_422");
 		}
+		const auto original_frame0 = jpeg_ybr_422_file.encoded_pixel_frame_bytes(0);
+		const std::vector<std::uint8_t> replacement_rgb_source{
+		    0x21u, 0x31u, 0x41u, 0x51u, 0x61u, 0x71u,
+		    0x81u, 0x91u, 0xA1u, 0xB1u, 0xC1u, 0xD1u};
+		const auto replacement_color_source = make_source_span(replacement_rgb_source,
+		    make_layout(dicom::pixel::DataType::u8, 1, 2, 2, 3,
+		        dicom::pixel::Photometric::rgb));
+		jpeg_ybr_422_file.set_pixel_data(
+		    "JPEGBaseline8Bit"_uid, replacement_color_source, std::size_t{0},
+		    std::span<const dicom::pixel::CodecOptionTextKv>(jpeg_lossy_options));
+		if (jpeg_ybr_422_file["PhotometricInterpretation"_tag].to_string_view().value_or("") != std::string_view("YBR_FULL_422")) {
+			fail("single-frame JPEG replacement should preserve YBR_FULL_422 target photometric");
+		}
+		if (jpeg_ybr_422_file.encoded_pixel_frame_bytes(0) == original_frame0) {
+			fail("single-frame JPEG replacement with quality-only options should re-encode the frame");
+		}
+		bool jpeg_ybr_rgb_target_threw = false;
+		try {
+			const std::array<dicom::pixel::CodecOptionTextKv, 2> jpeg_rgb_options{{
+			    {"quality", "90"},
+			    {"color_space", "rgb"},
+			}};
+			jpeg_ybr_422_file.set_pixel_data(
+			    "JPEGBaseline8Bit"_uid, replacement_color_source, std::size_t{0},
+			    std::span<const dicom::pixel::CodecOptionTextKv>(jpeg_rgb_options));
+		} catch (const std::exception&) {
+			jpeg_ybr_rgb_target_threw = true;
+		}
+		if (!jpeg_ybr_rgb_target_threw) {
+			fail("single-frame JPEG replacement should reject options incompatible with YBR_FULL_422 target photometric");
+		}
 
 		const std::array<dicom::pixel::CodecOptionTextKv, 3> jpeg_ybr_444_options{{
 		    {"quality", "90"},
