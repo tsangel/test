@@ -168,7 +168,8 @@ struct JpegColorOptionState {
 [[nodiscard]] pixel::Photometric compute_jpeg_output_photometric_or_throw(
     uid::WellKnown transfer_syntax, uint32_t codec_profile_code,
     std::span<const CodecOptionKv> codec_options,
-    pixel::Photometric source_photometric, std::size_t samples_per_pixel) {
+    pixel::Photometric source_photometric, std::size_t samples_per_pixel,
+    bool decoded_source_is_rgb_domain_for_jpeg) {
 	using namespace dicom::literals;
 
 	const auto jpeg_options = lookup_jpeg_color_options(codec_options);
@@ -200,7 +201,8 @@ struct JpegColorOptionState {
 		    "validate_target",
 		    "jpeg color_space/subsampling options require samples_per_pixel=3");
 	}
-	if (source_photometric != pixel::Photometric::rgb) {
+	if (source_photometric != pixel::Photometric::rgb &&
+	    !decoded_source_is_rgb_domain_for_jpeg) {
 		throw_codec_stage_exception(CodecStatusCode::invalid_argument,
 		    "validate_target",
 		    "jpeg color_space/subsampling options currently require source photometric RGB");
@@ -256,11 +258,12 @@ pixel::Photometric compute_output_photometric_for_encode_profile(
     uid::WellKnown transfer_syntax, uint32_t codec_profile_code,
     std::span<const CodecOptionKv> codec_options,
     bool use_multicomponent_transform, pixel::Photometric source_photometric,
-    std::size_t samples_per_pixel) {
+    std::size_t samples_per_pixel,
+    bool decoded_source_is_rgb_domain_for_jpeg) {
 	if (is_jpeg_encode_profile(codec_profile_code)) {
 		return compute_jpeg_output_photometric_or_throw(
 		    transfer_syntax, codec_profile_code, codec_options, source_photometric,
-		    samples_per_pixel);
+		    samples_per_pixel, decoded_source_is_rgb_domain_for_jpeg);
 	}
 	if (!use_multicomponent_transform) {
 		return source_photometric;

@@ -24,7 +24,8 @@ void validate_encode_profile_source_constraints(uint32_t codec_profile_code,
     uid::WellKnown transfer_syntax, uint32_t codec_profile_code,
     std::span<const CodecOptionKv> codec_options,
     bool use_multicomponent_transform, pixel::Photometric source_photometric,
-    std::size_t samples_per_pixel);
+    std::size_t samples_per_pixel,
+    bool decoded_source_is_rgb_domain_for_jpeg = false);
 
 [[nodiscard]] bool encode_profile_uses_lossy_compression(
     uint32_t codec_profile_code) noexcept;

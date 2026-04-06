@@ -1046,6 +1046,61 @@ def test_write_with_transfer_syntax_rejects_jpeg_extended12bit_color_space_optio
 		)
 
 
+def test_write_with_transfer_syntax_reencodes_jpeg_family_ybr_source_to_jpeg_baseline_ybr(tmp_path):
+	np = pytest.importorskip("numpy")
+	supported = {
+		uid.keyword or uid.value for uid in dicom.transfer_syntax_uids_encode_supported()
+	}
+	if "JPEGExtended12Bit" not in supported or "JPEGBaseline8Bit" not in supported:
+		pytest.skip("JPEGExtended12Bit/JPEGBaseline8Bit encoders are not available in this build")
+
+	df = dicom.DicomFile()
+	source = np.arange(2 * 2 * 3, dtype=np.uint8).reshape(2, 2, 3)
+	df.set_pixel_data(
+		"JPEGExtended12Bit", source, options={"type": "jpeg", "quality": 90}
+	)
+	# Simulate an incoming JPEG-family object whose stored PI is YBR even though
+	# the decoder feeds RGB-domain pixels into the transcode path.
+	df.PhotometricInterpretation = "YBR_FULL_422"
+
+	out_path = tmp_path / "write_with_transfer_syntax_jpeg_family_ybr_to_baseline.dcm"
+	df.write_with_transfer_syntax(
+		out_path,
+		"JPEGBaseline8Bit",
+		options={"type": "jpeg", "quality": 90, "color_space": "ybr"},
+	)
+
+	roundtrip = dicom.read_file(out_path)
+	assert roundtrip.transfer_syntax_uid.keyword == "JPEGBaseline8Bit"
+	assert roundtrip.PhotometricInterpretation == "YBR_FULL_422"
+	assert roundtrip.get_dataelement("PixelData").is_pixel_sequence
+
+
+def test_set_transfer_syntax_reencodes_jpeg_family_ybr_source_to_jpeg_baseline_ybr():
+	np = pytest.importorskip("numpy")
+	supported = {
+		uid.keyword or uid.value for uid in dicom.transfer_syntax_uids_encode_supported()
+	}
+	if "JPEGExtended12Bit" not in supported or "JPEGBaseline8Bit" not in supported:
+		pytest.skip("JPEGExtended12Bit/JPEGBaseline8Bit encoders are not available in this build")
+
+	df = dicom.DicomFile()
+	source = np.arange(2 * 2 * 3, dtype=np.uint8).reshape(2, 2, 3)
+	df.set_pixel_data(
+		"JPEGExtended12Bit", source, options={"type": "jpeg", "quality": 90}
+	)
+	df.PhotometricInterpretation = "YBR_FULL_422"
+
+	df.set_transfer_syntax(
+		"JPEGBaseline8Bit",
+		options={"type": "jpeg", "quality": 90, "color_space": "ybr"},
+	)
+
+	assert df.transfer_syntax_uid.keyword == "JPEGBaseline8Bit"
+	assert df.PhotometricInterpretation == "YBR_FULL_422"
+	assert df.get_dataelement("PixelData").is_pixel_sequence
+
+
 def test_set_transfer_syntax_state_only_updates_runtime_state_without_file_meta():
 	df = dicom.read_file(_test_file())
 	assert df.transfer_syntax_uid.keyword == "ExplicitVRLittleEndian"

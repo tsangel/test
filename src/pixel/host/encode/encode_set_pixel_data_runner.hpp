@@ -18,12 +18,14 @@ void run_set_pixel_data_from_frame_provider_with_computed_codec_options(
     DicomFile& file, uid::WellKnown transfer_syntax,
     const pixel::PixelLayout& source_layout,
     std::span<const CodecOptionKv> codec_options,
-    const std::function<std::span<const std::uint8_t>(std::size_t)>& frame_provider);
+    const std::function<std::span<const std::uint8_t>(std::size_t)>& frame_provider,
+    bool decoded_source_is_rgb_domain_for_jpeg = false);
 void run_set_pixel_data_from_frame_provider_streaming_with_computed_codec_options(
     DicomFile& file, uid::WellKnown transfer_syntax,
     const pixel::PixelLayout& source_layout,
     std::span<const CodecOptionKv> codec_options,
-    const std::function<std::span<const std::uint8_t>(std::size_t)>& frame_provider);
+    const std::function<std::span<const std::uint8_t>(std::size_t)>& frame_provider,
+    bool decoded_source_is_rgb_domain_for_jpeg = false);
 void encode_frames_from_frame_provider_with_runtime_or_throw(
     uid::WellKnown transfer_syntax,
     const pixel::PixelLayout& source_layout, uint32_t codec_profile_code,
