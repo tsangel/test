@@ -21,7 +21,8 @@ namespace dicom::pixel::detail {
 void validate_encode_profile_source_constraints(uint32_t codec_profile_code,
     int bits_allocated, int bits_stored);
 [[nodiscard]] pixel::Photometric compute_output_photometric_for_encode_profile(
-    uint32_t codec_profile_code, std::span<const CodecOptionKv> codec_options,
+    uid::WellKnown transfer_syntax, uint32_t codec_profile_code,
+    std::span<const CodecOptionKv> codec_options,
     bool use_multicomponent_transform, pixel::Photometric source_photometric,
     std::size_t samples_per_pixel);
 

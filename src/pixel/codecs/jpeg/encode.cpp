@@ -533,7 +533,12 @@ pixel_error_code encoder_encode_frame_to_context_buffer(
     {
       const int subsamp = (samples_sz == std::size_t{1})
           ? TJSAMP_GRAY
-          : (c->has_subsampling ? c->subsamp : TJSAMP_444);
+          : (c->has_subsampling
+                    ? c->subsamp
+                    : ((!lossless && c->has_colorspace &&
+                           c->colorspace == TJCS_YCbCr)
+                              ? TJSAMP_422
+                              : TJSAMP_444));
       const pixel_error_code ec =
           set_turbojpeg_param(c, handle.get(), TJPARAM_SUBSAMP, subsamp, "SUBSAMP");
       if (ec != PIXEL_CODEC_ERR_OK) {

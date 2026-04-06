@@ -166,8 +166,11 @@ struct JpegColorOptionState {
 }
 
 [[nodiscard]] pixel::Photometric compute_jpeg_output_photometric_or_throw(
-    uint32_t codec_profile_code, std::span<const CodecOptionKv> codec_options,
+    uid::WellKnown transfer_syntax, uint32_t codec_profile_code,
+    std::span<const CodecOptionKv> codec_options,
     pixel::Photometric source_photometric, std::size_t samples_per_pixel) {
+	using namespace dicom::literals;
+
 	const auto jpeg_options = lookup_jpeg_color_options(codec_options);
 	if (!jpeg_options.has_color_space && !jpeg_options.has_subsampling) {
 		return source_photometric;
@@ -186,6 +189,11 @@ struct JpegColorOptionState {
 		throw_codec_stage_exception(CodecStatusCode::invalid_argument,
 		    "validate_options",
 		    "jpeg color_space/subsampling options require a lossy JPEG transfer syntax");
+	}
+	if (transfer_syntax != "JPEGBaseline8Bit"_uid) {
+		throw_codec_stage_exception(CodecStatusCode::invalid_argument,
+		    "validate_options",
+		    "jpeg color_space/subsampling options require JPEGBaseline8Bit target transfer syntax");
 	}
 	if (samples_per_pixel != std::size_t{3}) {
 		throw_codec_stage_exception(CodecStatusCode::invalid_argument,
@@ -207,9 +215,13 @@ struct JpegColorOptionState {
 	if (jpeg_options.color_space == JpegColorSpaceOption::rgb) {
 		return pixel::Photometric::rgb;
 	}
-	return jpeg_options.subsampling == JpegSubsamplingOption::s422
-	           ? pixel::Photometric::ybr_full_422
-	           : pixel::Photometric::ybr_full;
+	if (jpeg_options.has_subsampling &&
+	    jpeg_options.subsampling != JpegSubsamplingOption::s422) {
+		throw_codec_stage_exception(CodecStatusCode::invalid_argument,
+		    "validate_options",
+		    "jpeg color_space='ybr' requires subsampling=422 for JPEGBaseline8Bit");
+	}
+	return pixel::Photometric::ybr_full_422;
 }
 
 } // namespace
@@ -241,12 +253,14 @@ void validate_encode_profile_source_constraints(uint32_t codec_profile_code,
 }
 
 pixel::Photometric compute_output_photometric_for_encode_profile(
-    uint32_t codec_profile_code, std::span<const CodecOptionKv> codec_options,
+    uid::WellKnown transfer_syntax, uint32_t codec_profile_code,
+    std::span<const CodecOptionKv> codec_options,
     bool use_multicomponent_transform, pixel::Photometric source_photometric,
     std::size_t samples_per_pixel) {
 	if (is_jpeg_encode_profile(codec_profile_code)) {
 		return compute_jpeg_output_photometric_or_throw(
-		    codec_profile_code, codec_options, source_photometric, samples_per_pixel);
+		    transfer_syntax, codec_profile_code, codec_options, source_photometric,
+		    samples_per_pixel);
 	}
 	if (!use_multicomponent_transform) {
 		return source_photometric;

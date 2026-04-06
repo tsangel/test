@@ -212,7 +212,7 @@ def test_set_pixel_data_frame_index_rejects_native_transfer_syntax():
         )
 
 
-def test_set_pixel_data_jpeg_ybr_full_updates_photometric():
+def test_set_pixel_data_jpeg_ybr_defaults_to_ybr_full_422_photometric():
     supported = {
         uid.keyword or uid.value for uid in dicom.transfer_syntax_uids_encode_supported()
     }
@@ -230,7 +230,7 @@ def test_set_pixel_data_jpeg_ybr_full_updates_photometric():
 
     assert (
         dicom_file.get_dataelement("PhotometricInterpretation").to_string_view()
-        == "YBR_FULL"
+        == "YBR_FULL_422"
     )
 
 
@@ -273,4 +273,49 @@ def test_set_pixel_data_frame_index_supports_jpeg_ybr_full_422_target():
             replacement,
             frame_index=0,
             options={"type": "jpeg", "quality": 90},
+        )
+
+
+def test_set_pixel_data_rejects_jpeg_ybr_subsampling_444():
+    supported = {
+        uid.keyword or uid.value for uid in dicom.transfer_syntax_uids_encode_supported()
+    }
+    if "JPEGBaseline8Bit" not in supported:
+        pytest.skip("JPEGBaseline8Bit encoder is not available in this build")
+
+    dicom_file = dicom.read_file(_test_file())
+    source = np.arange(2 * 2 * 3, dtype=np.uint8).reshape(2, 2, 3)
+
+    with pytest.raises(ValueError, match="subsampling=422"):
+        dicom_file.set_pixel_data(
+            "JPEGBaseline8Bit",
+            source,
+            options={
+                "type": "jpeg",
+                "quality": 90,
+                "color_space": "ybr",
+                "subsampling": "444",
+            },
+        )
+
+
+def test_set_pixel_data_rejects_jpeg_extended12bit_color_space_options():
+    supported = {
+        uid.keyword or uid.value for uid in dicom.transfer_syntax_uids_encode_supported()
+    }
+    if "JPEGExtended12Bit" not in supported:
+        pytest.skip("JPEGExtended12Bit encoder is not available in this build")
+
+    dicom_file = dicom.read_file(_test_file())
+    source = np.arange(2 * 2 * 3, dtype=np.uint8).reshape(2, 2, 3)
+
+    with pytest.raises(ValueError, match="JPEGBaseline8Bit"):
+        dicom_file.set_pixel_data(
+            "JPEGExtended12Bit",
+            source,
+            options={
+                "type": "jpeg",
+                "quality": 90,
+                "color_space": "ybr",
+            },
         )

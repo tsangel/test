@@ -1279,6 +1279,17 @@ nb::object apply_window_to_numpy_array(
 				throw nb::value_error(
 				    "jpeg options subsampling requires color_space='ybr'");
 			}
+			if (transfer_syntax &&
+			    (fields.has_color_space || fields.has_subsampling) &&
+			    *transfer_syntax != "JPEGBaseline8Bit"_uid) {
+				throw nb::value_error(
+				    "jpeg options color_space/subsampling require transfer syntax 'JPEGBaseline8Bit'");
+			}
+			if (fields.has_color_space && color_space == "ybr" &&
+			    fields.has_subsampling && subsampling != "422") {
+				throw nb::value_error(
+				    "jpeg options color_space='ybr' requires subsampling=422");
+			}
 			if (transfer_syntax && transfer_syntax->is_lossless() &&
 			    (fields.has_color_space || fields.has_subsampling)) {
 				throw nb::value_error(

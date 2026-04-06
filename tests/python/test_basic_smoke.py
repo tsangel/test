@@ -923,6 +923,33 @@ def test_write_with_transfer_syntax_roundtrip_without_mutating_source(tmp_path):
 	assert roundtrip_ctx.pixel_data(0) == baseline_frame
 
 
+def test_write_with_transfer_syntax_jpeg_baseline_ybr_updates_photometric(tmp_path):
+	np = pytest.importorskip("numpy")
+	supported = {
+		uid.keyword or uid.value for uid in dicom.transfer_syntax_uids_encode_supported()
+	}
+	if "JPEGBaseline8Bit" not in supported:
+		pytest.skip("JPEGBaseline8Bit encoder is not available in this build")
+
+	df = dicom.DicomFile()
+	source = np.arange(2 * 2 * 3, dtype=np.uint8).reshape(2, 2, 3)
+	df.set_pixel_data("ExplicitVRLittleEndian", source)
+
+	out_path = tmp_path / "write_with_transfer_syntax_jpeg_ybr.dcm"
+	df.write_with_transfer_syntax(
+		out_path,
+		"JPEGBaseline8Bit",
+		options={"type": "jpeg", "quality": 90, "color_space": "ybr"},
+	)
+
+	roundtrip = dicom.read_file(out_path)
+	assert roundtrip.transfer_syntax_uid.keyword == "JPEGBaseline8Bit"
+	assert roundtrip.PhotometricInterpretation == "YBR_FULL_422"
+	assert roundtrip.get_dataelement("PixelData").is_pixel_sequence
+	assert df.transfer_syntax_uid.keyword == "ExplicitVRLittleEndian"
+	assert df.PhotometricInterpretation == "RGB"
+
+
 def test_binary_memoryviews_keep_dataset_owner_alive():
 	df = dicom.read_file(_test_file())
 	base_refcount = sys.getrefcount(df)
@@ -975,6 +1002,48 @@ def test_set_transfer_syntax_encapsulated_to_encapsulated_cycle():
 	assert df.transfer_syntax_uid.keyword == "JPEGLSLossless"
 	assert df.get_dataelement("PixelData").is_pixel_sequence
 	assert df.pixel_data(0) == baseline_frame
+
+
+def test_set_transfer_syntax_jpeg_baseline_ybr_updates_photometric():
+	np = pytest.importorskip("numpy")
+	supported = {
+		uid.keyword or uid.value for uid in dicom.transfer_syntax_uids_encode_supported()
+	}
+	if "JPEGBaseline8Bit" not in supported:
+		pytest.skip("JPEGBaseline8Bit encoder is not available in this build")
+
+	df = dicom.DicomFile()
+	source = np.arange(2 * 2 * 3, dtype=np.uint8).reshape(2, 2, 3)
+	df.set_pixel_data("ExplicitVRLittleEndian", source)
+
+	df.set_transfer_syntax(
+		"JPEGBaseline8Bit",
+		options={"type": "jpeg", "quality": 90, "color_space": "ybr"},
+	)
+
+	assert df.transfer_syntax_uid.keyword == "JPEGBaseline8Bit"
+	assert df.PhotometricInterpretation == "YBR_FULL_422"
+	assert df.get_dataelement("PixelData").is_pixel_sequence
+
+
+def test_write_with_transfer_syntax_rejects_jpeg_extended12bit_color_space_options(tmp_path):
+	np = pytest.importorskip("numpy")
+	supported = {
+		uid.keyword or uid.value for uid in dicom.transfer_syntax_uids_encode_supported()
+	}
+	if "JPEGExtended12Bit" not in supported:
+		pytest.skip("JPEGExtended12Bit encoder is not available in this build")
+
+	df = dicom.DicomFile()
+	source = np.arange(2 * 2 * 3, dtype=np.uint8).reshape(2, 2, 3)
+	df.set_pixel_data("ExplicitVRLittleEndian", source)
+
+	with pytest.raises(ValueError, match="JPEGBaseline8Bit"):
+		df.write_with_transfer_syntax(
+			tmp_path / "write_with_transfer_syntax_jpeg_extended_ybr.dcm",
+			"JPEGExtended12Bit",
+			options={"type": "jpeg", "quality": 90, "color_space": "ybr"},
+		)
 
 
 def test_set_transfer_syntax_state_only_updates_runtime_state_without_file_meta():

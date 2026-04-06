@@ -212,6 +212,7 @@ df.set_pixel_data(
     },
 )
 # The resulting DICOM metadata uses PhotometricInterpretation=YBR_FULL_422.
+# Omitting subsampling here would default the YBR path to the same DICOM value.
 ```
 
 ### Parse and validate a Python options dict once, then reuse the context

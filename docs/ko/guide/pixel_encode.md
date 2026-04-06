@@ -208,6 +208,7 @@ df.set_pixel_data(
     },
 )
 # 결과 DICOM metadata는 PhotometricInterpretation=YBR_FULL_422 를 사용합니다.
+# 여기서 subsampling을 생략해도 YBR 경로는 같은 DICOM 값으로 기본 설정됩니다.
 ```
 
 ### Python 옵션 사전을 한 번 구문 분석하고 검증한 다음 컨텍스트를 재사용합니다.
