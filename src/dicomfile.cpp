@@ -2043,6 +2043,11 @@ PixelFrame* DicomFile::add_encoded_pixel_frame(std::vector<std::uint8_t>&& encod
 }
 
 void DicomFile::set_transfer_syntax_state_only(uid::WellKnown transfer_syntax) {
+	if (!transfer_syntax.valid() ||
+	    transfer_syntax.uid_type() != UidType::TransferSyntax) {
+		diag::throw_exception(
+		    "DicomFile::set_transfer_syntax_state_only reason=uid must be a valid Transfer Syntax UID");
+	}
 	transfer_syntax_uid_ = transfer_syntax.valid() ? transfer_syntax : uid::WellKnown{};
 	root_dataset_.explicit_vr_ = transfer_syntax_uid_.uses_explicit_vr();
 	auto& pixel_data = root_dataset_.get_dataelement("PixelData"_tag);

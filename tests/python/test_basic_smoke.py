@@ -977,6 +977,27 @@ def test_set_transfer_syntax_encapsulated_to_encapsulated_cycle():
 	assert df.pixel_data(0) == baseline_frame
 
 
+def test_set_transfer_syntax_state_only_updates_runtime_state_without_file_meta():
+	df = dicom.read_file(_test_file())
+	assert df.transfer_syntax_uid.keyword == "ExplicitVRLittleEndian"
+	assert df["TransferSyntaxUID"].to_transfer_syntax_uid().keyword == "ExplicitVRLittleEndian"
+	assert not df.get_dataelement("PixelData").is_pixel_sequence
+
+	df.set_transfer_syntax_state_only("RLELossless")
+
+	assert df.transfer_syntax_uid.keyword == "RLELossless"
+	assert df["TransferSyntaxUID"].to_transfer_syntax_uid().keyword == "ExplicitVRLittleEndian"
+	assert not df.get_dataelement("PixelData").is_pixel_sequence
+
+
+def test_set_transfer_syntax_state_only_rejects_non_transfer_syntax_uid():
+	df = dicom.read_file(_test_file())
+	with pytest.raises(ValueError, match="Transfer Syntax UID"):
+		df.set_transfer_syntax_state_only("CTImageStorage")
+	with pytest.raises(ValueError, match="Transfer Syntax UID"):
+		df.set_transfer_syntax_state_only(dicom.uid_from_keyword("CTImageStorage"))
+
+
 def test_encoder_context_reuse_for_set_transfer_syntax():
 	df = dicom.read_file(_test_file())
 	baseline_frame = df.pixel_data(0)

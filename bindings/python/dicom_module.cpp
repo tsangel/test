@@ -1401,6 +1401,18 @@ nb::object apply_window_to_numpy_array(
 	return *uid;
 }
 
+[[nodiscard]] Uid require_transfer_syntax_uid_or_throw(Uid uid) {
+	if (!uid.valid()) {
+		throw nb::value_error("uid must be a valid Transfer Syntax UID");
+	}
+	if (uid.uid_type() != dicom::UidType::TransferSyntax) {
+		const std::string message =
+		    "UID is not a Transfer Syntax UID: " + std::string(uid.value());
+		throw nb::value_error(message.c_str());
+	}
+	return uid;
+}
+
 void set_transfer_syntax_with_options(
     DicomFile& self, Uid transfer_syntax, nb::handle options) {
 	const auto text_options =
@@ -5275,6 +5287,26 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::kw_only(),
 		    nb::arg("encoder_context"),
 		    "Set transfer syntax using transfer syntax text and a preconfigured EncoderContext.")
+		.def("set_transfer_syntax_state_only",
+		    [](DicomFile& self, const Uid& transfer_syntax) {
+			    self.set_transfer_syntax_state_only(
+			        require_transfer_syntax_uid_or_throw(transfer_syntax));
+		    },
+		    nb::arg("transfer_syntax"),
+		    "Advanced API: update only the in-memory transfer syntax state.\n"
+		    "This does not transcode PixelData and does not update file meta (0002,0010).\n"
+		    "Use set_transfer_syntax(...) for a full conversion, or rebuild_file_meta()\n"
+		    "afterward if file meta should match the current runtime state.")
+		.def("set_transfer_syntax_state_only",
+		    [](DicomFile& self, const std::string& transfer_syntax_text) {
+			    self.set_transfer_syntax_state_only(
+			        parse_transfer_syntax_text_or_throw(transfer_syntax_text));
+		    },
+		    nb::arg("transfer_syntax"),
+		    "Advanced API: update only the in-memory transfer syntax state.\n"
+		    "This does not transcode PixelData and does not update file meta (0002,0010).\n"
+		    "Use set_transfer_syntax(...) for a full conversion, or rebuild_file_meta()\n"
+		    "afterward if file meta should match the current runtime state.")
 		.def("set_declared_specific_charset",
 		    [](DicomFile& self, nb::handle value) {
 			    const auto charsets =

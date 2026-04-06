@@ -3277,6 +3277,11 @@ public:
 	    const pixel::EncoderContext& encoder_ctx);
 	void set_transfer_syntax(uid::WellKnown transfer_syntax,
 	    std::span<const pixel::CodecOptionTextKv> codec_opt);
+	/// Advanced API: update only the in-memory transfer syntax label/state.
+	/// This does not transcode PixelData and does not update file meta (0002,0010).
+	/// Use `set_transfer_syntax(...)` for a full in-memory conversion, or call
+	/// `rebuild_file_meta()` later if file meta should match the current runtime state.
+	void set_transfer_syntax_state_only(uid::WellKnown transfer_syntax);
 	/// Update only the declared (0008,0005) Specific Character Set metadata.
 	/// Existing text value bytes are left untouched.
 	/// Prefer this API over directly editing the raw (0008,0005) element so the effective
@@ -3467,7 +3472,6 @@ private:
 	friend void pixel::set_pixel_data(
 	    DicomFile& file, pixel::ConstPixelSpan source, std::size_t frame_index,
 	    const pixel::EncoderContext& encoder_ctx);
-	void set_transfer_syntax_state_only(uid::WellKnown transfer_syntax);
 	void apply_transfer_syntax(uid::WellKnown transfer_syntax);
 	void apply_transfer_syntax(uid::WellKnown transfer_syntax,
 	    const pixel::EncoderContext& encoder_ctx);
