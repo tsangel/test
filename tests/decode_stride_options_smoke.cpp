@@ -432,7 +432,7 @@ int main() {
 			    expect_true(!decoded.bytes.empty(), std::string(label) + " decode payload");
 			    expect_true(decode_info.photometric.has_value(),
 			        std::string(label) + " decode photometric presence");
-			    expect_eq(*decode_info.photometric, plan.output_layout.photometric,
+			    expect_eq(*decode_info.photometric, dicom::pixel::Photometric::rgb,
 			        std::string(label) + " decode photometric");
 		    };
 

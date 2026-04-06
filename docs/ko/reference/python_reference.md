@@ -47,6 +47,10 @@ DICOM JSON Model ?쎄린/?곌린????댁꽌??[DICOM JSON](../guide/dicom_json.m
   `to_array(..., with_info=True)` and `decode_into(..., with_info=True)`.
 - `DecodeInfo.photometric` is an optional `Photometric` value and may be `None`
   when the successful decode result does not map cleanly to a DICOM photometric.
+  It reflects the backend's actual decoded output when representable, so it may
+  differ from stored metadata such as `YBR_RCT` / `YBR_ICT`.
+  Some backends may ignore `decode_mct` and still return RGB-domain samples; in
+  that case `DecodeInfo.photometric` reports `Photometric.rgb`.
 - `DecodeInfo.encoded_lossy_state` is an `EncodedLossyState` enum describing whether
   the encoded source is `lossless`, `lossy`, `near_lossless`, or `unknown`.
 - `DecodeInfo.dtype`, `DecodeInfo.planar`, and `DecodeInfo.bits_per_sample`

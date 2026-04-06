@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-#define PIXEL_DECODER_PLUGIN_ABI 0x00040000u
+#define PIXEL_DECODER_PLUGIN_ABI 0x00050000u
 
 typedef struct pixel_decoder_source {
   uint32_t struct_size;
@@ -22,7 +22,7 @@ typedef struct pixel_decoder_frame_info {
   uint32_t codec_profile_code;
   uint8_t source_dtype;
   uint8_t source_planar;
-  // Host-populated optional decoded color/photometric hint (low byte).
+  // Host-populated optional source photometric hint (low byte).
   uint16_t reserved0;
 
   int32_t rows;

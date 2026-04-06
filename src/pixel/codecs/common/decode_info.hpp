@@ -36,7 +36,7 @@ inline uint8_t decoded_planar_code_from_request(uint8_t dst_planar) noexcept {
       : PIXEL_DECODED_PLANAR_INTERLEAVED;
 }
 
-inline uint8_t decoded_color_space_hint_from_request(
+inline uint8_t source_photometric_hint_from_request(
     const pixel_decoder_request* request) noexcept {
   if (request == nullptr) {
     return PIXEL_DECODED_COLOR_SPACE_UNKNOWN;
@@ -51,9 +51,9 @@ inline uint8_t default_color_space_for_sample_count(
       : PIXEL_DECODED_COLOR_SPACE_UNKNOWN;
 }
 
-inline uint8_t default_color_space_from_request(
+inline uint8_t source_color_space_from_request(
     const pixel_decoder_request* request) noexcept {
-  const uint8_t hinted_color_space = decoded_color_space_hint_from_request(request);
+  const uint8_t hinted_color_space = source_photometric_hint_from_request(request);
   if (hinted_color_space != PIXEL_DECODED_COLOR_SPACE_UNKNOWN) {
     return hinted_color_space;
   }

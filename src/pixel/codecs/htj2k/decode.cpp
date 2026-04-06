@@ -356,13 +356,33 @@ uint16_t decoded_bits_per_sample_from_openjph_siz(
   return max_precision <= 65535u ? static_cast<uint16_t>(max_precision) : uint16_t{0};
 }
 
+uint8_t actual_color_space_from_htj2k_request(
+    const pixel_decoder_request* request) noexcept {
+  const uint8_t source_hint =
+      ::pixel::codec_common::source_photometric_hint_from_request(request);
+  switch (source_hint) {
+  case PIXEL_DECODED_COLOR_SPACE_YBR_RCT:
+  case PIXEL_DECODED_COLOR_SPACE_YBR_ICT:
+    // The current OpenJPH-backed HTJ2K decoder returns RGB-domain samples for
+    // DICOM MCT codestreams, so report the actual decoded buffer domain here.
+    return PIXEL_DECODED_COLOR_SPACE_RGB;
+  default:
+    break;
+  }
+  if (source_hint != PIXEL_DECODED_COLOR_SPACE_UNKNOWN) {
+    return source_hint;
+  }
+  return ::pixel::codec_common::default_color_space_for_sample_count(
+      request != nullptr ? request->frame.samples_per_pixel : 0);
+}
+
 template <typename SizT>
 void set_htj2k_decode_info(
     const pixel_decoder_request* request, const SizT& siz,
     uint32_t components) noexcept {
   ::pixel::codec_common::set_decoder_info(
       request,
-      ::pixel::codec_common::default_color_space_from_request(request),
+      actual_color_space_from_htj2k_request(request),
       encoded_lossy_state_from_htj2k_profile(request->frame.codec_profile_code),
       request->output.dst_dtype,
       ::pixel::codec_common::decoded_planar_code_from_request(

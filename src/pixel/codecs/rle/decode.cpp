@@ -214,7 +214,7 @@ bool write_integer_sample(uint8_t dst_dtype, int32_t sample, uint8_t* dst) {
 void set_rle_decode_info(const pixel_decoder_request* request) noexcept {
   ::pixel::codec_common::set_decoder_info(
       request,
-      ::pixel::codec_common::default_color_space_from_request(request),
+      ::pixel::codec_common::source_color_space_from_request(request),
       PIXEL_ENCODED_LOSSY_STATE_LOSSLESS,
       request->output.dst_dtype,
       ::pixel::codec_common::decoded_planar_code_from_request(

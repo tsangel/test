@@ -213,6 +213,11 @@ print(info2.photometric, info2.dtype, info2.planar)
 - `planar`: decoded planar/interleaved organization when known
 - `bits_per_sample`: decoded bits per sample, or `0` when unknown
 
+`DecodeInfo.photometric` follows the backend's actual decoded buffer domain, not
+just stored metadata. For example, if a JPEG2000 or HTJ2K backend still returns
+RGB-domain samples while `decode_mct=False`, `DecodeInfo.photometric` reports
+`Photometric.rgb`.
+
 For `frame=-1` on multi-frame input, Python `with_info=True` reports frame-0/common
 decode metadata while returning the full decoded volume or filling the full destination
 buffer.

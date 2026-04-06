@@ -4610,7 +4610,9 @@ NB_MODULE(_dicomsdl, m) {
 			    }
 			    return nb::cast(*self.photometric);
 		    },
-		    "Decoded output photometric when representable as a DICOM Photometric value, else None.")
+		    "Decoded output photometric when representable as a DICOM Photometric value, else None."
+		    " This reflects the backend's actual decoded buffer domain and may differ"
+		    " from stored metadata such as YBR_RCT/YBR_ICT.")
 		.def_prop_ro("encoded_lossy_state",
 		    [](const dicom::pixel::DecodeInfo& self) {
 			    return self.encoded_lossy_state;

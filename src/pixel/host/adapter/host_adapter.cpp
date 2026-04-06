@@ -465,7 +465,7 @@ pixel_error_code decode_frame_with_host_context(HostDecoderContext* ctx,
 
   pixel_decoder_request request{};
   if (!build_decoder_request(ctx->codec_profile_code, source_dtype.code, *source_layout,
-          normalized_output_layout.photometric, prepared_source, destination, output_dtype.code,
+          source_layout->photometric, prepared_source, destination, output_dtype.code,
           normalized_output_layout.planar,
           static_cast<uint64_t>(normalized_output_layout.row_stride),
           static_cast<uint64_t>(normalized_output_layout.frame_stride),

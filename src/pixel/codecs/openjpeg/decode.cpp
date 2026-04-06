@@ -319,11 +319,46 @@ uint16_t decoded_bits_per_sample_from_openjpeg_image(
       : uint16_t{0};
 }
 
+uint8_t actual_color_space_from_openjpeg_request(
+    const pixel_decoder_request* request, const opj_image_t* image) noexcept {
+  const uint8_t source_hint =
+      ::pixel::codec_common::source_photometric_hint_from_request(request);
+  if (image != nullptr) {
+    switch (image->color_space) {
+    case OPJ_CLRSPC_GRAY:
+      return PIXEL_DECODED_COLOR_SPACE_MONOCHROME;
+    case OPJ_CLRSPC_SRGB:
+      return request != nullptr && request->frame.samples_per_pixel == 4
+          ? PIXEL_DECODED_COLOR_SPACE_RGBA
+          : PIXEL_DECODED_COLOR_SPACE_RGB;
+    case OPJ_CLRSPC_SYCC:
+    case OPJ_CLRSPC_EYCC:
+      return PIXEL_DECODED_COLOR_SPACE_YBR_FULL;
+    default:
+      break;
+    }
+  }
+  switch (source_hint) {
+  case PIXEL_DECODED_COLOR_SPACE_YBR_RCT:
+  case PIXEL_DECODED_COLOR_SPACE_YBR_ICT:
+    // OpenJPEG currently returns RGB-domain samples for DICOM JPEG2000/HTJ2K
+    // codestreams that use the reversible/irreversible MCT.
+    return PIXEL_DECODED_COLOR_SPACE_RGB;
+  default:
+    break;
+  }
+  if (source_hint != PIXEL_DECODED_COLOR_SPACE_UNKNOWN) {
+    return source_hint;
+  }
+  return ::pixel::codec_common::default_color_space_for_sample_count(
+      request != nullptr ? request->frame.samples_per_pixel : 0);
+}
+
 void set_openjpeg_decode_info(
     const pixel_decoder_request* request, const opj_image_t* image) noexcept {
   ::pixel::codec_common::set_decoder_info(
       request,
-      ::pixel::codec_common::default_color_space_from_request(request),
+      actual_color_space_from_openjpeg_request(request, image),
       encoded_lossy_state_from_openjpeg_profile(request->frame.codec_profile_code),
       request->output.dst_dtype,
       ::pixel::codec_common::decoded_planar_code_from_request(

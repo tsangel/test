@@ -73,7 +73,7 @@ inline bool is_mct_capable_profile(uint32_t codec_profile_code) noexcept {
       codec_profile_code == PIXEL_CODEC_PROFILE_HTJ2K_LOSSY;
 }
 
-inline uint8_t decoded_color_space_code_from_photometric(
+inline uint8_t photometric_hint_code_from_photometric(
     dicom::pixel::Photometric photometric) noexcept {
   switch (photometric) {
   case dicom::pixel::Photometric::monochrome1:
@@ -110,7 +110,7 @@ inline uint8_t decoded_color_space_code_from_photometric(
 
 inline bool build_decoder_request(uint32_t codec_profile_code,
     uint8_t source_dtype_code, const dicom::pixel::PixelLayout& source_layout,
-    dicom::pixel::Photometric output_photometric,
+    dicom::pixel::Photometric source_photometric,
     std::span<const uint8_t> prepared_source, std::span<uint8_t> destination,
     uint8_t destination_dtype_code, dicom::pixel::Planar destination_planar,
     uint64_t output_row_stride, uint64_t output_frame_stride, bool decode_mct,
@@ -138,7 +138,7 @@ inline bool build_decoder_request(uint32_t codec_profile_code,
   request.frame.source_dtype = source_dtype_code;
   request.frame.source_planar = to_planar_code(source_layout.planar);
   request.frame.reserved0 = static_cast<uint16_t>(
-      decoded_color_space_code_from_photometric(output_photometric));
+      photometric_hint_code_from_photometric(source_photometric));
   request.frame.rows = source_layout.rows;
   request.frame.cols = source_layout.cols;
   request.frame.samples_per_pixel = source_layout.samples_per_pixel;

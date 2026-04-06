@@ -133,8 +133,8 @@ def test_decode_into_with_info_reports_rgb_for_native_color_planar_conversion():
     [
         ("RLELossless", dicom.Photometric.rgb),
         ("JPEGLSLossless", dicom.Photometric.rgb),
-        ("JPEG2000Lossless", dicom.Photometric.ybr_rct),
-        ("HTJ2KLossless", dicom.Photometric.ybr_rct),
+        ("JPEG2000Lossless", dicom.Photometric.rgb),
+        ("HTJ2KLossless", dicom.Photometric.rgb),
     ],
 )
 def test_to_array_with_info_reports_photometric_for_color_lossless_codecs(
@@ -151,3 +151,20 @@ def test_to_array_with_info_reports_photometric_for_color_lossless_codecs(
 
     assert np.array_equal(arr, source)
     assert info.photometric == expected_photometric
+
+
+@pytest.mark.parametrize("transfer_syntax", ["JPEG2000Lossless", "HTJ2KLossless"])
+def test_to_array_with_info_reports_actual_backend_output_when_decode_mct_is_disabled(
+    transfer_syntax: str,
+):
+    if not _supports_encode(transfer_syntax):
+        pytest.skip(f"{transfer_syntax} encoder is not available in this build")
+
+    dicom_file = dicom.read_file(_test_file())
+    source = np.arange(18, dtype=np.uint8).reshape(2, 3, 3)
+    dicom_file.set_pixel_data(transfer_syntax, source)
+
+    arr, info = dicom_file.to_array(frame=0, with_info=True, decode_mct=False)
+
+    assert np.array_equal(arr, source)
+    assert info.photometric == dicom.Photometric.rgb

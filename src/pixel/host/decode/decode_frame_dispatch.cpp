@@ -348,7 +348,7 @@ void build_direct_decode_request_for_core(pixel_decoder_request& request,
 	// Reuse the shared ABI request builder so builtin core-direct decode stays in lockstep
 	// with the plugin-backed request contract.
 	::pixel::runtime::build_decoder_request(codec_profile_code, source_dtype.code,
-	    decode_request.source_layout, decode_request.output_layout.photometric,
+	    decode_request.source_layout, decode_request.source_layout.photometric,
 	    prepared_source, destination,
 	    dst_dtype.code == PIXEL_DTYPE_UNKNOWN ? source_dtype.code : dst_dtype.code,
 	    decode_request.output_layout.planar,
