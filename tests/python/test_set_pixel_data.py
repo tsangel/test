@@ -150,6 +150,38 @@ def test_set_pixel_data_frame_index_supports_encoder_context():
     assert np.array_equal(decoded[1], frame1)
 
 
+def test_set_pixel_data_frame_index_recomputes_lossy_ratio_for_fragment_backed_frames():
+    supported = {
+        uid.keyword or uid.value for uid in dicom.transfer_syntax_uids_encode_supported()
+    }
+    if "JPEG2000" not in supported:
+        pytest.skip("JPEG2000 encoder is not available in this build")
+
+    dicom_file = dicom.read_file(_test_file())
+    frame0 = np.arange(32 * 32, dtype=np.int16).reshape(32, 32)
+    frame1 = np.full((32, 32), 17, dtype=np.int16)
+    source = np.stack([frame0, frame1], axis=0)
+    dicom_file.set_pixel_data("JPEG2000", source)
+
+    roundtrip = dicom.read_bytes(
+        dicom_file.write_bytes(), name="single-frame-lossy-roundtrip"
+    )
+    original_frame0_bytes = roundtrip.encoded_pixel_frame_bytes(0)
+    replacement = np.full((32, 32), 511, dtype=np.int16)
+    roundtrip.set_pixel_data("JPEG2000", replacement, frame_index=0)
+    replaced_frame0_bytes = roundtrip.encoded_pixel_frame_bytes(0)
+    assert replaced_frame0_bytes != original_frame0_bytes
+
+    encoded_total = len(replaced_frame0_bytes) + len(
+        roundtrip.encoded_pixel_frame_bytes(1)
+    )
+    ratios = (
+        roundtrip.get_dataelement("LossyImageCompressionRatio").to_double_vector()
+    )
+    assert ratios is not None and len(ratios) >= 2
+    assert ratios[-1] == pytest.approx(source.nbytes / encoded_total, rel=1e-6)
+
+
 def test_set_pixel_data_frame_index_rejects_multi_frame_source():
     supported = {
         uid.keyword or uid.value for uid in dicom.transfer_syntax_uids_encode_supported()

@@ -16,6 +16,37 @@
 namespace dicom::pixel::detail {
 using namespace dicom::literals;
 
+namespace {
+
+[[nodiscard]] std::size_t encoded_payload_size_from_frame_or_throw(
+    const PixelFrame& frame, std::size_t frame_index) {
+	const auto contiguous_bytes = frame.encoded_data_size();
+	if (contiguous_bytes != 0) {
+		return contiguous_bytes;
+	}
+
+	const auto& fragments = frame.fragments();
+	if (fragments.empty()) {
+		throw_frame_codec_stage_exception(frame_index,
+		    CodecStatusCode::internal_error, "update_lossy_metadata",
+		    "encoded frame has no payload while updating lossy metadata");
+	}
+
+	std::size_t total_bytes = 0;
+	constexpr std::size_t kSizeMax = std::numeric_limits<std::size_t>::max();
+	for (const auto& fragment : fragments) {
+		if (total_bytes > kSizeMax - fragment.length) {
+			throw_codec_stage_exception(CodecStatusCode::internal_error,
+			    "update_lossy_metadata",
+			    "encoded payload size overflows size_t while updating lossy metadata");
+		}
+		total_bytes += fragment.length;
+	}
+	return total_bytes;
+}
+
+}  // namespace
+
 std::size_t encoded_payload_size_from_pixel_sequence(const DataSet& dataset) {
 	const auto& pixel_data = dataset["PixelData"_tag];
 	if (!pixel_data || !pixel_data.vr().is_pixel_sequence()) {
@@ -40,7 +71,8 @@ std::size_t encoded_payload_size_from_pixel_sequence(const DataSet& dataset) {
 			    CodecStatusCode::internal_error, "update_lossy_metadata",
 			    "encoded frame missing while updating lossy metadata");
 		}
-		const auto frame_bytes = frame->encoded_data_size();
+		const auto frame_bytes =
+		    encoded_payload_size_from_frame_or_throw(*frame, frame_index);
 		if (encoded_payload_bytes > kSizeMax - frame_bytes) {
 			throw_codec_stage_exception(CodecStatusCode::internal_error,
 			    "update_lossy_metadata",
