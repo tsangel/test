@@ -10,6 +10,7 @@ __version__: str
 UID_PREFIX: str
 IMPLEMENTATION_CLASS_UID: str
 IMPLEMENTATION_VERSION_NAME: str
+PIXEL_PAYLOAD_PLACEHOLDER_MAGIC: bytes
 
 __all__ = [
     "LogLevel",
@@ -23,15 +24,19 @@ __all__ = [
     "UID_PREFIX",
     "IMPLEMENTATION_CLASS_UID",
     "IMPLEMENTATION_VERSION_NAME",
+    "PIXEL_PAYLOAD_PLACEHOLDER_MAGIC",
     "log_info",
     "log_warn",
     "log_error",
     "set_default_reporter",
     "set_thread_reporter",
     "set_log_level",
+    "Photometric",
+    "EncodedLossyState",
     "Planar",
     "DecodeOptions",
     "DecodePlan",
+    "DecodeInfo",
     "VoiLutFunction",
     "PixelPresentation",
     "WindowTransform",
@@ -68,6 +73,7 @@ __all__ = [
     "read_file_selected",
     "is_dicom_file",
     "read_bytes",
+    "read_bytes_with_pixel_payload",
     "read_bytes_selected",
     "load_root_elements_reserve_hint",
     "reset_root_elements_reserve_hint",
@@ -614,6 +620,11 @@ class DicomFile:
 
     @property
     def error_message(self) -> Optional[str]: ...
+
+    @property
+    def has_attached_pixel_payload(self) -> bool: ...
+
+    def detach_pixel_payload(self) -> None: ...
 
     @overload
     def create_decode_plan(self) -> DecodePlan: ...
@@ -1346,6 +1357,15 @@ def is_dicom_file(path: str | os.PathLike[str], /) -> bool: ...
 
 def read_bytes(
     data: bytes | bytearray | memoryview,
+    name: str = "<memory>",
+    load_until: Tag | None = ...,
+    keep_on_error: bool | None = ...,
+    copy: bool = ...,
+) -> DicomFile: ...
+
+def read_bytes_with_pixel_payload(
+    data: bytes | bytearray | memoryview,
+    pixel_payload: bytes | bytearray | memoryview,
     name: str = "<memory>",
     load_until: Tag | None = ...,
     keep_on_error: bool | None = ...,
