@@ -114,7 +114,7 @@ Start here:
 - [Tutorial notebooks](tutorials/README.md)
 - [CLI Tools](docs/en/guide/cli_tools.md)
 - [DICOM JSON](docs/en/guide/dicom_json.md)
-- [Split Pixel Payload](docs/en/guide/split_pixel_payload.md)
+- [Split Pixel Payload](docs/en/developer/split_pixel_payload.md)
 - [Python DataSet Guide](docs/en/guide/python_dataset_guide.md)
 - [C++ DataSet Guide](docs/en/guide/cpp_dataset_guide.md)
 - [Reference index](docs/en/reference/index.md)

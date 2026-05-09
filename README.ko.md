@@ -6,5 +6,5 @@ DicomSDL은 C++ 코어와 선택적 Python 바인딩을 제공하는 경량 DICO
 - 영문 README: [README.md](README.md)
 - 문서 홈: [docs/ko/index.md](docs/ko/index.md)
 - 빠른 시작: [docs/ko/guide/quickstart.md](docs/ko/guide/quickstart.md)
-- Split Pixel Payload: [docs/ko/guide/split_pixel_payload.md](docs/ko/guide/split_pixel_payload.md)
+- Split Pixel Payload: [docs/ko/developer/split_pixel_payload.md](docs/ko/developer/split_pixel_payload.md)
 - 번역 운영 규칙: [docs/en/developer/translation_workflow.md](docs/en/developer/translation_workflow.md)

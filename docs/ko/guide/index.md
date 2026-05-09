@@ -20,7 +20,6 @@ sequence_and_paths
 charset_and_person_name
 pixel_decode
 pixel_encode
-split_pixel_payload
 generating_uid
 error_handling
 troubleshooting

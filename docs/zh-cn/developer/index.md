@@ -12,6 +12,7 @@ This section is for contributors and maintainers working on benchmarks, build wo
 dev_notes
 translation_workflow
 logging
+split_pixel_payload
 cpp_build_from_source
 build_python_from_source
 python_dataset_access_benchmarks
