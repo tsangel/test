@@ -169,34 +169,15 @@ void write_sequence_element(const DataElement& element, Writer& writer, bool exp
 }
 
 template <typename Writer>
-void write_pixel_sequence_element(const DataElement& element, Writer& writer,
-    bool explicit_vr) {
+void write_pixel_sequence_value(const DataElement& element, Writer& writer) {
 	const PixelSequence* pixel_sequence = element.as_pixel_sequence();
 	if (!pixel_sequence) {
 		throw_write_stage_error(
-		    "write_pixel_sequence_element", "PX element has null pixel sequence pointer");
+		    "write_pixel_sequence_value", "PX element has null pixel sequence pointer");
 	}
 
 	const InStream* seq_stream = pixel_sequence->stream();
 	const auto offset_tables = compute_pixel_sequence_offset_tables(*pixel_sequence, seq_stream);
-	const DataSet* owning_dataset = element.parent();
-	const bool allow_extended_offset_table = owning_dataset != nullptr &&
-	    owning_dataset == owning_dataset->root_dataset();
-	// Extended Offset Tables are only synthesized for the instance-level PixelData.
-	if (offset_tables.use_extended && allow_extended_offset_table) {
-		const auto extended_offsets_bytes =
-		    u64_values_as_bytes(offset_tables.extended_offsets);
-		const auto extended_lengths_bytes =
-		    u64_values_as_bytes(offset_tables.extended_lengths);
-		write_non_sequence_element(
-		    writer, "ExtendedOffsetTable"_tag, VR::OV, extended_offsets_bytes, explicit_vr);
-		write_non_sequence_element(writer, "ExtendedOffsetTableLengths"_tag, VR::OV,
-		    extended_lengths_bytes, explicit_vr);
-	}
-
-	// Write PixelData itself as an undefined-length item sequence.
-	const VR pixel_vr = explicit_vr ? VR::OB : VR::None;
-	write_element_header(writer, element.tag(), pixel_vr, 0xFFFFFFFFu, true, explicit_vr);
 
 	const auto basic_offset_table_length =
 	    checked_u32(offset_tables.basic_offsets.size() * sizeof(std::uint32_t),
@@ -236,12 +217,12 @@ void write_pixel_sequence_element(const DataElement& element, Writer& writer,
 		const auto& fragments = frame->fragments();
 		for (const auto& fragment : fragments) {
 			if (!seq_stream) {
-				throw_write_stage_error("write_pixel_sequence_element",
+				throw_write_stage_error("write_pixel_sequence_value",
 				    "pixel fragment references stream but stream is null");
 			}
 			if (fragment.offset > seq_stream->end_offset() ||
 			    fragment.length > seq_stream->end_offset() - fragment.offset) {
-				throw_write_stage_error("write_pixel_sequence_element",
+				throw_write_stage_error("write_pixel_sequence_value",
 				    "pixel fragment out of bounds offset=0x{:X} length={}",
 				    fragment.offset, fragment.length);
 			}
@@ -250,6 +231,38 @@ void write_pixel_sequence_element(const DataElement& element, Writer& writer,
 	}
 
 	write_item_header(writer, kSequenceDelimitationTag, 0u);
+}
+
+template <typename Writer>
+void write_pixel_sequence_element(const DataElement& element, Writer& writer,
+    bool explicit_vr) {
+	const PixelSequence* pixel_sequence = element.as_pixel_sequence();
+	if (!pixel_sequence) {
+		throw_write_stage_error(
+		    "write_pixel_sequence_element", "PX element has null pixel sequence pointer");
+	}
+
+	const InStream* seq_stream = pixel_sequence->stream();
+	const auto offset_tables = compute_pixel_sequence_offset_tables(*pixel_sequence, seq_stream);
+	const DataSet* owning_dataset = element.parent();
+	const bool allow_extended_offset_table = owning_dataset != nullptr &&
+	    owning_dataset == owning_dataset->root_dataset();
+	// Extended Offset Tables are only synthesized for the instance-level PixelData.
+	if (offset_tables.use_extended && allow_extended_offset_table) {
+		const auto extended_offsets_bytes =
+		    u64_values_as_bytes(offset_tables.extended_offsets);
+		const auto extended_lengths_bytes =
+		    u64_values_as_bytes(offset_tables.extended_lengths);
+		write_non_sequence_element(
+		    writer, "ExtendedOffsetTable"_tag, VR::OV, extended_offsets_bytes, explicit_vr);
+		write_non_sequence_element(writer, "ExtendedOffsetTableLengths"_tag, VR::OV,
+		    extended_lengths_bytes, explicit_vr);
+	}
+
+	// Write PixelData itself as an undefined-length item sequence.
+	const VR pixel_vr = explicit_vr ? VR::OB : VR::None;
+	write_element_header(writer, element.tag(), pixel_vr, 0xFFFFFFFFu, true, explicit_vr);
+	write_pixel_sequence_value(element, writer);
 }
 
 template <typename Writer>
@@ -401,16 +414,10 @@ void write_root_dataset_body_with_pixel_writer(Writer& writer, const DataSet& da
 }
 
 template <typename Writer, typename FrameProvider>
-void write_native_pixel_data_from_frame_provider(Writer& writer,
-    const DataElement& element, bool explicit_vr, VR native_pixel_vr,
+void write_native_pixel_data_value_from_frame_provider(Writer& writer,
+    VR native_pixel_vr,
     std::size_t total_payload_bytes, std::size_t frame_count,
     std::size_t frame_payload_bytes, FrameProvider&& frame_provider) {
-	const auto even_value_length = padded_length(total_payload_bytes);
-	write_element_header(writer, element.tag(), explicit_vr ? native_pixel_vr : VR::None,
-	    checked_u32(
-	        even_value_length, CheckedU32Label::native_pixel_data_length),
-	    false, explicit_vr);
-
 	std::size_t bytes_written = 0;
 	// Stream each frame payload and verify the provider matches the precomputed layout.
 	for (std::size_t frame_index = 0; frame_index < frame_count; ++frame_index) {
@@ -436,6 +443,22 @@ void write_native_pixel_data_from_frame_provider(Writer& writer,
 	if ((total_payload_bytes & 1u) != 0u) {
 		writer.append_byte(native_pixel_vr.padding_byte());
 	}
+}
+
+template <typename Writer, typename FrameProvider>
+void write_native_pixel_data_from_frame_provider(Writer& writer,
+    const DataElement& element, bool explicit_vr, VR native_pixel_vr,
+    std::size_t total_payload_bytes, std::size_t frame_count,
+    std::size_t frame_payload_bytes, FrameProvider&& frame_provider) {
+	const auto even_value_length = padded_length(total_payload_bytes);
+	write_element_header(writer, element.tag(), explicit_vr ? native_pixel_vr : VR::None,
+	    checked_u32(
+	        even_value_length, CheckedU32Label::native_pixel_data_length),
+	    false, explicit_vr);
+
+	write_native_pixel_data_value_from_frame_provider(writer, native_pixel_vr,
+	    total_payload_bytes, frame_count, frame_payload_bytes,
+	    std::forward<FrameProvider>(frame_provider));
 }
 
 

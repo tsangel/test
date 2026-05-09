@@ -14,4 +14,10 @@ void write_with_transfer_syntax_to_buffer_writer(DicomFile& file, BufferWriter& 
     std::span<const pixel::CodecOptionTextKv> codec_opt_override,
     const pixel::EncoderContext* encoder_ctx, const WriteOptions& options);
 
+[[nodiscard]] SplitPixelPayloadWriteResult
+write_with_transfer_syntax_split_pixel_payload(DicomFile& file,
+    uid::WellKnown target_transfer_syntax, WriteEncoderConfigSource encode_mode,
+    std::span<const pixel::CodecOptionTextKv> codec_opt_override,
+    const pixel::EncoderContext* encoder_ctx, const WriteOptions& options);
+
 }  // namespace dicom::write_detail

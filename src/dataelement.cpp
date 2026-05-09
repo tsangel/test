@@ -1041,6 +1041,13 @@ std::span<const std::uint8_t> DataElement::value_span() const {
 			return {};
 		}
 		return std::span<const std::uint8_t>(storage_.vec->data(), length_);
+	case StorageKind::borrowed_bytes:
+		if (!storage_.borrowed_bytes) {
+			diag::error_and_throw(
+			    "DataElement::value_span tag={} vr={} reason=borrowed value bytes are detached",
+			    tag_.to_string(), vr_.str());
+		}
+		return std::span<const std::uint8_t>(storage_.borrowed_bytes, length_);
 	case StorageKind::stream:
 		if (!parent_) {
 			return {};
@@ -1147,6 +1154,43 @@ void DataElement::adopt_value_bytes(std::vector<std::uint8_t>&& bytes) {
 
 void DataElement::adopt_value_bytes_nocheck(std::vector<std::uint8_t>&& bytes) {
 	adopt_value_bytes_impl(std::move(bytes), false);
+}
+
+void DataElement::set_owned_value_bytes_no_vr_check(
+    std::vector<std::uint8_t>&& bytes) {
+	release_storage();
+	length_ = bytes.size();
+	storage_.vec = new std::vector<std::uint8_t>(std::move(bytes));
+	storage_kind_ = StorageKind::owned_bytes;
+}
+
+void DataElement::attach_borrowed_value_bytes(
+    const std::uint8_t* data, std::size_t size) {
+	if (vr_ == dicom::VR::SQ || vr_ == dicom::VR::PX || vr_ == dicom::VR::None) {
+		diag::error_and_throw(
+		    "DataElement::attach_borrowed_value_bytes reason=cannot attach raw bytes to sequence storage vr={}",
+		    vr_.str());
+	}
+	if (size != 0 && data == nullptr) {
+		diag::error_and_throw(
+		    "DataElement::attach_borrowed_value_bytes tag={} vr={} reason=null data with non-zero size",
+		    tag_.to_string(), vr_.str());
+	}
+	release_storage();
+	storage_.borrowed_bytes = data;
+	length_ = size;
+	storage_kind_ = StorageKind::borrowed_bytes;
+}
+
+void DataElement::detach_borrowed_value_bytes() noexcept {
+	if (storage_kind_ == StorageKind::borrowed_bytes) {
+		storage_.borrowed_bytes = nullptr;
+	}
+}
+
+bool DataElement::has_attached_borrowed_value_bytes() const noexcept {
+	return storage_kind_ == StorageKind::borrowed_bytes &&
+	    storage_.borrowed_bytes != nullptr;
 }
 
 void DataElement::adopt_value_bytes_impl(

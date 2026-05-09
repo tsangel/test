@@ -199,6 +199,10 @@ NativeDecodeSourceView build_native_decode_source_view_or_throw(
 		throw_decode_frame_source_error(
 		    std::string(source.name) + " is encapsulated, not raw");
 	}
+	if (dicom::detail::is_detached_pixel_payload_marker(*source.element)) {
+		throw_decode_frame_source_error(
+		    std::string(source.name) + " payload is detached");
+	}
 
 	if (source_layout.empty()) {
 		throw_decode_frame_source_error("invalid raw pixel metadata");
