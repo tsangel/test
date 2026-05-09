@@ -26,6 +26,11 @@ if(DICOM_BUILD_EXAMPLES)
     )
     target_link_libraries(simple_read PRIVATE dicomsdl)
 
+    add_executable(split_pixel_payload_example
+        examples/split_pixel_payload_example.cpp
+    )
+    target_link_libraries(split_pixel_payload_example PRIVATE dicomsdl)
+
     add_executable(dataset_access_example
         examples/dataset_access_example.cpp
     )
