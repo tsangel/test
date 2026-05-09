@@ -46,9 +46,29 @@ inline void reserve_for_split_append(
 
 [[nodiscard]] inline std::size_t pixel_sequence_value_reserve_size(
     const DataElement& element) {
-	CountingWriter writer;
-	write_pixel_sequence_value(element, writer);
-	return writer.written;
+	const PixelSequence* pixel_sequence = element.as_pixel_sequence();
+	if (!pixel_sequence) {
+		throw_write_stage_error("write_split_pixel_payload",
+		    "PX element has null pixel sequence pointer");
+	}
+
+	const auto offset_tables =
+	    compute_pixel_sequence_offset_tables(*pixel_sequence, pixel_sequence->stream());
+	const auto basic_offset_table_length =
+	    checked_u32(offset_tables.basic_offsets.size() * sizeof(std::uint32_t),
+	        CheckedU32Label::basic_offset_table_length);
+	std::size_t value_size = 8u + basic_offset_table_length;
+	if (value_size >
+	    std::numeric_limits<std::size_t>::max() - offset_tables.pixel_fragment_item_bytes) {
+		throw_write_stage_error("write_split_pixel_payload",
+		    "encapsulated split payload size exceeds size_t range");
+	}
+	value_size += offset_tables.pixel_fragment_item_bytes;
+	if (value_size > std::numeric_limits<std::size_t>::max() - 8u) {
+		throw_write_stage_error("write_split_pixel_payload",
+		    "encapsulated split payload size exceeds size_t range");
+	}
+	return value_size + 8u;
 }
 
 inline void append_split_native_pixel_payload_value(std::vector<std::uint8_t>& payload,

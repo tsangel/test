@@ -14,6 +14,7 @@ struct PixelSequenceOffsetTables {
 	std::vector<std::uint32_t> basic_offsets{};
 	std::vector<std::uint64_t> extended_offsets{};
 	std::vector<std::uint64_t> extended_lengths{};
+	std::size_t pixel_fragment_item_bytes{0};
 	bool use_extended{false};
 };
 
@@ -85,6 +86,7 @@ struct PixelSequenceOffsetTables {
 				    "encapsulated pixel frame size exceeds size_t range");
 			}
 			next_frame_offset += kItemHeaderBytes + full_fragment_length;
+			tables.pixel_fragment_item_bytes = next_frame_offset;
 		};
 
 		const auto encoded_data = frame->encoded_data_view();
