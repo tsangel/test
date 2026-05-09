@@ -69,6 +69,12 @@ def _build_native_placeholder(placeholder: bytes | None = None) -> bytes:
     return _build_part10("1.2.840.10008.1.2.1", body)
 
 
+def _build_native_truncated_pixeldata_header() -> bytes:
+    body = _common_pixel_metadata(columns=3, bits_allocated=16, frames="1")
+    body += struct.pack("<HH", 0x7FE0, 0x0010) + b"OB" + b"\x00\x00" + b"\x04\x00"
+    return _build_part10("1.2.840.10008.1.2.1", body)
+
+
 def _build_encap_placeholder(frames: str = "1") -> bytes:
     body = _common_pixel_metadata(columns=2, bits_allocated=8, frames=frames)
     body += _pack_explicit_le(
@@ -142,3 +148,15 @@ def test_read_bytes_with_pixel_payload_keep_on_error_clears_attached_state() -> 
     assert obj.error_message
     assert obj.has_attached_pixel_payload is False
     assert not hasattr(obj, "_pixel_payload_owner")
+
+    truncated = dicom.read_bytes_with_pixel_payload(
+        _build_native_truncated_pixeldata_header(),
+        b"\x34\x12\x56\x78\x9A\xBC",
+        name="py-split-truncated-main",
+        keep_on_error=True,
+    )
+
+    assert truncated.has_error is True
+    assert truncated.error_message
+    assert truncated.has_attached_pixel_payload is False
+    assert not hasattr(truncated, "_pixel_payload_owner")

@@ -1792,6 +1792,7 @@ void DicomFile::read_attached_stream(const ReadOptions& options) {
 		root_dataset_.read_attached_stream(options);
 		attach_pending_pixel_payload_or_throw();
 	} catch (const std::exception& ex) {
+		clear_pending_pixel_payload();
 		const std::string_view what = ex.what();
 		if (!what.empty()) {
 			set_error_state(std::string(what));
@@ -1805,6 +1806,7 @@ void DicomFile::read_attached_stream(const ReadOptions& options) {
 			throw;
 		}
 	} catch (...) {
+		clear_pending_pixel_payload();
 		if (capturing_reporter->has_error()) {
 			set_error_state(capturing_reporter->last_error_message());
 		} else {

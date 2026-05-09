@@ -162,6 +162,18 @@ std::vector<std::uint8_t> build_native_without_pixeldata_part10() {
 	return build_part10("1.2.840.10008.1.2.1", body);
 }
 
+std::vector<std::uint8_t> build_native_truncated_pixeldata_header_part10() {
+	std::vector<std::uint8_t> body;
+	append_common_pixel_metadata(body, 3, 16, "1");
+	append_u16_le(body, 0x7FE0u);
+	append_u16_le(body, 0x0010u);
+	body.push_back(static_cast<std::uint8_t>('O'));
+	body.push_back(static_cast<std::uint8_t>('B'));
+	append_u16_le(body, 0u);
+	append_u16_le(body, 4u);
+	return build_part10("1.2.840.10008.1.2.1", body);
+}
+
 std::vector<std::uint8_t> build_encap_placeholder_part10(std::string frames_text) {
 	std::vector<std::uint8_t> body;
 	append_common_pixel_metadata(body, 2, 8, std::move(frames_text));
@@ -432,6 +444,17 @@ int main() {
 		}
 		if (kept_bad_magic->has_attached_pixel_payload()) {
 			fail("keep_on_error placeholder attach failure should not stay attached");
+		}
+
+		const auto truncated_main = build_native_truncated_pixeldata_header_part10();
+		auto kept_truncated_main = dicom::read_bytes_with_pixel_payload(
+		    "truncated-main-keep", truncated_main.data(), truncated_main.size(),
+		    pixel_payload.data(), pixel_payload.size(), keep_on_error);
+		if (!kept_truncated_main || !kept_truncated_main->has_error()) {
+			fail("keep_on_error main parse failure should be recorded");
+		}
+		if (kept_truncated_main->has_attached_pixel_payload()) {
+			fail("keep_on_error main parse failure should clear pending payload");
 		}
 
 		const auto encap_main = build_encap_placeholder_part10("1");
