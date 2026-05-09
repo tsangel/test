@@ -281,7 +281,7 @@ int main() {
 			fail("native split pixel decode mismatch");
 		}
 
-		file->detach_pixel_payload();
+		file->detach_pixel_payload(true);
 		if (file->has_attached_pixel_payload()) {
 			fail("native split payload should report detached");
 		}
@@ -306,6 +306,32 @@ int main() {
 			fail("native dump after detach should show stored PixelData dump text");
 		}
 		expect_throw("native decode after detach",
+		    [&]() { (void)file->pixel_data(0); }, "detached");
+	}
+
+	{
+		const auto main_p10 = build_native_placeholder_part10();
+		const std::vector<std::uint8_t> pixel_payload{
+		    0x34u, 0x12u, 0x56u, 0x78u, 0x9Au, 0xBCu};
+		auto file = dicom::read_bytes_with_pixel_payload(
+		    "split-native-minimal-detach", main_p10.data(), main_p10.size(),
+		    pixel_payload.data(), pixel_payload.size());
+		file->detach_pixel_payload();
+		if (file->has_attached_pixel_payload()) {
+			fail("minimal native detach should report detached");
+		}
+		auto& detached_pixel_data = file->get_dataelement("PixelData"_tag);
+		if (detached_pixel_data.storage_kind() !=
+		        dicom::DataElement::StorageKind::owned_bytes ||
+		    detached_pixel_data.vr() != dicom::VR::OW ||
+		    !bytes_equal(detached_pixel_data.value_span(), placeholder_magic())) {
+			fail("minimal native detach should keep only the DXP1 marker");
+		}
+		const auto minimal_dump = file->dump();
+		if (minimal_dump.find("\\x34\\x12\\x56\\x78") != std::string::npos) {
+			fail("minimal native detach should not retain PixelData dump text");
+		}
+		expect_throw("native decode after minimal detach",
 		    [&]() { (void)file->pixel_data(0); }, "detached");
 	}
 
@@ -355,7 +381,7 @@ int main() {
 		if (file->pixel_data(0) != expected) {
 			fail("single-frame encapsulated split decode mismatch");
 		}
-		file->detach_pixel_payload();
+		file->detach_pixel_payload(true);
 		if (file->has_attached_pixel_payload()) {
 			fail("single-frame encapsulated split payload should report detached");
 		}

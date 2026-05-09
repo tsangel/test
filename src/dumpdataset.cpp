@@ -373,8 +373,11 @@ void append_detached_pixel_payload_marker_dump_text(
 void append_dump_element_lines(std::string& out, const DataElement& element,
     std::string_view prefix, std::size_t max_print_chars, bool include_offset) {
 	if (detail::is_detached_pixel_payload_marker(element)) {
-		append_detached_pixel_payload_marker_dump_text(out, element);
-		return;
+		const auto marker_text = detail::detached_pixel_payload_marker_text(element);
+		if (!marker_text.empty()) {
+			append_detached_pixel_payload_marker_dump_text(out, element);
+			return;
+		}
 	}
 
 	const auto tag_token = dump_tag_token(element.tag());
@@ -462,6 +465,15 @@ std::string dump_dataset(
 namespace detail {
 
 bool is_detached_pixel_payload_marker(const DataElement& element) {
+	if (element.tag() != "PixelData"_tag ||
+	    element.storage_kind() != DataElement::StorageKind::owned_bytes) {
+		return false;
+	}
+	const auto span = element.value_span();
+	if (span.size() == kPixelPayloadPlaceholderMagic.size()) {
+		return std::equal(kPixelPayloadPlaceholderMagic.begin(),
+		    kPixelPayloadPlaceholderMagic.end(), span.begin());
+	}
 	return !detached_pixel_payload_marker_text(element).empty();
 }
 

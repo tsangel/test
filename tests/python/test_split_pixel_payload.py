@@ -105,7 +105,18 @@ def test_read_bytes_with_pixel_payload_native_detach_releases_owner() -> None:
     assert obj["PixelData"].vr == dicom.VR.OW
     assert obj.pixel_data(0) == bytes(payload)
 
-    obj.detach_pixel_payload()
+    minimal = dicom.read_bytes_with_pixel_payload(
+        _build_native_placeholder(), payload, name="py-split-native-minimal"
+    )
+    minimal.detach_pixel_payload()
+    assert minimal.has_attached_pixel_payload is False
+    assert not hasattr(minimal, "_pixel_payload_owner")
+    assert minimal["PixelData"].value_bytes() == dicom.PIXEL_PAYLOAD_PLACEHOLDER_MAGIC
+    assert "\\x34\\x12\\x56\\x78" not in minimal.dump()
+    with pytest.raises(Exception, match="detached"):
+        minimal.pixel_data(0)
+
+    obj.detach_pixel_payload(keep_dump=True)
     assert obj.has_attached_pixel_payload is False
     assert not hasattr(obj, "_pixel_payload_owner")
     assert obj.Rows == 1

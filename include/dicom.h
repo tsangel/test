@@ -3308,7 +3308,7 @@ public:
 	void attach_to_memory_with_pixel_payload(std::string name,
 	    std::vector<std::uint8_t>&& buffer,
 	    const std::uint8_t* pixel_payload, std::size_t pixel_payload_size);
-	void detach_pixel_payload();
+	void detach_pixel_payload(bool keep_dump = false);
 	[[nodiscard]] bool has_attached_pixel_payload() const;
 	void read_attached_stream(const ReadOptions& options = {});
 	[[nodiscard]] bool has_error() const noexcept { return has_error_; }
@@ -3517,9 +3517,10 @@ private:
 		void set_pending(
 		    const DicomFile& file, const std::uint8_t* data, std::size_t size);
 		void clear_pending() noexcept;
-		void detach_loaded_no_load(DicomFile& file) const;
+		void discard_loaded_no_load(DicomFile& file) const;
+		void detach_loaded_no_load(DicomFile& file, bool keep_dump) const;
 		void attach_pending_or_throw(DicomFile& file);
-		void detach(DicomFile& file);
+		void detach(DicomFile& file, bool keep_dump);
 		[[nodiscard]] bool has_attached(const DicomFile& file) const;
 
 	private:

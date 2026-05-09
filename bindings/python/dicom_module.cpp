@@ -5289,13 +5289,15 @@ NB_MODULE(_dicomsdl, m) {
 		.def_prop_ro("has_attached_pixel_payload", &DicomFile::has_attached_pixel_payload,
 		    "True when this DicomFile currently references split PixelData payload memory.")
 		.def("detach_pixel_payload",
-		    [](DicomFile& self) {
-			    self.detach_pixel_payload();
+		    [](DicomFile& self, bool keep_dump) {
+			    self.detach_pixel_payload(keep_dump);
 			    auto py_self = nb::cast(&self, nb::rv_policy::reference);
 			    delete_python_attr_if_present(py_self, "_pixel_payload_owner");
 		    },
+		    nb::arg("keep_dump") = false,
 		    "Detach split PixelData payload memory. Metadata remains available, but pixel "
-		    "decode APIs fail until a payload is attached again.")
+		    "decode APIs fail until a payload is attached again. Set keep_dump=True to "
+		    "store the current PixelData dump text in the detached marker.")
 		.def_prop_ro("dataset",
 		    [](DicomFile& self) -> DataSet& { return self.dataset(); },
 		    nb::rv_policy::reference_internal,

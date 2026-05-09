@@ -108,8 +108,10 @@ private:
 }
 
 [[nodiscard]] std::vector<std::uint8_t> make_detached_pixel_payload_marker_bytes(
-    const DataElement& pixel_data) {
-	const auto dump_text = detail::dump_pixel_data_element_for_detach_marker(pixel_data);
+    const DataElement& pixel_data, bool keep_dump) {
+	const auto dump_text = keep_dump
+	                           ? detail::dump_pixel_data_element_for_detach_marker(pixel_data)
+	                           : std::string{};
 	std::vector<std::uint8_t> marker;
 	marker.reserve(kPixelPayloadPlaceholderMagic.size() + dump_text.size());
 	marker.insert(marker.end(), kPixelPayloadPlaceholderMagic.begin(),
@@ -1566,26 +1568,26 @@ DicomFile::const_iterator DicomFile::cend() const {
 }
 
 void DicomFile::attach_to_file(const std::filesystem::path& path) {
-	external_pixel_payload_.detach_loaded_no_load(*this);
+	external_pixel_payload_.discard_loaded_no_load(*this);
 	external_pixel_payload_.clear_pending();
 	root_dataset_.attach_to_file(path);
 }
 
 void DicomFile::attach_to_memory(const std::uint8_t* data, std::size_t size, bool copy) {
-	external_pixel_payload_.detach_loaded_no_load(*this);
+	external_pixel_payload_.discard_loaded_no_load(*this);
 	external_pixel_payload_.clear_pending();
 	root_dataset_.attach_to_memory(data, size, copy);
 }
 
 void DicomFile::attach_to_memory(const std::string& name, const std::uint8_t* data,
     std::size_t size, bool copy) {
-	external_pixel_payload_.detach_loaded_no_load(*this);
+	external_pixel_payload_.discard_loaded_no_load(*this);
 	external_pixel_payload_.clear_pending();
 	root_dataset_.attach_to_memory(name, data, size, copy);
 }
 
 void DicomFile::attach_to_memory(std::string name, std::vector<std::uint8_t>&& buffer) {
-	external_pixel_payload_.detach_loaded_no_load(*this);
+	external_pixel_payload_.discard_loaded_no_load(*this);
 	external_pixel_payload_.clear_pending();
 	root_dataset_.attach_to_memory(std::move(name), std::move(buffer));
 }
@@ -1593,7 +1595,7 @@ void DicomFile::attach_to_memory(std::string name, std::vector<std::uint8_t>&& b
 void DicomFile::attach_to_memory_with_pixel_payload(const std::uint8_t* data,
     std::size_t size, const std::uint8_t* pixel_payload,
     std::size_t pixel_payload_size, bool copy) {
-	external_pixel_payload_.detach_loaded_no_load(*this);
+	external_pixel_payload_.discard_loaded_no_load(*this);
 	external_pixel_payload_.clear_pending();
 	root_dataset_.attach_to_memory(data, size, copy);
 	external_pixel_payload_.set_pending(*this, pixel_payload, pixel_payload_size);
@@ -1603,7 +1605,7 @@ void DicomFile::attach_to_memory_with_pixel_payload(const std::string& name,
     const std::uint8_t* data, std::size_t size,
     const std::uint8_t* pixel_payload, std::size_t pixel_payload_size,
     bool copy) {
-	external_pixel_payload_.detach_loaded_no_load(*this);
+	external_pixel_payload_.discard_loaded_no_load(*this);
 	external_pixel_payload_.clear_pending();
 	root_dataset_.attach_to_memory(name, data, size, copy);
 	external_pixel_payload_.set_pending(*this, pixel_payload, pixel_payload_size);
@@ -1612,7 +1614,7 @@ void DicomFile::attach_to_memory_with_pixel_payload(const std::string& name,
 void DicomFile::attach_to_memory_with_pixel_payload(std::string name,
     std::vector<std::uint8_t>&& buffer,
     const std::uint8_t* pixel_payload, std::size_t pixel_payload_size) {
-	external_pixel_payload_.detach_loaded_no_load(*this);
+	external_pixel_payload_.discard_loaded_no_load(*this);
 	external_pixel_payload_.clear_pending();
 	root_dataset_.attach_to_memory(std::move(name), std::move(buffer));
 	external_pixel_payload_.set_pending(*this, pixel_payload, pixel_payload_size);
@@ -1643,20 +1645,36 @@ void DicomFile::ExternalPixelPayload::clear_pending() noexcept {
 	has_pending_ = false;
 }
 
-void DicomFile::ExternalPixelPayload::detach_loaded_no_load(DicomFile& file) const {
+void DicomFile::ExternalPixelPayload::discard_loaded_no_load(
+    DicomFile& file) const {
+	auto& pixel_data = file.root_dataset_.get_dataelement("PixelData"_tag);
+	if (pixel_data.is_missing()) {
+		return;
+	}
+	if (pixel_data.storage_kind() == DataElement::StorageKind::borrowed_bytes) {
+		pixel_data.detach_borrowed_value_bytes();
+		return;
+	}
+	if (auto* pixel_sequence = pixel_data.as_pixel_sequence()) {
+		pixel_sequence->detach_external_memory();
+	}
+}
+
+void DicomFile::ExternalPixelPayload::detach_loaded_no_load(
+    DicomFile& file, bool keep_dump) const {
 	auto& pixel_data = file.root_dataset_.get_dataelement("PixelData"_tag);
 	if (pixel_data.is_missing()) {
 		return;
 	}
 	if (pixel_data.storage_kind() == DataElement::StorageKind::borrowed_bytes) {
 		pixel_data.set_owned_value_bytes_no_vr_check(
-		    make_detached_pixel_payload_marker_bytes(pixel_data));
+		    make_detached_pixel_payload_marker_bytes(pixel_data, keep_dump));
 		return;
 	}
 	if (auto* pixel_sequence = pixel_data.as_pixel_sequence()) {
 		(void)pixel_sequence;
 		pixel_data.set_owned_value_bytes_no_vr_check(
-		    make_detached_pixel_payload_marker_bytes(pixel_data));
+		    make_detached_pixel_payload_marker_bytes(pixel_data, keep_dump));
 	}
 }
 
@@ -1671,7 +1689,7 @@ void DicomFile::ExternalPixelPayload::attach_pending_or_throw(DicomFile& file) {
 	try {
 		attach_to_loaded_placeholder(file, data, size, identifier);
 	} catch (...) {
-		detach_loaded_no_load(file);
+		detach_loaded_no_load(file, false);
 		throw;
 	}
 }
@@ -1735,11 +1753,11 @@ void DicomFile::ExternalPixelPayload::attach_to_loaded_placeholder(
 	pixel_data.attach_borrowed_value_bytes(data, size);
 }
 
-void DicomFile::detach_pixel_payload() {
-	external_pixel_payload_.detach(*this);
+void DicomFile::detach_pixel_payload(bool keep_dump) {
+	external_pixel_payload_.detach(*this, keep_dump);
 }
 
-void DicomFile::ExternalPixelPayload::detach(DicomFile& file) {
+void DicomFile::ExternalPixelPayload::detach(DicomFile& file, bool keep_dump) {
 	clear_pending();
 	file.root_dataset_.ensure_loaded("PixelData"_tag);
 	auto& pixel_data = file.root_dataset_.get_dataelement("PixelData"_tag);
@@ -1748,13 +1766,13 @@ void DicomFile::ExternalPixelPayload::detach(DicomFile& file) {
 	}
 	if (pixel_data.storage_kind() == DataElement::StorageKind::borrowed_bytes) {
 		pixel_data.set_owned_value_bytes_no_vr_check(
-		    make_detached_pixel_payload_marker_bytes(pixel_data));
+		    make_detached_pixel_payload_marker_bytes(pixel_data, keep_dump));
 		return;
 	}
 	if (auto* pixel_sequence = pixel_data.as_pixel_sequence()) {
 		(void)pixel_sequence;
 		pixel_data.set_owned_value_bytes_no_vr_check(
-		    make_detached_pixel_payload_marker_bytes(pixel_data));
+		    make_detached_pixel_payload_marker_bytes(pixel_data, keep_dump));
 	}
 }
 

@@ -218,14 +218,6 @@ std::vector<std::uint8_t> DicomFile::write_bytes(const WriteOptions& options) {
 SplitPixelPayloadWriteResult DicomFile::write_bytes_split_pixel_payload(
     const WriteOptions& options) {
 	SplitPixelPayloadWriteResult result{};
-	std::size_t reserve_hint = 4096;
-	if (!this->path().empty()) {
-		reserve_hint = std::max(reserve_hint, this->stream().attached_size());
-	}
-	if (options.include_preamble) {
-		reserve_hint += 132;
-	}
-	result.dicom_bytes.reserve(reserve_hint);
 
 	bool wrote_pixel_data = false;
 	try {
@@ -239,6 +231,8 @@ SplitPixelPayloadWriteResult DicomFile::write_bytes_split_pixel_payload(
 		    write_detail::determine_target_transfer_syntax(*this, dataset, options);
 		const auto write_plan =
 		    write_detail::determine_dataset_write_plan(target_transfer_syntax, dataset);
+		result.dicom_bytes.reserve(
+		    write_detail::split_main_dicom_reserve_hint(dataset, options));
 
 		write_detail::BufferWriter writer(result.dicom_bytes);
 		if (options.include_preamble) {

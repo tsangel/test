@@ -570,6 +570,18 @@ void write_encapsulated_transcoded_split_pixel_payload_or_throw(
     const TransferSyntaxWriteDecision& decision,
     PreparedStreamingTranscodeState& state) {
 	bool wrote_pixel_data = false;
+	const auto frame_count = state.encode_source_layout.frames;
+	std::size_t payload_reserve = 16u;
+	if (frame_count <=
+	    (std::numeric_limits<std::size_t>::max() - payload_reserve) / 9u) {
+		payload_reserve += frame_count * 9u;
+	}
+	if (state.encoded_payload_bytes != 0 &&
+	    payload_reserve <=
+	        std::numeric_limits<std::size_t>::max() - state.encoded_payload_bytes) {
+		payload_reserve += state.encoded_payload_bytes;
+	}
+	reserve_for_split_append(pixel_payload, payload_reserve);
 	BufferWriter payload_writer(pixel_payload);
 	write_dataset_body_with_overlay_and_pixel_writer(writer, file.dataset(), state.overlay,
 	    state.write_plan,
@@ -820,14 +832,6 @@ SplitPixelPayloadWriteResult write_with_transfer_syntax_split_pixel_payload_impl
     std::span<const pixel::CodecOptionTextKv> codec_opt_override,
     const pixel::EncoderContext* encoder_ctx, const WriteOptions& options) {
 	SplitPixelPayloadWriteResult result{};
-	std::size_t reserve_hint = 4096;
-	if (!file.path().empty()) {
-		reserve_hint = std::max(reserve_hint, file.stream().attached_size());
-	}
-	if (options.include_preamble) {
-		reserve_hint += 132;
-	}
-	result.dicom_bytes.reserve(reserve_hint);
 
 	try {
 		if (!target_transfer_syntax.valid() ||
@@ -840,6 +844,8 @@ SplitPixelPayloadWriteResult write_with_transfer_syntax_split_pixel_payload_impl
 		dataset.ensure_loaded(Tag(0xFFFFu, 0xFFFFu));
 		const auto decision =
 		    classify_transfer_syntax_write(file, dataset, target_transfer_syntax);
+		result.dicom_bytes.reserve(
+		    split_main_dicom_reserve_hint(dataset, options));
 
 		BufferWriter writer(result.dicom_bytes);
 		if (!decision.needs_pixel_transcode && decision.same_transfer_syntax &&
