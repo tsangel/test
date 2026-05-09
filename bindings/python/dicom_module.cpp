@@ -1548,6 +1548,37 @@ void write_with_transfer_syntax_with_encoder_context(DicomFile& self, nb::handle
 	    transfer_syntax, encoder_context, write_options);
 }
 
+[[nodiscard]] dicom::SplitPixelPayloadWriteResult
+write_with_transfer_syntax_split_pixel_payload_with_options(DicomFile& self,
+    Uid transfer_syntax, nb::handle options, bool include_preamble,
+    bool write_file_meta, bool keep_existing_meta) {
+	dicom::WriteOptions write_options;
+	write_options.include_preamble = include_preamble;
+	write_options.write_file_meta = write_file_meta;
+	write_options.keep_existing_meta = keep_existing_meta;
+
+	const auto text_options =
+	    parse_encoder_options_to_text_storage(options, transfer_syntax);
+	if (text_options.auto_mode) {
+		return self.write_with_transfer_syntax_split_pixel_payload(
+		    transfer_syntax, write_options);
+	}
+	return self.write_with_transfer_syntax_split_pixel_payload(
+	    transfer_syntax, text_options.span(), write_options);
+}
+
+[[nodiscard]] dicom::SplitPixelPayloadWriteResult
+write_with_transfer_syntax_split_pixel_payload_with_encoder_context(DicomFile& self,
+    Uid transfer_syntax, const EncoderContext& encoder_context,
+    bool include_preamble, bool write_file_meta, bool keep_existing_meta) {
+	dicom::WriteOptions write_options;
+	write_options.include_preamble = include_preamble;
+	write_options.write_file_meta = write_file_meta;
+	write_options.keep_existing_meta = keep_existing_meta;
+	return self.write_with_transfer_syntax_split_pixel_payload(
+	    transfer_syntax, encoder_context, write_options);
+}
+
 void set_pixel_data_with_options(DicomFile& self, Uid transfer_syntax,
     nb::handle source_obj, std::optional<std::size_t> frame_index,
     nb::handle options) {
@@ -3328,6 +3359,13 @@ nb::bytes to_python_bytes(std::vector<std::uint8_t>&& bytes) {
 		return nb::bytes("", 0);
 	}
 	return nb::bytes(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+}
+
+nb::tuple split_write_result_to_python_tuple(
+    dicom::SplitPixelPayloadWriteResult&& result) {
+	return nb::make_tuple(
+	    to_python_bytes(std::move(result.dicom_bytes)),
+	    to_python_bytes(std::move(result.pixel_payload_bytes)));
 }
 
 std::pair<std::string, std::vector<std::uint8_t>> json_source_to_named_buffer(
@@ -5636,6 +5674,91 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::arg("write_file_meta") = true,
 		    nb::arg("keep_existing_meta") = true,
 		    "Serialize this DicomFile to bytes using the current dataset state.")
+		.def("write_bytes_split_pixel_payload",
+		    [](DicomFile& self, bool include_preamble, bool write_file_meta,
+		        bool keep_existing_meta) {
+			    return split_write_result_to_python_tuple(
+			        self.write_bytes_split_pixel_payload(make_write_options(
+			            include_preamble, write_file_meta, keep_existing_meta)));
+		    },
+		    nb::kw_only(),
+		    nb::arg("include_preamble") = true,
+		    nb::arg("write_file_meta") = true,
+		    nb::arg("keep_existing_meta") = true,
+		    "Serialize this DicomFile with PixelData replaced by the DXP1 placeholder.\n"
+		    "Returns (dicom_bytes, pixel_payload).")
+		.def("write_with_transfer_syntax_split_pixel_payload",
+		    [](DicomFile& self, const Uid& transfer_syntax, nb::handle options,
+		        bool include_preamble, bool write_file_meta, bool keep_existing_meta) {
+			    return split_write_result_to_python_tuple(
+			        write_with_transfer_syntax_split_pixel_payload_with_options(self,
+			            transfer_syntax, options, include_preamble, write_file_meta,
+			            keep_existing_meta));
+		    },
+		    nb::arg("transfer_syntax"),
+		    nb::kw_only(),
+		    nb::arg("options") = nb::none(),
+		    nb::arg("include_preamble") = true,
+		    nb::arg("write_file_meta") = true,
+		    nb::arg("keep_existing_meta") = true,
+		    "Serialize this DicomFile using the requested transfer syntax with PixelData "
+		    "replaced by the DXP1 placeholder.\n"
+		    "Returns (dicom_bytes, pixel_payload).")
+		.def("write_with_transfer_syntax_split_pixel_payload",
+		    [](DicomFile& self, const std::string& transfer_syntax_text,
+		        nb::handle options, bool include_preamble, bool write_file_meta,
+		        bool keep_existing_meta) {
+			    return split_write_result_to_python_tuple(
+			        write_with_transfer_syntax_split_pixel_payload_with_options(self,
+			            parse_transfer_syntax_text_or_throw(transfer_syntax_text), options,
+			            include_preamble, write_file_meta, keep_existing_meta));
+		    },
+		    nb::arg("transfer_syntax"),
+		    nb::kw_only(),
+		    nb::arg("options") = nb::none(),
+		    nb::arg("include_preamble") = true,
+		    nb::arg("write_file_meta") = true,
+		    nb::arg("keep_existing_meta") = true,
+		    "Serialize this DicomFile using transfer syntax text with PixelData replaced "
+		    "by the DXP1 placeholder.\n"
+		    "Returns (dicom_bytes, pixel_payload).")
+		.def("write_with_transfer_syntax_split_pixel_payload",
+		    [](DicomFile& self, const Uid& transfer_syntax,
+		        const EncoderContext& encoder_context, bool include_preamble,
+		        bool write_file_meta, bool keep_existing_meta) {
+			    return split_write_result_to_python_tuple(
+			        write_with_transfer_syntax_split_pixel_payload_with_encoder_context(
+			            self, transfer_syntax, encoder_context, include_preamble,
+			            write_file_meta, keep_existing_meta));
+		    },
+		    nb::arg("transfer_syntax"),
+		    nb::kw_only(),
+		    nb::arg("encoder_context"),
+		    nb::arg("include_preamble") = true,
+		    nb::arg("write_file_meta") = true,
+		    nb::arg("keep_existing_meta") = true,
+		    "Serialize this DicomFile using the requested transfer syntax and a "
+		    "preconfigured EncoderContext with PixelData replaced by the DXP1 placeholder.\n"
+		    "Returns (dicom_bytes, pixel_payload).")
+		.def("write_with_transfer_syntax_split_pixel_payload",
+		    [](DicomFile& self, const std::string& transfer_syntax_text,
+		        const EncoderContext& encoder_context, bool include_preamble,
+		        bool write_file_meta, bool keep_existing_meta) {
+			    return split_write_result_to_python_tuple(
+			        write_with_transfer_syntax_split_pixel_payload_with_encoder_context(
+			            self, parse_transfer_syntax_text_or_throw(transfer_syntax_text),
+			            encoder_context, include_preamble, write_file_meta,
+			            keep_existing_meta));
+		    },
+		    nb::arg("transfer_syntax"),
+		    nb::kw_only(),
+		    nb::arg("encoder_context"),
+		    nb::arg("include_preamble") = true,
+		    nb::arg("write_file_meta") = true,
+		    nb::arg("keep_existing_meta") = true,
+		    "Serialize this DicomFile using transfer syntax text and a preconfigured "
+		    "EncoderContext with PixelData replaced by the DXP1 placeholder.\n"
+		    "Returns (dicom_bytes, pixel_payload).")
 		.def("write_json",
 		    [](DicomFile& self, bool include_group_0002, nb::handle bulk_data,
 		        std::size_t bulk_data_threshold, const std::string& bulk_data_uri_template,

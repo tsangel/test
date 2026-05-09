@@ -781,6 +781,57 @@ class DicomFile:
         write_file_meta: bool = ...,
         keep_existing_meta: bool = ...,
     ) -> bytes: ...
+    def write_bytes_split_pixel_payload(
+        self,
+        *,
+        include_preamble: bool = ...,
+        write_file_meta: bool = ...,
+        keep_existing_meta: bool = ...,
+    ) -> tuple[bytes, bytes]: ...
+    @overload
+    def write_with_transfer_syntax_split_pixel_payload(
+        self,
+        transfer_syntax: Uid,
+        /,
+        *,
+        options: object = ...,
+        include_preamble: bool = ...,
+        write_file_meta: bool = ...,
+        keep_existing_meta: bool = ...,
+    ) -> tuple[bytes, bytes]: ...
+    @overload
+    def write_with_transfer_syntax_split_pixel_payload(
+        self,
+        transfer_syntax: str,
+        /,
+        *,
+        options: object = ...,
+        include_preamble: bool = ...,
+        write_file_meta: bool = ...,
+        keep_existing_meta: bool = ...,
+    ) -> tuple[bytes, bytes]: ...
+    @overload
+    def write_with_transfer_syntax_split_pixel_payload(
+        self,
+        transfer_syntax: Uid,
+        /,
+        *,
+        encoder_context: EncoderContext,
+        include_preamble: bool = ...,
+        write_file_meta: bool = ...,
+        keep_existing_meta: bool = ...,
+    ) -> tuple[bytes, bytes]: ...
+    @overload
+    def write_with_transfer_syntax_split_pixel_payload(
+        self,
+        transfer_syntax: str,
+        /,
+        *,
+        encoder_context: EncoderContext,
+        include_preamble: bool = ...,
+        write_file_meta: bool = ...,
+        keep_existing_meta: bool = ...,
+    ) -> tuple[bytes, bytes]: ...
     def pixel_data(self, frame_index: int = ...) -> bytes: ...
     def encoded_pixel_frame_bytes(self, frame_index: int, /) -> bytes: ...
     def encoded_pixel_frame_view(self, frame_index: int, /) -> memoryview: ...

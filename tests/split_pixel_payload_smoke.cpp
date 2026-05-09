@@ -156,6 +156,14 @@ std::vector<std::uint8_t> build_native_placeholder_part10(
 	return build_part10("1.2.840.10008.1.2.1", body);
 }
 
+std::vector<std::uint8_t> build_native_full_part10(
+    const std::vector<std::uint8_t>& pixel_payload) {
+	std::vector<std::uint8_t> body;
+	append_common_pixel_metadata(body, 3, 16, "1");
+	append_explicit_vr_le_32(body, "PixelData"_tag, 'O', 'W', pixel_payload);
+	return build_part10("1.2.840.10008.1.2.1", body);
+}
+
 std::vector<std::uint8_t> build_native_without_pixeldata_part10() {
 	std::vector<std::uint8_t> body;
 	append_common_pixel_metadata(body, 1, 16, "1");
@@ -178,6 +186,15 @@ std::vector<std::uint8_t> build_encap_placeholder_part10(std::string frames_text
 	std::vector<std::uint8_t> body;
 	append_common_pixel_metadata(body, 2, 8, std::move(frames_text));
 	append_explicit_vr_le_32(body, "PixelData"_tag, 'O', 'B', placeholder_magic());
+	return build_part10("1.2.840.10008.1.2.1.98", body);
+}
+
+std::vector<std::uint8_t> build_encap_full_part10(
+    std::string frames_text, const std::vector<std::uint8_t>& pixel_payload) {
+	std::vector<std::uint8_t> body;
+	append_common_pixel_metadata(body, 2, 8, std::move(frames_text));
+	append_explicit_vr_le_32(
+	    body, "PixelData"_tag, 'O', 'B', pixel_payload, true);
 	return build_part10("1.2.840.10008.1.2.1.98", body);
 }
 
@@ -384,6 +401,123 @@ int main() {
 		}
 		if (file->pixel_data(0) != frame0 || file->pixel_data(1) != frame1) {
 			fail("multi-frame encapsulated split decode mismatch");
+		}
+	}
+
+	{
+		const std::vector<std::uint8_t> pixel_payload{
+		    0x34u, 0x12u, 0x56u, 0x78u, 0x9Au, 0xBCu};
+		const auto source_p10 = build_native_full_part10(pixel_payload);
+		auto source = dicom::read_bytes(
+		    "split-write-native-source", source_p10.data(), source_p10.size());
+		const auto written = source->write_bytes_split_pixel_payload();
+		if (written.pixel_payload_bytes != pixel_payload) {
+			fail("native split write owned payload mismatch");
+		}
+		auto placeholder_only = dicom::read_bytes(
+		    "split-write-native-main", written.dicom_bytes.data(),
+		    written.dicom_bytes.size());
+		const auto placeholder =
+		    placeholder_only->get_dataelement("PixelData"_tag).value_span();
+		if (!bytes_equal(placeholder, placeholder_magic())) {
+			fail("native split write main should contain DXP1 placeholder");
+		}
+		auto roundtrip = dicom::read_bytes_with_pixel_payload(
+		    "split-write-native-roundtrip", written.dicom_bytes.data(),
+		    written.dicom_bytes.size(), written.pixel_payload_bytes.data(),
+		    written.pixel_payload_bytes.size());
+		if (roundtrip->pixel_data(0) != pixel_payload) {
+			fail("native split write roundtrip pixel decode mismatch");
+		}
+	}
+
+	{
+		const std::vector<std::uint8_t> pixel_payload{
+		    0x01u, 0x00u, 0x02u, 0x00u, 0x03u, 0x00u};
+		dicom::pixel::PixelLayout layout{
+		    .data_type = dicom::pixel::DataType::u16,
+		    .photometric = dicom::pixel::Photometric::monochrome2,
+		    .planar = dicom::pixel::Planar::interleaved,
+		    .reserved = 0,
+		    .rows = 1,
+		    .cols = 3,
+		    .frames = 1,
+		    .samples_per_pixel = 1,
+		    .bits_stored = 16,
+		    .row_stride = 6,
+		    .frame_stride = 6,
+		};
+		dicom::DicomFile native_source;
+		native_source.set_pixel_data("ExplicitVRLittleEndian"_uid,
+		    dicom::pixel::ConstPixelSpan{.layout = layout, .bytes = pixel_payload});
+		const auto same_ts_split =
+		    native_source.write_with_transfer_syntax_split_pixel_payload(
+		        "ExplicitVRLittleEndian"_uid);
+		if (same_ts_split.pixel_payload_bytes != pixel_payload) {
+			fail("same transfer syntax split write payload mismatch");
+		}
+		const auto rle_split =
+		    native_source.write_with_transfer_syntax_split_pixel_payload("RLELossless"_uid);
+		if (rle_split.pixel_payload_bytes.empty()) {
+			fail("native->RLE split write payload should not be empty");
+		}
+		auto rle_placeholder_only = dicom::read_bytes(
+		    "split-write-rle-main", rle_split.dicom_bytes.data(),
+		    rle_split.dicom_bytes.size());
+		const auto rle_placeholder =
+		    rle_placeholder_only->get_dataelement("PixelData"_tag).value_span();
+		if (!bytes_equal(rle_placeholder, placeholder_magic())) {
+			fail("native->RLE split write main should contain DXP1 placeholder");
+		}
+		auto rle_roundtrip = dicom::read_bytes_with_pixel_payload(
+		    "split-write-rle-roundtrip", rle_split.dicom_bytes.data(),
+		    rle_split.dicom_bytes.size(), rle_split.pixel_payload_bytes.data(),
+		    rle_split.pixel_payload_bytes.size());
+		if (rle_roundtrip->pixel_data(0) != pixel_payload) {
+			fail("native->RLE split write roundtrip pixel mismatch");
+		}
+
+		const auto native_split =
+		    rle_roundtrip->write_with_transfer_syntax_split_pixel_payload(
+		        "ExplicitVRLittleEndian"_uid);
+		if (native_split.pixel_payload_bytes != pixel_payload) {
+			fail("RLE->native split write payload mismatch");
+		}
+		auto native_roundtrip = dicom::read_bytes_with_pixel_payload(
+		    "split-write-native-transcode-roundtrip",
+		    native_split.dicom_bytes.data(), native_split.dicom_bytes.size(),
+		    native_split.pixel_payload_bytes.data(),
+		    native_split.pixel_payload_bytes.size());
+		if (native_roundtrip->pixel_data(0) != pixel_payload) {
+			fail("RLE->native split write roundtrip pixel mismatch");
+		}
+	}
+
+	{
+		const auto source_payload = build_single_frame_encap_payload();
+		const auto source_p10 = build_encap_full_part10("1", source_payload);
+		const std::vector<std::uint8_t> expected_frame{0x34u, 0x12u};
+		auto source = dicom::read_bytes(
+		    "split-write-encap-source", source_p10.data(), source_p10.size());
+		const auto written = source->write_bytes_split_pixel_payload();
+		if (written.pixel_payload_bytes.empty()) {
+			fail("encapsulated split write payload should not be empty");
+		}
+		auto placeholder_only = dicom::read_bytes(
+		    "split-write-encap-main", written.dicom_bytes.data(),
+		    written.dicom_bytes.size());
+		const auto placeholder =
+		    placeholder_only->get_dataelement("PixelData"_tag).value_span();
+		if (!bytes_equal(placeholder, placeholder_magic())) {
+			fail("encapsulated split write main should contain DXP1 placeholder");
+		}
+		auto roundtrip = dicom::read_bytes_with_pixel_payload(
+		    "split-write-encap-roundtrip", written.dicom_bytes.data(),
+		    written.dicom_bytes.size(), written.pixel_payload_bytes.data(),
+		    written.pixel_payload_bytes.size());
+		if (!bytes_equal(roundtrip->encoded_pixel_frame_view(0), expected_frame) ||
+		    roundtrip->pixel_data(0) != expected_frame) {
+			fail("encapsulated split write roundtrip pixel mismatch");
 		}
 	}
 

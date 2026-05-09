@@ -1302,6 +1302,11 @@ struct WriteOptions {
 	bool keep_existing_meta{true};
 };
 
+struct SplitPixelPayloadWriteResult {
+	std::vector<std::uint8_t> dicom_bytes{};
+	std::vector<std::uint8_t> pixel_payload_bytes{};
+};
+
 enum class CharsetEncodeErrorPolicy : std::uint8_t {
 	strict = 0,
 	replace_qmark,
@@ -3125,6 +3130,8 @@ public:
 	void rebuild_file_meta();
 	void write_to_stream(std::ostream& os, const WriteOptions& options = {});
 	[[nodiscard]] std::vector<std::uint8_t> write_bytes(const WriteOptions& options = {});
+	[[nodiscard]] SplitPixelPayloadWriteResult write_bytes_split_pixel_payload(
+	    const WriteOptions& options = {});
 	void write_file(const std::filesystem::path& path, const WriteOptions& options = {});
 	/// Serialize the root dataset using the DICOM JSON Model.
 	[[nodiscard]] JsonWriteResult write_json(const JsonWriteOptions& options = {}) const;
@@ -3147,6 +3154,16 @@ public:
 	void write_with_transfer_syntax(std::ostream& os, uid::WellKnown transfer_syntax,
 	    const pixel::EncoderContext& encoder_ctx, const WriteOptions& options = {});
 	void write_with_transfer_syntax(std::ostream& os, uid::WellKnown transfer_syntax,
+	    std::span<const pixel::CodecOptionTextKv> codec_opt,
+	    const WriteOptions& options = {});
+	[[nodiscard]] SplitPixelPayloadWriteResult
+	write_with_transfer_syntax_split_pixel_payload(
+	    uid::WellKnown transfer_syntax, const WriteOptions& options = {});
+	[[nodiscard]] SplitPixelPayloadWriteResult
+	write_with_transfer_syntax_split_pixel_payload(uid::WellKnown transfer_syntax,
+	    const pixel::EncoderContext& encoder_ctx, const WriteOptions& options = {});
+	[[nodiscard]] SplitPixelPayloadWriteResult
+	write_with_transfer_syntax_split_pixel_payload(uid::WellKnown transfer_syntax,
 	    std::span<const pixel::CodecOptionTextKv> codec_opt,
 	    const WriteOptions& options = {});
 	/// Convenience overload that writes to a regular file path.

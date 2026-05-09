@@ -136,6 +136,82 @@ def test_read_bytes_with_pixel_payload_copy_false_keeps_buffers_alive() -> None:
     assert obj.pixel_data(0) == b"\x34\x12"
 
 
+def test_write_bytes_split_pixel_payload_roundtrip() -> None:
+    payload = b"\x34\x12\x56\x78\x9A\xBC"
+    native = dicom.read_bytes_with_pixel_payload(
+        _build_native_placeholder(), payload, name="py-split-write-native"
+    )
+    main_bytes, payload_bytes = native.write_bytes_split_pixel_payload()
+    assert payload_bytes == payload
+    placeholder_only = dicom.read_bytes(main_bytes, name="py-split-write-native-main")
+    assert placeholder_only["PixelData"].value_bytes() == dicom.PIXEL_PAYLOAD_PLACEHOLDER_MAGIC
+    roundtrip = dicom.read_bytes_with_pixel_payload(
+        main_bytes, payload_bytes, name="py-split-write-native-rt"
+    )
+    assert roundtrip.pixel_data(0) == payload
+
+    encap = dicom.read_bytes_with_pixel_payload(
+        _build_encap_placeholder("1"),
+        _single_frame_encap_payload(),
+        name="py-split-write-encap",
+    )
+    main_bytes, payload_bytes = encap.write_bytes_split_pixel_payload()
+    placeholder_only = dicom.read_bytes(main_bytes, name="py-split-write-encap-main")
+    assert placeholder_only["PixelData"].value_bytes() == dicom.PIXEL_PAYLOAD_PLACEHOLDER_MAGIC
+    roundtrip = dicom.read_bytes_with_pixel_payload(
+        main_bytes, payload_bytes, name="py-split-write-encap-rt"
+    )
+    assert roundtrip.encoded_pixel_frame_bytes(0) == b"\x34\x12"
+    assert roundtrip.pixel_data(0) == b"\x34\x12"
+
+
+def test_write_with_transfer_syntax_split_pixel_payload_roundtrip() -> None:
+    payload = b"\x34\x12\x56\x78\x9A\xBC"
+    native = dicom.read_bytes_with_pixel_payload(
+        _build_native_placeholder(), payload, name="py-split-write-ts-native"
+    )
+    main_bytes, payload_bytes = (
+        native.write_with_transfer_syntax_split_pixel_payload("ExplicitVRLittleEndian")
+    )
+    assert payload_bytes == payload
+    same_ts_roundtrip = dicom.read_bytes_with_pixel_payload(
+        main_bytes, payload_bytes, name="py-split-write-ts-same-rt"
+    )
+    assert same_ts_roundtrip.pixel_data(0) == payload
+
+    main_bytes, payload_bytes = (
+        native.write_with_transfer_syntax_split_pixel_payload("RLELossless")
+    )
+    placeholder_only = dicom.read_bytes(main_bytes, name="py-split-write-ts-rle-main")
+    assert placeholder_only["PixelData"].value_bytes() == dicom.PIXEL_PAYLOAD_PLACEHOLDER_MAGIC
+    rle_roundtrip = dicom.read_bytes_with_pixel_payload(
+        main_bytes, payload_bytes, name="py-split-write-ts-rle-rt"
+    )
+    assert rle_roundtrip.pixel_data(0) == payload
+
+    ctx = dicom.create_encoder_context("RLELossless")
+    main_bytes, payload_bytes = (
+        native.write_with_transfer_syntax_split_pixel_payload(
+            "RLELossless", encoder_context=ctx
+        )
+    )
+    rle_roundtrip = dicom.read_bytes_with_pixel_payload(
+        main_bytes, payload_bytes, name="py-split-write-ts-rle-ctx-rt"
+    )
+    assert rle_roundtrip.pixel_data(0) == payload
+
+    main_bytes, payload_bytes = (
+        rle_roundtrip.write_with_transfer_syntax_split_pixel_payload(
+            "ExplicitVRLittleEndian"
+        )
+    )
+    assert payload_bytes == payload
+    native_roundtrip = dicom.read_bytes_with_pixel_payload(
+        main_bytes, payload_bytes, name="py-split-write-ts-native-rt"
+    )
+    assert native_roundtrip.pixel_data(0) == payload
+
+
 def test_read_bytes_with_pixel_payload_keep_on_error_clears_attached_state() -> None:
     obj = dicom.read_bytes_with_pixel_payload(
         _build_native_placeholder(b"BAD!"),
