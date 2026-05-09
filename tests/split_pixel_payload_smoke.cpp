@@ -226,6 +226,9 @@ int main() {
 		if (pixel_data.storage_kind() != dicom::DataElement::StorageKind::borrowed_bytes) {
 			fail("native split PixelData should use borrowed_bytes storage");
 		}
+		if (pixel_data.vr() != dicom::VR::OW) {
+			fail("native split PixelData should infer OW from BitsAllocated");
+		}
 		if (!bytes_equal(pixel_data.value_span(), pixel_payload)) {
 			fail("native split PixelData value_span mismatch");
 		}
@@ -363,6 +366,37 @@ int main() {
 			    "null-payload", bad_magic.data(), bad_magic.size(),
 			    nullptr, pixel_payload.size());
 		}, "null pixel payload");
+	}
+
+	{
+		dicom::ReadOptions keep_on_error;
+		keep_on_error.keep_on_error = true;
+
+		const auto bad_magic = build_native_placeholder_part10(
+		    {'B', 'A', 'D', '!'});
+		const std::vector<std::uint8_t> pixel_payload{
+		    0x34u, 0x12u, 0x56u, 0x78u, 0x9Au, 0xBCu};
+		auto kept_bad_magic = dicom::read_bytes_with_pixel_payload(
+		    "bad-magic-keep", bad_magic.data(), bad_magic.size(),
+		    pixel_payload.data(), pixel_payload.size(), keep_on_error);
+		if (!kept_bad_magic || !kept_bad_magic->has_error()) {
+			fail("keep_on_error placeholder attach failure should be recorded");
+		}
+		if (kept_bad_magic->has_attached_pixel_payload()) {
+			fail("keep_on_error placeholder attach failure should not stay attached");
+		}
+
+		const auto encap_main = build_encap_placeholder_part10("1");
+		const std::vector<std::uint8_t> malformed_payload{0xFEu, 0xFFu};
+		auto kept_bad_encap = dicom::read_bytes_with_pixel_payload(
+		    "bad-encap-keep", encap_main.data(), encap_main.size(),
+		    malformed_payload.data(), malformed_payload.size(), keep_on_error);
+		if (!kept_bad_encap || !kept_bad_encap->has_error()) {
+			fail("keep_on_error encapsulated attach failure should be recorded");
+		}
+		if (kept_bad_encap->has_attached_pixel_payload()) {
+			fail("keep_on_error encapsulated attach failure should detach payload");
+		}
 	}
 
 	return 0;

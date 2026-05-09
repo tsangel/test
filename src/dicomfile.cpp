@@ -1650,10 +1650,16 @@ void DicomFile::attach_pending_pixel_payload_or_throw() {
 	if (!has_pending_pixel_payload_) {
 		return;
 	}
-	attach_pixel_payload_to_loaded_placeholder(
-	    pending_pixel_payload_data_, pending_pixel_payload_size_,
-	    pending_pixel_payload_identifier_);
+	const auto* data = pending_pixel_payload_data_;
+	const auto size = pending_pixel_payload_size_;
+	auto identifier = pending_pixel_payload_identifier_;
 	clear_pending_pixel_payload();
+	try {
+		attach_pixel_payload_to_loaded_placeholder(data, size, identifier);
+	} catch (...) {
+		detach_loaded_pixel_payload_no_load();
+		throw;
+	}
 }
 
 void DicomFile::attach_pixel_payload_to_loaded_placeholder(
@@ -1707,12 +1713,9 @@ void DicomFile::attach_pixel_payload_to_loaded_placeholder(
 		return;
 	}
 
-	VR native_vr = placeholder.vr();
-	if (native_vr != VR::OB && native_vr != VR::OW) {
-		const auto bits_allocated =
-		    static_cast<int>(root_dataset_["BitsAllocated"_tag].to_long().value_or(0));
-		native_vr = native_pixel_vr_from_bits_allocated(bits_allocated);
-	}
+	const auto bits_allocated =
+	    static_cast<int>(root_dataset_["BitsAllocated"_tag].to_long().value_or(0));
+	const auto native_vr = native_pixel_vr_from_bits_allocated(bits_allocated);
 	auto& pixel_data = root_dataset_.add_dataelement("PixelData"_tag, native_vr);
 	pixel_data.attach_borrowed_value_bytes(data, size);
 }
