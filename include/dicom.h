@@ -2562,6 +2562,7 @@ private:
 	    DataSet* parent, bool bind_to_parent_stream) noexcept;
 	void set_value_bytes_nocheck(std::vector<std::uint8_t>&& bytes);
 	void adopt_value_bytes_nocheck(std::vector<std::uint8_t>&& bytes);
+	void set_owned_value_bytes_no_vr_check(std::vector<std::uint8_t>&& bytes);
 	void adopt_value_bytes_impl(
 	    std::vector<std::uint8_t>&& bytes, bool notify_charset_parent);
 	void attach_borrowed_value_bytes(const std::uint8_t* data, std::size_t size);
@@ -2573,6 +2574,12 @@ private:
 };
 
 namespace detail {
+
+[[nodiscard]] bool is_detached_pixel_payload_marker(const DataElement& element);
+[[nodiscard]] std::string_view detached_pixel_payload_marker_text(const DataElement& element);
+[[nodiscard]] std::string dump_pixel_data_element_for_detach_marker(
+    const DataElement& element, std::size_t max_print_chars = 0,
+    bool include_offset = true);
 
 template <typename T>
 inline constexpr bool dependent_false_v = false;

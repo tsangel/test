@@ -107,6 +107,17 @@ private:
 	return bits_allocated > 8 ? VR::OW : VR::OB;
 }
 
+[[nodiscard]] std::vector<std::uint8_t> make_detached_pixel_payload_marker_bytes(
+    const DataElement& pixel_data) {
+	const auto dump_text = detail::dump_pixel_data_element_for_detach_marker(pixel_data);
+	std::vector<std::uint8_t> marker;
+	marker.reserve(kPixelPayloadPlaceholderMagic.size() + dump_text.size());
+	marker.insert(marker.end(), kPixelPayloadPlaceholderMagic.begin(),
+	    kPixelPayloadPlaceholderMagic.end());
+	marker.insert(marker.end(), dump_text.begin(), dump_text.end());
+	return marker;
+}
+
 [[nodiscard]] bool file_uses_little_endian(const DicomFile& file) noexcept {
 	return file.transfer_syntax_uid() != "ExplicitVRBigEndian"_uid;
 }
@@ -1638,11 +1649,14 @@ void DicomFile::detach_loaded_pixel_payload_no_load() {
 		return;
 	}
 	if (pixel_data.storage_kind_ == DataElement::StorageKind::borrowed_bytes) {
-		pixel_data.detach_borrowed_value_bytes();
+		pixel_data.set_owned_value_bytes_no_vr_check(
+		    make_detached_pixel_payload_marker_bytes(pixel_data));
 		return;
 	}
 	if (auto* pixel_sequence = pixel_data.as_pixel_sequence()) {
-		pixel_sequence->detach_external_memory();
+		(void)pixel_sequence;
+		pixel_data.set_owned_value_bytes_no_vr_check(
+		    make_detached_pixel_payload_marker_bytes(pixel_data));
 	}
 }
 
@@ -1728,11 +1742,14 @@ void DicomFile::detach_pixel_payload() {
 		return;
 	}
 	if (pixel_data.storage_kind_ == DataElement::StorageKind::borrowed_bytes) {
-		pixel_data.detach_borrowed_value_bytes();
+		pixel_data.set_owned_value_bytes_no_vr_check(
+		    make_detached_pixel_payload_marker_bytes(pixel_data));
 		return;
 	}
 	if (auto* pixel_sequence = pixel_data.as_pixel_sequence()) {
-		pixel_sequence->detach_external_memory();
+		(void)pixel_sequence;
+		pixel_data.set_owned_value_bytes_no_vr_check(
+		    make_detached_pixel_payload_marker_bytes(pixel_data));
 	}
 }
 
@@ -2122,6 +2139,11 @@ std::span<const std::uint8_t> DicomFile::encoded_pixel_frame_view(std::size_t fr
 	if (pixel_data.is_missing()) {
 		diag::error_and_throw(
 		    "DicomFile::encoded_pixel_frame_view file={} frame_index={} reason=PixelData is missing",
+		    path(), frame_index);
+	}
+	if (detail::is_detached_pixel_payload_marker(pixel_data)) {
+		diag::error_and_throw(
+		    "DicomFile::encoded_pixel_frame_view file={} frame_index={} reason=PixelData payload is detached",
 		    path(), frame_index);
 	}
 	if (!pixel_data.vr().is_pixel_sequence()) {

@@ -103,6 +103,13 @@ def test_read_bytes_with_pixel_payload_native_detach_releases_owner() -> None:
     assert obj.has_attached_pixel_payload is False
     assert not hasattr(obj, "_pixel_payload_owner")
     assert obj.Rows == 1
+    marker = obj["PixelData"].value_bytes()
+    assert marker.startswith(dicom.PIXEL_PAYLOAD_PLACEHOLDER_MAGIC)
+    marker_text = marker[len(dicom.PIXEL_PAYLOAD_PLACEHOLDER_MAGIC) :].decode("utf-8")
+    assert "'7fe00010'\tOW" in marker_text
+    assert "\\x34\\x12\\x56\\x78" in marker_text
+    assert "'7fe00010'\tOW" in obj.dump()
+    assert "\\x34\\x12\\x56\\x78" in obj.dump()
     with pytest.raises(Exception, match="detached"):
         obj.pixel_data(0)
 

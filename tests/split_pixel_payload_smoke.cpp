@@ -209,6 +209,22 @@ bool bytes_equal(std::span<const std::uint8_t> lhs,
 	    std::equal(lhs.begin(), lhs.end(), rhs.begin(), rhs.end());
 }
 
+bool starts_with_magic(std::span<const std::uint8_t> bytes) {
+	return bytes.size() > dicom::kPixelPayloadPlaceholderMagic.size() &&
+	    std::equal(dicom::kPixelPayloadPlaceholderMagic.begin(),
+	        dicom::kPixelPayloadPlaceholderMagic.end(), bytes.begin());
+}
+
+std::string marker_text(std::span<const std::uint8_t> bytes) {
+	if (!starts_with_magic(bytes)) {
+		return {};
+	}
+	const auto offset = dicom::kPixelPayloadPlaceholderMagic.size();
+	return std::string(
+	    reinterpret_cast<const char*>(bytes.data() + offset),
+	    bytes.size() - offset);
+}
+
 } // namespace
 
 int main() {
@@ -243,9 +259,23 @@ int main() {
 		if (file->get_dataelement("Rows"_tag).to_long().value_or(0) != 1) {
 			fail("metadata should remain available after native payload detach");
 		}
-		expect_throw("native value_span after detach",
-		    [&]() { (void)file->get_dataelement("PixelData"_tag).value_span(); },
-		    "detached");
+		auto& detached_pixel_data = file->get_dataelement("PixelData"_tag);
+		if (detached_pixel_data.storage_kind() !=
+		    dicom::DataElement::StorageKind::owned_bytes ||
+		    detached_pixel_data.vr() != dicom::VR::OW) {
+			fail("native detach should preserve VR and replace payload with owned marker");
+		}
+		const auto native_marker = detached_pixel_data.value_span();
+		const auto native_marker_text = marker_text(native_marker);
+		if (native_marker_text.find("'7fe00010'\tOW") == std::string::npos ||
+		    native_marker_text.find("\\x34\\x12\\x56\\x78") == std::string::npos) {
+			fail("native detach marker should contain PixelData dump text");
+		}
+		const auto native_dump = file->dump();
+		if (native_dump.find("'7fe00010'\tOW") == std::string::npos ||
+		    native_dump.find("\\x34\\x12\\x56\\x78") == std::string::npos) {
+			fail("native dump after detach should show stored PixelData dump text");
+		}
 		expect_throw("native decode after detach",
 		    [&]() { (void)file->pixel_data(0); }, "detached");
 	}
@@ -299,6 +329,24 @@ int main() {
 		file->detach_pixel_payload();
 		if (file->has_attached_pixel_payload()) {
 			fail("single-frame encapsulated split payload should report detached");
+		}
+		auto& detached_pixel_data = file->get_dataelement("PixelData"_tag);
+		if (detached_pixel_data.storage_kind() !=
+		    dicom::DataElement::StorageKind::owned_bytes ||
+		    detached_pixel_data.vr() != dicom::VR::PX ||
+		    detached_pixel_data.as_pixel_sequence() != nullptr) {
+			fail("encapsulated detach should preserve PX and replace PixelSequence with owned marker");
+		}
+		const auto encap_marker_text = marker_text(detached_pixel_data.value_span());
+		if (encap_marker_text.find("'7fe00010'\tPX") == std::string::npos ||
+		    encap_marker_text.find("PIXEL SEQUENCE WITH 1 FRAME(S)") == std::string::npos ||
+		    encap_marker_text.find("FRAGMENT #0") == std::string::npos) {
+			fail("encapsulated detach marker should contain PixelSequence dump text");
+		}
+		const auto encap_dump = file->dump();
+		if (encap_dump.find("PIXEL SEQUENCE WITH 1 FRAME(S)") == std::string::npos ||
+		    encap_dump.find("FRAGMENT #0") == std::string::npos) {
+			fail("encapsulated dump after detach should show stored PixelSequence dump text");
 		}
 		expect_throw("encapsulated frame view after detach",
 		    [&]() { (void)file->encoded_pixel_frame_view(0); }, "detached");

@@ -1156,6 +1156,14 @@ void DataElement::adopt_value_bytes_nocheck(std::vector<std::uint8_t>&& bytes) {
 	adopt_value_bytes_impl(std::move(bytes), false);
 }
 
+void DataElement::set_owned_value_bytes_no_vr_check(
+    std::vector<std::uint8_t>&& bytes) {
+	release_storage();
+	length_ = bytes.size();
+	storage_.vec = new std::vector<std::uint8_t>(std::move(bytes));
+	storage_kind_ = StorageKind::owned_bytes;
+}
+
 void DataElement::attach_borrowed_value_bytes(
     const std::uint8_t* data, std::size_t size) {
 	if (vr_ == dicom::VR::SQ || vr_ == dicom::VR::PX || vr_ == dicom::VR::None) {

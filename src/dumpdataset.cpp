@@ -21,6 +21,7 @@ constexpr std::size_t kDumpBinaryPreviewBytes = 64;
 constexpr std::size_t kDumpMinValueChars = 80;
 constexpr std::size_t kFragmentPreviewHeadBytes = 16;
 constexpr std::size_t kFragmentPreviewTailBytes = 8;
+constexpr std::string_view kDetachedPixelDataDumpPrefix{"'7fe00010'\t"};
 
 std::string dump_tag_token(Tag tag) {
 	return fmt::format("{:04x}{:04x}", tag.group(), tag.element());
@@ -239,6 +240,11 @@ std::string dump_binary_value_preview(const DataElement& element) {
 	return out;
 }
 
+bool starts_with(std::string_view text, std::string_view prefix) noexcept {
+	return text.size() >= prefix.size() &&
+	    text.substr(0, prefix.size()) == prefix;
+}
+
 void append_fragment_hex_bytes(std::string& out, std::span<const std::uint8_t> bytes) {
 	for (std::size_t i = 0; i < bytes.size(); ++i) {
 		if (!out.empty()) {
@@ -307,6 +313,11 @@ std::string dump_element_value(const DataElement& element) {
 	return "(no value)";
 }
 
+void append_dump_element_lines(std::string& out, const DataElement& element,
+    std::string_view prefix, std::size_t max_print_chars, bool include_offset);
+void append_dump_dataset_lines(std::string& out, const DataSet* dataset,
+    std::string_view prefix, std::size_t max_print_chars, bool include_offset);
+
 void append_dump_pixel_sequence_lines(std::string& out, const PixelSequence& pixseq) {
 	const auto frame_count = pixseq.number_of_frames();
 	const InStream* seq_stream = pixseq.stream();
@@ -347,71 +358,93 @@ void append_dump_pixel_sequence_lines(std::string& out, const PixelSequence& pix
 	}
 }
 
+void append_detached_pixel_payload_marker_dump_text(
+    std::string& out, const DataElement& element) {
+	const auto marker_text = detail::detached_pixel_payload_marker_text(element);
+	if (marker_text.empty()) {
+		return;
+	}
+	out.append(marker_text.data(), marker_text.size());
+	if (out.empty() || out.back() != '\n') {
+		out.push_back('\n');
+	}
+}
+
+void append_dump_element_lines(std::string& out, const DataElement& element,
+    std::string_view prefix, std::size_t max_print_chars, bool include_offset) {
+	if (detail::is_detached_pixel_payload_marker(element)) {
+		append_detached_pixel_payload_marker_dump_text(out, element);
+		return;
+	}
+
+	const auto tag_token = dump_tag_token(element.tag());
+	std::string tag_path;
+	if (prefix.empty()) {
+		tag_path = tag_token;
+	} else {
+		tag_path = fmt::format("{}.{}", prefix, tag_token);
+	}
+
+	const auto keyword_sv = lookup::tag_to_keyword(element.tag().value());
+	const std::string keyword =
+	    keyword_sv.empty() ? std::string{"-"} : std::string(keyword_sv.data(), keyword_sv.size());
+	const int vm = element.vm();
+	const int vm_print = vm < 0 ? 0 : vm;
+	const auto prefix_text = include_offset
+	                             ? fmt::format(
+	                                   "'{}'\t{}\t{}\t{}\t0x{:x}\t",
+	                                   tag_path, element.vr().str(),
+	                                   element.length(), vm_print, element.offset())
+	                             : fmt::format(
+	                                   "'{}'\t{}\t{}\t{}\t",
+	                                   tag_path, element.vr().str(),
+	                                   element.length(), vm_print);
+	const auto suffix_text = fmt::format("\t# {}\n", keyword);
+	std::size_t effective_max_print_chars = max_print_chars;
+	if (effective_max_print_chars != 0) {
+		std::size_t min_required = prefix_text.size();
+		if (std::numeric_limits<std::size_t>::max() - min_required > suffix_text.size()) {
+			min_required += suffix_text.size();
+		} else {
+			min_required = std::numeric_limits<std::size_t>::max();
+		}
+		if (std::numeric_limits<std::size_t>::max() - min_required > kDumpMinValueChars) {
+			min_required += kDumpMinValueChars;
+		} else {
+			min_required = std::numeric_limits<std::size_t>::max();
+		}
+		if (effective_max_print_chars < min_required) {
+			effective_max_print_chars = min_required;
+		}
+	}
+	const auto value = truncate_dump_value_for_print_width(
+	    dump_element_value(element), effective_max_print_chars,
+	    prefix_text.size(), suffix_text.size());
+	out += prefix_text;
+	out += pad_dump_value_min_width(value, kDumpMinValueChars);
+	out += suffix_text;
+
+	if (const auto* seq = element.sequence()) {
+		for (int item_index = 0; item_index < seq->size(); ++item_index) {
+			append_dump_dataset_lines(
+			    out, seq->get_dataset(static_cast<std::size_t>(item_index)),
+			    fmt::format("{}.{}", tag_path, item_index), max_print_chars, include_offset);
+		}
+		return;
+	}
+
+	if (const auto* pixseq = element.pixel_sequence()) {
+		append_dump_pixel_sequence_lines(out, *pixseq);
+	}
+}
+
 void append_dump_dataset_lines(std::string& out, const DataSet* dataset,
     std::string_view prefix, std::size_t max_print_chars, bool include_offset) {
 	if (!dataset) {
 		return;
 	}
 	for (const auto& element : *dataset) {
-		const auto tag_token = dump_tag_token(element.tag());
-		std::string tag_path;
-		if (prefix.empty()) {
-			tag_path = tag_token;
-		} else {
-			tag_path = fmt::format("{}.{}", prefix, tag_token);
-		}
-
-		const auto keyword_sv = lookup::tag_to_keyword(element.tag().value());
-		const std::string keyword =
-		    keyword_sv.empty() ? std::string{"-"} : std::string(keyword_sv.data(), keyword_sv.size());
-		const int vm = element.vm();
-		const int vm_print = vm < 0 ? 0 : vm;
-		const auto prefix_text = include_offset
-		                             ? fmt::format(
-		                                   "'{}'\t{}\t{}\t{}\t0x{:x}\t",
-		                                   tag_path, element.vr().str(),
-		                                   element.length(), vm_print, element.offset())
-		                             : fmt::format(
-		                                   "'{}'\t{}\t{}\t{}\t",
-		                                   tag_path, element.vr().str(),
-		                                   element.length(), vm_print);
-		const auto suffix_text = fmt::format("\t# {}\n", keyword);
-		std::size_t effective_max_print_chars = max_print_chars;
-		if (effective_max_print_chars != 0) {
-			std::size_t min_required = prefix_text.size();
-			if (std::numeric_limits<std::size_t>::max() - min_required > suffix_text.size()) {
-				min_required += suffix_text.size();
-			} else {
-				min_required = std::numeric_limits<std::size_t>::max();
-			}
-			if (std::numeric_limits<std::size_t>::max() - min_required > kDumpMinValueChars) {
-				min_required += kDumpMinValueChars;
-			} else {
-				min_required = std::numeric_limits<std::size_t>::max();
-			}
-			if (effective_max_print_chars < min_required) {
-				effective_max_print_chars = min_required;
-			}
-		}
-		const auto value = truncate_dump_value_for_print_width(
-		    dump_element_value(element), effective_max_print_chars,
-		    prefix_text.size(), suffix_text.size());
-		out += prefix_text;
-		out += pad_dump_value_min_width(value, kDumpMinValueChars);
-		out += suffix_text;
-
-		if (const auto* seq = element.sequence()) {
-			for (int item_index = 0; item_index < seq->size(); ++item_index) {
-				append_dump_dataset_lines(
-				    out, seq->get_dataset(static_cast<std::size_t>(item_index)),
-				    fmt::format("{}.{}", tag_path, item_index), max_print_chars, include_offset);
-			}
-			continue;
-		}
-
-		if (const auto* pixseq = element.pixel_sequence()) {
-			append_dump_pixel_sequence_lines(out, *pixseq);
-		}
+		append_dump_element_lines(out, element, prefix, max_print_chars, include_offset);
 	}
 }
 
@@ -425,6 +458,46 @@ std::string dump_dataset(
 }
 
 }  // namespace
+
+namespace detail {
+
+bool is_detached_pixel_payload_marker(const DataElement& element) {
+	return !detached_pixel_payload_marker_text(element).empty();
+}
+
+std::string_view detached_pixel_payload_marker_text(const DataElement& element) {
+	if (element.tag() != "PixelData"_tag ||
+	    element.storage_kind() != DataElement::StorageKind::owned_bytes) {
+		return {};
+	}
+
+	const auto span = element.value_span();
+	if (span.size() <= kPixelPayloadPlaceholderMagic.size()) {
+		return {};
+	}
+	if (!std::equal(kPixelPayloadPlaceholderMagic.begin(),
+	        kPixelPayloadPlaceholderMagic.end(), span.begin())) {
+		return {};
+	}
+
+	const auto* text_begin = reinterpret_cast<const char*>(
+	    span.data() + kPixelPayloadPlaceholderMagic.size());
+	const auto text_size = span.size() - kPixelPayloadPlaceholderMagic.size();
+	const std::string_view text{text_begin, text_size};
+	if (!starts_with(text, kDetachedPixelDataDumpPrefix)) {
+		return {};
+	}
+	return text;
+}
+
+std::string dump_pixel_data_element_for_detach_marker(
+    const DataElement& element, std::size_t max_print_chars, bool include_offset) {
+	std::string out;
+	append_dump_element_lines(out, element, {}, max_print_chars, include_offset);
+	return out;
+}
+
+}  // namespace detail
 
 std::string DataSet::dump(std::size_t max_print_chars, bool include_offset) const {
 	if (this == root_dataset_ && stream_ && stream_->is_valid() && last_tag_loaded_ != "ffff,ffff"_tag) {
