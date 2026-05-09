@@ -180,6 +180,15 @@ def test_write_with_transfer_syntax_split_pixel_payload_roundtrip() -> None:
     assert same_ts_roundtrip.pixel_data(0) == payload
 
     main_bytes, payload_bytes = (
+        native.write_with_transfer_syntax_split_pixel_payload("ExplicitVRBigEndian")
+    )
+    assert payload_bytes == payload
+    big_endian_roundtrip = dicom.read_bytes_with_pixel_payload(
+        main_bytes, payload_bytes, name="py-split-write-ts-big-endian-rt"
+    )
+    assert big_endian_roundtrip.pixel_data(0) == payload
+
+    main_bytes, payload_bytes = (
         native.write_with_transfer_syntax_split_pixel_payload("RLELossless")
     )
     placeholder_only = dicom.read_bytes(main_bytes, name="py-split-write-ts-rle-main")

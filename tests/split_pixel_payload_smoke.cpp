@@ -456,6 +456,20 @@ int main() {
 		if (same_ts_split.pixel_payload_bytes != pixel_payload) {
 			fail("same transfer syntax split write payload mismatch");
 		}
+		const auto big_endian_split =
+		    native_source.write_with_transfer_syntax_split_pixel_payload(
+		        "ExplicitVRBigEndian"_uid);
+		if (big_endian_split.pixel_payload_bytes != pixel_payload) {
+			fail("Big Endian native split write should keep normalized payload bytes");
+		}
+		auto big_endian_roundtrip = dicom::read_bytes_with_pixel_payload(
+		    "split-write-big-endian-native-roundtrip",
+		    big_endian_split.dicom_bytes.data(), big_endian_split.dicom_bytes.size(),
+		    big_endian_split.pixel_payload_bytes.data(),
+		    big_endian_split.pixel_payload_bytes.size());
+		if (big_endian_roundtrip->pixel_data(0) != pixel_payload) {
+			fail("Big Endian native split write roundtrip pixel mismatch");
+		}
 		const auto rle_split =
 		    native_source.write_with_transfer_syntax_split_pixel_payload("RLELossless"_uid);
 		if (rle_split.pixel_payload_bytes.empty()) {
