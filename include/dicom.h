@@ -38,6 +38,13 @@ struct yyjson_val;
 
 namespace dicom {
 
+inline constexpr std::array<std::uint8_t, 4> kPixelPayloadPlaceholderMagic{
+	static_cast<std::uint8_t>('D'),
+	static_cast<std::uint8_t>('X'),
+	static_cast<std::uint8_t>('P'),
+	static_cast<std::uint8_t>('1'),
+};
+
 class DataSet;
 class DataElement;
 enum class CharsetEncodeErrorPolicy : std::uint8_t;
@@ -2269,6 +2276,7 @@ public:
 		inline_bytes,
 		heap,
 		owned_bytes,
+		borrowed_bytes,
 		sequence,
 		pixel_sequence
 	};
@@ -2527,6 +2535,7 @@ private:
 		Sequence* seq;
 		PixelSequence* pixseq;
 		std::size_t offset_;
+		const std::uint8_t* borrowed_bytes;
 		std::uint8_t inline_bytes[kInlineStorageBytes];
 		constexpr Storage() noexcept : ptr(nullptr) {}
 	} storage_{};
@@ -2555,8 +2564,12 @@ private:
 	void adopt_value_bytes_nocheck(std::vector<std::uint8_t>&& bytes);
 	void adopt_value_bytes_impl(
 	    std::vector<std::uint8_t>&& bytes, bool notify_charset_parent);
+	void attach_borrowed_value_bytes(const std::uint8_t* data, std::size_t size);
+	void detach_borrowed_value_bytes() noexcept;
+	[[nodiscard]] bool has_attached_borrowed_value_bytes() const noexcept;
 	void materialize_json_tree();
 	[[nodiscard]] std::optional<std::vector<std::string>> parse_json_tree_utf8_values() const;
+	friend class DicomFile;
 };
 
 namespace detail {
@@ -3261,6 +3274,18 @@ public:
 	void attach_to_memory(const std::string& name, const std::uint8_t* data,
 	    std::size_t size, bool copy = true);
 	void attach_to_memory(std::string name, std::vector<std::uint8_t>&& buffer);
+	void attach_to_memory_with_pixel_payload(const std::uint8_t* data, std::size_t size,
+	    const std::uint8_t* pixel_payload, std::size_t pixel_payload_size,
+	    bool copy = true);
+	void attach_to_memory_with_pixel_payload(const std::string& name,
+	    const std::uint8_t* data, std::size_t size,
+	    const std::uint8_t* pixel_payload, std::size_t pixel_payload_size,
+	    bool copy = true);
+	void attach_to_memory_with_pixel_payload(std::string name,
+	    std::vector<std::uint8_t>&& buffer,
+	    const std::uint8_t* pixel_payload, std::size_t pixel_payload_size);
+	void detach_pixel_payload();
+	[[nodiscard]] bool has_attached_pixel_payload() const;
 	void read_attached_stream(const ReadOptions& options = {});
 	[[nodiscard]] bool has_error() const noexcept { return has_error_; }
 	[[nodiscard]] const std::string& error_message() const noexcept { return error_message_; }
@@ -3480,12 +3505,22 @@ private:
 	void clear_error_state() noexcept;
 	void set_error_state(std::string message);
 	void clear_json_doc_owner() noexcept { json_doc_owner_.reset(); }
+	void set_pending_pixel_payload(const std::uint8_t* data, std::size_t size);
+	void clear_pending_pixel_payload() noexcept;
+	void detach_loaded_pixel_payload_no_load();
+	void attach_pending_pixel_payload_or_throw();
+	void attach_pixel_payload_to_loaded_placeholder(
+	    const std::uint8_t* data, std::size_t size, const std::string& identifier);
 
 	DataSet root_dataset_;
 	std::shared_ptr<yyjson_doc> json_doc_owner_{};
 	uid::WellKnown transfer_syntax_uid_{};
 	bool has_error_{false};
 	std::string error_message_{};
+	const std::uint8_t* pending_pixel_payload_data_{nullptr};
+	std::size_t pending_pixel_payload_size_{0};
+	std::string pending_pixel_payload_identifier_{};
+	bool has_pending_pixel_payload_{false};
 };
 
 /// Represents a DICOM SQ element value: an ordered list of nested DataSets.
@@ -3895,10 +3930,23 @@ class PixelSequence {
 	/// Drop encoded data buffer for a given frame to free memory.
 	void clear_frame_encoded_data(std::size_t index);
 
-		/// Attach to a substream containing the pixel sequence payload.
-		void attach_to_stream(InStream* base_stream, std::size_t size);
-		/// Read the attached pixel sequence stream (fragments, offset tables).
-		void read_attached_stream();
+	/// Attach to a substream containing the pixel sequence payload.
+	void attach_to_stream(InStream* base_stream, std::size_t size);
+	/// Attach to caller-owned PixelData value bytes without copying.
+	void attach_to_external_memory(const std::uint8_t* data, std::size_t size);
+	/// Attach to caller-owned PixelData value bytes without copying.
+	void attach_to_external_memory(
+	    std::string identifier, const std::uint8_t* data, std::size_t size);
+	/// Detach a previously attached external pixel payload stream.
+	void detach_external_memory();
+	[[nodiscard]] bool has_external_memory() const noexcept {
+		return external_memory_stream_;
+	}
+	[[nodiscard]] bool external_memory_detached() const noexcept {
+		return external_memory_detached_;
+	}
+	/// Read the attached pixel sequence stream (fragments, offset tables).
+	void read_attached_stream();
 	/// Access the underlying pixel sequence stream.
 	[[nodiscard]] InStream* stream() noexcept { return stream_.get(); }
 	/// Const access to the underlying pixel sequence stream.
@@ -3915,6 +3963,8 @@ private:
 	std::size_t extended_offset_table_offset_{0};
 	std::size_t extended_offset_table_count_{0};
 	std::vector<std::unique_ptr<PixelFrame>> frames_;
+	bool external_memory_stream_{false};
+	bool external_memory_detached_{false};
 };
 
 #include "dataset_value_access.inl.hpp"
@@ -3983,6 +4033,7 @@ inline void DataElement::release_storage() noexcept {
 	case StorageKind::stream:
 	case StorageKind::json_tree:
 	case StorageKind::inline_bytes:
+	case StorageKind::borrowed_bytes:
 		break;
 	}
 	storage_.ptr = nullptr;
@@ -3993,6 +4044,8 @@ inline std::size_t DataElement::offset() const noexcept {
 	switch (storage_kind_) {
 	case StorageKind::stream:
 		return storage_.offset_;
+	case StorageKind::borrowed_bytes:
+		return 0;
 	case StorageKind::json_tree:
 		return 0;
 	case StorageKind::sequence:
@@ -4035,6 +4088,24 @@ std::unique_ptr<DicomFile> read_bytes(const std::string& name, const std::uint8_
     std::size_t size, ReadOptions options = {});
 /// Read from an owning buffer moved into the dataset.
 std::unique_ptr<DicomFile> read_bytes(std::string name, std::vector<std::uint8_t>&& buffer,
+    ReadOptions options = {});
+/// Read a main P10 buffer whose PixelData value is a DXP1 placeholder and attach
+/// caller-owned PixelData value bytes without copying.
+std::unique_ptr<DicomFile> read_bytes_with_pixel_payload(const std::string& name,
+    const std::uint8_t* data, std::size_t size,
+    const std::uint8_t* pixel_payload, std::size_t pixel_payload_size,
+    ReadOptions options = {});
+/// Read a main P10 buffer whose PixelData value is a DXP1 placeholder and attach
+/// caller-owned PixelData value bytes without copying.
+std::unique_ptr<DicomFile> read_bytes_with_pixel_payload(
+    const std::uint8_t* data, std::size_t size,
+    const std::uint8_t* pixel_payload, std::size_t pixel_payload_size,
+    ReadOptions options = {});
+/// Read an owning main P10 buffer whose PixelData value is a DXP1 placeholder and
+/// attach caller-owned PixelData value bytes without copying.
+std::unique_ptr<DicomFile> read_bytes_with_pixel_payload(std::string name,
+    std::vector<std::uint8_t>&& buffer,
+    const std::uint8_t* pixel_payload, std::size_t pixel_payload_size,
     ReadOptions options = {});
 /// Read a DICOM JSON dataset from a raw memory buffer.
 /// Current implementation is memory-based and does not support ensure_loaded()-style partial reads.

@@ -259,6 +259,10 @@ std::span<const std::uint8_t> PixelSequence::frame_encoded_span(std::size_t inde
 	}
 
 	if (!stream_) {
+		if (external_memory_detached_) {
+			diag::error_and_throw(
+			    "PixelSequence::frame_encoded_span reason=external pixel payload is detached");
+		}
 		diag::error_and_throw("PixelSequence::frame_encoded_span reason=null stream");
 	}
 	InStream* stream = stream_.get();
@@ -308,10 +312,65 @@ void PixelSequence::attach_to_stream(InStream* base_stream, std::size_t size) {
 		diag::error_and_throw("PixelSequence::attach_to_stream reason=null base_stream");
 	}
 	stream_ = std::make_unique<InSubStream>(base_stream, size);
+	external_memory_stream_ = false;
+	external_memory_detached_ = false;
+}
+
+void PixelSequence::attach_to_external_memory(
+    const std::uint8_t* data, std::size_t size) {
+	attach_to_external_memory(std::string{"<pixel-payload>"}, data, size);
+}
+
+void PixelSequence::attach_to_external_memory(
+    std::string identifier, const std::uint8_t* data, std::size_t size) {
+	if (size == 0) {
+		diag::error_and_throw(
+		    "PixelSequence::attach_to_external_memory identifier={} reason=empty pixel payload",
+		    identifier.empty() ? "<pixel-payload>" : identifier);
+	}
+	if (size != 0 && data == nullptr) {
+		diag::error_and_throw(
+		    "PixelSequence::attach_to_external_memory identifier={} reason=null data with non-zero size",
+		    identifier.empty() ? "<pixel-payload>" : identifier);
+	}
+	if (identifier.empty()) {
+		identifier = "<pixel-payload>";
+	}
+	auto stream = std::make_unique<InStringStream>();
+	stream->attach_memory(data, size, false);
+	stream->set_identifier(std::move(identifier));
+	stream_ = std::move(stream);
+	value_offset_ = 0;
+	base_offset_ = 0;
+	basic_offset_table_offset_ = 0;
+	basic_offset_table_count_ = 0;
+	extended_offset_table_offset_ = 0;
+	extended_offset_table_count_ = 0;
+	frames_.clear();
+	external_memory_stream_ = true;
+	external_memory_detached_ = false;
+}
+
+void PixelSequence::detach_external_memory() {
+	if (!external_memory_stream_ && !external_memory_detached_) {
+		return;
+	}
+	for (auto& frame : frames_) {
+		if (frame) {
+			frame->discard_encoded_data();
+		}
+	}
+	stream_.reset();
+	external_memory_stream_ = false;
+	external_memory_detached_ = true;
 }
 
 void PixelSequence::read_attached_stream() {
 	if (!stream_) {
+		if (external_memory_detached_) {
+			diag::error_and_throw(
+			    "PixelSequence::read_attached_stream reason=external pixel payload is detached");
+		}
 		diag::error_and_throw("PixelSequence::read_attached_stream reason=null stream");
 	}
 	basic_offset_table_offset_ = 0;
