@@ -1,13 +1,27 @@
 #!/usr/bin/env python3
-"""Read a split PixelData payload with DicomSDL.
+"""Read or create a split PixelData payload with DicomSDL.
 
 Usage:
     python split_pixel_payload_example.py
     python split_pixel_payload_example.py main-p10.dcm pixel-payload.bin --frame 0
+    python split_pixel_payload_example.py --split source.dcm main-out.dcm pixel-payload.bin
+    python split_pixel_payload_example.py --split source.dcm main-out.dcm pixel-payload.bin \
+        --transfer-syntax RLELossless
 
-With no input paths, this runs a tiny built-in native PixelData demo. For a real
-encapsulated payload, pixel-payload.bin must contain the full PixelData value
-field: Basic Offset Table item, fragments, and sequence delimiter.
+The split-payload convention is private to DicomSDL runtime workflows:
+
+* The main P10 DICOM stores (7FE0,0010) PixelData as the fixed 4-byte DXP1
+  placeholder.
+* The sidecar payload stores the complete PixelData value bytes.
+* For encapsulated transfer syntaxes, the sidecar starts with the Basic Offset
+  Table item and includes all fragment items plus the sequence delimiter.
+
+Use write_bytes_split_pixel_payload() to split without transcoding, or
+write_with_transfer_syntax_split_pixel_payload() to serialize through a target
+transfer syntax while splitting. After a viewer decodes the frames it needs,
+call detach_pixel_payload() before releasing the caller-owned payload memory.
+Pass keep_dump=True if you want the detached marker to retain PixelData dump
+text for diagnostics.
 """
 
 from __future__ import annotations
@@ -71,56 +85,166 @@ def _hex_prefix(data: bytes, max_count: int = 16) -> str:
     return prefix + (" ..." if len(data) > max_count else "")
 
 
-def _run(name: str, main_p10: bytes | bytearray, payload: bytes | bytearray, frame: int) -> int:
+def _print_decode_summary(dicom_file: dicom.DicomFile, frame: int) -> None:
+    pixel_data = dicom_file["PixelData"]
+    if pixel_data.vr == dicom.VR.PX:
+        try:
+            encoded = dicom_file.encoded_pixel_frame_bytes(frame)
+            suffix = f" [{_hex_prefix(encoded)}]" if encoded else ""
+            print(f"Encoded frame {frame}: {len(encoded)} bytes{suffix}")
+        except Exception as exc:
+            print(f"Encoded frame {frame}: unavailable ({exc})")
+
+    try:
+        decoded = dicom_file.pixel_data(frame)
+        suffix = f" [{_hex_prefix(decoded)}]" if decoded else ""
+        print(f"Decoded frame {frame}: {len(decoded)} bytes{suffix}")
+    except Exception as exc:
+        print(f"Decoded frame {frame}: unavailable ({exc})")
+
+
+def _print_attached_summary(dicom_file: dicom.DicomFile, frame: int) -> None:
+    print(f"TransferSyntaxUID: {dicom_file.transfer_syntax_uid.value}")
+    print(f"Rows x Columns: {dicom_file.Rows} x {dicom_file.Columns}")
+    print(f"PixelData VR after attach: {dicom_file['PixelData'].vr.str()}")
+    print(f"Attached payload: {dicom_file.has_attached_pixel_payload}")
+    _print_decode_summary(dicom_file, frame)
+
+
+def _run_read_split(
+    name: str,
+    main_p10: bytes | bytearray,
+    payload: bytearray,
+    frame: int,
+    keep_dump: bool,
+) -> int:
     dicom_file = dicom.read_bytes_with_pixel_payload(
         main_p10, payload, name=name, copy=False
     )
 
     print(f"Loaded split DICOM: {dicom_file.path}")
-    print(f"TransferSyntaxUID: {dicom_file.transfer_syntax_uid.value}")
-    print(f"Rows x Columns: {dicom_file.Rows} x {dicom_file.Columns}")
-    print(f"PixelData VR after attach: {dicom_file['PixelData'].vr.str()}")
-    print(f"Attached payload: {dicom_file.has_attached_pixel_payload}")
+    _print_attached_summary(dicom_file, frame)
 
-    decoded = dicom_file.pixel_data(frame)
-    suffix = f" [{_hex_prefix(decoded)}]" if decoded else ""
-    print(f"Decoded frame {frame}: {len(decoded)} bytes{suffix}")
-
-    dicom_file.detach_pixel_payload()
+    dicom_file.detach_pixel_payload(keep_dump=keep_dump)
     payload.clear()
 
     print(f"Attached payload after detach: {dicom_file.has_attached_pixel_payload}")
     print(f"Rows still available after detach: {dicom_file.Rows}")
+    if keep_dump:
+        print("Detached marker keeps PixelData dump text for diagnostics.")
     print("After detach, do not call pixel decode APIs until a payload is attached again.")
 
     return 0
 
 
+def _run_split_source(
+    source_path: Path,
+    main_out_path: Path,
+    payload_out_path: Path,
+    transfer_syntax: str | None,
+    frame: int,
+    keep_dump: bool,
+) -> int:
+    source = dicom.read_file(source_path)
+
+    if transfer_syntax:
+        main_bytes, payload_bytes = source.write_with_transfer_syntax_split_pixel_payload(
+            transfer_syntax
+        )
+        print(f"Split source through target transfer syntax: {transfer_syntax}")
+    else:
+        main_bytes, payload_bytes = source.write_bytes_split_pixel_payload()
+        print("Split source with its current transfer syntax.")
+
+    main_out_path.write_bytes(main_bytes)
+    payload_out_path.write_bytes(payload_bytes)
+    print(f"Wrote main DICOM: {main_out_path} ({len(main_bytes)} bytes)")
+    print(f"Wrote PixelData payload: {payload_out_path} ({len(payload_bytes)} bytes)")
+
+    placeholder_only = dicom.read_bytes(main_bytes, name="split-main-placeholder-check")
+    if placeholder_only["PixelData"].value_bytes() != dicom.PIXEL_PAYLOAD_PLACEHOLDER_MAGIC:
+        raise RuntimeError("split main DICOM does not contain the DXP1 PixelData placeholder")
+    print("Verified main DICOM has the DXP1 PixelData placeholder.")
+
+    main_owner = bytearray(main_bytes)
+    payload_owner = bytearray(payload_bytes)
+    rejoined = dicom.read_bytes_with_pixel_payload(
+        main_owner,
+        payload_owner,
+        name="split-roundtrip-check",
+        copy=False,
+    )
+    print("Reattached split payload for a roundtrip check.")
+    _print_attached_summary(rejoined, frame)
+
+    rejoined.detach_pixel_payload(keep_dump=keep_dump)
+    payload_owner.clear()
+    print("Detached roundtrip payload; metadata remains available.")
+    return 0
+
+
 def main(argv: Sequence[str]) -> int:
     parser = argparse.ArgumentParser(
-        description="Read a DXP1 split PixelData payload and detach it after decode",
+        description="Read or create a DXP1 split PixelData payload",
+        epilog=(
+            "Without --split, provide main_p10 and pixel_payload to read an already "
+            "split instance. With --split, provide source.dcm, main-out.dcm, and "
+            "pixel-payload.bin to create split outputs. The optional "
+            "--transfer-syntax value can be a UID or DicomSDL keyword such as "
+            "ExplicitVRLittleEndian, ExplicitVRBigEndian, or RLELossless."
+        ),
     )
-    parser.add_argument("main_p10", nargs="?", help="Main P10 file containing DXP1 PixelData")
-    parser.add_argument("pixel_payload", nargs="?", help="External PixelData value bytes")
+    parser.add_argument(
+        "--split",
+        action="store_true",
+        help="split a normal source DICOM into main DICOM and PixelData payload files",
+    )
+    parser.add_argument(
+        "--transfer-syntax",
+        help="target transfer syntax to use while splitting",
+    )
+    parser.add_argument(
+        "--keep-dump",
+        action="store_true",
+        help="keep PixelData dump text in the detached marker",
+    )
     parser.add_argument("--frame", type=int, default=0, help="Frame index to decode")
+    parser.add_argument("paths", nargs="*", help="input/output paths; see usage examples")
     args = parser.parse_args(argv)
 
-    if args.main_p10 is None and args.pixel_payload is None:
-        return _run(
+    if args.split:
+        if len(args.paths) != 3:
+            parser.error("--split requires: source.dcm main-out.dcm pixel-payload.bin")
+        return _run_split_source(
+            Path(args.paths[0]),
+            Path(args.paths[1]),
+            Path(args.paths[2]),
+            args.transfer_syntax,
+            args.frame,
+            args.keep_dump,
+        )
+
+    if args.transfer_syntax:
+        parser.error("--transfer-syntax is only valid with --split")
+
+    if not args.paths:
+        return _run_read_split(
             "built-in-split-pixel-payload-demo",
             bytearray(_build_demo_main_p10()),
             bytearray(b"\x34\x12\x56\x78\x9A\xBC"),
             args.frame,
+            args.keep_dump,
         )
 
-    if args.main_p10 is None or args.pixel_payload is None:
-        parser.error("provide both main_p10 and pixel_payload, or neither for the demo")
+    if len(args.paths) != 2:
+        parser.error("provide main_p10 and pixel_payload, or use --split")
 
-    return _run(
-        args.main_p10,
-        bytearray(Path(args.main_p10).read_bytes()),
-        bytearray(Path(args.pixel_payload).read_bytes()),
+    return _run_read_split(
+        args.paths[0],
+        bytearray(Path(args.paths[0]).read_bytes()),
+        bytearray(Path(args.paths[1]).read_bytes()),
         args.frame,
+        args.keep_dump,
     )
 
 
