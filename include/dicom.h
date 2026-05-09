@@ -3495,6 +3495,26 @@ public:
 	}
 
 private:
+	class ExternalPixelPayload {
+	public:
+		void set_pending(
+		    const DicomFile& file, const std::uint8_t* data, std::size_t size);
+		void clear_pending() noexcept;
+		void detach_loaded_no_load(DicomFile& file) const;
+		void attach_pending_or_throw(DicomFile& file);
+		void detach(DicomFile& file);
+		[[nodiscard]] bool has_attached(const DicomFile& file) const;
+
+	private:
+		void attach_to_loaded_placeholder(DicomFile& file,
+		    const std::uint8_t* data, std::size_t size, const std::string& identifier) const;
+
+		const std::uint8_t* pending_data_{nullptr};
+		std::size_t pending_size_{0};
+		std::string pending_identifier_{};
+		bool has_pending_{false};
+	};
+
 	friend class SelectedReadParser;
 	friend class DataSet;
 	friend class JsonReadParser;
@@ -3512,22 +3532,13 @@ private:
 	void clear_error_state() noexcept;
 	void set_error_state(std::string message);
 	void clear_json_doc_owner() noexcept { json_doc_owner_.reset(); }
-	void set_pending_pixel_payload(const std::uint8_t* data, std::size_t size);
-	void clear_pending_pixel_payload() noexcept;
-	void detach_loaded_pixel_payload_no_load();
-	void attach_pending_pixel_payload_or_throw();
-	void attach_pixel_payload_to_loaded_placeholder(
-	    const std::uint8_t* data, std::size_t size, const std::string& identifier);
 
 	DataSet root_dataset_;
 	std::shared_ptr<yyjson_doc> json_doc_owner_{};
 	uid::WellKnown transfer_syntax_uid_{};
 	bool has_error_{false};
 	std::string error_message_{};
-	const std::uint8_t* pending_pixel_payload_data_{nullptr};
-	std::size_t pending_pixel_payload_size_{0};
-	std::string pending_pixel_payload_identifier_{};
-	bool has_pending_pixel_payload_{false};
+	ExternalPixelPayload external_pixel_payload_{};
 };
 
 /// Represents a DICOM SQ element value: an ordered list of nested DataSets.
