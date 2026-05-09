@@ -381,6 +381,19 @@ int main() {
 		if (file->pixel_data(0) != expected) {
 			fail("single-frame encapsulated split decode mismatch");
 		}
+		const auto rewritten = file->write_bytes_split_pixel_payload();
+		if (rewritten.pixel_payload_bytes.empty()) {
+			fail("external encapsulated split write payload should not be empty");
+		}
+		auto rewritten_roundtrip = dicom::read_bytes_with_pixel_payload(
+		    "split-encap-single-rewritten-roundtrip",
+		    rewritten.dicom_bytes.data(), rewritten.dicom_bytes.size(),
+		    rewritten.pixel_payload_bytes.data(),
+		    rewritten.pixel_payload_bytes.size());
+		if (!bytes_equal(rewritten_roundtrip->encoded_pixel_frame_view(0), expected) ||
+		    rewritten_roundtrip->pixel_data(0) != expected) {
+			fail("external encapsulated split write roundtrip pixel mismatch");
+		}
 		file->detach_pixel_payload(true);
 		if (file->has_attached_pixel_payload()) {
 			fail("single-frame encapsulated split payload should report detached");
