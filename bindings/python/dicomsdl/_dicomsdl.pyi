@@ -10,7 +10,7 @@ __version__: str
 UID_PREFIX: str
 IMPLEMENTATION_CLASS_UID: str
 IMPLEMENTATION_VERSION_NAME: str
-PIXEL_PAYLOAD_PLACEHOLDER_MAGIC: bytes
+PIXELDATA_PAYLOAD_PLACEHOLDER_MAGIC: bytes
 
 __all__ = [
     "LogLevel",
@@ -24,7 +24,7 @@ __all__ = [
     "UID_PREFIX",
     "IMPLEMENTATION_CLASS_UID",
     "IMPLEMENTATION_VERSION_NAME",
-    "PIXEL_PAYLOAD_PLACEHOLDER_MAGIC",
+    "PIXELDATA_PAYLOAD_PLACEHOLDER_MAGIC",
     "log_info",
     "log_warn",
     "log_error",
@@ -37,6 +37,9 @@ __all__ = [
     "DecodeOptions",
     "DecodePlan",
     "DecodeInfo",
+    "PixelPayloadDecodeDescriptor",
+    "SplitPixelDataPayloadResult",
+    "PixelPayloadDecoder",
     "VoiLutFunction",
     "PixelPresentation",
     "WindowTransform",
@@ -73,7 +76,9 @@ __all__ = [
     "read_file_selected",
     "is_dicom_file",
     "read_bytes",
-    "read_bytes_with_pixel_payload",
+    "read_bytes_with_pixeldata_payload",
+    "split_pixeldata_payload",
+    "join_pixeldata_payload",
     "read_bytes_selected",
     "load_root_elements_reserve_hint",
     "reset_root_elements_reserve_hint",
@@ -283,6 +288,47 @@ class DecodeInfo:
     def planar(self) -> Planar | None: ...
     @property
     def bits_per_sample(self) -> int: ...
+
+
+class PixelPayloadDecodeDescriptor:
+    def __init__(self) -> None: ...
+
+    transfer_syntax_uid: str
+    photometric: str
+    rows: int
+    cols: int
+    frames: int
+    samples_per_pixel: int
+    bits_allocated: int
+    bits_stored: int
+    pixel_representation: int
+    planar_configuration: int
+    expected_payload_length: int
+    frame_fragments: str
+    source_name: str
+
+    def __repr__(self) -> str: ...
+
+
+class SplitPixelDataPayloadResult:
+    @property
+    def ok(self) -> bool: ...
+    error_message: str
+    @property
+    def main_bytes(self) -> bytes: ...
+    @property
+    def pixel_payload(self) -> bytes: ...
+    decode_descriptor: PixelPayloadDecodeDescriptor
+
+    def __repr__(self) -> str: ...
+
+
+class PixelPayloadDecoder:
+    def __init__(self, descriptor: PixelPayloadDecodeDescriptor, pixel_payload: object) -> None: ...
+    def create_decode_plan(self, options: DecodeOptions = ...) -> DecodePlan: ...
+    def decode_into(self, out: object, frame: int = ..., *, plan: object | None = ...) -> object: ...
+    def to_array(self, frame: int = ..., *, plan: object | None = ...) -> object: ...
+    def pixel_array(self, frame: int = ..., *, plan: object | None = ...) -> object: ...
 
 
 class RescaleTransform:
@@ -622,9 +668,9 @@ class DicomFile:
     def error_message(self) -> Optional[str]: ...
 
     @property
-    def has_attached_pixel_payload(self) -> bool: ...
+    def has_attached_pixeldata_payload(self) -> bool: ...
 
-    def detach_pixel_payload(self, keep_dump: bool = False) -> None: ...
+    def detach_pixeldata_payload(self, keep_dump: bool = False) -> None: ...
 
     @overload
     def create_decode_plan(self) -> DecodePlan: ...
@@ -781,15 +827,8 @@ class DicomFile:
         write_file_meta: bool = ...,
         keep_existing_meta: bool = ...,
     ) -> bytes: ...
-    def write_bytes_split_pixel_payload(
-        self,
-        *,
-        include_preamble: bool = ...,
-        write_file_meta: bool = ...,
-        keep_existing_meta: bool = ...,
-    ) -> tuple[bytes, bytes]: ...
     @overload
-    def write_with_transfer_syntax_split_pixel_payload(
+    def write_bytes_with_transfer_syntax(
         self,
         transfer_syntax: Uid,
         /,
@@ -798,9 +837,9 @@ class DicomFile:
         include_preamble: bool = ...,
         write_file_meta: bool = ...,
         keep_existing_meta: bool = ...,
-    ) -> tuple[bytes, bytes]: ...
+    ) -> bytes: ...
     @overload
-    def write_with_transfer_syntax_split_pixel_payload(
+    def write_bytes_with_transfer_syntax(
         self,
         transfer_syntax: str,
         /,
@@ -809,9 +848,9 @@ class DicomFile:
         include_preamble: bool = ...,
         write_file_meta: bool = ...,
         keep_existing_meta: bool = ...,
-    ) -> tuple[bytes, bytes]: ...
+    ) -> bytes: ...
     @overload
-    def write_with_transfer_syntax_split_pixel_payload(
+    def write_bytes_with_transfer_syntax(
         self,
         transfer_syntax: Uid,
         /,
@@ -820,9 +859,9 @@ class DicomFile:
         include_preamble: bool = ...,
         write_file_meta: bool = ...,
         keep_existing_meta: bool = ...,
-    ) -> tuple[bytes, bytes]: ...
+    ) -> bytes: ...
     @overload
-    def write_with_transfer_syntax_split_pixel_payload(
+    def write_bytes_with_transfer_syntax(
         self,
         transfer_syntax: str,
         /,
@@ -831,7 +870,7 @@ class DicomFile:
         include_preamble: bool = ...,
         write_file_meta: bool = ...,
         keep_existing_meta: bool = ...,
-    ) -> tuple[bytes, bytes]: ...
+    ) -> bytes: ...
     def pixel_data(self, frame_index: int = ...) -> bytes: ...
     def encoded_pixel_frame_bytes(self, frame_index: int, /) -> bytes: ...
     def encoded_pixel_frame_view(self, frame_index: int, /) -> memoryview: ...
@@ -1228,6 +1267,7 @@ class DataSetSelection:
     def __init__(self, nodes: DataSetSelectionNodesLike, /) -> None: ...
     def __len__(self) -> int: ...
     def __bool__(self) -> bool: ...
+    def extended(self, nodes: DataSetSelectionNodesLike, /) -> DataSetSelection: ...
 
 
 DataSetSelectionLike: TypeAlias = DataSetSelection | DataSetSelectionNodesLike
@@ -1414,7 +1454,7 @@ def read_bytes(
     copy: bool = ...,
 ) -> DicomFile: ...
 
-def read_bytes_with_pixel_payload(
+def read_bytes_with_pixeldata_payload(
     data: bytes | bytearray | memoryview,
     pixel_payload: bytes | bytearray | memoryview,
     name: str = "<memory>",
@@ -1422,6 +1462,18 @@ def read_bytes_with_pixel_payload(
     keep_on_error: bool | None = ...,
     copy: bool = ...,
 ) -> DicomFile: ...
+
+def split_pixeldata_payload(
+    selection: DataSetSelectionLike,
+    source: str | os.PathLike[str] | bytes | bytearray | memoryview,
+    *,
+    name: str = "<memory>",
+) -> SplitPixelDataPayloadResult: ...
+
+def join_pixeldata_payload(
+    main_bytes: bytes | bytearray | memoryview,
+    pixel_payload: bytes | bytearray | memoryview,
+) -> bytes: ...
 
 def read_bytes_selected(
     data: bytes | bytearray | memoryview,

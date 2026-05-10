@@ -665,6 +665,22 @@ DataSetSelection::DataSetSelection(std::vector<DataSetSelectionNode> nodes) {
 	nodes_ = normalize_selection_nodes(std::move(nodes), true);
 }
 
+DataSetSelection DataSetSelection::extended(
+    std::initializer_list<DataSetSelectionNode> extra) const {
+	return extended(std::vector<DataSetSelectionNode>(extra));
+}
+
+DataSetSelection DataSetSelection::extended(
+    std::vector<DataSetSelectionNode> extra) const {
+	std::vector<DataSetSelectionNode> nodes;
+	nodes.reserve(nodes_.size() + extra.size());
+	nodes.insert(nodes.end(), nodes_.begin(), nodes_.end());
+	nodes.insert(nodes.end(),
+	    std::make_move_iterator(extra.begin()),
+	    std::make_move_iterator(extra.end()));
+	return DataSetSelection(std::move(nodes));
+}
+
 std::unique_ptr<DicomFile> read_file_selected(
     const std::filesystem::path& path, const DataSetSelection& selection,
     ReadOptions options) {

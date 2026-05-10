@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -21,19 +22,20 @@ This example demonstrates the DicomSDL split PixelData convention.
 There are two separate workflows:
 
 1. Attach and read an already split instance:
-   - main P10 DICOM contains (7FE0,0010) PixelData as a 4-byte "DXP1" marker.
+   - main P10 DICOM contains (7FE0,0010) PixelData as a 22-byte
+     "PIXDATA1" placeholder metadata value.
    - pixel-payload.bin contains the complete PixelData value bytes.
    - For encapsulated transfer syntaxes, that value starts with the Basic Offset
      Table item and includes all fragment items plus the sequence delimiter.
 
 2. Split a normal DICOM instance:
-   - write_bytes_split_pixel_payload() serializes normal metadata into the main
-     DICOM bytes and moves PixelData value bytes into a separate buffer.
-   - write_with_transfer_syntax_split_pixel_payload() does the same while
-     serializing through a requested target transfer syntax.
+   - split_pixeldata_payload() replaces the source PixelData element with the
+     PIXDATA1 placeholder without reserializing the rest of the P10 bytes.
+   - If you need transcoding, first serialize to memory with
+     write_bytes_with_transfer_syntax(), then split those bytes.
 
 The external pixel payload memory is caller-owned. Detach before freeing it.
-detach_pixel_payload() keeps only the lightweight DXP1 marker; pass true if you
+detach_pixeldata_payload() keeps only the lightweight PIXDATA1 marker; pass true if you
 want the detached marker to retain PixelData dump text for diagnostics.
 */
 
@@ -49,6 +51,12 @@ void append_u32_le(std::vector<std::uint8_t>& out, std::uint32_t value) {
     out.push_back(static_cast<std::uint8_t>((value >> 8) & 0xFFu));
     out.push_back(static_cast<std::uint8_t>((value >> 16) & 0xFFu));
     out.push_back(static_cast<std::uint8_t>((value >> 24) & 0xFFu));
+}
+
+void append_u64_le(std::vector<std::uint8_t>& out, std::uint64_t value) {
+    for (int shift = 0; shift < 64; shift += 8) {
+        out.push_back(static_cast<std::uint8_t>((value >> shift) & 0xFFu));
+    }
 }
 
 void append_bytes(std::vector<std::uint8_t>& out,
@@ -112,8 +120,18 @@ std::vector<std::uint8_t> build_part10(std::string transfer_syntax_uid,
 
 std::vector<std::uint8_t> placeholder_magic() {
     return std::vector<std::uint8_t>(
-        dicom::kPixelPayloadPlaceholderMagic.begin(),
-        dicom::kPixelPayloadPlaceholderMagic.end());
+        dicom::kPixelDataPayloadPlaceholderMagic.begin(),
+        dicom::kPixelDataPayloadPlaceholderMagic.end());
+}
+
+std::vector<std::uint8_t> placeholder_value(
+    char vr0, char vr1, std::uint32_t vl, std::uint64_t payload_length) {
+    auto value = placeholder_magic();
+    value.push_back(static_cast<std::uint8_t>(vr0));
+    value.push_back(static_cast<std::uint8_t>(vr1));
+    append_u32_le(value, vl);
+    append_u64_le(value, payload_length);
+    return value;
 }
 
 std::vector<std::uint8_t> build_demo_main_p10() {
@@ -133,9 +151,9 @@ std::vector<std::uint8_t> build_demo_main_p10() {
     append_explicit_vr_le_16(body, "PixelRepresentation"_tag, 'U', 'S',
         {0x00u, 0x00u});
 
-    // The main P10 keeps only the fixed DXP1 placeholder in PixelData.
+    // The main P10 keeps only placeholder metadata in PixelData.
     append_explicit_vr_le_32(body, "PixelData"_tag, 'O', 'B',
-        placeholder_magic());
+        placeholder_value('O', 'W', 6u, 6u));
 
     return build_part10("1.2.840.10008.1.2.1", body);
 }
@@ -183,9 +201,9 @@ std::string hex_prefix(const ByteRange& bytes, std::size_t max_count = 16) {
 
 bool is_placeholder_pixel_data(const dicom::DataElement& pixel_data) {
     const auto value = pixel_data.value_span();
-    return value.size() == dicom::kPixelPayloadPlaceholderMagic.size() &&
-        std::equal(value.begin(), value.end(),
-            dicom::kPixelPayloadPlaceholderMagic.begin());
+    return value.size() == dicom::kPixelDataPayloadPlaceholderMetadataSize &&
+        std::equal(dicom::kPixelDataPayloadPlaceholderMagic.begin(),
+            dicom::kPixelDataPayloadPlaceholderMagic.end(), value.begin());
 }
 
 void print_decode_summary(dicom::DicomFile& file, std::size_t frame_index) {
@@ -238,7 +256,7 @@ void print_attached_summary(dicom::DicomFile& file, std::size_t frame_index) {
     std::cout << "PixelData VR after attach: " << pixel_data.vr().str()
               << "\n";
     std::cout << "Attached payload: "
-              << (file.has_attached_pixel_payload() ? "yes" : "no") << "\n";
+              << (file.has_attached_pixeldata_payload() ? "yes" : "no") << "\n";
 
     print_encoded_summary_if_available(file, frame_index);
     print_decode_summary(file, frame_index);
@@ -247,7 +265,7 @@ void print_attached_summary(dicom::DicomFile& file, std::size_t frame_index) {
 int run_read_split_example(const std::string& name,
     std::vector<std::uint8_t>& main_p10,
     std::vector<std::uint8_t>& pixel_payload, std::size_t frame_index) {
-    auto file = dicom::read_bytes_with_pixel_payload(name,
+    auto file = dicom::read_bytes_with_pixeldata_payload(name,
         main_p10.data(), main_p10.size(),
         pixel_payload.data(), pixel_payload.size());
 
@@ -256,12 +274,12 @@ int run_read_split_example(const std::string& name,
 
     // After decode, the caller can detach and release the external payload.
     // Pass true to keep PixelData dump text inside the detached marker.
-    file->detach_pixel_payload();
+    file->detach_pixeldata_payload();
     pixel_payload.clear();
     pixel_payload.shrink_to_fit();
 
     std::cout << "Attached payload after detach: "
-              << (file->has_attached_pixel_payload() ? "yes" : "no") << "\n";
+              << (file->has_attached_pixeldata_payload() ? "yes" : "no") << "\n";
     std::cout << "Rows still available after detach: "
               << file->dataset()["Rows"_tag].to_long().value_or(0) << "\n";
     std::cout << "After detach, do not call pixel decode APIs until a payload "
@@ -273,45 +291,55 @@ int run_read_split_example(const std::string& name,
 int run_split_source_example(const std::string& source_path,
     const std::string& main_out_path, const std::string& payload_out_path,
     const std::string& transfer_syntax_text, std::size_t frame_index) {
-    auto source = dicom::read_file(source_path);
-    dicom::SplitPixelPayloadWriteResult split;
+    dicom::SplitPixelDataPayloadResult split;
 
     if (transfer_syntax_text.empty()) {
-        split = source->write_bytes_split_pixel_payload();
-        std::cout << "Split source with its current transfer syntax.\n";
+        split = dicom::split_pixeldata_payload(
+            dicom::DataSetSelection{}, std::filesystem::path(source_path));
+        std::cout << "Split source bytes with its current transfer syntax.\n";
     } else {
+        auto source = dicom::read_file(source_path);
         const auto transfer_syntax = dicom::uid::lookup_or_throw(transfer_syntax_text);
-        split = source->write_with_transfer_syntax_split_pixel_payload(
-            transfer_syntax);
-        std::cout << "Split source through target transfer syntax: "
+        const auto transcoded =
+            source->write_bytes_with_transfer_syntax(transfer_syntax);
+        split = dicom::split_pixeldata_payload(
+            dicom::DataSetSelection{}, "transcoded-split-source",
+            std::span<const std::uint8_t>(
+                transcoded.data(), transcoded.size()));
+        std::cout << "Serialized to memory and split target transfer syntax: "
                   << transfer_syntax.value() << "\n";
     }
+    if (!split.ok()) {
+        throw std::runtime_error(split.error_message.empty()
+                ? std::string("split_pixeldata_payload failed")
+                : split.error_message);
+    }
 
-    write_all_bytes(main_out_path, split.dicom_bytes);
-    write_all_bytes(payload_out_path, split.pixel_payload_bytes);
+    write_all_bytes(main_out_path, split.main_bytes);
+    write_all_bytes(payload_out_path, split.pixel_payload);
 
     std::cout << "Wrote main DICOM: " << main_out_path << " ("
-              << split.dicom_bytes.size() << " bytes)\n";
+              << split.main_bytes.size() << " bytes)\n";
     std::cout << "Wrote PixelData payload: " << payload_out_path << " ("
-              << split.pixel_payload_bytes.size() << " bytes)\n";
+              << split.pixel_payload.size() << " bytes)\n";
 
     auto placeholder_only = dicom::read_bytes("split-main-placeholder-check",
-        split.dicom_bytes.data(), split.dicom_bytes.size());
+        split.main_bytes.data(), split.main_bytes.size());
     if (!is_placeholder_pixel_data(
             placeholder_only->get_dataelement("PixelData"_tag))) {
         throw std::runtime_error(
-            "split main DICOM does not contain the DXP1 PixelData placeholder");
+            "split main DICOM does not contain the PIXDATA1 PixelData placeholder");
     }
-    std::cout << "Verified main DICOM has the DXP1 PixelData placeholder.\n";
+    std::cout << "Verified main DICOM has the PIXDATA1 PixelData placeholder.\n";
 
-    auto rejoined = dicom::read_bytes_with_pixel_payload(
-        "split-roundtrip-check", split.dicom_bytes.data(),
-        split.dicom_bytes.size(), split.pixel_payload_bytes.data(),
-        split.pixel_payload_bytes.size());
+    auto rejoined = dicom::read_bytes_with_pixeldata_payload(
+        "split-roundtrip-check", split.main_bytes.data(),
+        split.main_bytes.size(), split.pixel_payload.data(),
+        split.pixel_payload.size());
     std::cout << "Reattached split payload for a roundtrip check.\n";
     print_attached_summary(*rejoined, frame_index);
 
-    rejoined->detach_pixel_payload();
+    rejoined->detach_pixeldata_payload();
     std::cout << "Detached roundtrip payload; metadata remains available.\n";
     return 0;
 }
@@ -329,7 +357,7 @@ void print_usage(const char* program) {
         << "  Run a tiny built-in native PixelData attach/detach demo.\n\n"
         << "Read split inputs:\n"
         << "  main-p10.dcm must contain (7FE0,0010) PixelData as the fixed\n"
-        << "  4-byte DXP1 placeholder. pixel-payload.bin must contain the\n"
+        << "  22-byte PIXDATA1 placeholder metadata. pixel-payload.bin must contain the\n"
         << "  complete PixelData value bytes. For encapsulated payloads, that\n"
         << "  means Basic Offset Table item, fragment items, and sequence\n"
         << "  delimiter.\n\n"

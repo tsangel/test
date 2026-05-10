@@ -130,6 +130,7 @@ add_library(dicomsdl STATIC
     src/dicomfile_pixel_encode.cpp
     src/json_read.cpp
     src/json_write.cpp
+    src/p10_pixeldata_payload.cpp
     src/selected_read.cpp
     src/writing/direct_write.cpp
     src/writing/transcoded_write.cpp

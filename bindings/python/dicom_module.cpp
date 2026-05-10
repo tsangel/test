@@ -318,6 +318,28 @@ struct PyPixelPayloadDecodeDescriptor {
 	}
 };
 
+struct PySplitPixelDataPayloadResult {
+	std::vector<std::uint8_t> main_bytes{};
+	std::vector<std::uint8_t> pixel_payload{};
+	PyPixelPayloadDecodeDescriptor decode_descriptor{};
+	std::string error_message{};
+
+	[[nodiscard]] bool ok() const noexcept {
+		return error_message.empty();
+	}
+
+	[[nodiscard]] static PySplitPixelDataPayloadResult from_cpp(
+	    dicom::SplitPixelDataPayloadResult&& result) {
+		PySplitPixelDataPayloadResult out{};
+		out.main_bytes = std::move(result.main_bytes);
+		out.pixel_payload = std::move(result.pixel_payload);
+		out.decode_descriptor =
+		    PyPixelPayloadDecodeDescriptor::from_cpp(result.decode_descriptor);
+		out.error_message = std::move(result.error_message);
+		return out;
+	}
+};
+
 struct DirectRawArrayAccess {
 	DecodedArrayLayout layout{};
 	std::span<const std::uint8_t> source_bytes{};
@@ -1601,10 +1623,9 @@ void write_with_transfer_syntax_with_encoder_context(DicomFile& self, nb::handle
 	    transfer_syntax, encoder_context, write_options);
 }
 
-[[nodiscard]] dicom::SplitPixelPayloadWriteResult
-write_with_transfer_syntax_split_pixel_payload_with_options(DicomFile& self,
-    Uid transfer_syntax, nb::handle options, bool include_preamble,
-    bool write_file_meta, bool keep_existing_meta) {
+[[nodiscard]] std::vector<std::uint8_t> write_bytes_with_transfer_syntax_with_options(
+    DicomFile& self, Uid transfer_syntax, nb::handle options,
+    bool include_preamble, bool write_file_meta, bool keep_existing_meta) {
 	dicom::WriteOptions write_options;
 	write_options.include_preamble = include_preamble;
 	write_options.write_file_meta = write_file_meta;
@@ -1613,22 +1634,21 @@ write_with_transfer_syntax_split_pixel_payload_with_options(DicomFile& self,
 	const auto text_options =
 	    parse_encoder_options_to_text_storage(options, transfer_syntax);
 	if (text_options.auto_mode) {
-		return self.write_with_transfer_syntax_split_pixel_payload(
-		    transfer_syntax, write_options);
+		return self.write_bytes_with_transfer_syntax(transfer_syntax, write_options);
 	}
-	return self.write_with_transfer_syntax_split_pixel_payload(
+	return self.write_bytes_with_transfer_syntax(
 	    transfer_syntax, text_options.span(), write_options);
 }
 
-[[nodiscard]] dicom::SplitPixelPayloadWriteResult
-write_with_transfer_syntax_split_pixel_payload_with_encoder_context(DicomFile& self,
+[[nodiscard]] std::vector<std::uint8_t>
+write_bytes_with_transfer_syntax_with_encoder_context(DicomFile& self,
     Uid transfer_syntax, const EncoderContext& encoder_context,
     bool include_preamble, bool write_file_meta, bool keep_existing_meta) {
 	dicom::WriteOptions write_options;
 	write_options.include_preamble = include_preamble;
 	write_options.write_file_meta = write_file_meta;
 	write_options.keep_existing_meta = keep_existing_meta;
-	return self.write_with_transfer_syntax_split_pixel_payload(
+	return self.write_bytes_with_transfer_syntax(
 	    transfer_syntax, encoder_context, write_options);
 }
 
@@ -3506,11 +3526,11 @@ nb::bytes to_python_bytes(std::vector<std::uint8_t>&& bytes) {
 	return nb::bytes(reinterpret_cast<const char*>(bytes.data()), bytes.size());
 }
 
-nb::tuple split_write_result_to_python_tuple(
-    dicom::SplitPixelPayloadWriteResult&& result) {
-	return nb::make_tuple(
-	    to_python_bytes(std::move(result.dicom_bytes)),
-	    to_python_bytes(std::move(result.pixel_payload_bytes)));
+nb::bytes to_python_bytes(std::span<const std::uint8_t> bytes) {
+	if (bytes.empty()) {
+		return nb::bytes("", 0);
+	}
+	return nb::bytes(reinterpret_cast<const char*>(bytes.data()), bytes.size());
 }
 
 std::pair<std::string, std::vector<std::uint8_t>> json_source_to_named_buffer(
@@ -3829,9 +3849,9 @@ NB_MODULE(_dicomsdl, m) {
 	    dicom::uid::implementation_class_uid().data(), dicom::uid::implementation_class_uid().size());
 	m.attr("IMPLEMENTATION_VERSION_NAME") = nb::str(
 	    dicom::uid::implementation_version_name().data(), dicom::uid::implementation_version_name().size());
-	m.attr("PIXEL_PAYLOAD_PLACEHOLDER_MAGIC") = nb::bytes(
-	    reinterpret_cast<const char*>(dicom::kPixelPayloadPlaceholderMagic.data()),
-	    dicom::kPixelPayloadPlaceholderMagic.size());
+	m.attr("PIXELDATA_PAYLOAD_PLACEHOLDER_MAGIC") = nb::bytes(
+	    reinterpret_cast<const char*>(dicom::kPixelDataPayloadPlaceholderMagic.data()),
+	    dicom::kPixelDataPayloadPlaceholderMagic.size());
 
 	// Logging helpers: forward to diag default reporter
 	m.def("log_info", [] (const std::string& msg) {
@@ -5046,6 +5066,36 @@ NB_MODULE(_dicomsdl, m) {
 			    return oss.str();
 		    });
 
+	nb::class_<PySplitPixelDataPayloadResult>(m, "SplitPixelDataPayloadResult",
+	    "Result of split_pixeldata_payload().")
+		.def_prop_ro("ok", &PySplitPixelDataPayloadResult::ok)
+		.def_ro("error_message", &PySplitPixelDataPayloadResult::error_message)
+		.def_prop_ro("main_bytes",
+		    [](const PySplitPixelDataPayloadResult& self) {
+			    return to_python_bytes(std::span<const std::uint8_t>(
+			        self.main_bytes.data(), self.main_bytes.size()));
+		    })
+		.def_prop_ro("pixel_payload",
+		    [](const PySplitPixelDataPayloadResult& self) {
+			    return to_python_bytes(std::span<const std::uint8_t>(
+			        self.pixel_payload.data(), self.pixel_payload.size()));
+		    })
+		.def_ro("decode_descriptor",
+		    &PySplitPixelDataPayloadResult::decode_descriptor)
+		.def("__repr__",
+		    [](const PySplitPixelDataPayloadResult& self) {
+			    std::ostringstream oss;
+			    oss << "SplitPixelDataPayloadResult(ok="
+			        << (self.ok() ? "True" : "False")
+			        << ", main_bytes=" << self.main_bytes.size()
+			        << ", pixel_payload=" << self.pixel_payload.size();
+			    if (!self.ok()) {
+				    oss << ", error_message='" << self.error_message << "'";
+			    }
+			    oss << ")";
+			    return oss.str();
+		    });
+
 	nb::class_<PyPixelPayloadDecoder>(m, "PixelPayloadDecoder",
 	    "Decode caller-owned split PixelData payload bytes without reconstructing a DicomFile.")
 		.def("__init__",
@@ -5500,13 +5550,13 @@ NB_MODULE(_dicomsdl, m) {
 			    return nb::str(self.error_message().c_str(), self.error_message().size());
 		    },
 		    "Latest captured parse error message, or None when no error was recorded.")
-		.def_prop_ro("has_attached_pixel_payload", &DicomFile::has_attached_pixel_payload,
+		.def_prop_ro("has_attached_pixeldata_payload", &DicomFile::has_attached_pixeldata_payload,
 		    "True when this DicomFile currently references split PixelData payload memory.")
-		.def("detach_pixel_payload",
+		.def("detach_pixeldata_payload",
 		    [](DicomFile& self, bool keep_dump) {
-			    self.detach_pixel_payload(keep_dump);
+			    self.detach_pixeldata_payload(keep_dump);
 			    auto py_self = nb::cast(&self, nb::rv_policy::reference);
-			    delete_python_attr_if_present(py_self, "_pixel_payload_owner");
+			    delete_python_attr_if_present(py_self, "_pixeldata_payload_owner");
 		    },
 		    nb::arg("keep_dump") = false,
 		    "Detach split PixelData payload memory. Metadata remains available, but pixel "
@@ -5896,26 +5946,12 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::arg("write_file_meta") = true,
 		    nb::arg("keep_existing_meta") = true,
 		    "Serialize this DicomFile to bytes using the current dataset state.")
-		.def("write_bytes_split_pixel_payload",
-		    [](DicomFile& self, bool include_preamble, bool write_file_meta,
-		        bool keep_existing_meta) {
-			    return split_write_result_to_python_tuple(
-			        self.write_bytes_split_pixel_payload(make_write_options(
-			            include_preamble, write_file_meta, keep_existing_meta)));
-		    },
-		    nb::kw_only(),
-		    nb::arg("include_preamble") = true,
-		    nb::arg("write_file_meta") = true,
-		    nb::arg("keep_existing_meta") = true,
-		    "Serialize this DicomFile with PixelData replaced by the DXP1 placeholder.\n"
-		    "Returns (dicom_bytes, pixel_payload).")
-		.def("write_with_transfer_syntax_split_pixel_payload",
+		.def("write_bytes_with_transfer_syntax",
 		    [](DicomFile& self, const Uid& transfer_syntax, nb::handle options,
 		        bool include_preamble, bool write_file_meta, bool keep_existing_meta) {
-			    return split_write_result_to_python_tuple(
-			        write_with_transfer_syntax_split_pixel_payload_with_options(self,
-			            transfer_syntax, options, include_preamble, write_file_meta,
-			            keep_existing_meta));
+			    return to_python_bytes(write_bytes_with_transfer_syntax_with_options(
+			        self, transfer_syntax, options, include_preamble, write_file_meta,
+			        keep_existing_meta));
 		    },
 		    nb::arg("transfer_syntax"),
 		    nb::kw_only(),
@@ -5923,17 +5959,15 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::arg("include_preamble") = true,
 		    nb::arg("write_file_meta") = true,
 		    nb::arg("keep_existing_meta") = true,
-		    "Serialize this DicomFile using the requested transfer syntax with PixelData "
-		    "replaced by the DXP1 placeholder.\n"
-		    "Returns (dicom_bytes, pixel_payload).")
-		.def("write_with_transfer_syntax_split_pixel_payload",
+		    "Serialize this DicomFile to bytes using the requested transfer syntax "
+		    "without mutating the source object.")
+		.def("write_bytes_with_transfer_syntax",
 		    [](DicomFile& self, const std::string& transfer_syntax_text,
 		        nb::handle options, bool include_preamble, bool write_file_meta,
 		        bool keep_existing_meta) {
-			    return split_write_result_to_python_tuple(
-			        write_with_transfer_syntax_split_pixel_payload_with_options(self,
-			            parse_transfer_syntax_text_or_throw(transfer_syntax_text), options,
-			            include_preamble, write_file_meta, keep_existing_meta));
+			    return to_python_bytes(write_bytes_with_transfer_syntax_with_options(
+			        self, parse_transfer_syntax_text_or_throw(transfer_syntax_text),
+			        options, include_preamble, write_file_meta, keep_existing_meta));
 		    },
 		    nb::arg("transfer_syntax"),
 		    nb::kw_only(),
@@ -5941,16 +5975,15 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::arg("include_preamble") = true,
 		    nb::arg("write_file_meta") = true,
 		    nb::arg("keep_existing_meta") = true,
-		    "Serialize this DicomFile using transfer syntax text with PixelData replaced "
-		    "by the DXP1 placeholder.\n"
-		    "Returns (dicom_bytes, pixel_payload).")
-		.def("write_with_transfer_syntax_split_pixel_payload",
+		    "Serialize this DicomFile to bytes using transfer syntax text without "
+		    "mutating the source object.")
+		.def("write_bytes_with_transfer_syntax",
 		    [](DicomFile& self, const Uid& transfer_syntax,
 		        const EncoderContext& encoder_context, bool include_preamble,
 		        bool write_file_meta, bool keep_existing_meta) {
-			    return split_write_result_to_python_tuple(
-			        write_with_transfer_syntax_split_pixel_payload_with_encoder_context(
-			            self, transfer_syntax, encoder_context, include_preamble,
+			    return to_python_bytes(
+			        write_bytes_with_transfer_syntax_with_encoder_context(self,
+			            transfer_syntax, encoder_context, include_preamble,
 			            write_file_meta, keep_existing_meta));
 		    },
 		    nb::arg("transfer_syntax"),
@@ -5959,16 +5992,15 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::arg("include_preamble") = true,
 		    nb::arg("write_file_meta") = true,
 		    nb::arg("keep_existing_meta") = true,
-		    "Serialize this DicomFile using the requested transfer syntax and a "
-		    "preconfigured EncoderContext with PixelData replaced by the DXP1 placeholder.\n"
-		    "Returns (dicom_bytes, pixel_payload).")
-		.def("write_with_transfer_syntax_split_pixel_payload",
+		    "Serialize this DicomFile to bytes using the requested transfer syntax and "
+		    "a preconfigured EncoderContext without mutating the source object.")
+		.def("write_bytes_with_transfer_syntax",
 		    [](DicomFile& self, const std::string& transfer_syntax_text,
 		        const EncoderContext& encoder_context, bool include_preamble,
 		        bool write_file_meta, bool keep_existing_meta) {
-			    return split_write_result_to_python_tuple(
-			        write_with_transfer_syntax_split_pixel_payload_with_encoder_context(
-			            self, parse_transfer_syntax_text_or_throw(transfer_syntax_text),
+			    return to_python_bytes(
+			        write_bytes_with_transfer_syntax_with_encoder_context(self,
+			            parse_transfer_syntax_text_or_throw(transfer_syntax_text),
 			            encoder_context, include_preamble, write_file_meta,
 			            keep_existing_meta));
 		    },
@@ -5978,9 +6010,8 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::arg("include_preamble") = true,
 		    nb::arg("write_file_meta") = true,
 		    nb::arg("keep_existing_meta") = true,
-		    "Serialize this DicomFile using transfer syntax text and a preconfigured "
-		    "EncoderContext with PixelData replaced by the DXP1 placeholder.\n"
-		    "Returns (dicom_bytes, pixel_payload).")
+		    "Serialize this DicomFile to bytes using transfer syntax text and a "
+		    "preconfigured EncoderContext without mutating the source object.")
 		.def("write_json",
 		    [](DicomFile& self, bool include_group_0002, nb::handle bulk_data,
 		        std::size_t bulk_data_threshold, const std::string& bulk_data_uri_template,
@@ -6286,7 +6317,8 @@ NB_MODULE(_dicomsdl, m) {
 	    "\n"
 	    "Construct from a sequence of selection nodes. Leaf nodes may be Tag, packed\n"
 	    "int (0xGGGGEEEE), or str. Nested nodes use a 2-item pair: (tag, children).\n"
-	    "Example: ['StudyInstanceUID', ('ReferencedSeriesSequence', ['SeriesInstanceUID'])].")
+	    "Example: ['StudyInstanceUID', ('ReferencedSeriesSequence', ['SeriesInstanceUID'])].\n"
+	    "Use extended(nodes) to return a new selection with additional nodes.")
 		.def(nb::init<>())
 		.def("__init__",
 		    [](dicom::DataSetSelection* self, nb::handle nodes) {
@@ -6295,6 +6327,12 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::arg("nodes"))
 		.def("__len__", [](const dicom::DataSetSelection& self) { return self.nodes().size(); })
 		.def("__bool__", [](const dicom::DataSetSelection& self) { return !self.empty(); })
+		.def("extended",
+		    [](const dicom::DataSetSelection& self, nb::handle nodes) {
+			    return self.extended(selection_nodes_from_py(nodes, "nodes"));
+		    },
+		    nb::arg("nodes"),
+		    "Return a canonicalized DataSetSelection with additional selection nodes.")
 		.def("__repr__",
 		    [](const dicom::DataSetSelection& self) {
 			    std::ostringstream oss;
@@ -6595,17 +6633,17 @@ m.def("read_bytes",
 	    "the binding keeps a Python reference, but mutating or freeing the underlying memory can\n"
 	    "still corrupt the dataset.");
 
-	m.def("read_bytes_with_pixel_payload",
+	m.def("read_bytes_with_pixeldata_payload",
 	    [] (nb::object buffer, nb::object pixel_payload, const std::string& name,
 	        std::optional<Tag> load_until, std::optional<bool> keep_on_error, bool copy) {
 	        PyBufferView main_view(buffer);
 	        const Py_buffer& main_info = main_view.view();
-	        require_1d_contiguous_buffer(main_info, "read_bytes_with_pixel_payload data");
+	        require_1d_contiguous_buffer(main_info, "read_bytes_with_pixeldata_payload data");
 
 	        PyBufferView payload_view(pixel_payload);
 	        const Py_buffer& payload_info = payload_view.view();
 	        require_1d_contiguous_buffer(
-	            payload_info, "read_bytes_with_pixel_payload pixel_payload");
+	            payload_info, "read_bytes_with_pixeldata_payload pixel_payload");
 
 	        const auto main_elem_size =
 	            static_cast<std::size_t>(main_info.itemsize <= 0 ? 1 : main_info.itemsize);
@@ -6636,7 +6674,7 @@ m.def("read_bytes",
 	        } else {
 		        if (payload_elem_size != 1) {
 			        throw std::invalid_argument(
-			            "read_bytes_with_pixel_payload(copy=False) requires a byte-oriented pixel_payload buffer");
+			            "read_bytes_with_pixeldata_payload(copy=False) requires a byte-oriented pixel_payload buffer");
 		        }
 		        payload_owner = pixel_payload;
 		        payload_data = static_cast<const std::uint8_t*>(payload_info.buf);
@@ -6648,26 +6686,26 @@ m.def("read_bytes",
 		        if (main_total > 0) {
 			        std::memcpy(owned.data(), main_info.buf, main_total);
 		        }
-		        file = dicom::read_bytes_with_pixel_payload(std::string{name}, std::move(owned),
+		        file = dicom::read_bytes_with_pixeldata_payload(std::string{name}, std::move(owned),
 		            payload_data, payload_total, opts);
 	        } else {
 		        if (main_elem_size != 1) {
 			        throw std::invalid_argument(
-			            "read_bytes_with_pixel_payload(copy=False) requires a byte-oriented data buffer");
+			            "read_bytes_with_pixeldata_payload(copy=False) requires a byte-oriented data buffer");
 		        }
-		        file = dicom::read_bytes_with_pixel_payload(std::string{name},
+		        file = dicom::read_bytes_with_pixeldata_payload(std::string{name},
 		            static_cast<const std::uint8_t*>(main_info.buf), main_total,
 		            payload_data, payload_total, opts);
 	        }
 
 	        const bool payload_attached =
-	            file != nullptr && file->has_attached_pixel_payload();
+	            file != nullptr && file->has_attached_pixeldata_payload();
 	        nb::object py_file = nb::cast(std::move(file));
 	        if (!copy && main_total > 0) {
 		        py_file.attr("_buffer_owner") = buffer;
 	        }
 	        if (payload_attached) {
-		        py_file.attr("_pixel_payload_owner") = payload_owner;
+		        py_file.attr("_pixeldata_payload_owner") = payload_owner;
 	        }
 	        return py_file;
 	    },
@@ -6678,7 +6716,7 @@ m.def("read_bytes",
 	    nb::arg("keep_on_error") = nb::none(),
 	    nb::arg("copy") = true,
 	    "Read a DicomFile from a main Part 10 bytes-like object whose PixelData value is "
-	    "the DXP1 split-payload placeholder, and attach separate PixelData value bytes.\n"
+	    "the PIXDATA1 split-payload placeholder, and attach separate PixelData value bytes.\n"
 	    "\n"
 	    "Parameters\n"
 	    "----------\n"
@@ -6698,8 +6736,70 @@ m.def("read_bytes",
 	    "    When True, copy both input buffers into Python-owned memory retained by the "
 	    "returned DicomFile. When False, reference the caller's byte-oriented buffers.\n"
 	    "\n"
-	    "Call DicomFile.detach_pixel_payload() after decoding to release the retained "
+	    "Call DicomFile.detach_pixeldata_payload() after decoding to release the retained "
 	    "pixel payload owner; metadata remains available afterward.");
+
+	m.def("split_pixeldata_payload",
+	    [](nb::handle selection_value, nb::handle source, const std::string& name) {
+		    const auto selection = selection_from_py(selection_value, "selection");
+		    const bool is_text_path = PyUnicode_Check(source.ptr()) != 0;
+		    const bool is_buffer = PyObject_CheckBuffer(source.ptr()) != 0;
+		    const bool is_pathlike =
+		        !is_buffer && PyObject_HasAttrString(source.ptr(), "__fspath__") != 0;
+		    if (is_text_path || is_pathlike) {
+			    return PySplitPixelDataPayloadResult::from_cpp(
+			        dicom::split_pixeldata_payload(selection,
+			            python_path_to_filesystem_path(source, "source")));
+		    }
+
+		    PyBufferView view(source);
+		    const Py_buffer& info = view.view();
+		    require_1d_contiguous_buffer(info, "split_pixeldata_payload source");
+		    const auto elem_size =
+		        static_cast<std::size_t>(info.itemsize <= 0 ? 1 : info.itemsize);
+		    if (elem_size != 1) {
+			    throw std::invalid_argument(
+			        "split_pixeldata_payload requires a byte-oriented buffer for bytes-like input");
+		    }
+		    return PySplitPixelDataPayloadResult::from_cpp(
+		        dicom::split_pixeldata_payload(selection, std::string_view{name},
+		            std::span<const std::uint8_t>(
+		                static_cast<const std::uint8_t*>(info.buf),
+		                static_cast<std::size_t>(info.len))));
+	    },
+	    nb::arg("selection"),
+	    nb::arg("source"),
+	    nb::kw_only(),
+	    nb::arg("name") = std::string{"<memory>"},
+	    "Byte-preserving split of a Part 10 source into a SplitPixelDataPayloadResult.");
+
+	m.def("join_pixeldata_payload",
+	    [](nb::handle main_bytes, nb::handle pixel_payload) {
+		    PyBufferView main_view(main_bytes);
+		    const Py_buffer& main_info = main_view.view();
+		    require_1d_contiguous_buffer(main_info, "join_pixeldata_payload main_bytes");
+		    PyBufferView payload_view(pixel_payload);
+		    const Py_buffer& payload_info = payload_view.view();
+		    require_1d_contiguous_buffer(payload_info, "join_pixeldata_payload pixel_payload");
+		    const auto main_elem_size =
+		        static_cast<std::size_t>(main_info.itemsize <= 0 ? 1 : main_info.itemsize);
+		    const auto payload_elem_size =
+		        static_cast<std::size_t>(payload_info.itemsize <= 0 ? 1 : payload_info.itemsize);
+		    if (main_elem_size != 1 || payload_elem_size != 1) {
+			    throw std::invalid_argument(
+			        "join_pixeldata_payload requires byte-oriented buffers");
+		    }
+		    auto joined = dicom::join_pixeldata_payload(
+		        std::span<const std::uint8_t>(
+		            static_cast<const std::uint8_t*>(main_info.buf),
+		            static_cast<std::size_t>(main_info.len)),
+		        std::span<const std::uint8_t>(
+		            static_cast<const std::uint8_t*>(payload_info.buf),
+		            static_cast<std::size_t>(payload_info.len)));
+		    return to_python_bytes(std::move(joined));
+	    },
+	    nb::arg("main_bytes"), nb::arg("pixel_payload"),
+	    "Join split P10 main bytes and value-only PixelData payload bytes.");
 
 	m.def("read_bytes_selected",
 	    [](nb::object buffer, nb::handle selection_value, const std::string& name,
@@ -7270,7 +7370,7 @@ m.def("generate_study_instance_uid",
 	    "UID_PREFIX",
 	    "IMPLEMENTATION_CLASS_UID",
 	    "IMPLEMENTATION_VERSION_NAME",
-	    "PIXEL_PAYLOAD_PLACEHOLDER_MAGIC",
+	    "PIXELDATA_PAYLOAD_PLACEHOLDER_MAGIC",
 	    "log_info",
 	    "log_warn",
 	    "log_error",
@@ -7284,6 +7384,7 @@ m.def("generate_study_instance_uid",
 	    "DecodePlan",
 	    "DecodeInfo",
 	    "PixelPayloadDecodeDescriptor",
+		    "SplitPixelDataPayloadResult",
 	    "PixelPayloadDecoder",
 	    "VoiLutFunction",
 	    "PixelPresentation",
@@ -7321,7 +7422,9 @@ m.def("generate_study_instance_uid",
 	    "read_file_selected",
 	    "is_dicom_file",
 	    "read_bytes",
-	    "read_bytes_with_pixel_payload",
+	    "read_bytes_with_pixeldata_payload",
+		    "split_pixeldata_payload",
+	    "join_pixeldata_payload",
 	    "read_bytes_selected",
 	    "load_root_elements_reserve_hint",
 	    "reset_root_elements_reserve_hint",
@@ -7352,4 +7455,3 @@ m.def("generate_study_instance_uid",
 	    "generate_series_instance_uid",
 	    "generate_study_instance_uid");
 }
-

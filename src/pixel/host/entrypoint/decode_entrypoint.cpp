@@ -349,7 +349,6 @@ PixelPayloadDecoder::PixelPayloadDecoder(
 		    "pixel payload length mismatch: expected {} byte(s), got {} byte(s)",
 		    desc.expected_payload_length, pixel_payload_.size());
 	}
-
 	const auto ts_text = trim_ascii_space(desc.transfer_syntax_uid);
 	const auto transfer_syntax = uid::lookup(ts_text);
 	if (!transfer_syntax.has_value() ||
@@ -501,13 +500,14 @@ void PixelPayloadDecoder::decode_into(std::size_t frame_index,
 			if (!detail::checked_mul_size_t(
 			        frame_index, source_layout_.frame_stride, frame_offset) ||
 			    pixel_payload_.size() < frame_offset ||
-			    pixel_payload_.size() - frame_offset < source_layout_.frame_stride) {
+			    pixel_payload_.size() - frame_offset <
+			        source_layout_.frame_stride) {
 				detail::throw_frame_codec_stage_exception(frame_index,
 				    detail::CodecStatusCode::invalid_argument, "load_frame_source",
 				    "native frame range is outside pixel payload");
 			}
-			prepared_source =
-			    pixel_payload_.subspan(frame_offset, source_layout_.frame_stride);
+			prepared_source = pixel_payload_.subspan(
+			    frame_offset, source_layout_.frame_stride);
 		} else {
 			const auto& fragments = frame_fragments_.at(frame_index);
 			if (fragments.size() == 1) {

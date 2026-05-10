@@ -804,11 +804,13 @@ def test_selected_read_python_api_with_dataset_selection_keeps_selected_tags_onl
 	        ("ReferencedStudySequence", ["ReferencedSOPInstanceUID"]),
 	    ]
 	)
+	selection = selection.extended(["SOPClassUID"])
 
 	selected = dicom.read_bytes_selected(source_bytes, selection, name="selected-seq")
 	assert selected.transfer_syntax_uid.keyword == "ExplicitVRLittleEndian"
 	assert selected["TransferSyntaxUID"].to_transfer_syntax_uid().keyword == "ExplicitVRLittleEndian"
 	assert selected["SOPInstanceUID"].to_uid_string() == "1.2.3.4.5.6.7.8.9"
+	assert selected["SOPClassUID"].to_uid_string() == "1.2.840.10008.5.1.4.1.1.7"
 	assert not selected["PixelData"]
 
 	seq = selected["ReferencedStudySequence"]
