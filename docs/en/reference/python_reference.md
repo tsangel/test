@@ -29,15 +29,19 @@ For DICOM JSON Model read/write, see [DICOM JSON](../guide/dicom_json.md).
 ## Selected read
 
 - `DataSetSelection([...])` builds a canonicalized nested selection tree.
-- `read_file_selected(path, selection, keep_on_error=None)` reads a `DicomFile`
-  that keeps only the selected tags and nested sequence children.
-- `read_bytes_selected(data, selection, name="<memory>", keep_on_error=None, copy=True)`
+- `read_file_selected(path, selection, load_until=None, keep_on_error=None)`
+  reads a `DicomFile` that keeps only the selected tags and nested sequence children.
+- `read_bytes_selected(data, selection, name="<memory>", load_until=None, keep_on_error=None, copy=True)`
   reads the same selected result from a bytes-like object.
+- `continue_read_selected(file, selection, load_until=None, keep_on_error=None)`
+  continues selected reading in-place from the current stream position of a
+  partially read `DicomFile`. Existing elements are preserved.
 - `selection` may be a reusable `DataSetSelection` or a raw nested Python
   sequence of leaf tags and `(tag, children)` pairs for one-shot calls.
 - `TransferSyntaxUID` and `SpecificCharacterSet` are always considered at the
   root level, even when omitted from the selection.
-- `ReadOptions.load_until` does not apply to selected-read APIs.
+- `load_until` is an upper bound on the selected-read frontier. The effective
+  root stop tag is `min(last selected root tag, load_until)`.
 - Private and unknown tags are valid selection targets, including explicit tag strings such as `"70531000"`.
 - Selecting only an `SQ` keeps the present sequence and item count, but child
   item datasets may be empty.

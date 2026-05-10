@@ -46,7 +46,7 @@
 - For large write-only transcodes, prefer `write_with_transfer_syntax(...)` over `set_transfer_syntax(...)` followed by `write_file(...)`. That path now exists in both C++ and Python for file output; C++ also provides `std::ostream` variants.
 - In Python, `has_error` and `error_message` are the file-level state you check after permissive reads that keep partial data.
 - `read_file_selected(...)` 和 `read_bytes_selected(...)` 会返回只保留所选 tag 和嵌套 sequence child 的 `DicomFile`。
-- selected read 会始终考虑 root `TransferSyntaxUID` 和 `SpecificCharacterSet`，忽略 `ReadOptions.load_until`，并允许 selection tree 中出现 private/unknown tag，以及 `"70531000"` 这样的 explicit tag string。
+- selected read 会始终考虑 root `TransferSyntaxUID` 和 `SpecificCharacterSet`，将 `ReadOptions.load_until` 作为 selection frontier 的上限，并允许 selection tree 中出现 private/unknown tag，以及 `"70531000"` 这样的 explicit tag string。
 - 即使 selected read 只选择了 `SQ` 本身，也会保留 present 的 sequence 和 item count。
 - 选择/访问区域之外的 malformed data 可能完全不会被看到，因此 selected-read `has_error` / `error_message` 只描述实际访问到的区域。
 

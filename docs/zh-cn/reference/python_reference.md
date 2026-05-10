@@ -40,7 +40,7 @@ Use that page for:
   raw nested Python sequence，由 leaf tag 和 `(tag, children)` pair 组成。
 - `TransferSyntaxUID` 和 `SpecificCharacterSet` 即使没有写进 selection，也始终会在
   root level 被考虑。
-- `ReadOptions.load_until` 不适用于 selected-read API。
+- `load_until` 是 selected-read frontier 的上限。
 - private tag 和 unknown tag 也可以作为 selection 目标，也可以写成 `"70531000"` 这样的 explicit tag string。
 - 即使只选择 `SQ` 本身，也会保留 present 的 sequence 和 item count，但 child item
   dataset 可能为空。

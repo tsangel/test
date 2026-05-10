@@ -11,7 +11,7 @@
 
 ## Python surface
 
-- constructors and loaders: `read_file(...)`, `read_bytes(...)`, `read_file_selected(...)`, `read_bytes_selected(...)`
+- constructors and loaders: `read_file(...)`, `read_bytes(...)`, `read_file_selected(...)`, `read_bytes_selected(...)`, `continue_read_selected(...)`
 - root dataset access: `df.dataset`
 - forwarded dataset operations: `add_dataelement`, `ensure_dataelement`, `ensure_loaded`, `remove_dataelement`, `get_dataelement`, `get_value`, `set_value`, `__getitem__`, `__contains__`, iteration
 - file/session state: `path`, `transfer_syntax_uid`, `has_error`, `error_message`
@@ -45,7 +45,8 @@
 - In Python, `to_array(..., with_info=True)` returns `(array, DecodeInfo)` and `decode_into(..., with_info=True)` returns `DecodeInfo` after writing into the supplied output buffer.
 - For `frame=-1` on multi-frame input, Python `with_info=True` reports frame-0/common decode metadata.
 - `read_file_selected(...)` and `read_bytes_selected(...)` return `DicomFile` objects that keep only the selected tags and nested sequence children.
-- Selected read always considers root `TransferSyntaxUID` and `SpecificCharacterSet`, ignores `ReadOptions.load_until`, and allows private/unknown tags in the selection tree, including explicit tag strings such as `"70531000"`.
+- `continue_read_selected(...)` preserves existing elements and continues selected reading from the current stream position of a partially read `DicomFile`.
+- Selected read always considers root `TransferSyntaxUID` and `SpecificCharacterSet`, treats `ReadOptions.load_until` as an upper bound on the selection frontier, and allows private/unknown tags in the selection tree, including explicit tag strings such as `"70531000"`.
 - If a selected read only names an `SQ`, that present sequence and its item count are still preserved.
 - Malformed data outside the selected/visited region may remain unseen, so selected-read `has_error` / `error_message` only describe the region that was actually visited.
 

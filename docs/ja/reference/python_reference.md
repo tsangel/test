@@ -42,7 +42,7 @@ DICOM JSON Model の読み書きについては
   そのまま渡すこともできます。
 - `TransferSyntaxUID` と `SpecificCharacterSet` は selection に書かなくても
   root level で常に考慮されます。
-- `ReadOptions.load_until` は selected-read API には適用されません。
+- `load_until` は selected-read frontier の上限として扱われます。
 - private tag と unknown tag も selection 対象として使え、`"70531000"` のような explicit tag string も使えます。
 - `SQ` だけを選択しても present な sequence と item count は保持されますが、
   child item dataset は空になり得ます。

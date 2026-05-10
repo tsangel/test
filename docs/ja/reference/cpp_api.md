@@ -158,7 +158,7 @@ Note: These attachment calls are intended for the root `DataSet` (the object ret
 - `read_file_selected(...)` と `read_bytes_selected(...)` は、選択した tag と
   nested sequence child だけを残した `DicomFile` を返します。
 - `ReadOptions.keep_on_error` と memory-buffer `ReadOptions.copy` はそのまま有効です。
-  `ReadOptions.load_until` は selected-read API では無視されます。
+  `ReadOptions.load_until` は selected-read frontier の上限として扱われます。
 - `SQ` だけを選択しても、source に存在する sequence と item count は保持されます。
 - 選択/訪問した領域の外にある malformed data は見えないままのことがあり、
   `has_error` や `error_message` に反映されない場合があります。
@@ -173,7 +173,7 @@ Note: These attachment calls are intended for the root `DataSet` (the object ret
 - Each walk step yields `DataSetWalkEntry { path, element }`.
 - `path` is an ancestors-only borrowed view in both APIs. Persist `path.to_string()` if you need to keep it after the current callback/iterator step.
 - Traversal only covers the dataset state that is already loaded; it does not implicitly call `ensure_loaded()` or `ensure_dataelement()`.
-- On partially loaded attached datasets, tags beyond the loaded frontier are silently absent from visit/walk. Fully load first or call `ensure_loaded(tag)` before using traversal for full-dataset passes.
+- On partially loaded attached datasets, tags beyond the parsed frontier are silently absent from visit/walk. Fully load first or call `ensure_loaded(tag)` before using traversal for full-dataset passes.
 - `DataSetWalkEntry::skip_sequence()` / `DataSetWalkIterator::skip_sequence()` skip the current sequence subtree.
 - `DataSetWalkEntry::skip_current_dataset()` / `DataSetWalkIterator::skip_current_dataset()` skip the rest of the current dataset.
 - Full usage examples in C++ and Python: [DataSet Visit and Walk](../guide/dataset_visit_and_walk.md)
