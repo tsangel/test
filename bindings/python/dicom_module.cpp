@@ -265,6 +265,59 @@ struct PixelArrayLayout {
 	std::size_t required_bytes{0};
 };
 
+struct PyPixelPayloadDecodeDescriptor {
+	std::string transfer_syntax_uid{};
+	std::string photometric{};
+	std::uint32_t rows{0};
+	std::uint32_t cols{0};
+	std::uint32_t frames{1};
+	std::uint16_t samples_per_pixel{1};
+	std::uint16_t bits_allocated{0};
+	std::uint16_t bits_stored{0};
+	std::uint16_t pixel_representation{0};
+	std::uint16_t planar_configuration{0};
+	std::size_t expected_payload_length{0};
+	std::string frame_fragments{};
+	std::string source_name{"<pixel-payload>"};
+
+	[[nodiscard]] dicom::pixel::PixelPayloadDecodeDescriptor view() const noexcept {
+		return dicom::pixel::PixelPayloadDecodeDescriptor{
+		    .transfer_syntax_uid = transfer_syntax_uid,
+		    .photometric = photometric,
+		    .rows = rows,
+		    .cols = cols,
+		    .frames = frames,
+		    .samples_per_pixel = samples_per_pixel,
+		    .bits_allocated = bits_allocated,
+		    .bits_stored = bits_stored,
+		    .pixel_representation = pixel_representation,
+		    .planar_configuration = planar_configuration,
+		    .expected_payload_length = expected_payload_length,
+		    .frame_fragments = frame_fragments,
+		    .source_name = source_name,
+		};
+	}
+
+	[[nodiscard]] static PyPixelPayloadDecodeDescriptor from_cpp(
+	    const dicom::pixel::PixelPayloadDecodeDescriptor& desc) {
+		PyPixelPayloadDecodeDescriptor out{};
+		out.transfer_syntax_uid.assign(desc.transfer_syntax_uid);
+		out.photometric.assign(desc.photometric);
+		out.rows = desc.rows;
+		out.cols = desc.cols;
+		out.frames = desc.frames;
+		out.samples_per_pixel = desc.samples_per_pixel;
+		out.bits_allocated = desc.bits_allocated;
+		out.bits_stored = desc.bits_stored;
+		out.pixel_representation = desc.pixel_representation;
+		out.planar_configuration = desc.planar_configuration;
+		out.expected_payload_length = desc.expected_payload_length;
+		out.frame_fragments = desc.frame_fragments;
+		out.source_name.assign(desc.source_name);
+		return out;
+	}
+};
+
 struct DirectRawArrayAccess {
 	DecodedArrayLayout layout{};
 	std::span<const std::uint8_t> source_bytes{};
@@ -2142,6 +2195,98 @@ void delete_python_attr_if_present(nb::handle object, const char* name) {
 	if (PyObject_DelAttrString(object.ptr(), name) != 0) {
 		throw nb::python_error();
 	}
+}
+
+class PyPixelPayloadDecoder {
+public:
+	PyPixelPayloadDecoder(const PyPixelPayloadDecodeDescriptor& desc,
+	    nb::handle pixel_payload) {
+		PyBufferView view(pixel_payload);
+		const Py_buffer& info = view.view();
+		require_1d_contiguous_buffer(info, "PixelPayloadDecoder pixel_payload");
+		const auto elem_size =
+		    static_cast<std::size_t>(info.itemsize <= 0 ? 1 : info.itemsize);
+		if (elem_size != 1) {
+			throw nb::value_error(
+			    "PixelPayloadDecoder requires a byte-oriented pixel_payload buffer");
+		}
+		const auto total = static_cast<std::size_t>(info.len);
+		auto payload_span = std::span<const std::uint8_t>(
+		    static_cast<const std::uint8_t*>(info.buf), total);
+		payload_owner_ = nb::borrow<nb::object>(pixel_payload);
+		decoder_ = std::make_unique<dicom::pixel::PixelPayloadDecoder>(
+		    desc.view(), payload_span);
+	}
+
+	[[nodiscard]] dicom::pixel::PixelPayloadDecoder& decoder() {
+		return *decoder_;
+	}
+
+	[[nodiscard]] const dicom::pixel::PixelPayloadDecoder& decoder() const {
+		return *decoder_;
+	}
+
+private:
+	std::unique_ptr<dicom::pixel::PixelPayloadDecoder> decoder_{};
+	nb::object payload_owner_{};
+};
+
+DecodedArrayLayout payload_decoder_layout_or_throw(
+    const PyPixelPayloadDecoder& self, long frame, nb::handle plan_obj) {
+	if (frame < 0) {
+		throw nb::value_error(
+		    "PixelPayloadDecoder supports single-frame decode only; frame must be >= 0");
+	}
+	const auto plan = plan_obj.is_none()
+	                      ? self.decoder().create_decode_plan()
+	                      : nb::cast<dicom::pixel::DecodePlan>(plan_obj);
+	return build_decode_layout_from_plan(plan, frame);
+}
+
+nb::object pixel_payload_decoder_decode_into(
+    const PyPixelPayloadDecoder& self, nb::handle out, long frame, nb::handle plan_obj) {
+	const auto layout = payload_decoder_layout_or_throw(self, frame, plan_obj);
+	PyWritableBufferView writable(out);
+	const auto& view = writable.view();
+	if (view.itemsize <= 0) {
+		throw nb::value_error("decode_into requires a valid output itemsize");
+	}
+	const auto actual_itemsize = static_cast<std::size_t>(view.itemsize);
+	if (actual_itemsize != layout.spec.bytes_per_sample) {
+		throw nb::value_error("decode_into output itemsize does not match decoded sample size");
+	}
+	if (view.len < 0) {
+		throw nb::value_error("decode_into output buffer length is invalid");
+	}
+	const auto actual_bytes = static_cast<std::size_t>(view.len);
+	if (actual_bytes != layout.required_bytes) {
+		throw nb::value_error(
+		    "decode_into output buffer size does not match expected decoded size");
+	}
+	if (layout.required_bytes > 0 && view.buf == nullptr) {
+		throw nb::value_error("decode_into output buffer is null");
+	}
+
+	auto out_span = std::span<std::uint8_t>(
+	    static_cast<std::uint8_t*>(view.buf), actual_bytes);
+	{
+		nb::gil_scoped_release release;
+		self.decoder().decode_into(layout.frame_index, out_span, layout.plan);
+	}
+	return nb::borrow<nb::object>(out);
+}
+
+nb::object pixel_payload_decoder_to_array(
+    const PyPixelPayloadDecoder& self, long frame, nb::handle plan_obj) {
+	const auto layout = payload_decoder_layout_or_throw(self, frame, plan_obj);
+	auto out = make_writable_numpy_array(
+	    layout.ndim, layout.shape, layout.strides, layout.spec.dtype,
+	    layout.required_bytes);
+	{
+		nb::gil_scoped_release release;
+		self.decoder().decode_into(layout.frame_index, out.bytes, layout.plan);
+	}
+	return nb::cast(std::move(out.array));
 }
 
 nb::object dataelement_get_value_py(DataElement& element, nb::handle parent = nb::handle()) {
@@ -4867,6 +5012,75 @@ NB_MODULE(_dicomsdl, m) {
 			    return oss.str();
 		    });
 
+	nb::class_<PyPixelPayloadDecodeDescriptor>(m, "PixelPayloadDecodeDescriptor",
+	    "Borrow-only metadata needed to decode a split PixelData payload.")
+		.def(nb::init<>())
+		.def_rw("transfer_syntax_uid",
+		    &PyPixelPayloadDecodeDescriptor::transfer_syntax_uid)
+		.def_rw("photometric", &PyPixelPayloadDecodeDescriptor::photometric)
+		.def_rw("rows", &PyPixelPayloadDecodeDescriptor::rows)
+		.def_rw("cols", &PyPixelPayloadDecodeDescriptor::cols)
+		.def_rw("frames", &PyPixelPayloadDecodeDescriptor::frames)
+		.def_rw("samples_per_pixel",
+		    &PyPixelPayloadDecodeDescriptor::samples_per_pixel)
+		.def_rw("bits_allocated", &PyPixelPayloadDecodeDescriptor::bits_allocated)
+		.def_rw("bits_stored", &PyPixelPayloadDecodeDescriptor::bits_stored)
+		.def_rw("pixel_representation",
+		    &PyPixelPayloadDecodeDescriptor::pixel_representation)
+		.def_rw("planar_configuration",
+		    &PyPixelPayloadDecodeDescriptor::planar_configuration)
+		.def_rw("expected_payload_length",
+		    &PyPixelPayloadDecodeDescriptor::expected_payload_length)
+		.def_rw("frame_fragments",
+		    &PyPixelPayloadDecodeDescriptor::frame_fragments)
+		.def_rw("source_name", &PyPixelPayloadDecodeDescriptor::source_name)
+		.def("__repr__",
+		    [](const PyPixelPayloadDecodeDescriptor& self) {
+			    std::ostringstream oss;
+			    oss << "PixelPayloadDecodeDescriptor(transfer_syntax_uid='"
+			        << self.transfer_syntax_uid << "', photometric='"
+			        << self.photometric << "', rows=" << self.rows
+			        << ", cols=" << self.cols << ", frames=" << self.frames
+			        << ", expected_payload_length="
+			        << self.expected_payload_length << ")";
+			    return oss.str();
+		    });
+
+	nb::class_<PyPixelPayloadDecoder>(m, "PixelPayloadDecoder",
+	    "Decode caller-owned split PixelData payload bytes without reconstructing a DicomFile.")
+		.def("__init__",
+		    [](PyPixelPayloadDecoder* self,
+		        const PyPixelPayloadDecodeDescriptor& desc, nb::handle pixel_payload) {
+			    new (self) PyPixelPayloadDecoder(desc, pixel_payload);
+		    },
+		    nb::arg("descriptor"), nb::arg("pixel_payload"))
+		.def("create_decode_plan",
+		    [](const PyPixelPayloadDecoder& self,
+		        const dicom::pixel::DecodeOptions& options) {
+			    return self.decoder().create_decode_plan(options);
+		    },
+		    nb::arg("options") = dicom::pixel::DecodeOptions{},
+		    "Create a DecodePlan from the descriptor captured by this decoder.")
+		.def("decode_into",
+		    &pixel_payload_decoder_decode_into,
+		    nb::arg("out"),
+		    nb::arg("frame") = 0,
+		    nb::kw_only(),
+		    nb::arg("plan") = nb::none(),
+		    "Decode one split-payload frame into an existing writable buffer.")
+		.def("to_array",
+		    &pixel_payload_decoder_to_array,
+		    nb::arg("frame") = 0,
+		    nb::kw_only(),
+		    nb::arg("plan") = nb::none(),
+		    "Decode one split-payload frame and return a NumPy array.")
+		.def("pixel_array",
+		    &pixel_payload_decoder_to_array,
+		    nb::arg("frame") = 0,
+		    nb::kw_only(),
+		    nb::arg("plan") = nb::none(),
+		    "Alias for to_array(frame=...).");
+
 	nb::class_<dicom::pixel::RescaleTransform>(m, "RescaleTransform",
 	    "Linear rescale transform applied after decode.")
 		.def(nb::init<>())
@@ -5407,6 +5621,12 @@ NB_MODULE(_dicomsdl, m) {
 		    },
 		    nb::arg("options"),
 		    "Compute a reusable DecodePlan from explicit DecodeOptions.")
+		.def("pixel_payload_decode_descriptor",
+		    [](const DicomFile& self) {
+			    return PyPixelPayloadDecodeDescriptor::from_cpp(
+			        self.pixel_payload_decode_descriptor());
+		    },
+		    "Return metadata needed by PixelPayloadDecoder for split PixelData payload bytes.")
 		.def("__len__",
 		    [](DicomFile& self) { return self.dataset().size(); },
 		    "Number of active DataElements currently available in the root DataSet")
@@ -7063,6 +7283,8 @@ m.def("generate_study_instance_uid",
 	    "DecodeOptions",
 	    "DecodePlan",
 	    "DecodeInfo",
+	    "PixelPayloadDecodeDescriptor",
+	    "PixelPayloadDecoder",
 	    "VoiLutFunction",
 	    "PixelPresentation",
 	    "WindowTransform",

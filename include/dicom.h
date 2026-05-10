@@ -2069,6 +2069,57 @@ struct DecodeInfo {
 	std::uint16_t bits_per_sample{0};
 };
 
+[[nodiscard]] std::optional<Photometric> parse_photometric(
+    std::string_view text) noexcept;
+[[nodiscard]] std::string_view photometric_to_string(
+    Photometric photometric) noexcept;
+
+struct PixelPayloadDecodeDescriptor {
+	std::string_view transfer_syntax_uid{};
+	std::string_view photometric{};
+
+	std::uint32_t rows{0};
+	std::uint32_t cols{0};
+	std::uint32_t frames{1};
+	std::uint16_t samples_per_pixel{1};
+	std::uint16_t bits_allocated{0};
+	std::uint16_t bits_stored{0};
+	std::uint16_t pixel_representation{0};
+	std::uint16_t planar_configuration{0};
+
+	std::size_t expected_payload_length{0};
+	std::string frame_fragments{};
+	std::string_view source_name{"<pixel-payload>"};
+};
+
+class PixelPayloadDecoder {
+public:
+	PixelPayloadDecoder(const PixelPayloadDecodeDescriptor& desc,
+	    std::span<const std::uint8_t> pixel_payload);
+
+	[[nodiscard]] DecodePlan create_decode_plan(
+	    const DecodeOptions& opt = {}) const;
+	void decode_into(std::size_t frame_index, std::span<std::uint8_t> dst,
+	    const DecodePlan& plan) const;
+	[[nodiscard]] PixelBuffer pixel_buffer(
+	    std::size_t frame_index, const DecodePlan& plan) const;
+
+private:
+	struct Fragment {
+		std::size_t offset{0};
+		std::size_t length{0};
+	};
+
+	uid::WellKnown transfer_syntax_uid_{};
+	PixelLayout source_layout_{};
+	std::span<const std::uint8_t> pixel_payload_{};
+	std::vector<std::vector<Fragment>> frame_fragments_{};
+	std::string source_name_{"<pixel-payload>"};
+};
+
+[[nodiscard]] PixelPayloadDecodeDescriptor pixel_payload_decode_descriptor(
+    const DicomFile& file);
+
 using ExecutionProgressCallback =
     void (*)(std::size_t completed, std::size_t total, void* user_data) noexcept;
 using ExecutionCancelCallback = bool (*)(void* user_data) noexcept;
@@ -3366,6 +3417,10 @@ public:
 	[[nodiscard]] pixel::DecodePlan create_decode_plan(
 	    const pixel::DecodeOptions& opt = {}) const {
 		return pixel::create_decode_plan(*this, opt);
+	}
+	[[nodiscard]] pixel::PixelPayloadDecodeDescriptor
+	pixel_payload_decode_descriptor() const {
+		return pixel::pixel_payload_decode_descriptor(*this);
 	}
 	[[nodiscard]] std::optional<pixel::VoiLut> voi_lut() const;
 	[[nodiscard]] std::optional<pixel::VoiLut> voi_lut(std::size_t frame_index) const;

@@ -4,6 +4,7 @@ import gc
 import struct
 
 import dicomsdl as dicom
+import numpy as np
 import pytest
 
 
@@ -174,6 +175,59 @@ def test_write_bytes_split_pixel_payload_roundtrip() -> None:
     )
     assert roundtrip.encoded_pixel_frame_bytes(0) == b"\x34\x12"
     assert roundtrip.pixel_data(0) == b"\x34\x12"
+
+
+def test_pixel_payload_decoder_decodes_split_payload_only() -> None:
+    payload = b"\x34\x12\x56\x78\x9A\xBC"
+    native = dicom.read_bytes_with_pixel_payload(
+        _build_native_placeholder(), payload, name="py-payload-decoder-native"
+    )
+    desc = native.pixel_payload_decode_descriptor()
+    main_bytes, payload_bytes = native.write_bytes_split_pixel_payload()
+    assert desc.expected_payload_length == len(payload_bytes)
+    assert desc.frame_fragments == ""
+
+    decoder = dicom.PixelPayloadDecoder(desc, payload_bytes)
+    plan = decoder.create_decode_plan()
+    assert decoder.to_array(frame=0, plan=plan).tobytes() == payload
+    out = np.empty((1, 3), dtype=np.uint16)
+    returned = decoder.decode_into(out, frame=0, plan=plan)
+    assert returned is out
+    assert out.tobytes() == payload
+
+    # Descriptor string_views are parsed at construction time; Python descriptor
+    # strings can be replaced or released after the decoder is built.
+    desc.transfer_syntax_uid = str(desc.transfer_syntax_uid)
+    desc.photometric = str(desc.photometric)
+    decoder = dicom.PixelPayloadDecoder(desc, bytearray(payload_bytes))
+    gc.collect()
+    assert decoder.to_array(frame=0).tobytes() == payload
+
+    encap = dicom.read_bytes_with_pixel_payload(
+        _build_encap_placeholder("1"),
+        _single_frame_encap_payload(),
+        name="py-payload-decoder-encap",
+    )
+    encap_desc = encap.pixel_payload_decode_descriptor()
+    main_bytes, encap_payload = encap.write_bytes_split_pixel_payload()
+    assert encap_desc.expected_payload_length == len(encap_payload)
+    assert encap_desc.frame_fragments
+
+    payload_owner = bytearray(encap_payload)
+    encap_decoder = dicom.PixelPayloadDecoder(encap_desc, payload_owner)
+    del payload_owner
+    gc.collect()
+    assert encap_decoder.to_array(frame=0).tobytes() == b"\x34\x12"
+
+    bad_desc = encap.pixel_payload_decode_descriptor()
+    bad_desc.frame_fragments = ""
+    with pytest.raises(Exception, match="frame_fragments"):
+        dicom.PixelPayloadDecoder(bad_desc, encap_payload)
+
+    bad_desc = encap.pixel_payload_decode_descriptor()
+    bad_desc.frame_fragments = "999999:1"
+    with pytest.raises(Exception, match="outside pixel payload"):
+        dicom.PixelPayloadDecoder(bad_desc, encap_payload)
 
 
 def test_write_with_transfer_syntax_split_pixel_payload_roundtrip() -> None:

@@ -7,6 +7,7 @@
 #include "pixel/host/encode/encode_set_pixel_data_runner.hpp"
 #include "pixel/host/support/dicom_pixel_support.hpp"
 #include "photometric_text_detail.hpp"
+#include "writing/detail/dataset_write.hpp"
 
 #include <array>
 #include <algorithm>
@@ -118,6 +119,109 @@ private:
 	    kPixelPayloadPlaceholderMagic.end());
 	marker.insert(marker.end(), dump_text.begin(), dump_text.end());
 	return marker;
+}
+
+struct SplitPixelPayloadFrameFragments {
+	std::string text{};
+	std::size_t expected_payload_length{0};
+};
+
+[[nodiscard]] SplitPixelPayloadFrameFragments build_split_pixel_payload_frame_fragments(
+    const DicomFile& file, const PixelSequence& pixel_sequence) {
+	const InStream* seq_stream = pixel_sequence.stream();
+	const auto offset_tables =
+	    write_detail::compute_pixel_sequence_offset_tables(pixel_sequence, seq_stream);
+
+	const auto add_size_or_throw = [&](std::size_t& total, std::size_t additional,
+	                                   std::string_view reason) {
+		if (additional > std::numeric_limits<std::size_t>::max() - total) {
+			diag::error_and_throw(
+			    "DicomFile::pixel_payload_decode_descriptor file={} reason={}",
+			    file.path(), reason);
+		}
+		total += additional;
+	};
+
+	SplitPixelPayloadFrameFragments result{};
+	std::size_t cursor = 8u; // Basic Offset Table item header.
+	if (offset_tables.basic_offsets.size() >
+	    std::numeric_limits<std::size_t>::max() / sizeof(std::uint32_t)) {
+		diag::error_and_throw(
+		    "DicomFile::pixel_payload_decode_descriptor file={} reason=Basic Offset Table size exceeds size_t range",
+		    file.path());
+	}
+	add_size_or_throw(cursor,
+	    offset_tables.basic_offsets.size() * sizeof(std::uint32_t),
+	    "Basic Offset Table size exceeds size_t range");
+
+	const auto append_fragment = [&](std::size_t raw_length, bool& first_fragment) {
+		const auto length = write_detail::padded_length(raw_length);
+		if (cursor > std::numeric_limits<std::size_t>::max() - 8u ||
+		    length > std::numeric_limits<std::size_t>::max() - cursor - 8u) {
+			diag::error_and_throw(
+			    "DicomFile::pixel_payload_decode_descriptor file={} reason=PixelData payload size exceeds size_t range",
+			    file.path());
+		}
+		const auto value_offset = cursor + 8u;
+		if (!first_fragment) {
+			result.text.push_back(',');
+		}
+		result.text += std::to_string(value_offset);
+		result.text.push_back(':');
+		result.text += std::to_string(length);
+		first_fragment = false;
+		cursor = value_offset + length;
+	};
+
+	const auto frame_count = pixel_sequence.number_of_frames();
+	if (frame_count == 0) {
+		diag::error_and_throw(
+		    "DicomFile::pixel_payload_decode_descriptor file={} reason=PixelSequence has no frames",
+		    file.path());
+	}
+
+	for (std::size_t frame_index = 0; frame_index < frame_count; ++frame_index) {
+		if (frame_index != 0) {
+			result.text.push_back(';');
+		}
+		const PixelFrame* frame = pixel_sequence.frame(frame_index);
+		if (!frame) {
+			diag::error_and_throw(
+			    "DicomFile::pixel_payload_decode_descriptor file={} reason=PixelSequence frame #{} is missing",
+			    file.path(), frame_index + 1u);
+		}
+
+		bool first_fragment = true;
+		const auto encoded_data = frame->encoded_data_view();
+		if (!encoded_data.empty()) {
+			append_fragment(encoded_data.size(), first_fragment);
+		} else {
+			const auto& fragments = frame->fragments();
+			for (const auto& fragment : fragments) {
+				if (!seq_stream) {
+					diag::error_and_throw(
+					    "DicomFile::pixel_payload_decode_descriptor file={} reason=PixelSequence fragment references stream but stream is null",
+					    file.path());
+				}
+				if (fragment.offset > seq_stream->end_offset() ||
+				    fragment.length > seq_stream->end_offset() - fragment.offset) {
+					diag::error_and_throw(
+					    "DicomFile::pixel_payload_decode_descriptor file={} reason=PixelSequence fragment out of bounds offset=0x{:X} length={}",
+					    file.path(), fragment.offset, fragment.length);
+				}
+				append_fragment(fragment.length, first_fragment);
+			}
+		}
+		if (first_fragment) {
+			diag::error_and_throw(
+			    "DicomFile::pixel_payload_decode_descriptor file={} reason=PixelSequence frame #{} has no fragments",
+			    file.path(), frame_index + 1u);
+		}
+	}
+
+	add_size_or_throw(cursor, 8u, "PixelData sequence delimiter exceeds size_t range");
+	result.expected_payload_length = cursor;
+	return result;
 }
 
 [[nodiscard]] bool file_uses_little_endian(const DicomFile& file) noexcept {
@@ -1871,6 +1975,89 @@ std::optional<pixel::PixelLayout> DicomFile::native_pixel_layout() const {
 	}
 	return source_layout;
 }
+
+namespace pixel {
+
+PixelPayloadDecodeDescriptor pixel_payload_decode_descriptor(const DicomFile& file) {
+	const auto transfer_syntax = file.transfer_syntax_uid();
+	if (!transfer_syntax.valid() ||
+	    transfer_syntax.uid_type() != UidType::TransferSyntax) {
+		diag::error_and_throw(
+		    "DicomFile::pixel_payload_decode_descriptor file={} reason=invalid transfer syntax",
+		    file.path());
+	}
+
+	const auto source_layout = support_detail::compute_decode_source_layout(file);
+	if (source_layout.empty()) {
+		diag::error_and_throw(
+		    "DicomFile::pixel_payload_decode_descriptor file={} reason=invalid pixel metadata",
+		    file.path());
+	}
+	if (source_layout.data_type == DataType::f32 ||
+	    source_layout.data_type == DataType::f64) {
+		diag::error_and_throw(
+		    "DicomFile::pixel_payload_decode_descriptor file={} reason=FloatPixelData and DoubleFloatPixelData are not supported",
+		    file.path());
+	}
+
+	file.ensure_loaded("PixelData"_tag);
+	const auto& pixel_data = file.dataset()["PixelData"_tag];
+	if (!pixel_data || pixel_data.is_missing()) {
+		diag::error_and_throw(
+		    "DicomFile::pixel_payload_decode_descriptor file={} reason=PixelData is missing",
+		    file.path());
+	}
+	if (dicom::detail::is_detached_pixel_payload_marker(pixel_data)) {
+		diag::error_and_throw(
+		    "DicomFile::pixel_payload_decode_descriptor file={} reason=PixelData payload is detached",
+		    file.path());
+	}
+	if (transfer_syntax.is_encapsulated() != pixel_data.vr().is_pixel_sequence()) {
+		diag::error_and_throw(
+		    "DicomFile::pixel_payload_decode_descriptor file={} reason=PixelData VR does not match transfer syntax encapsulation",
+		    file.path());
+	}
+
+	PixelPayloadDecodeDescriptor desc{};
+	desc.transfer_syntax_uid = transfer_syntax.value();
+	desc.photometric = photometric_to_string(source_layout.photometric);
+	desc.rows = source_layout.rows;
+	desc.cols = source_layout.cols;
+	desc.frames = source_layout.frames;
+	desc.samples_per_pixel = source_layout.samples_per_pixel;
+	desc.bits_allocated = static_cast<std::uint16_t>(source_layout.bits_allocated());
+	desc.bits_stored = source_layout.bits_stored;
+	desc.pixel_representation =
+	    static_cast<std::uint16_t>(source_layout.pixel_representation());
+	desc.planar_configuration =
+	    source_layout.planar == Planar::planar ? std::uint16_t{1} : std::uint16_t{0};
+	desc.source_name = "<pixel-payload>";
+
+	if (pixel_data.vr().is_pixel_sequence()) {
+		const auto* pixel_sequence = pixel_data.as_pixel_sequence();
+		if (!pixel_sequence) {
+			diag::error_and_throw(
+			    "DicomFile::pixel_payload_decode_descriptor file={} reason=PixelData sequence is missing",
+			    file.path());
+		}
+		auto fragments =
+		    build_split_pixel_payload_frame_fragments(file, *pixel_sequence);
+		desc.expected_payload_length = fragments.expected_payload_length;
+		desc.frame_fragments = std::move(fragments.text);
+		return desc;
+	}
+
+	if (!pixel_data.vr().is_binary()) {
+		diag::error_and_throw(
+		    "DicomFile::pixel_payload_decode_descriptor file={} reason=PixelData must be native binary or encapsulated PX",
+		    file.path());
+	}
+	desc.expected_payload_length =
+	    write_detail::padded_length(pixel_data.value_span().size());
+	return desc;
+}
+
+} // namespace pixel
 
 std::optional<pixel::ModalityLut> DicomFile::modality_lut() const {
 	return modality_lut(std::size_t{0});

@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <exception>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -468,6 +469,36 @@ int main() {
 		if (roundtrip->pixel_data(0) != pixel_payload) {
 			fail("native split write roundtrip pixel decode mismatch");
 		}
+
+		const auto desc = source->pixel_payload_decode_descriptor();
+		if (desc.expected_payload_length != written.pixel_payload_bytes.size() ||
+		    !desc.frame_fragments.empty()) {
+			fail("native payload descriptor metadata mismatch");
+		}
+		dicom::pixel::PixelPayloadDecoder decoder(desc,
+		    std::span<const std::uint8_t>(
+		        written.pixel_payload_bytes.data(), written.pixel_payload_bytes.size()));
+		const auto plan = decoder.create_decode_plan();
+		if (decoder.pixel_buffer(0, plan).bytes != pixel_payload) {
+			fail("native payload-only decoder mismatch");
+		}
+		std::optional<dicom::pixel::PixelPayloadDecoder> transient_decoder;
+		{
+			std::string ts(desc.transfer_syntax_uid);
+			std::string photometric(desc.photometric);
+			std::string source_name("transient-native-payload");
+			auto transient_desc = desc;
+			transient_desc.transfer_syntax_uid = ts;
+			transient_desc.photometric = photometric;
+			transient_desc.source_name = source_name;
+			transient_decoder.emplace(transient_desc,
+			    std::span<const std::uint8_t>(
+			        written.pixel_payload_bytes.data(), written.pixel_payload_bytes.size()));
+		}
+		const auto transient_plan = transient_decoder->create_decode_plan();
+		if (transient_decoder->pixel_buffer(0, transient_plan).bytes != pixel_payload) {
+			fail("payload decoder should not borrow descriptor strings after construction");
+		}
 	}
 
 	{
@@ -508,6 +539,17 @@ int main() {
 		    big_endian_split.pixel_payload_bytes.size());
 		if (big_endian_roundtrip->pixel_data(0) != pixel_payload) {
 			fail("Big Endian native split write roundtrip pixel mismatch");
+		}
+		const auto big_endian_desc =
+		    big_endian_roundtrip->pixel_payload_decode_descriptor();
+		dicom::pixel::PixelPayloadDecoder big_endian_decoder(
+		    big_endian_desc,
+		    std::span<const std::uint8_t>(
+		        big_endian_split.pixel_payload_bytes.data(),
+		        big_endian_split.pixel_payload_bytes.size()));
+		const auto big_endian_plan = big_endian_decoder.create_decode_plan();
+		if (big_endian_decoder.pixel_buffer(0, big_endian_plan).bytes != pixel_payload) {
+			fail("Big Endian native payload-only decoder mismatch");
 		}
 		const auto rle_split =
 		    native_source.write_with_transfer_syntax_split_pixel_payload("RLELossless"_uid);
@@ -572,6 +614,55 @@ int main() {
 		    roundtrip->pixel_data(0) != expected_frame) {
 			fail("encapsulated split write roundtrip pixel mismatch");
 		}
+
+		const auto desc = source->pixel_payload_decode_descriptor();
+		if (desc.expected_payload_length != written.pixel_payload_bytes.size() ||
+		    desc.frame_fragments.empty()) {
+			fail("encapsulated payload descriptor metadata mismatch");
+		}
+		dicom::pixel::PixelPayloadDecoder decoder(desc,
+		    std::span<const std::uint8_t>(
+		        written.pixel_payload_bytes.data(), written.pixel_payload_bytes.size()));
+		const auto plan = decoder.create_decode_plan();
+		if (decoder.pixel_buffer(0, plan).bytes != expected_frame) {
+			fail("encapsulated payload-only decoder mismatch");
+		}
+
+		auto missing_fragments = desc;
+		missing_fragments.frame_fragments.clear();
+		expect_throw("payload decoder missing frame_fragments",
+		    [&]() {
+			    (void)dicom::pixel::PixelPayloadDecoder(
+			        missing_fragments,
+			        std::span<const std::uint8_t>(
+			            written.pixel_payload_bytes.data(),
+			            written.pixel_payload_bytes.size()));
+		    },
+		    "frame_fragments");
+
+		auto malformed_fragments = desc;
+		malformed_fragments.frame_fragments = "not-a-fragment";
+		expect_throw("payload decoder malformed frame_fragments",
+		    [&]() {
+			    (void)dicom::pixel::PixelPayloadDecoder(
+			        malformed_fragments,
+			        std::span<const std::uint8_t>(
+			            written.pixel_payload_bytes.data(),
+			            written.pixel_payload_bytes.size()));
+		    },
+		    "offset:length");
+
+		auto out_of_bounds_fragments = desc;
+		out_of_bounds_fragments.frame_fragments = "999999:1";
+		expect_throw("payload decoder out-of-bounds frame_fragments",
+		    [&]() {
+			    (void)dicom::pixel::PixelPayloadDecoder(
+			        out_of_bounds_fragments,
+			        std::span<const std::uint8_t>(
+			            written.pixel_payload_bytes.data(),
+			            written.pixel_payload_bytes.size()));
+		    },
+		    "outside pixel payload");
 	}
 
 	{

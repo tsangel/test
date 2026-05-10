@@ -19,6 +19,11 @@ void dispatch_decode_prepared_frame(const DicomFile& df,
     std::size_t frame_index, std::span<const std::uint8_t> prepared_source,
     std::span<std::uint8_t> dst, const DecodePlan& plan,
     pixel_decoder_info* decode_info = nullptr);
+void dispatch_decode_prepared_frame(uid::WellKnown transfer_syntax,
+    const PixelLayout& source_layout,
+    std::size_t frame_index, std::span<const std::uint8_t> prepared_source,
+    std::span<std::uint8_t> dst, const DecodePlan& plan,
+    pixel_decoder_info* decode_info = nullptr);
 
 void dispatch_decode_all_frames(
     const DicomFile& df, std::span<std::uint8_t> dst, const DecodePlan& plan,

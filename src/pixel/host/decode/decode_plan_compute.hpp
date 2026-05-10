@@ -68,7 +68,7 @@ inline void validate_explicit_decode_output_layout_or_throw(
 }
 
 [[nodiscard]] inline PixelLayout compute_decode_output_layout_or_throw(
-    const DicomFile& file, const PixelLayout& source_layout,
+    std::string_view source_name, const PixelLayout& source_layout,
     const DecodeOptions& effective_opt) {
 	// Validate caller-controlled layout policy first so plan creation fails early
 	// before any backend-specific work is scheduled.
@@ -76,7 +76,7 @@ inline void validate_explicit_decode_output_layout_or_throw(
 	    !is_valid_alignment(effective_opt.alignment)) {
 		diag::error_and_throw(
 		    "DicomFile::calc_decode_output_layout file={} reason=alignment must be 0/1 or power-of-two <= 4096",
-		    file.path());
+		    source_name);
 	}
 
 	constexpr int kMaxRowsOrColumns = 65535;
@@ -86,30 +86,30 @@ inline void validate_explicit_decode_output_layout_or_throw(
 	if (source_layout.empty()) {
 		diag::error_and_throw(
 		    "DicomFile::calc_decode_output_layout file={} reason=invalid Rows/Columns/SamplesPerPixel",
-		    file.path());
+		    source_name);
 	}
 	if (source_layout.rows > static_cast<std::uint32_t>(kMaxRowsOrColumns) ||
 	    source_layout.cols > static_cast<std::uint32_t>(kMaxRowsOrColumns)) {
 		diag::error_and_throw(
 		    "DicomFile::calc_decode_output_layout file={} reason=Rows/Columns must be <= 65535",
-		    file.path());
+		    source_name);
 	}
 	if (source_layout.samples_per_pixel > static_cast<std::uint16_t>(kMaxSamplesPerPixel)) {
 		diag::error_and_throw(
 		    "DicomFile::calc_decode_output_layout file={} reason=SamplesPerPixel must be <= 4",
-		    file.path());
+		    source_name);
 	}
 
 	if (source_layout.frames == 0) {
 		diag::error_and_throw(
 		    "DicomFile::calc_decode_output_layout file={} reason=invalid NumberOfFrames",
-		    file.path());
+		    source_name);
 	}
 
 	if (bytes_per_sample_of(source_layout.data_type) == 0) {
 		diag::error_and_throw(
 		    "DicomFile::calc_decode_output_layout file={} reason=unsupported or unknown source layout dtype",
-		    file.path());
+		    source_name);
 	}
 
 	// Start from semantic pixel metadata, then normalize it into a packed/aligned
@@ -162,15 +162,22 @@ inline void validate_explicit_decode_output_layout_or_throw(
 	} catch (const std::invalid_argument& e) {
 		diag::error_and_throw(
 		    "DicomFile::calc_decode_output_layout file={} reason={}",
-		    file.path(), e.what());
+		    source_name, e.what());
 	} catch (const std::overflow_error& e) {
 		diag::error_and_throw(
 		    "DicomFile::calc_decode_output_layout file={} reason={}",
-		    file.path(), e.what());
+		    source_name, e.what());
 	}
 	diag::error_and_throw(
 	    "DicomFile::calc_decode_output_layout file={} reason=unexpected layout computation failure",
-	    file.path());
+	    source_name);
+}
+
+[[nodiscard]] inline PixelLayout compute_decode_output_layout_or_throw(
+    const DicomFile& file, const PixelLayout& source_layout,
+    const DecodeOptions& effective_opt) {
+	return compute_decode_output_layout_or_throw(
+	    file.path(), source_layout, effective_opt);
 }
 
 } // namespace dicom::pixel::detail

@@ -774,38 +774,46 @@ void dispatch_decode_frame(const DicomFile& df, std::size_t frame_index,
 void dispatch_decode_prepared_frame(const DicomFile& df,
     const PixelLayout& source_layout,
     std::size_t frame_index, std::span<const std::uint8_t> prepared_source,
-	std::span<std::uint8_t> dst, const DecodePlan& plan,
+    std::span<std::uint8_t> dst, const DecodePlan& plan,
     pixel_decoder_info* decode_info) {
 	try {
-		const auto request = build_decode_dispatch_request_view(
-		    df.transfer_syntax_uid(), source_layout, plan);
-		// This entry point is used when another layer already materialized one frame source.
-		validate_decode_frame_request_or_throw(request, frame_index);
-
-#if defined(DICOMSDL_PIXEL_RUNTIME_ENABLED)
-		initialize_decoder_info(decode_info);
-		// Prepared-frame dispatch skips the raw-copy shortcut because the caller already
-		// chose the source representation; builtin uncompressed decode is still worth trying.
-		if (request.transfer_syntax.is_uncompressed() &&
-		    try_decode_frame_with_builtin_uncompressed_core_source(
-		        request, prepared_source, frame_index, dst, decode_info)) {
-			return;
-		}
-		const auto settings = resolve_decode_frame_thread_settings(request);
-		if (try_decode_frame_with_runtime_source(
-		        request, prepared_source, frame_index, dst, settings.codec_threads,
-		        decode_info)) {
-			return;
-		}
-#endif
-
-		throw_frame_codec_stage_exception(frame_index,
-		    CodecStatusCode::unsupported, "plugin_lookup",
-		    "runtime registry is not available");
+		dispatch_decode_prepared_frame(df.transfer_syntax_uid(), source_layout,
+		    frame_index, prepared_source, dst, plan, decode_info);
 	} catch (const diag::DicomException& ex) {
 		rethrow_codec_exception_at_boundary(
 		    "pixel::decode_frame_into", df, ex);
 	}
+}
+
+void dispatch_decode_prepared_frame(uid::WellKnown transfer_syntax,
+    const PixelLayout& source_layout,
+    std::size_t frame_index, std::span<const std::uint8_t> prepared_source,
+    std::span<std::uint8_t> dst, const DecodePlan& plan,
+    pixel_decoder_info* decode_info) {
+	const auto request = build_decode_dispatch_request_view(
+	    transfer_syntax, source_layout, plan);
+	// This entry point is used when another layer already materialized one frame source.
+	validate_decode_frame_request_or_throw(request, frame_index);
+#if defined(DICOMSDL_PIXEL_RUNTIME_ENABLED)
+	initialize_decoder_info(decode_info);
+	// Prepared-frame dispatch skips the raw-copy shortcut because the caller already
+	// chose the source representation; builtin uncompressed decode is still worth trying.
+	if (request.transfer_syntax.is_uncompressed() &&
+	    try_decode_frame_with_builtin_uncompressed_core_source(
+	        request, prepared_source, frame_index, dst, decode_info)) {
+		return;
+	}
+	const auto settings = resolve_decode_frame_thread_settings(request);
+	if (try_decode_frame_with_runtime_source(
+	        request, prepared_source, frame_index, dst, settings.codec_threads,
+	        decode_info)) {
+		return;
+	}
+#endif
+
+	throw_frame_codec_stage_exception(frame_index,
+	    CodecStatusCode::unsupported, "plugin_lookup",
+	    "runtime registry is not available");
 }
 
 void dispatch_decode_all_frames(
