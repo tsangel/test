@@ -38,12 +38,10 @@ struct yyjson_val;
 
 namespace dicom {
 
-inline constexpr std::array<std::uint8_t, 4> kPixelPayloadPlaceholderMagic{
-	static_cast<std::uint8_t>('D'),
-	static_cast<std::uint8_t>('X'),
-	static_cast<std::uint8_t>('P'),
-	static_cast<std::uint8_t>('1'),
+inline constexpr std::array<std::uint8_t, 8> kPixelDataPayloadPlaceholderMagic{
+	'P', 'I', 'X', 'D', 'A', 'T', 'A', '1'
 };
+inline constexpr std::size_t kPixelDataPayloadPlaceholderMetadataSize = 22;
 
 class DataSet;
 class DataElement;
@@ -1200,6 +1198,10 @@ public:
 	DataSetSelection();
 	DataSetSelection(std::initializer_list<DataSetSelectionNode> init);
 	explicit DataSetSelection(std::vector<DataSetSelectionNode> nodes);
+	[[nodiscard]] DataSetSelection extended(
+	    std::initializer_list<DataSetSelectionNode> extra) const;
+	[[nodiscard]] DataSetSelection extended(
+	    std::vector<DataSetSelectionNode> extra) const;
 
 	[[nodiscard]] bool empty() const noexcept { return nodes_.empty(); }
 	[[nodiscard]] std::span<const DataSetSelectionNode> nodes() const noexcept {
@@ -1300,11 +1302,6 @@ struct WriteOptions {
 	bool write_file_meta{true};
 	// When false, write_* rebuilds (0002,eeee) before serialization.
 	bool keep_existing_meta{true};
-};
-
-struct SplitPixelPayloadWriteResult {
-	std::vector<std::uint8_t> dicom_bytes{};
-	std::vector<std::uint8_t> pixel_payload_bytes{};
 };
 
 enum class CharsetEncodeErrorPolicy : std::uint8_t {
@@ -2068,6 +2065,72 @@ struct DecodeInfo {
 	std::optional<Planar> planar{};
 	std::uint16_t bits_per_sample{0};
 };
+
+[[nodiscard]] std::optional<Photometric> parse_photometric(
+    std::string_view text) noexcept;
+[[nodiscard]] std::string_view photometric_to_string(
+    Photometric photometric) noexcept;
+
+struct PixelPayloadDecodeDescriptor {
+	std::string_view transfer_syntax_uid{};
+	std::string_view photometric{};
+
+	std::uint32_t rows{0};
+	std::uint32_t cols{0};
+	std::uint32_t frames{1};
+	std::uint16_t samples_per_pixel{1};
+	std::uint16_t bits_allocated{0};
+	std::uint16_t bits_stored{0};
+	std::uint16_t pixel_representation{0};
+	std::uint16_t planar_configuration{0};
+
+	std::size_t expected_payload_length{0};
+	std::string frame_fragments{};
+	std::string_view source_name{"<pixel-payload>"};
+};
+
+class PixelPayloadDecoder {
+public:
+	PixelPayloadDecoder(const PixelPayloadDecodeDescriptor& desc,
+	    std::span<const std::uint8_t> pixel_payload);
+
+	[[nodiscard]] DecodePlan create_decode_plan(
+	    const DecodeOptions& opt = {}) const;
+	void decode_into(std::size_t frame_index, std::span<std::uint8_t> dst,
+	    const DecodePlan& plan) const;
+	[[nodiscard]] PixelBuffer pixel_buffer(
+	    std::size_t frame_index, const DecodePlan& plan) const;
+
+private:
+	struct Fragment {
+		std::size_t offset{0};
+		std::size_t length{0};
+	};
+
+	uid::WellKnown transfer_syntax_uid_{};
+	PixelLayout source_layout_{};
+	std::span<const std::uint8_t> pixel_payload_{};
+	std::vector<std::vector<Fragment>> frame_fragments_{};
+	std::string source_name_{"<pixel-payload>"};
+};
+
+[[nodiscard]] PixelPayloadDecodeDescriptor pixel_payload_decode_descriptor(
+    const DicomFile& file);
+
+} // namespace pixel
+
+struct SplitPixelDataPayloadResult {
+	std::vector<std::uint8_t> main_bytes{};
+	std::vector<std::uint8_t> pixel_payload{};
+	pixel::PixelPayloadDecodeDescriptor decode_descriptor{};
+	std::string error_message{};
+
+	[[nodiscard]] bool ok() const noexcept {
+		return error_message.empty();
+	}
+};
+
+namespace pixel {
 
 using ExecutionProgressCallback =
     void (*)(std::size_t completed, std::size_t total, void* user_data) noexcept;
@@ -3130,8 +3193,6 @@ public:
 	void rebuild_file_meta();
 	void write_to_stream(std::ostream& os, const WriteOptions& options = {});
 	[[nodiscard]] std::vector<std::uint8_t> write_bytes(const WriteOptions& options = {});
-	[[nodiscard]] SplitPixelPayloadWriteResult write_bytes_split_pixel_payload(
-	    const WriteOptions& options = {});
 	void write_file(const std::filesystem::path& path, const WriteOptions& options = {});
 	/// Serialize the root dataset using the DICOM JSON Model.
 	[[nodiscard]] JsonWriteResult write_json(const JsonWriteOptions& options = {}) const;
@@ -3156,14 +3217,13 @@ public:
 	void write_with_transfer_syntax(std::ostream& os, uid::WellKnown transfer_syntax,
 	    std::span<const pixel::CodecOptionTextKv> codec_opt,
 	    const WriteOptions& options = {});
-	[[nodiscard]] SplitPixelPayloadWriteResult
-	write_with_transfer_syntax_split_pixel_payload(
+	[[nodiscard]] std::vector<std::uint8_t> write_bytes_with_transfer_syntax(
 	    uid::WellKnown transfer_syntax, const WriteOptions& options = {});
-	[[nodiscard]] SplitPixelPayloadWriteResult
-	write_with_transfer_syntax_split_pixel_payload(uid::WellKnown transfer_syntax,
-	    const pixel::EncoderContext& encoder_ctx, const WriteOptions& options = {});
-	[[nodiscard]] SplitPixelPayloadWriteResult
-	write_with_transfer_syntax_split_pixel_payload(uid::WellKnown transfer_syntax,
+	[[nodiscard]] std::vector<std::uint8_t> write_bytes_with_transfer_syntax(
+	    uid::WellKnown transfer_syntax, const pixel::EncoderContext& encoder_ctx,
+	    const WriteOptions& options = {});
+	[[nodiscard]] std::vector<std::uint8_t> write_bytes_with_transfer_syntax(
+	    uid::WellKnown transfer_syntax,
 	    std::span<const pixel::CodecOptionTextKv> codec_opt,
 	    const WriteOptions& options = {});
 	/// Convenience overload that writes to a regular file path.
@@ -3298,18 +3358,18 @@ public:
 	void attach_to_memory(const std::string& name, const std::uint8_t* data,
 	    std::size_t size, bool copy = true);
 	void attach_to_memory(std::string name, std::vector<std::uint8_t>&& buffer);
-	void attach_to_memory_with_pixel_payload(const std::uint8_t* data, std::size_t size,
+	void attach_to_memory_with_pixeldata_payload(const std::uint8_t* data, std::size_t size,
 	    const std::uint8_t* pixel_payload, std::size_t pixel_payload_size,
 	    bool copy = true);
-	void attach_to_memory_with_pixel_payload(const std::string& name,
+	void attach_to_memory_with_pixeldata_payload(const std::string& name,
 	    const std::uint8_t* data, std::size_t size,
 	    const std::uint8_t* pixel_payload, std::size_t pixel_payload_size,
 	    bool copy = true);
-	void attach_to_memory_with_pixel_payload(std::string name,
+	void attach_to_memory_with_pixeldata_payload(std::string name,
 	    std::vector<std::uint8_t>&& buffer,
 	    const std::uint8_t* pixel_payload, std::size_t pixel_payload_size);
-	void detach_pixel_payload(bool keep_dump = false);
-	[[nodiscard]] bool has_attached_pixel_payload() const;
+	void detach_pixeldata_payload(bool keep_dump = false);
+	[[nodiscard]] bool has_attached_pixeldata_payload() const;
 	void read_attached_stream(const ReadOptions& options = {});
 	[[nodiscard]] bool has_error() const noexcept { return has_error_; }
 	[[nodiscard]] const std::string& error_message() const noexcept { return error_message_; }
@@ -3366,6 +3426,10 @@ public:
 	[[nodiscard]] pixel::DecodePlan create_decode_plan(
 	    const pixel::DecodeOptions& opt = {}) const {
 		return pixel::create_decode_plan(*this, opt);
+	}
+	[[nodiscard]] pixel::PixelPayloadDecodeDescriptor
+	pixel_payload_decode_descriptor() const {
+		return pixel::pixel_payload_decode_descriptor(*this);
 	}
 	[[nodiscard]] std::optional<pixel::VoiLut> voi_lut() const;
 	[[nodiscard]] std::optional<pixel::VoiLut> voi_lut(std::size_t frame_index) const;
@@ -4125,24 +4189,33 @@ std::unique_ptr<DicomFile> read_bytes(const std::string& name, const std::uint8_
 /// Read from an owning buffer moved into the dataset.
 std::unique_ptr<DicomFile> read_bytes(std::string name, std::vector<std::uint8_t>&& buffer,
     ReadOptions options = {});
-/// Read a main P10 buffer whose PixelData value is a DXP1 placeholder and attach
+/// Read a main P10 buffer whose PixelData value is a PIXDATA1 placeholder and attach
 /// caller-owned PixelData value bytes without copying.
-std::unique_ptr<DicomFile> read_bytes_with_pixel_payload(const std::string& name,
+std::unique_ptr<DicomFile> read_bytes_with_pixeldata_payload(const std::string& name,
     const std::uint8_t* data, std::size_t size,
     const std::uint8_t* pixel_payload, std::size_t pixel_payload_size,
     ReadOptions options = {});
-/// Read a main P10 buffer whose PixelData value is a DXP1 placeholder and attach
-/// caller-owned PixelData value bytes without copying.
-std::unique_ptr<DicomFile> read_bytes_with_pixel_payload(
-    const std::uint8_t* data, std::size_t size,
-    const std::uint8_t* pixel_payload, std::size_t pixel_payload_size,
-    ReadOptions options = {});
-/// Read an owning main P10 buffer whose PixelData value is a DXP1 placeholder and
-/// attach caller-owned PixelData value bytes without copying.
-std::unique_ptr<DicomFile> read_bytes_with_pixel_payload(std::string name,
+	/// Read an owning main P10 buffer whose PixelData value is a PIXDATA1 placeholder and
+	/// attach caller-owned PixelData value bytes without copying.
+	std::unique_ptr<DicomFile> read_bytes_with_pixeldata_payload(std::string name,
     std::vector<std::uint8_t>&& buffer,
     const std::uint8_t* pixel_payload, std::size_t pixel_payload_size,
     ReadOptions options = {});
+/// Split a Part 10 file without reserializing. PixelData is returned as value
+/// bytes only; main_bytes contains a PixelData placeholder with original header
+/// metadata for join_pixeldata_payload().
+[[nodiscard]] SplitPixelDataPayloadResult split_pixeldata_payload(
+    const DataSetSelection& selection, const std::filesystem::path& path);
+/// Split a named Part 10 memory buffer without reserializing. PixelData is
+/// returned as value bytes only.
+[[nodiscard]] SplitPixelDataPayloadResult split_pixeldata_payload(
+    const DataSetSelection& selection, std::string_view name,
+    std::span<const std::uint8_t> bytes);
+/// Reconstruct a Part 10 byte stream by replacing the PixelData placeholder in
+/// main_bytes with a PixelData element built from value-only pixel_payload bytes.
+[[nodiscard]] std::vector<std::uint8_t> join_pixeldata_payload(
+    std::span<const std::uint8_t> main_bytes,
+    std::span<const std::uint8_t> pixel_payload);
 /// Read a DICOM JSON dataset from a raw memory buffer.
 /// Current implementation is memory-based and does not support ensure_loaded()-style partial reads.
 [[nodiscard]] JsonReadResult read_json(

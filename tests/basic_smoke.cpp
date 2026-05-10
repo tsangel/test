@@ -532,6 +532,13 @@ int main() {
 		    default_selection.nodes()[1].tag != "SpecificCharacterSet"_tag) {
 			fail("default DataSetSelection should canonicalize to the implicit root metadata selection");
 		}
+		auto extended_selection = default_selection.extended({"PatientName"_tag});
+		if (extended_selection.nodes().size() != 3 ||
+		    extended_selection.nodes()[0].tag != "TransferSyntaxUID"_tag ||
+		    extended_selection.nodes()[1].tag != "SpecificCharacterSet"_tag ||
+		    extended_selection.nodes()[2].tag != "PatientName"_tag) {
+			fail("DataSetSelection::extended should preserve canonical metadata and add new nodes");
+		}
 
 		dicom::ReadOptions selected_options;
 		selected_options.load_until = dicom::Tag::from_value(0);

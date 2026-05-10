@@ -1044,6 +1044,12 @@ void DataSet::read_attached_stream(const ReadOptions& options) {
 		    path(), *uid_value);
 	}
 
+	if (options.load_until <= "(0002,FFFF)"_tag) {
+		(void)refresh_effective_charset_cache(nullptr, nullptr);
+		update_root_elements_reserve_hint(element_index_.size());
+		return;
+	}
+
 	if (transfer_syntax_uid() == "DeflatedExplicitVRLittleEndian"_uid ||
 	    transfer_syntax_uid() == "ExplicitVRBigEndian"_uid) {
 		std::size_t dataset_start_offset = stream_->tell();
@@ -1188,7 +1194,7 @@ void DataSet::read_elements_until(Tag load_until, InStream* stream) {
 						    path(), stream->tell(), tag.to_string(), vr.str());
 					}
 						length = endian::load_le<std::uint32_t>(buf4.data());
-						
+
 						// Some non-conforming writers store VR UT with a 2-byte length; salvage it.
 						if (length != 0xffffffff && length > stream->bytes_remaining()) {
 							stream->unread(4);
@@ -1274,7 +1280,7 @@ void DataSet::read_elements_until(Tag load_until, InStream* stream) {
 				// PROBABLY SEQUENCE ELEMENT WITH IMPLICIT VR WITH ...
 				length = stream->bytes_remaining();
 				vr = VR::SQ;
-				
+
 				DataElement& elem = append_parsed_dataelement_nocheck(tag, VR::SQ, offset, length);
 				Sequence *seq = elem.as_sequence();
 				InSubStream subs(stream, length);

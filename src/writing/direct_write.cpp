@@ -1,5 +1,4 @@
 #include "writing/detail/write_metadata.hpp"
-#include "writing/detail/split_pixel_payload_write.hpp"
 #include "writing/transcoded_write.hpp"
 #include "../stream_path_detail.hpp"
 
@@ -215,58 +214,6 @@ std::vector<std::uint8_t> DicomFile::write_bytes(const WriteOptions& options) {
 	return output;
 }
 
-SplitPixelPayloadWriteResult DicomFile::write_bytes_split_pixel_payload(
-    const WriteOptions& options) {
-	SplitPixelPayloadWriteResult result{};
-
-	bool wrote_pixel_data = false;
-	try {
-		if (!options.keep_existing_meta) {
-			rebuild_file_meta_or_throw(*this);
-		}
-
-		const DataSet& dataset = this->dataset();
-		dataset.ensure_loaded(Tag(0xFFFFu, 0xFFFFu));
-		const auto target_transfer_syntax =
-		    write_detail::determine_target_transfer_syntax(*this, dataset, options);
-		const auto write_plan =
-		    write_detail::determine_dataset_write_plan(target_transfer_syntax, dataset);
-		result.dicom_bytes.reserve(
-		    write_detail::split_main_dicom_reserve_hint(dataset, options));
-
-		write_detail::BufferWriter writer(result.dicom_bytes);
-		if (options.include_preamble) {
-			write_detail::write_preamble(writer);
-		}
-		if (options.write_file_meta) {
-			write_detail::write_file_meta_group(writer, dataset);
-		}
-
-		write_detail::write_root_dataset_body_with_pixel_writer(
-		    writer, dataset, write_plan,
-		    [&](const DataElement& element, auto& direct_writer, bool explicit_vr) {
-			    wrote_pixel_data = true;
-			    write_detail::append_split_pixel_payload_value(
-			        result.pixel_payload_bytes, element, write_plan);
-			    write_detail::write_split_pixel_placeholder_element(
-			        element, direct_writer, explicit_vr);
-		    });
-
-		if (!wrote_pixel_data) {
-			write_detail::throw_write_stage_error("write_split_pixel_payload",
-			    "PixelData is missing");
-		}
-		write_detail::finalize_split_pixel_payload_result_or_throw(result);
-		return result;
-	} catch (const diag::DicomException& ex) {
-		if (rebuild_file_meta_exception_has_boundary_prefix(ex.what())) {
-			rethrow_rebuild_file_meta_exception_at_write_boundary_or_throw(*this, ex);
-		}
-		write_detail::rethrow_write_exception_at_boundary_or_throw(
-		    "write_bytes_split_pixel_payload", this->path(), ex);
-	}
-}
-
 void DicomFile::write_file(const std::filesystem::path& path, const WriteOptions& options) {
 	with_output_file_stream(path, "write_file",
 	    [&](std::ostream& os) { this->write_to_stream(os, options); });
@@ -299,28 +246,64 @@ void DicomFile::write_with_transfer_syntax(std::ostream& os,
 	    codec_opt, nullptr, options);
 }
 
-SplitPixelPayloadWriteResult DicomFile::write_with_transfer_syntax_split_pixel_payload(
+std::vector<std::uint8_t> DicomFile::write_bytes_with_transfer_syntax(
     uid::WellKnown transfer_syntax, const WriteOptions& options) {
-	return write_detail::write_with_transfer_syntax_split_pixel_payload(*this,
+	std::vector<std::uint8_t> output;
+	std::size_t reserve_hint = 4096;
+	if (!this->path().empty()) {
+		reserve_hint = std::max(reserve_hint, this->stream().attached_size());
+	}
+	if (options.include_preamble) {
+		reserve_hint += 132;
+	}
+	output.reserve(reserve_hint);
+
+	write_detail::BufferWriter writer(output);
+	write_detail::write_with_transfer_syntax_to_buffer_writer(*this, writer,
 	    transfer_syntax, write_detail::WriteEncoderConfigSource::use_plugin_defaults,
 	    std::span<const pixel::CodecOptionTextKv>{}, nullptr, options);
+	return output;
 }
 
-SplitPixelPayloadWriteResult DicomFile::write_with_transfer_syntax_split_pixel_payload(
+std::vector<std::uint8_t> DicomFile::write_bytes_with_transfer_syntax(
     uid::WellKnown transfer_syntax, const pixel::EncoderContext& encoder_ctx,
     const WriteOptions& options) {
-	return write_detail::write_with_transfer_syntax_split_pixel_payload(*this,
+	std::vector<std::uint8_t> output;
+	std::size_t reserve_hint = 4096;
+	if (!this->path().empty()) {
+		reserve_hint = std::max(reserve_hint, this->stream().attached_size());
+	}
+	if (options.include_preamble) {
+		reserve_hint += 132;
+	}
+	output.reserve(reserve_hint);
+
+	write_detail::BufferWriter writer(output);
+	write_detail::write_with_transfer_syntax_to_buffer_writer(*this, writer,
 	    transfer_syntax, write_detail::WriteEncoderConfigSource::use_encoder_context,
 	    std::span<const pixel::CodecOptionTextKv>{}, &encoder_ctx, options);
+	return output;
 }
 
-SplitPixelPayloadWriteResult DicomFile::write_with_transfer_syntax_split_pixel_payload(
+std::vector<std::uint8_t> DicomFile::write_bytes_with_transfer_syntax(
     uid::WellKnown transfer_syntax,
     std::span<const pixel::CodecOptionTextKv> codec_opt,
     const WriteOptions& options) {
-	return write_detail::write_with_transfer_syntax_split_pixel_payload(*this,
+	std::vector<std::uint8_t> output;
+	std::size_t reserve_hint = 4096;
+	if (!this->path().empty()) {
+		reserve_hint = std::max(reserve_hint, this->stream().attached_size());
+	}
+	if (options.include_preamble) {
+		reserve_hint += 132;
+	}
+	output.reserve(reserve_hint);
+
+	write_detail::BufferWriter writer(output);
+	write_detail::write_with_transfer_syntax_to_buffer_writer(*this, writer,
 	    transfer_syntax, write_detail::WriteEncoderConfigSource::use_explicit_options,
 	    codec_opt, nullptr, options);
+	return output;
 }
 
 void DicomFile::write_with_transfer_syntax(const std::filesystem::path& path,

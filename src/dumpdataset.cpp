@@ -466,13 +466,19 @@ namespace detail {
 
 bool is_detached_pixel_payload_marker(const DataElement& element) {
 	if (element.tag() != "PixelData"_tag ||
-	    element.storage_kind() != DataElement::StorageKind::owned_bytes) {
+	    element.storage_kind() == DataElement::StorageKind::pixel_sequence ||
+	    element.storage_kind() == DataElement::StorageKind::sequence ||
+	    element.storage_kind() == DataElement::StorageKind::none) {
 		return false;
 	}
 	const auto span = element.value_span();
-	if (span.size() == kPixelPayloadPlaceholderMagic.size()) {
-		return std::equal(kPixelPayloadPlaceholderMagic.begin(),
-		    kPixelPayloadPlaceholderMagic.end(), span.begin());
+	if (span.size() == kPixelDataPayloadPlaceholderMagic.size()) {
+		return std::equal(kPixelDataPayloadPlaceholderMagic.begin(),
+		    kPixelDataPayloadPlaceholderMagic.end(), span.begin());
+	}
+	if (span.size() == kPixelDataPayloadPlaceholderMetadataSize) {
+		return std::equal(kPixelDataPayloadPlaceholderMagic.begin(),
+		    kPixelDataPayloadPlaceholderMagic.end(), span.begin());
 	}
 	return !detached_pixel_payload_marker_text(element).empty();
 }
@@ -484,17 +490,17 @@ std::string_view detached_pixel_payload_marker_text(const DataElement& element) 
 	}
 
 	const auto span = element.value_span();
-	if (span.size() <= kPixelPayloadPlaceholderMagic.size()) {
+	if (span.size() <= kPixelDataPayloadPlaceholderMagic.size()) {
 		return {};
 	}
-	if (!std::equal(kPixelPayloadPlaceholderMagic.begin(),
-	        kPixelPayloadPlaceholderMagic.end(), span.begin())) {
+	if (!std::equal(kPixelDataPayloadPlaceholderMagic.begin(),
+	        kPixelDataPayloadPlaceholderMagic.end(), span.begin())) {
 		return {};
 	}
 
 	const auto* text_begin = reinterpret_cast<const char*>(
-	    span.data() + kPixelPayloadPlaceholderMagic.size());
-	const auto text_size = span.size() - kPixelPayloadPlaceholderMagic.size();
+	    span.data() + kPixelDataPayloadPlaceholderMagic.size());
+	const auto text_size = span.size() - kPixelDataPayloadPlaceholderMagic.size();
 	const std::string_view text{text_begin, text_size};
 	if (!starts_with(text, kDetachedPixelDataDumpPrefix)) {
 		return {};
