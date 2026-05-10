@@ -178,6 +178,107 @@ pixel_payload.shrink_to_fit();
 In C++, the caller owns both vectors. Do not release or reallocate the payload
 vector while the `DicomFile` still has an attached payload.
 
+## Decode A Payload Without Reattaching A DicomFile
+
+Some storage layers already keep the small decode metadata in an index record
+such as TSV. In that case, reconstructing a `DicomFile` or DICOM JSON object
+only to decode one frame can be unnecessary work. `PixelPayloadDecoder` decodes
+directly from the separated PixelData payload and a compact descriptor.
+
+The descriptor can be created from a normal or reattached `DicomFile`:
+
+```python
+source = dicom.read_file("image.dcm")
+main_bytes, pixel_payload = source.write_bytes_split_pixel_payload()
+
+desc = source.pixel_payload_decode_descriptor()
+decoder = dicom.PixelPayloadDecoder(desc, pixel_payload)
+
+plan = decoder.create_decode_plan()
+frame0 = decoder.to_array(frame=0, plan=plan)
+```
+
+The same pattern works after reading split buffers:
+
+```python
+df = dicom.read_bytes_with_pixel_payload(main_bytes, pixel_payload)
+desc = df.pixel_payload_decode_descriptor()
+
+decoder = dicom.PixelPayloadDecoder(desc, pixel_payload)
+out = bytearray(decoder.create_decode_plan().required_bytes(frame=0))
+decoder.decode_into(out, frame=0)
+
+df.detach_pixel_payload()
+```
+
+In Python, `PixelPayloadDecoder` keeps a Python owner reference to the
+`pixel_payload` object. It still uses borrow semantics: mutating, resizing, or
+freeing foreign memory behind the object while decode is running is not safe.
+
+C++ uses strict borrow-only semantics:
+
+```cpp
+auto source = dicom::read_file("image.dcm");
+auto split = source->write_bytes_split_pixel_payload();
+
+auto desc = source->pixel_payload_decode_descriptor();
+dicom::pixel::PixelPayloadDecoder decoder(
+    desc,
+    std::span<const std::uint8_t>(
+        split.pixel_payload_bytes.data(),
+        split.pixel_payload_bytes.size()));
+
+auto plan = decoder.create_decode_plan();
+auto frame0 = decoder.pixel_buffer(0, plan);
+```
+
+The C++ decoder does not copy `pixel_payload`. Keep the backing memory alive
+for the full decoder lifetime and for every in-flight decode call.
+
+### Descriptor Fields
+
+`PixelPayloadDecodeDescriptor` contains only the metadata needed by the pixel
+decode path:
+
+- `transfer_syntax_uid`: transfer syntax UID text, parsed by the decoder
+  constructor.
+- `photometric`: DICOM `PhotometricInterpretation` text, parsed by the decoder
+  constructor.
+- image geometry: `rows`, `cols`, `frames`, `samples_per_pixel`.
+- stored sample metadata: `bits_allocated`, `bits_stored`,
+  `pixel_representation`, `planar_configuration`.
+- `expected_payload_length`: optional payload byte length check. A non-zero
+  value must match the supplied payload size.
+- `frame_fragments`: encapsulated frame/fragment index. Empty for native
+  payloads.
+- `source_name`: diagnostic name used in decode errors.
+
+The descriptor's string views only need to remain valid during
+`PixelPayloadDecoder` construction. The constructor parses `transfer_syntax_uid`,
+parses `photometric`, and parses `frame_fragments` into internal state.
+
+### Fragment Format
+
+For encapsulated transfer syntaxes, `frame_fragments` is required. It uses the
+same value-byte meaning as `PixelFragment`:
+
+```text
+offset:length,offset:length;offset:length
+```
+
+- `;` separates frames.
+- `,` separates fragments within one frame.
+- `offset` is relative to the beginning of the `pixel_payload` buffer.
+- `offset` points to fragment value bytes, not to the 8-byte item header.
+- `length` is the stored fragment value length in the payload buffer.
+- Native/uncompressed payloads leave this field empty.
+
+When `pixel_payload_decode_descriptor()` is called on a full source DICOM, it
+computes offsets as they will appear in
+`write_bytes_split_pixel_payload().pixel_payload_bytes`. This makes the
+descriptor directly compatible with the emitted split payload even when the
+source DICOM's original PixelSequence offsets were absolute file offsets.
+
 ## Detach And Metadata Lifetime
 
 After `detach_pixel_payload()`:
@@ -297,6 +398,12 @@ Python:
 - `DicomFile.write_bytes_split_pixel_payload() -> (bytes, bytes)`
 - `DicomFile.write_with_transfer_syntax_split_pixel_payload(...) -> (bytes, bytes)`
 - `dicomsdl.read_bytes_with_pixel_payload(main, payload, name=..., copy=...)`
+- `DicomFile.pixel_payload_decode_descriptor() -> PixelPayloadDecodeDescriptor`
+- `PixelPayloadDecoder(descriptor, pixel_payload)`
+- `PixelPayloadDecoder.create_decode_plan(options=...)`
+- `PixelPayloadDecoder.decode_into(out, frame=0, plan=...)`
+- `PixelPayloadDecoder.to_array(frame=0, plan=...)`
+- `PixelPayloadDecoder.pixel_array(frame=0, plan=...)` alias
 - `DicomFile.detach_pixel_payload(keep_dump=False)`
 - `DicomFile.has_attached_pixel_payload`
 
@@ -306,6 +413,10 @@ C++:
 - `DicomFile::write_with_transfer_syntax_split_pixel_payload(...)`
 - `read_bytes_with_pixel_payload(...)`
 - `DicomFile::attach_to_memory_with_pixel_payload(...)`
+- `DicomFile::pixel_payload_decode_descriptor()`
+- `pixel::pixel_payload_decode_descriptor(const DicomFile&)`
+- `pixel::PixelPayloadDecoder`
+- `pixel::parse_photometric(...)`
+- `pixel::photometric_to_string(...)`
 - `DicomFile::detach_pixel_payload(bool keep_dump = false)`
 - `DicomFile::has_attached_pixel_payload()`
-
