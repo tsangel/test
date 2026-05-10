@@ -28,18 +28,25 @@ DICOM JSON Model ?쎄린/?곌린????댁꽌??[DICOM JSON](../guide/dicom_json.m
 
 ## Selected read
 
-- `DataSetSelection([...])`??canonicalized nested selection tree瑜?留뚮벊?덈떎.
-- `read_file_selected(path, selection, keep_on_error=None)`???붿뒪?ъ뿉???좏깮???쒓렇? sequence ?섏쐞 ??ぉ留??닿릿 `DicomFile`???쎌뒿?덈떎.
-- `read_bytes_selected(data, selection, name="<memory>", keep_on_error=None, copy=True)`??  bytes-like object?먯꽌 媛숈? 諛⑹떇?쇰줈 ?좏깮??遺遺꾨쭔 ?쎌뒿?덈떎.
-- `selection`?먮뒗 ?ъ궗??媛?ν븳 `DataSetSelection`???섍꺼???섍퀬, one-shot ?몄텧??  ?꾪빐 leaf tag? `(tag, children)` pair濡??대（?댁쭊 raw nested Python sequence瑜?  諛붾줈 ?섍꺼???⑸땲??
-- `TransferSyntaxUID`? `SpecificCharacterSet`??selection???놁뼱??root level?먯꽌
-  ??긽 怨좊젮?⑸땲??
-- `ReadOptions.load_until`? selected-read API???곸슜?섏? ?딆뒿?덈떎.
-- private tag? unknown tag??selection ??곸쑝濡??ъ슜?????덉쑝硫? `"70531000"` 媛숈? explicit tag string???ъ슜?????덉뒿?덈떎.
-- `SQ`留??좏깮?대룄 present??sequence? item count???좎??섏?留? child item dataset?
-  鍮꾩뼱 ?덉쓣 ???덉뒿?덈떎.
-- ?좏깮???곸뿭 諛뽰쓽 malformed data??蹂댁씠吏 ?딆쓣 ???덉쑝誘濡? `has_error`?
-  `error_message`??selected read媛 ?ㅼ젣濡?諛⑸Ц???곸뿭留??ㅻ챸?⑸땲??
+- `DataSetSelection([...])`은 canonicalized nested selection tree를 만듭니다.
+- `read_file_selected(path, selection, keep_on_error=None, *, load_until=None)`는
+  디스크에서 선택한 tag와 nested sequence child만 유지하는 `DicomFile`을 읽습니다.
+- `read_bytes_selected(data, selection, name="<memory>", keep_on_error=None, copy=True, *, load_until=None)`는
+  bytes-like object에서 같은 selected 결과를 읽습니다.
+- `continue_read_selected(file, selection, *, load_until=None, keep_on_error=None)`는
+  일부만 읽힌 `DicomFile`의 현재 stream 위치부터 selected read를 in-place로 이어갑니다.
+  기존 element는 유지됩니다.
+- `selection`에는 재사용 가능한 `DataSetSelection`을 넘길 수도 있고, one-shot 호출에서는
+  leaf tag와 `(tag, children)` pair로 이루어진 raw nested Python sequence를 바로 넘길 수도 있습니다.
+- `TransferSyntaxUID`와 `SpecificCharacterSet`은 selection에 없어도 root level에서 항상 고려됩니다.
+- `load_until`은 selected-read frontier의 상한입니다. 실제 root stop tag는
+  `min(마지막 selected root tag, load_until)`입니다.
+- private tag와 unknown tag도 selection 대상으로 사용할 수 있으며,
+  `"70531000"` 같은 explicit tag string도 사용할 수 있습니다.
+- `SQ`만 선택해도 present sequence와 item count는 유지되지만 child item dataset은
+  비어 있을 수 있습니다.
+- 선택 영역 밖의 malformed data는 보이지 않을 수 있으므로 `has_error`와
+  `error_message`는 selected read가 실제로 방문한 영역만 설명합니다.
 
 ## Pixel decode metadata
 

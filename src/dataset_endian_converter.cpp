@@ -433,10 +433,10 @@ private:
 
 } // namespace
 
-std::vector<std::uint8_t> normalize_big_endian_dataset(
+std::vector<std::uint8_t> convert_big_endian_dataset_to_little_endian(
     std::span<const std::uint8_t> full_input, std::size_t dataset_start_offset) {
 	if (dataset_start_offset > full_input.size()) {
-		throw_normalizer_error("dataset_endian_normalize", dataset_start_offset,
+		throw_normalizer_error("dataset_endian_convert", dataset_start_offset,
 		    "invalid big-endian dataset start offset");
 	}
 

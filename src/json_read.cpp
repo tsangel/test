@@ -657,7 +657,7 @@ std::unique_ptr<DicomFile> JsonReadParser::make_file() const {
 	file->attach_to_memory(name_, std::vector<std::uint8_t>{});
 	auto& dataset = file->dataset();
 	dataset.json_read_charset_errors_ = options_.charset_errors;
-	dataset.last_tag_loaded_ = Tag(0xFFFFu, 0xFFFFu);
+	dataset.last_tag_parsed_ = Tag(0xFFFFu, 0xFFFFu);
 	return file;
 }
 
@@ -1172,7 +1172,7 @@ void JsonReadParser::finalize_dataset(DataSet& dataset) const {
 			++dataset.active_element_count_;
 		}
 	}
-	dataset.last_tag_loaded_ = Tag(0xFFFFu, 0xFFFFu);
+	dataset.last_tag_parsed_ = Tag(0xFFFFu, 0xFFFFu);
 }
 
 void JsonReadParser::postprocess_pending_bulk(

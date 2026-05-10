@@ -15,7 +15,7 @@
 
 ## Python surface
 
-- constructors and loaders: `read_file(...)`, `read_bytes(...)`, `read_file_selected(...)`, `read_bytes_selected(...)`
+- constructors and loaders: `read_file(...)`, `read_bytes(...)`, `read_file_selected(...)`, `read_bytes_selected(...)`, `continue_read_selected(...)`
 - root dataset access: `df.dataset`
 - forwarded dataset operations: `add_dataelement`, `ensure_dataelement`, `ensure_loaded`, `remove_dataelement`, `get_dataelement`, `get_value`, `set_value`, `__getitem__`, `__contains__`, iteration
 - file/session state: `path`, `transfer_syntax_uid`, `has_error`, `error_message`
@@ -48,10 +48,14 @@
 - In Python, `has_error` and `error_message` are the file-level state you check after permissive reads that keep partial data.
 - In Python, `to_array(..., with_info=True)` returns `(array, DecodeInfo)` and `decode_into(..., with_info=True)` returns `DecodeInfo` after writing into the supplied output buffer.
 - For `frame=-1` on multi-frame input, Python `with_info=True` reports frame-0/common decode metadata.
-- `read_file_selected(...)`? `read_bytes_selected(...)`???좏깮???쒓렇? sequence ?섏쐞 ??ぉ留??닿릿 `DicomFile`??諛섑솚?⑸땲??
-- selected read??root `TransferSyntaxUID`? `SpecificCharacterSet`瑜???긽 怨좊젮?섍퀬, `ReadOptions.load_until`??臾댁떆?섎ŉ, selection tree?먯꽌 private/unknown tag? `"70531000"` 媛숈? explicit tag string???덉슜?⑸땲??
-- selected read媛 `SQ`留??좏깮?섎뜑?쇰룄, present??sequence? item count???좎??⑸땲??
-- ?좏깮/諛⑸Ц ?곸뿭 諛뽰쓽 malformed data??蹂댁씠吏 ?딆쓣 ???덉쑝誘濡? selected-read `has_error` / `error_message`???ㅼ젣濡?諛⑸Ц???곸뿭留??ㅻ챸?⑸땲??
+- `read_file_selected(...)`와 `read_bytes_selected(...)`는 선택한 tag와 nested sequence child만 유지하는 `DicomFile`을 반환합니다.
+- `continue_read_selected(...)`는 기존 element를 유지하고, 일부만 읽힌 `DicomFile`의 현재 stream 위치부터 selected read를 이어갑니다.
+- selected read는 root `TransferSyntaxUID`와 `SpecificCharacterSet`을 항상 고려하고,
+  `ReadOptions.load_until`을 selection frontier의 상한으로 처리하며, selection tree에서 private/unknown tag와
+  `"70531000"` 같은 explicit tag string을 허용합니다.
+- selected read가 `SQ`만 선택하더라도 present sequence와 item count는 유지됩니다.
+- 선택/방문 영역 밖의 malformed data는 보이지 않을 수 있으므로 selected-read `has_error` /
+  `error_message`는 실제로 방문한 영역만 설명합니다.
 
 ## Related docs
 

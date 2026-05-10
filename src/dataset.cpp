@@ -455,7 +455,72 @@ void DataSet::attach_to_stream(std::string identifier, std::unique_ptr<InStream>
 	if (this == root_dataset_ && root_file_) {
 		root_file_->clear_json_doc_owner();
 	}
-	last_tag_loaded_ = stream_->is_valid() ? Tag::from_value(0) : Tag(0xFFFFu, 0xFFFFu);
+	last_tag_parsed_ = stream_->is_valid() ? Tag::from_value(0) : Tag(0xFFFFu, 0xFFFFu);
+}
+
+// Prepare the root stream so the dataset body can be parsed with the normal
+// little-endian parser. Deflated Explicit VR Little Endian is inflated in-place
+// into a memory-backed stream; Explicit VR Big Endian is converted to Explicit
+// VR Little Endian. Other transfer syntaxes keep their original stream.
+void DataSet::prepare_attached_stream_for_transfer_syntax(const char* context) {
+	if (this != root_dataset_) {
+		diag::error_and_throw("{} reason=called on non-root dataset", context);
+	}
+	if (!stream_ || !stream_->is_valid()) {
+		diag::error_and_throw("{} file={} reason=no valid attached stream",
+		    context, path());
+	}
+
+	const auto transfer_syntax = transfer_syntax_uid();
+	if (transfer_syntax != "DeflatedExplicitVRLittleEndian"_uid &&
+	    transfer_syntax != "ExplicitVRBigEndian"_uid) {
+		return;
+	}
+	if (last_tag_parsed_ >= kDatasetBodyPreparedTag) {
+		explicit_vr_ = true;
+		return;
+	}
+
+	std::size_t dataset_start_offset = stream_->tell();
+	const auto& meta_group_length = get_dataelement("(0002,0000)"_tag);
+	if (auto group_length = meta_group_length.to_long(); group_length && *group_length >= 0) {
+		const auto offset_candidate =
+		    meta_group_length.offset() + meta_group_length.length() +
+		    static_cast<std::size_t>(*group_length);
+		if (offset_candidate <= stream_->end_offset()) {
+			dataset_start_offset = offset_candidate;
+		}
+	}
+
+	const auto full_size = stream_->end_offset();
+	const auto full_span = stream_->get_span(0, full_size);
+	if (dataset_start_offset > full_span.size()) {
+		diag::error_and_throw(
+		    "{} file={} offset=0x{:X} reason=invalid dataset body start offset",
+		    context, path(), dataset_start_offset);
+	}
+
+	std::vector<std::uint8_t> normalized_image;
+	try {
+		if (transfer_syntax == "DeflatedExplicitVRLittleEndian"_uid) {
+			normalized_image = inflate_deflated_dataset(full_span, dataset_start_offset);
+		} else {
+			normalized_image =
+			    convert_big_endian_dataset_to_little_endian(full_span, dataset_start_offset);
+		}
+	} catch (const diag::DicomException& ex) {
+		diag::error_and_throw("{} file={} {}", context, path(), ex.what());
+	}
+
+	const std::string stream_identifier = path();
+	attach_to_memory(stream_identifier, std::move(normalized_image));
+	stream_->seek(dataset_start_offset);
+
+	// Keep the public transfer syntax UID as-is, but parse the normalized body as LE explicit VR.
+	explicit_vr_ = true;
+	if (last_tag_parsed_ < kDatasetBodyPreparedTag) {
+		last_tag_parsed_ = kDatasetBodyPreparedTag;
+	}
 }
 
 const std::string& DataSet::path() const {
@@ -593,13 +658,13 @@ bool DataSet::should_append_to_elements(std::uint32_t tag_value) const noexcept 
 	return element_index_.empty() || element_index_.back().tag.value() < tag_value;
 }
 
-[[noreturn]] void DataSet::throw_beyond_last_loaded_tag(
+[[noreturn]] void DataSet::throw_beyond_last_parsed_tag(
     Tag tag, std::source_location location) const {
 	diag::error_and_throw(
-	    "{} file={} tag={} last_loaded={} reason=tag is beyond the loaded frontier; "
+	    "{} file={} tag={} last_parsed={} reason=tag is beyond the parsed frontier; "
 	    "call ensure_loaded(tag) or fully load the dataset before mutating this tag",
 	    tidy_fn_name(location), path(), tag.to_string(),
-	    last_tag_loaded_.to_string());
+	    last_tag_parsed_.to_string());
 }
 
 DataElement* DataSet::find_dataelement_in_elements(std::uint32_t tag_value) {
@@ -770,8 +835,8 @@ DataSet::TagPathParent DataSet::ensure_tag_path_parent(
 }
 
 DataElement& DataSet::add_dataelement(Tag tag, VR vr) {
-	if (is_beyond_last_loaded_tag(tag)) [[unlikely]] {
-		throw_beyond_last_loaded_tag(tag);
+	if (is_beyond_last_parsed_tag(tag)) [[unlikely]] {
+		throw_beyond_last_parsed_tag(tag);
 	}
 	const auto tag_value = tag.value();
 	// Fast append path for in-order growth: create a fresh zero-length element at the tail.
@@ -873,8 +938,8 @@ const DataElement& DataSet::get_dataelement(Tag tag) const {
 }
 
 DataElement& DataSet::ensure_dataelement(Tag tag, VR vr) {
-	if (is_beyond_last_loaded_tag(tag)) [[unlikely]] {
-		throw_beyond_last_loaded_tag(tag);
+	if (is_beyond_last_parsed_tag(tag)) [[unlikely]] {
+		throw_beyond_last_parsed_tag(tag);
 	}
 	const auto tag_value = tag.value();
 	// Fast append path for in-order growth: create a fresh zero-length element at the tail.
@@ -1011,7 +1076,7 @@ void DataSet::read_attached_stream(const ReadOptions& options) {
 	element_index_.reserve(load_root_elements_reserve_hint());
 	active_element_count_ = 0;
 	effective_charset_ = charset::detail::default_charset_spec();
-	last_tag_loaded_ = Tag::from_value(0);
+	last_tag_parsed_ = Tag::from_value(0);
 	if (root_file_) {
 		root_file_->set_transfer_syntax_state_only("ExplicitVRLittleEndian"_uid);
 	} else {
@@ -1050,49 +1115,8 @@ void DataSet::read_attached_stream(const ReadOptions& options) {
 		return;
 	}
 
-	if (transfer_syntax_uid() == "DeflatedExplicitVRLittleEndian"_uid ||
-	    transfer_syntax_uid() == "ExplicitVRBigEndian"_uid) {
-		std::size_t dataset_start_offset = stream_->tell();
-		const auto& meta_group_length = get_dataelement("(0002,0000)"_tag);
-		if (auto group_length = meta_group_length.to_long(); group_length && *group_length >= 0) {
-			const auto offset_candidate =
-			    meta_group_length.offset() + meta_group_length.length() +
-			    static_cast<std::size_t>(*group_length);
-			if (offset_candidate <= stream_->end_offset()) {
-				dataset_start_offset = offset_candidate;
-			}
-		}
-
-		const auto full_size = stream_->end_offset();
-		const auto full_span = stream_->get_span(0, full_size);
-		if (dataset_start_offset > full_span.size()) {
-			diag::error_and_throw(
-			    fmt::format(
-			        "DataSet::read_attached_stream file={} offset=0x{:X} reason=invalid dataset body start offset",
-			        path(), dataset_start_offset));
-		}
-
-		std::vector<std::uint8_t> normalized_image;
-		try {
-			if (transfer_syntax_uid() == "DeflatedExplicitVRLittleEndian"_uid) {
-				normalized_image =
-				    inflate_deflated_dataset(full_span, dataset_start_offset);
-			} else {
-				normalized_image =
-				    normalize_big_endian_dataset(full_span, dataset_start_offset);
-			}
-		} catch (const diag::DicomException& ex) {
-			diag::error_and_throw(
-			    "DataSet::read_attached_stream file={} {}", path(), ex.what());
-		}
-
-		const std::string stream_identifier = path();
-		attach_to_memory(stream_identifier, std::move(normalized_image));
-		stream_->seek(dataset_start_offset);
-
-		// Keep the public transfer syntax UID as-is, but parse the normalized body as LE explicit VR.
-		explicit_vr_ = true;
-	}
+	// Deflated and Big Endian streams need a prepared LE Explicit VR body before parsing.
+	prepare_attached_stream_for_transfer_syntax("DataSet::read_attached_stream");
 
 	read_elements_until(options.load_until, stream_.get());
 	(void)refresh_effective_charset_cache(nullptr, nullptr);
@@ -1165,10 +1189,10 @@ void DataSet::read_elements_until(Tag load_until, InStream* stream) {
 			break;
 		}
 
-		if (last_tag_loaded_ > tag && this != root_dataset_) {
+		if (last_tag_parsed_ > tag && this != root_dataset_) {
 			diag::error(
 				"DataSet::read_elements_until file={} offset=0x{:X} tag={} last_tag={} reason=tag order decreased (unexpected sequence end?)",
-				path(), stream->tell() - 8, tag.to_string(), last_tag_loaded_.to_string());
+				path(), stream->tell() - 8, tag.to_string(), last_tag_parsed_.to_string());
 			stream->unread(8);
 			break;
 		}
@@ -1294,21 +1318,21 @@ void DataSet::read_elements_until(Tag load_until, InStream* stream) {
 			}
 		}
 
-		last_tag_loaded_ = tag;
+		last_tag_parsed_ = tag;
 
     	if (tag == load_until) break;
 	} // END OF WHILE -----------------------------------------------------------
 
-	last_tag_loaded_ = load_until;
+	last_tag_parsed_ = load_until;
 	if (stream->is_eof())
-		last_tag_loaded_ = "ffff,ffff"_tag;
+		last_tag_parsed_ = "ffff,ffff"_tag;
 }
 
 void DataSet::ensure_loaded(Tag tag) {
 	if (!stream_ || !stream_->is_valid()) {
 		return;
 	}
-	if (tag > last_tag_loaded_) {
+	if (tag > last_tag_parsed_) {
 		read_elements_until(tag, nullptr);
 	}
 }

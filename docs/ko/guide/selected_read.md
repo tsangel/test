@@ -42,6 +42,32 @@ auto file = dicom::read_file_selected("sample.dcm", selection);
 auto& ds = file->dataset();
 ```
 
+## C++ 단계적 selected read
+
+`continue_read_selected(...)`는 이미 attach되어 있거나 일부만 읽힌
+`DicomFile`의 현재 stream 위치부터 selected read를 이어서 수행합니다.
+기존에 읽은 element는 유지하고, 새로 방문한 selected tag만 추가로 materialize합니다.
+
+```cpp
+#include <dicom.h>
+using namespace dicom::literals;
+
+dicom::ReadOptions preflight;
+preflight.load_until = "TransferSyntaxUID"_tag;
+auto file = dicom::read_file("sample.dcm", preflight);
+
+dicom::DataSetSelection selection{
+    "PatientName"_tag,
+    "StudyInstanceUID"_tag,
+    "Rows"_tag,
+    "Columns"_tag,
+};
+
+dicom::ReadOptions selected_options;
+selected_options.load_until = "Columns"_tag;  // selected read의 선택적 상한
+dicom::continue_read_selected(*file, selection, selected_options);
+```
+
 ## Python에서 재사용하는 예
 
 ```python
@@ -60,6 +86,17 @@ selection = dicom.DataSetSelection(
 )
 
 df = dicom.read_file_selected("sample.dcm", selection)
+```
+
+`read_file_selected(...)`와 `read_bytes_selected(...)`도 `load_until=`을
+받습니다. 여기서 `load_until`은 selected-read frontier의 상한입니다.
+
+```python
+df = dicom.read_file_selected(
+    "sample.dcm",
+    selection,
+    load_until=dicom.Tag("Columns"),
+)
 ```
 
 ## Python one-shot 예시
@@ -84,16 +121,40 @@ df = dicom.read_bytes_selected(
 같은 selection을 여러 파일에 반복해서 적용할 계획이라면,
 `DataSetSelection(...)`을 한 번 만들어 재사용하는 편이 좋습니다.
 
+## Python 단계적 selected read
+
+앞선 read가 file meta나 초반 prefix를 이미 읽어 둔 상태에서, 그 상태를
+유지한 채 뒤쪽 selected tag만 추가하고 싶다면 `continue_read_selected(...)`를
+사용합니다.
+
+```python
+import dicomsdl as dicom
+
+df = dicom.read_file("sample.dcm", load_until=dicom.Tag("0002,0010"))
+dicom.continue_read_selected(
+    df,
+    ["PatientName", "StudyInstanceUID", "Rows", "Columns"],
+    load_until=dicom.Tag("Columns"),
+)
+```
+
 ## 동작 규칙
 
 - 반환되는 `DicomFile`에는 선택한 태그와 sequence 하위 항목만 들어 있습니다.
   선택하지 않은 태그는 없는 것처럼 동작합니다.
 - 루트 레벨의 `TransferSyntaxUID`와 `SpecificCharacterSet`는
   selection에 직접 적지 않아도 항상 고려됩니다.
-- selected-read API에서는 `ReadOptions.load_until`을 무시합니다.
-  읽기 경계는 selection을 기준으로 내부에서 계산합니다.
+- `ReadOptions.load_until`은 selected-read frontier의 상한입니다.
+  실제 root stop tag는 `min(마지막 selected root tag, load_until)`입니다.
+- `load_until`이 마지막 selected tag보다 앞이면 selected read는 `load_until`
+  지점에서 멈추며, 그 뒤의 selected tag는 유지하지 않습니다.
+- `load_until`을 생략하면 마지막 selected root tag까지 읽습니다.
+- `continue_read_selected(...)`는 in-place 동작입니다. dataset을 rewind하거나
+  clear하지 않으며, 현재 stream 위치가 이미 지나간 tag를 다시 읽지는 않습니다.
 - `SQ`만 선택했더라도 source에 그 sequence가 있으면 해당 sequence element는 유지됩니다.
   item dataset도 유지되지만, 선택된 child가 없으면 item dataset은 비어 있을 수 있습니다.
+- Deflated Explicit VR Little Endian과 Explicit VR Big Endian 입력은 일반 read와
+  같은 내부 normalization 경로로 body stream을 준비한 뒤 selected body를 읽습니다.
 - private tag와 unknown tag도 selection 대상으로 사용할 수 있으며,
   `"70531000"` 같은 명시적 tag string도 쓸 수 있습니다.
 - `keep_on_error`는 일반 read와 비슷하게 동작하지만,

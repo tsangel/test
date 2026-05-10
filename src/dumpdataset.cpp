@@ -518,7 +518,7 @@ std::string dump_pixel_data_element_for_detach_marker(
 }  // namespace detail
 
 std::string DataSet::dump(std::size_t max_print_chars, bool include_offset) const {
-	if (this == root_dataset_ && stream_ && stream_->is_valid() && last_tag_loaded_ != "ffff,ffff"_tag) {
+	if (this == root_dataset_ && stream_ && stream_->is_valid() && last_tag_parsed_ != "ffff,ffff"_tag) {
 		const_cast<DataSet*>(this)->ensure_loaded("ffff,ffff"_tag);
 	}
 	return dump_dataset(this, max_print_chars, include_offset);

@@ -34,15 +34,16 @@ DICOM JSON Model の読み書きについては
 ## Selected read
 
 - `DataSetSelection([...])` は canonicalized nested selection tree を構築します。
-- `read_file_selected(path, selection, keep_on_error=None)` は、選択した tag と nested sequence child だけを保持する `DicomFile` をディスクから読みます。
-- `read_bytes_selected(data, selection, name="<memory>", keep_on_error=None, copy=True)` は
+- `read_file_selected(path, selection, keep_on_error=None, *, load_until=None)` は、選択した tag と nested sequence child だけを保持する `DicomFile` をディスクから読みます。
+- `read_bytes_selected(data, selection, name="<memory>", keep_on_error=None, copy=True, *, load_until=None)` は
   bytes-like object から同じ選択結果を読みます。
+- `continue_read_selected(file, selection, *, load_until=None, keep_on_error=None)` は、部分的に読み込まれた `DicomFile` の現在の stream 位置から selected read を in-place で続行します。
 - `selection` には再利用用の `DataSetSelection` も渡せますし、one-shot 呼び出し用に
   leaf tag と `(tag, children)` pair からなる raw nested Python sequence を
   そのまま渡すこともできます。
 - `TransferSyntaxUID` と `SpecificCharacterSet` は selection に書かなくても
   root level で常に考慮されます。
-- `ReadOptions.load_until` は selected-read API には適用されません。
+- `load_until` は selected-read frontier の上限として扱われます。
 - private tag と unknown tag も selection 対象として使え、`"70531000"` のような explicit tag string も使えます。
 - `SQ` だけを選択しても present な sequence と item count は保持されますが、
   child item dataset は空になり得ます。

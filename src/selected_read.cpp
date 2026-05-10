@@ -1,15 +1,13 @@
 #include "dicom.h"
 
-#include "dataset_deflate_codec.h"
-#include "dataset_endian_converter.h"
 #include "diagnostics.h"
-#include "stream_path_detail.hpp"
 
 #include <algorithm>
 #include <array>
 #include <bit>
 #include <cstring>
 #include <iterator>
+#include <optional>
 #include <utility>
 
 using namespace dicom::literals;
@@ -22,50 +20,6 @@ namespace {
 constexpr Tag kSpecificCharacterSetTag = "(0008,0005)"_tag;
 constexpr Tag kTransferSyntaxUidTag = "(0002,0010)"_tag;
 constexpr Tag kFileMetaReadUntilTag = "(0002,ffff)"_tag;
-
-class LastErrorCapturingReporter final : public diag::Reporter {
-public:
-	explicit LastErrorCapturingReporter(std::shared_ptr<diag::Reporter> downstream)
-	    : downstream_(std::move(downstream)) {}
-
-	void report(diag::LogLevel level, std::string_view message) override {
-		if (level == diag::LogLevel::Error) {
-			has_error_ = true;
-			last_error_message_.assign(message);
-		}
-		if (downstream_) {
-			downstream_->report(level, message);
-		}
-	}
-
-	[[nodiscard]] bool has_error() const noexcept { return has_error_; }
-	[[nodiscard]] const std::string& last_error_message() const noexcept {
-		return last_error_message_;
-	}
-
-private:
-	std::shared_ptr<diag::Reporter> downstream_;
-	bool has_error_{false};
-	std::string last_error_message_{};
-};
-
-class ThreadReporterGuard {
-public:
-	explicit ThreadReporterGuard(std::shared_ptr<diag::Reporter> reporter)
-	    : previous_(diag::thread_reporter_slot()) {
-		diag::set_thread_reporter(std::move(reporter));
-	}
-
-	~ThreadReporterGuard() {
-		diag::set_thread_reporter(previous_);
-	}
-
-	ThreadReporterGuard(const ThreadReporterGuard&) = delete;
-	ThreadReporterGuard& operator=(const ThreadReporterGuard&) = delete;
-
-private:
-	std::shared_ptr<diag::Reporter> previous_;
-};
 
 [[nodiscard]] std::vector<DataSetSelectionNode> normalize_selection_nodes(
     std::vector<DataSetSelectionNode> nodes, bool inject_default_root_metadata = false) {
@@ -143,6 +97,15 @@ private:
 	};
 }
 
+[[nodiscard]] Tag effective_selected_read_stop_tag(
+    const DataSetSelection& selection, const ReadOptions& options) noexcept {
+	const auto nodes = selection.nodes();
+	const Tag selection_stop = nodes.empty() ? Tag{} : nodes.back().tag;
+	return options.load_until.value() < selection_stop.value()
+	         ? options.load_until
+	         : selection_stop;
+}
+
 [[nodiscard]] std::string_view tidy_fn_name(
     std::source_location location = std::source_location::current()) noexcept {
 	auto name = std::string_view(location.function_name());
@@ -166,13 +129,23 @@ class SelectedReadParser {
 public:
 	static void read_attached_stream(
 	    DicomFile& file, const DataSetSelection& selection, const ReadOptions& options);
+	static void continue_attached_stream(
+	    DicomFile& file, const DataSetSelection& selection, const ReadOptions& options);
 
 private:
 	static void read_attached_stream_impl(
 	    DicomFile& file, const DataSetSelection& selection, const ReadOptions& options);
-	static void read_elements_selected(DataSet& dataset,
-	    std::span<const DataSetSelectionNode> nodes, InStream* stream, bool allow_early_stop);
-	static void read_sequence_selected(Sequence& sequence,
+	static void continue_attached_stream_impl(
+	    DicomFile& file, const DataSetSelection& selection, const ReadOptions& options);
+	static void reset_root_dataset(DicomFile& file);
+	static void read_file_meta(DicomFile& file);
+	static void read_root_elements_selected_until(DicomFile& file,
+	    const DataSetSelection& selection, const ReadOptions& options, const char* context);
+	static void prepare_body_stream_if_needed(DataSet& root, const char* context);
+	static void read_elements_selected_until(DataSet& dataset,
+	    std::span<const DataSetSelectionNode> nodes, InStream* stream, bool allow_early_stop,
+	    std::optional<Tag> explicit_stop_tag = std::nullopt);
+	static void read_sequence_selected_items(Sequence& sequence,
 	    std::span<const DataSetSelectionNode> nodes, InStream* stream);
 
 	static void skip_undefined_length_sequence(DataSet& dataset, InStream* stream);
@@ -303,8 +276,9 @@ void SelectedReadParser::skip_undefined_length_dataset(DataSet& dataset, InStrea
 	}
 }
 
-void SelectedReadParser::read_elements_selected(DataSet& dataset,
-    std::span<const DataSetSelectionNode> nodes, InStream* stream, bool allow_early_stop) {
+void SelectedReadParser::read_elements_selected_until(DataSet& dataset,
+    std::span<const DataSetSelectionNode> nodes, InStream* stream, bool allow_early_stop,
+    std::optional<Tag> explicit_stop_tag) {
 	std::array<std::uint8_t, 8> buf8{};
 	std::array<std::uint8_t, 4> buf4{};
 
@@ -312,14 +286,14 @@ void SelectedReadParser::read_elements_selected(DataSet& dataset,
 		stream = dataset.stream_.get();
 		if (!stream) {
 			diag::error_and_throw(
-			    "SelectedRead read_elements_selected file={} reason=no valid attached stream",
+			    "SelectedRead read_elements_selected_until file={} reason=no valid attached stream",
 			    dataset.path());
 		}
 	}
 
 	const bool explicit_vr = dataset.is_explicit_vr();
 	SelectionCursor cursor(nodes);
-	const Tag max_selected_tag = cursor.max_tag();
+	const Tag stop_tag = explicit_stop_tag.value_or(cursor.max_tag());
 
 	while (!stream->is_eof()) {
 		if (stream->read_8bytes(buf8) != 8) {
@@ -340,7 +314,7 @@ void SelectedReadParser::read_elements_selected(DataSet& dataset,
 					break;
 				}
 				diag::error(
-				    "SelectedRead read_elements_selected file={} offset=0x{:X} tag={} reason=item delim encountered out of sequence",
+				    "SelectedRead read_elements_selected_until file={} offset=0x{:X} tag={} reason=item delim encountered out of sequence",
 				    dataset.path(), item_offset, tag.to_string());
 				continue;
 			}
@@ -349,27 +323,27 @@ void SelectedReadParser::read_elements_selected(DataSet& dataset,
 					break;
 				}
 				diag::error(
-				    "SelectedRead read_elements_selected file={} offset=0x{:X} tag={} reason=sequence delim encountered while parsing root dataset",
+				    "SelectedRead read_elements_selected_until file={} offset=0x{:X} tag={} reason=sequence delim encountered while parsing root dataset",
 				    dataset.path(), item_offset, tag.to_string());
 				continue;
 			}
 		}
 
 		if (allow_early_stop && &dataset == dataset.root_dataset_ &&
-		    tag.value() > max_selected_tag.value()) {
+		    tag.value() > stop_tag.value()) {
 			stream->unread(8);
 			break;
 		}
 		if (allow_early_stop && &dataset != dataset.root_dataset_ &&
-		    tag.value() > max_selected_tag.value()) {
+		    tag.value() > stop_tag.value()) {
 			stream->unread(8);
 			break;
 		}
 
-		if (dataset.last_tag_loaded_ > tag && &dataset != dataset.root_dataset_) {
+		if (dataset.last_tag_parsed_ > tag && &dataset != dataset.root_dataset_) {
 			diag::error(
-			    "SelectedRead read_elements_selected file={} offset=0x{:X} tag={} last_tag={} reason=tag order decreased",
-			    dataset.path(), stream->tell() - 8, tag.to_string(), dataset.last_tag_loaded_.to_string());
+			    "SelectedRead read_elements_selected_until file={} offset=0x{:X} tag={} last_tag={} reason=tag order decreased",
+			    dataset.path(), stream->tell() - 8, tag.to_string(), dataset.last_tag_parsed_.to_string());
 			stream->unread(8);
 			break;
 		}
@@ -394,14 +368,14 @@ void SelectedReadParser::read_elements_selected(DataSet& dataset,
 				    dataset.append_parsed_dataelement_nocheck(parsed_tag, VR::SQ, offset, sequence_length);
 				auto* sequence = elem.as_sequence();
 				InSubStream subs(stream, sequence_length);
-				read_sequence_selected(*sequence,
+				read_sequence_selected_items(*sequence,
 				    matched_node ? std::span<const DataSetSelectionNode>(matched_node->children)
 				                 : std::span<const DataSetSelectionNode>{},
 				    &subs);
 				const auto consumed = subs.tell() - offset;
 				elem.set_length(consumed);
 				stream->skip(consumed);
-				dataset.last_tag_loaded_ = parsed_tag;
+				dataset.last_tag_parsed_ = parsed_tag;
 				continue;
 			}
 
@@ -409,10 +383,10 @@ void SelectedReadParser::read_elements_selected(DataSet& dataset,
 				skip_undefined_length_sequence(dataset, stream);
 			} else if (stream->skip(length) != length) {
 				diag::error_and_throw(
-				    "SelectedRead read_elements_selected file={} offset=0x{:X} tag={} vr={} length={} reason=failed to skip SQ bytes",
+				    "SelectedRead read_elements_selected_until file={} offset=0x{:X} tag={} vr={} length={} reason=failed to skip SQ bytes",
 				    dataset.path(), offset, parsed_tag.to_string(), vr.str(), length);
 			}
-			dataset.last_tag_loaded_ = parsed_tag;
+			dataset.last_tag_parsed_ = parsed_tag;
 			continue;
 		}
 
@@ -426,12 +400,12 @@ void SelectedReadParser::read_elements_selected(DataSet& dataset,
 				const auto consumed = pixseq->stream()->tell() - offset;
 				elem.set_length(consumed);
 				stream->skip(consumed);
-				dataset.last_tag_loaded_ = parsed_tag;
+				dataset.last_tag_parsed_ = parsed_tag;
 				continue;
 			}
 
 			skip_undefined_length_sequence(dataset, stream);
-			dataset.last_tag_loaded_ = parsed_tag;
+			dataset.last_tag_parsed_ = parsed_tag;
 			continue;
 		}
 
@@ -442,19 +416,19 @@ void SelectedReadParser::read_elements_selected(DataSet& dataset,
 				    dataset.append_parsed_dataelement_nocheck(parsed_tag, VR::SQ, offset, inferred_length);
 				auto* sequence = elem.as_sequence();
 				InSubStream subs(stream, inferred_length);
-				read_sequence_selected(*sequence,
+				read_sequence_selected_items(*sequence,
 				    matched_node ? std::span<const DataSetSelectionNode>(matched_node->children)
 				                 : std::span<const DataSetSelectionNode>{},
 				    &subs);
 				const auto consumed = subs.tell() - offset;
 				elem.set_length(consumed);
 				stream->skip(consumed);
-				dataset.last_tag_loaded_ = parsed_tag;
+				dataset.last_tag_parsed_ = parsed_tag;
 				continue;
 			}
 
 			skip_undefined_length_sequence(dataset, stream);
-			dataset.last_tag_loaded_ = parsed_tag;
+			dataset.last_tag_parsed_ = parsed_tag;
 			continue;
 		}
 
@@ -463,31 +437,31 @@ void SelectedReadParser::read_elements_selected(DataSet& dataset,
 		}
 		if (stream->skip(length) != length) {
 			diag::error_and_throw(
-			    "SelectedRead read_elements_selected file={} offset=0x{:X} tag={} vr={} length={} reason=value length exceeds remaining bytes",
+			    "SelectedRead read_elements_selected_until file={} offset=0x{:X} tag={} vr={} length={} reason=value length exceeds remaining bytes",
 			    dataset.path(), offset, parsed_tag.to_string(), vr.str(), length);
 		}
-		dataset.last_tag_loaded_ = parsed_tag;
+		dataset.last_tag_parsed_ = parsed_tag;
 	}
 
-	dataset.last_tag_loaded_ = allow_early_stop ? max_selected_tag : dataset.last_tag_loaded_;
+	dataset.last_tag_parsed_ = allow_early_stop ? stop_tag : dataset.last_tag_parsed_;
 	if (stream->is_eof()) {
-		dataset.last_tag_loaded_ = "ffff,ffff"_tag;
+		dataset.last_tag_parsed_ = "ffff,ffff"_tag;
 	}
 }
 
-void SelectedReadParser::read_sequence_selected(
+void SelectedReadParser::read_sequence_selected_items(
     Sequence& sequence, std::span<const DataSetSelectionNode> nodes, InStream* stream) {
 	std::array<std::uint8_t, 8> buf8{};
 	auto* owner_dataset = sequence.owner_dataset_;
 	if (!owner_dataset) {
 		diag::error_and_throw(
-		    "SelectedRead read_sequence_selected reason=no owning dataset context");
+		    "SelectedRead read_sequence_selected_items reason=no owning dataset context");
 	}
 
 	while (!stream->is_eof()) {
 		if (stream->read_8bytes(buf8) != 8) {
 			diag::error_and_throw(
-			    "SelectedRead read_sequence_selected stream={} offset=0x{:X} reason=failed to read 8-byte item header",
+			    "SelectedRead read_sequence_selected_items stream={} offset=0x{:X} reason=failed to read 8-byte item header",
 			    stream->identifier(), stream->tell());
 		}
 
@@ -500,7 +474,7 @@ void SelectedReadParser::read_sequence_selected(
 		if (tag != "(fffe,e000)"_tag) {
 			stream->unread(8);
 			diag::error(
-			    "SelectedRead read_sequence_selected stream={} offset=0x{:X} reason=expected (FFFE,E000) item tag but found {}",
+			    "SelectedRead read_sequence_selected_items stream={} offset=0x{:X} reason=expected (FFFE,E000) item tag but found {}",
 			    stream->identifier(), stream->tell(), tag.to_string());
 			break;
 		}
@@ -509,7 +483,7 @@ void SelectedReadParser::read_sequence_selected(
 		DataSet* item_dataset = sequence.add_dataset();
 		if (!item_dataset) {
 			diag::error_and_throw(
-			    "SelectedRead read_sequence_selected reason=failed to append item dataset");
+			    "SelectedRead read_sequence_selected_items reason=failed to append item dataset");
 		}
 		item_dataset->set_offset(item_offset);
 
@@ -517,7 +491,7 @@ void SelectedReadParser::read_sequence_selected(
 			item_dataset->attach_to_substream(stream, stream->bytes_remaining());
 			auto& subs = item_dataset->stream();
 			const auto offset_start = subs.tell();
-			read_elements_selected(*item_dataset, nodes, &subs, false);
+			read_elements_selected_until(*item_dataset, nodes, &subs, false);
 			const auto offset_end = subs.tell();
 			stream->skip(offset_end - offset_start);
 			continue;
@@ -529,56 +503,30 @@ void SelectedReadParser::read_sequence_selected(
 
 		item_dataset->attach_to_substream(stream, length);
 		auto& subs = item_dataset->stream();
-		read_elements_selected(*item_dataset, nodes, &subs, true);
+		read_elements_selected_until(*item_dataset, nodes, &subs, true);
 		stream->skip(length);
 	}
 }
 
 void SelectedReadParser::read_attached_stream(
     DicomFile& file, const DataSetSelection& selection, const ReadOptions& options) {
-	file.clear_error_state();
-
-	std::shared_ptr<diag::Reporter> downstream = diag::thread_reporter_slot();
-	if (!downstream) {
-		downstream = diag::default_reporter();
-	}
-	auto capturing_reporter = std::make_shared<LastErrorCapturingReporter>(downstream);
-	ThreadReporterGuard reporter_scope(capturing_reporter);
-
-	try {
+	file.capture_read_errors(options,
+	    "read_*_selected reason=unknown read error",
+	    "read_*_selected reason=unknown non-std exception", [&] {
 		read_attached_stream_impl(file, selection, options);
-	} catch (const std::exception& ex) {
-		const std::string_view what = ex.what();
-		if (!what.empty()) {
-			file.set_error_state(std::string(what));
-		} else if (capturing_reporter->has_error()) {
-			file.set_error_state(capturing_reporter->last_error_message());
-		} else {
-			file.set_error_state("read_*_selected reason=unknown read error");
-		}
-
-		if (!options.keep_on_error) {
-			throw;
-		}
-	} catch (...) {
-		if (capturing_reporter->has_error()) {
-			file.set_error_state(capturing_reporter->last_error_message());
-		} else {
-			file.set_error_state("read_*_selected reason=unknown non-std exception");
-		}
-
-		if (!options.keep_on_error) {
-			throw;
-		}
-	}
-
-	if (!file.has_error() && capturing_reporter->has_error()) {
-		file.set_error_state(capturing_reporter->last_error_message());
-	}
+	});
 }
 
-void SelectedReadParser::read_attached_stream_impl(
+void SelectedReadParser::continue_attached_stream(
     DicomFile& file, const DataSetSelection& selection, const ReadOptions& options) {
+	file.capture_read_errors(options,
+	    "continue_read_selected reason=unknown read error",
+	    "continue_read_selected reason=unknown non-std exception", [&] {
+		continue_attached_stream_impl(file, selection, options);
+	});
+}
+
+void SelectedReadParser::reset_root_dataset(DicomFile& file) {
 	auto& root = file.root_dataset_;
 	root.elements_.clear();
 	root.element_map_.clear();
@@ -586,9 +534,12 @@ void SelectedReadParser::read_attached_stream_impl(
 	root.element_index_.reserve(load_root_elements_reserve_hint());
 	root.active_element_count_ = 0;
 	root.effective_charset_ = nullptr;
-	root.last_tag_loaded_ = Tag::from_value(0);
+	root.last_tag_parsed_ = Tag::from_value(0);
 	file.set_transfer_syntax_state_only("ExplicitVRLittleEndian"_uid);
+}
 
+void SelectedReadParser::read_file_meta(DicomFile& file) {
+	auto& root = file.root_dataset_;
 	if (!root.stream_ || !root.stream_->is_valid()) {
 		diag::error_and_throw(
 		    "read_*_selected file={} reason=no valid attached stream", root.path());
@@ -603,7 +554,7 @@ void SelectedReadParser::read_attached_stream_impl(
 	}
 
 	const auto meta_selection = file_meta_selection_nodes();
-	read_elements_selected(root, meta_selection, root.stream_.get(), true);
+	read_elements_selected_until(root, meta_selection, root.stream_.get(), true);
 
 	const auto& transfer_syntax = root.get_dataelement("(0002,0010)"_tag);
 	if (auto well_known = transfer_syntax.to_transfer_syntax_uid()) {
@@ -613,44 +564,48 @@ void SelectedReadParser::read_attached_stream_impl(
 		    "read_*_selected file={} transfer_syntax_uid={} reason=unknown transfer syntax UID",
 		    root.path(), *uid_value);
 	}
+}
 
-	if (root.transfer_syntax_uid() == "DeflatedExplicitVRLittleEndian"_uid ||
-	    root.transfer_syntax_uid() == "ExplicitVRBigEndian"_uid) {
-		std::size_t dataset_start_offset = root.stream_->tell();
-		const auto& meta_group_length = root.get_dataelement("(0002,0000)"_tag);
-		if (auto group_length = meta_group_length.to_long(); group_length && *group_length >= 0) {
-			const auto offset_candidate =
-			    meta_group_length.offset() + meta_group_length.length() +
-			    static_cast<std::size_t>(*group_length);
-			if (offset_candidate <= root.stream_->end_offset()) {
-				dataset_start_offset = offset_candidate;
-			}
-		}
-
-		const auto full_size = root.stream_->end_offset();
-		const auto full_span = root.stream_->get_span(0, full_size);
-		if (dataset_start_offset > full_span.size()) {
-			diag::error_and_throw(
-			    "read_*_selected file={} offset=0x{:X} reason=invalid dataset body start offset",
-			    root.path(), dataset_start_offset);
-		}
-
-		std::vector<std::uint8_t> normalized_image;
-		if (root.transfer_syntax_uid() == "DeflatedExplicitVRLittleEndian"_uid) {
-			normalized_image = inflate_deflated_dataset(full_span, dataset_start_offset);
-		} else {
-			normalized_image = normalize_big_endian_dataset(full_span, dataset_start_offset);
-		}
-
-		const std::string stream_identifier = root.path();
-		root.attach_to_memory(stream_identifier, std::move(normalized_image));
-		root.stream_->seek(dataset_start_offset);
-		root.explicit_vr_ = true;
+void SelectedReadParser::prepare_body_stream_if_needed(DataSet& root, const char* context) {
+	if (root.last_tag_parsed_ >= DataSet::kDatasetBodyPreparedTag) {
+		return;
 	}
 
-	(void)options;
-	read_elements_selected(root, selection.nodes(), root.stream_.get(), true);
+	// Deflated and Big Endian streams are prepared here before body parsing.
+	root.prepare_attached_stream_for_transfer_syntax(context);
+}
+
+void SelectedReadParser::read_root_elements_selected_until(DicomFile& file,
+    const DataSetSelection& selection, const ReadOptions& options, const char* context) {
+	auto& root = file.root_dataset_;
+
+	const auto stop_tag = effective_selected_read_stop_tag(selection, options);
+	if (stop_tag <= root.last_tag_parsed_ || stop_tag <= kFileMetaReadUntilTag) {
+		(void)root.refresh_effective_charset_cache(nullptr, nullptr);
+		return;
+	}
+
+	prepare_body_stream_if_needed(root, context);
+	read_elements_selected_until(root, selection.nodes(), root.stream_.get(), true, stop_tag);
 	(void)root.refresh_effective_charset_cache(nullptr, nullptr);
+}
+
+void SelectedReadParser::read_attached_stream_impl(
+    DicomFile& file, const DataSetSelection& selection, const ReadOptions& options) {
+	reset_root_dataset(file);
+	read_file_meta(file);
+	read_root_elements_selected_until(file, selection, options, "read_*_selected");
+}
+
+void SelectedReadParser::continue_attached_stream_impl(
+    DicomFile& file, const DataSetSelection& selection, const ReadOptions& options) {
+	auto& root = file.root_dataset_;
+	if (!root.stream_ || !root.stream_->is_valid()) {
+		diag::error_and_throw(
+		    "continue_read_selected file={} reason=no valid attached stream", root.path());
+	}
+
+	read_root_elements_selected_until(file, selection, options, "continue_read_selected");
 }
 
 DataSetSelection::DataSetSelection() {
@@ -712,6 +667,11 @@ std::unique_ptr<DicomFile> read_bytes_selected(
 	dicom_file->attach_to_memory(std::move(name), std::move(buffer));
 	SelectedReadParser::read_attached_stream(*dicom_file, selection, options);
 	return dicom_file;
+}
+
+void continue_read_selected(
+    DicomFile& file, const DataSetSelection& selection, ReadOptions options) {
+	SelectedReadParser::continue_attached_stream(file, selection, options);
 }
 
 }  // namespace dicom

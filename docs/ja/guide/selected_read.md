@@ -91,8 +91,8 @@ df = dicom.read_bytes_selected(
   入ります。未選択 tag は存在しないかのように振る舞います。
 - root level の `TransferSyntaxUID` と `SpecificCharacterSet` は、
   明示しなくても常に考慮されます。
-- selected-read API では `ReadOptions.load_until` は無視されます。
-  必要な read frontier は selection から内部的に導出されます。
+- selected-read API では `ReadOptions.load_until` は selection frontier の上限として扱われます。
+  実際の root stop tag は `min(last selected root tag, load_until)` です。
 - `SQ` だけを選択した場合でも、source にその sequence が存在すれば
   present な `SQ` を保持します。item dataset も保持されますが、
   child selection が空なら item dataset 自体は空になり得ます。

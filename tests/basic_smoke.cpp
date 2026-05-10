@@ -540,10 +540,8 @@ int main() {
 			fail("DataSetSelection::extended should preserve canonical metadata and add new nodes");
 		}
 
-		dicom::ReadOptions selected_options;
-		selected_options.load_until = dicom::Tag::from_value(0);
 		auto selected = read_bytes_selected(
-		    source_bytes.data(), source_bytes.size(), selection, selected_options);
+		    source_bytes.data(), source_bytes.size(), selection);
 		if (selected->transfer_syntax_uid() != source.transfer_syntax_uid()) {
 			fail("read_bytes_selected should preserve transfer syntax state even when not selected");
 		}
@@ -585,6 +583,67 @@ int main() {
 		    !selected_item1->get_dataelement(nested_private_tag) ||
 		    selected_item1->get_dataelement("PatientName"_tag)) {
 			fail("read_bytes_selected should project selected children for later sequence items");
+		}
+
+		dicom::ReadOptions capped_options;
+		capped_options.load_until = "PatientName"_tag;
+		auto capped = read_bytes_selected(
+		    source_bytes.data(), source_bytes.size(),
+		    dicom::DataSetSelection{"StudyInstanceUID"_tag, "SOPInstanceUID"_tag},
+		    capped_options);
+		if (!capped->get_dataelement("SOPInstanceUID"_tag)) {
+			fail("read_bytes_selected should keep selected tags before load_until cap");
+		}
+		if (capped->get_dataelement("StudyInstanceUID"_tag)) {
+			fail("read_bytes_selected should not read selected tags beyond load_until cap");
+		}
+
+		dicom::ReadOptions prefix_options;
+		prefix_options.load_until = "TransferSyntaxUID"_tag;
+		auto partial = read_bytes(source_bytes.data(), source_bytes.size(), prefix_options);
+		if (partial->get_dataelement("PatientName"_tag)) {
+			fail("read_bytes(load_until=TransferSyntaxUID) should stop before root dataset body");
+		}
+		continue_read_selected(*partial, dicom::DataSetSelection{"PatientName"_tag});
+		if (!partial->get_dataelement("PatientName"_tag)) {
+			fail("continue_read_selected should add selected future elements");
+		}
+		if (partial->get_dataelement("StudyInstanceUID"_tag)) {
+			fail("continue_read_selected should not materialize unselected future elements");
+		}
+
+		dicom::ReadOptions prefix_to_patient_options;
+		prefix_to_patient_options.load_until = "PatientName"_tag;
+		auto prefix_to_patient =
+		    read_bytes(source_bytes.data(), source_bytes.size(), prefix_to_patient_options);
+		if (!prefix_to_patient->get_dataelement("PatientName"_tag)) {
+			fail("read_bytes(load_until=PatientName) should keep the loaded prefix");
+		}
+		continue_read_selected(
+		    *prefix_to_patient, dicom::DataSetSelection{"StudyInstanceUID"_tag});
+		if (!prefix_to_patient->get_dataelement("PatientName"_tag) ||
+		    !prefix_to_patient->get_dataelement("StudyInstanceUID"_tag)) {
+			fail("continue_read_selected should preserve loaded prefix and add selected suffix");
+		}
+
+		const auto deflated_bytes =
+		    source.write_bytes_with_transfer_syntax("DeflatedExplicitVRLittleEndian"_uid);
+		auto deflated_selected = read_bytes_selected(
+		    deflated_bytes.data(), deflated_bytes.size(),
+		    dicom::DataSetSelection{"PatientName"_tag});
+		if (deflated_selected->transfer_syntax_uid() != "DeflatedExplicitVRLittleEndian"_uid ||
+		    !deflated_selected->get_dataelement("PatientName"_tag)) {
+			fail("read_bytes_selected should normalize deflated datasets and preserve public transfer syntax");
+		}
+		dicom::ReadOptions deflated_prefix_options;
+		deflated_prefix_options.load_until = "TransferSyntaxUID"_tag;
+		auto deflated_partial =
+		    read_bytes(deflated_bytes.data(), deflated_bytes.size(), deflated_prefix_options);
+		continue_read_selected(
+		    *deflated_partial, dicom::DataSetSelection{"PatientName"_tag});
+		if (deflated_partial->transfer_syntax_uid() != "DeflatedExplicitVRLittleEndian"_uid ||
+		    !deflated_partial->get_dataelement("PatientName"_tag)) {
+			fail("continue_read_selected should normalize deflated datasets from a meta-only prefix");
 		}
 
 		dicom::DataSetSelection sequence_only_selection{
@@ -684,11 +743,8 @@ int main() {
 			    "Rows"_tag,
 			    "Columns"_tag,
 			};
-			dicom::ReadOptions selected_options;
-			selected_options.load_until = dicom::Tag::from_value(0);
-
 			auto full = read_file(tutorial_ct1_unc);
-			auto selected = read_file_selected(tutorial_ct1_unc, selection, selected_options);
+			auto selected = read_file_selected(tutorial_ct1_unc, selection);
 			if (selected->transfer_syntax_uid() != full->transfer_syntax_uid() ||
 			    selected->transfer_syntax_uid() != "ExplicitVRLittleEndian"_uid) {
 				fail("selected read should preserve uncompressed tutorial transfer syntax state");
@@ -742,11 +798,8 @@ int main() {
 			        "CodeMeaning"_tag,
 			    }},
 			};
-			dicom::ReadOptions selected_options;
-			selected_options.load_until = dicom::Tag::from_value(0);
-
 			auto full = read_file(tutorial_ct2_jlsn);
-			auto selected = read_file_selected(tutorial_ct2_jlsn, selection, selected_options);
+			auto selected = read_file_selected(tutorial_ct2_jlsn, selection);
 			if (selected->transfer_syntax_uid() != full->transfer_syntax_uid() ||
 			    selected->transfer_syntax_uid() != "JPEGLSNearLossless"_uid) {
 				fail("selected read should preserve tutorial CT2_JLSN transfer syntax state");
@@ -805,6 +858,43 @@ int main() {
 			if (full_derivation == nullptr || selected_derivation == nullptr ||
 			    full_derivation->size() != selected_derivation->size()) {
 				fail("selected read should preserve DerivationCodeSequence item count in tutorial CT2_JLSN sample");
+			}
+		}
+
+		const auto big_endian_sample = repo_root / "tests" / "test_be.dcm";
+		if (std::filesystem::exists(big_endian_sample)) {
+			dicom::DataSetSelection selection{
+			    "Rows"_tag,
+			    "Columns"_tag,
+			    "PatientName"_tag,
+			};
+			auto full = read_file(big_endian_sample);
+			auto selected = read_file_selected(big_endian_sample, selection);
+			if (selected->transfer_syntax_uid() != "ExplicitVRBigEndian"_uid ||
+			    full->transfer_syntax_uid() != "ExplicitVRBigEndian"_uid) {
+				fail("selected read should preserve ExplicitVRBigEndian transfer syntax state");
+			}
+			require_selected_long(
+			    *full, *selected, "Rows",
+			    "selected read should normalize ExplicitVRBigEndian Rows");
+			require_selected_long(
+			    *full, *selected, "Columns",
+			    "selected read should normalize ExplicitVRBigEndian Columns");
+
+			dicom::ReadOptions meta_only_options;
+			meta_only_options.load_until = "TransferSyntaxUID"_tag;
+			auto partial = read_file(big_endian_sample, meta_only_options);
+			continue_read_selected(*partial, selection);
+			if (partial->transfer_syntax_uid() != "ExplicitVRBigEndian"_uid) {
+				fail("continue_read_selected should preserve ExplicitVRBigEndian transfer syntax state");
+			}
+			const auto full_rows = full->get_value<long long>("Rows");
+			const auto partial_rows = partial->get_value<long long>("Rows");
+			const auto full_columns = full->get_value<long long>("Columns");
+			const auto partial_columns = partial->get_value<long long>("Columns");
+			if (!full_rows || !partial_rows || *full_rows != *partial_rows ||
+			    !full_columns || !partial_columns || *full_columns != *partial_columns) {
+				fail("continue_read_selected should normalize ExplicitVRBigEndian from a meta-only prefix");
 			}
 		}
 	}

@@ -821,6 +821,26 @@ def test_selected_read_python_api_with_dataset_selection_keeps_selected_tags_onl
 	assert item["ReferencedSOPInstanceUID"].to_uid_string() == "1.2.3.4.5.6"
 	assert not item["StudyInstanceUID"]
 
+	capped = dicom.read_bytes_selected(
+	    source_bytes,
+	    ["SOPInstanceUID", "PixelData"],
+	    name="selected-capped",
+	    load_until=dicom.Tag("SOPInstanceUID"),
+	)
+	assert capped["SOPInstanceUID"].to_uid_string() == "1.2.3.4.5.6.7.8.9"
+	assert not capped["PixelData"]
+
+	partial = dicom.read_bytes(
+	    source_bytes,
+	    name="selected-continue-prefix",
+	    load_until=dicom.Tag("TransferSyntaxUID"),
+	    copy=False,
+	)
+	assert not partial["SOPInstanceUID"]
+	dicom.continue_read_selected(partial, ["SOPInstanceUID"])
+	assert partial["SOPInstanceUID"].to_uid_string() == "1.2.3.4.5.6.7.8.9"
+	assert not partial["PixelData"]
+
 	with pytest.raises(Exception):
 		dicom.read_bytes_selected(
 		    _build_malformed_sample(),

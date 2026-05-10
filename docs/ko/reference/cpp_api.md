@@ -158,7 +158,10 @@ Note: These attachment calls are intended for the root `DataSet` (the object ret
 - `read_file_selected(...)`와 `read_bytes_selected(...)`는 선택한 태그와
   nested sequence child만 남긴 `DicomFile`을 반환합니다.
 - `ReadOptions.keep_on_error`와 memory-buffer `ReadOptions.copy`는 그대로 적용됩니다.
-  `ReadOptions.load_until`은 selected-read API에서 무시됩니다.
+  `ReadOptions.load_until`은 selected-read frontier의 상한으로 적용됩니다.
+  실제 root stop tag는 `min(마지막 selected root tag, load_until)`입니다.
+- `continue_read_selected(file, selection, options)`는 일부만 읽힌 `DicomFile`의
+  현재 stream 위치부터 selected read를 in-place로 이어갑니다. 기존 element는 유지됩니다.
 - `SQ`만 선택해도 source에 존재하는 sequence와 item count는 유지됩니다.
 - 선택한/방문한 영역 밖의 malformed data는 보이지 않을 수 있으므로
   `has_error`나 `error_message`에 반영되지 않을 수 있습니다.
@@ -173,7 +176,7 @@ Note: These attachment calls are intended for the root `DataSet` (the object ret
 - Each walk step yields `DataSetWalkEntry { path, element }`.
 - `path` is an ancestors-only borrowed view in both APIs. Persist `path.to_string()` if you need to keep it after the current callback/iterator step.
 - Traversal only covers the dataset state that is already loaded; it does not implicitly call `ensure_loaded()` or `ensure_dataelement()`.
-- On partially loaded attached datasets, tags beyond the loaded frontier are silently absent from visit/walk. Fully load first or call `ensure_loaded(tag)` before using traversal for full-dataset passes.
+- On partially loaded attached datasets, tags beyond the parsed frontier are silently absent from visit/walk. Fully load first or call `ensure_loaded(tag)` before using traversal for full-dataset passes.
 - `DataSetWalkEntry::skip_sequence()` / `DataSetWalkIterator::skip_sequence()` skip the current sequence subtree.
 - `DataSetWalkEntry::skip_current_dataset()` / `DataSetWalkIterator::skip_current_dataset()` skip the rest of the current dataset.
 - Full usage examples in C++ and Python: [DataSet Visit and Walk](../guide/dataset_visit_and_walk.md)

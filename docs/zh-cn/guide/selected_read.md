@@ -90,8 +90,8 @@ df = dicom.read_bytes_selected(
   未选中的 tag 会表现得像不存在一样。
 - root level 的 `TransferSyntaxUID` 和 `SpecificCharacterSet` 即使没有显式写进
   selection，也始终会被考虑。
-- 在 selected-read API 中，`ReadOptions.load_until` 会被忽略。
-  读取 frontier 会根据 selection 在内部推导。
+- 在 selected-read API 中，`ReadOptions.load_until` 是 selection frontier 的上限。
+  实际 root stop tag 是 `min(last selected root tag, load_until)`。
 - 即使只选择了 `SQ` 本身，只要 source 里存在该 sequence，返回结果里也会保留
   这个 present 的 `SQ`。item dataset 也会保留，但如果没有选中任何 child，
   item dataset 可能是空的。

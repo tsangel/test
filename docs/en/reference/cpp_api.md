@@ -154,7 +154,11 @@ Note: These attachment calls are intended for the root `DataSet` (the object ret
 - `read_file_selected(...)` and `read_bytes_selected(...)` return a `DicomFile`
   that keeps only the selected tags and nested sequence children.
 - `ReadOptions.keep_on_error` and memory-buffer `ReadOptions.copy` still apply.
-  `ReadOptions.load_until` is ignored by selected-read APIs.
+  `ReadOptions.load_until` is an upper bound on the selected-read frontier.
+  The effective root stop tag is `min(last selected root tag, load_until)`.
+- `continue_read_selected(file, selection, options)` continues selected reading
+  in-place from the current stream position of a partially read `DicomFile`.
+  Existing elements are preserved.
 - Selecting only an `SQ` keeps that present sequence and its item count, even
   when no child tags are selected.
 - Malformed data outside the selected/visited region may remain unseen and
@@ -170,7 +174,7 @@ Note: These attachment calls are intended for the root `DataSet` (the object ret
 - Each walk step yields `DataSetWalkEntry { path, element }`.
 - `path` is an ancestors-only borrowed view in both APIs. Persist `path.to_string()` if you need to keep it after the current callback/iterator step.
 - Traversal only covers the dataset state that is already loaded; it does not implicitly call `ensure_loaded()` or `ensure_dataelement()`.
-- On partially loaded attached datasets, tags beyond the loaded frontier are silently absent from visit/walk. Fully load first or call `ensure_loaded(tag)` before using traversal for full-dataset passes.
+- On partially loaded attached datasets, tags beyond the parsed frontier are silently absent from visit/walk. Fully load first or call `ensure_loaded(tag)` before using traversal for full-dataset passes.
 - `DataSetWalkEntry::skip_sequence()` / `DataSetWalkIterator::skip_sequence()` skip the current sequence subtree.
 - `DataSetWalkEntry::skip_current_dataset()` / `DataSetWalkIterator::skip_current_dataset()` skip the rest of the current dataset.
 - Full usage examples in C++ and Python: [DataSet Visit and Walk](../guide/dataset_visit_and_walk.md)
