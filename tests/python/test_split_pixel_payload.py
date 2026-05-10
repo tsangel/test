@@ -357,7 +357,10 @@ def test_pixel_payload_decoder_decodes_split_payload_only() -> None:
     # strings can be replaced or released after the decoder is built.
     desc.transfer_syntax_uid = str(desc.transfer_syntax_uid)
     desc.photometric = str(desc.photometric)
-    decoder = dicom.PixelPayloadDecoder(desc, bytearray(payload_bytes))
+    payload_owner = bytearray(payload_bytes)
+    decoder = dicom.PixelPayloadDecoder(desc, payload_owner)
+    with pytest.raises(BufferError):
+        payload_owner.extend(b"\xAA")
     gc.collect()
     assert decoder.to_array(frame=0).tobytes() == payload
 

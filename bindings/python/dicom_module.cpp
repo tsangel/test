@@ -2221,8 +2221,8 @@ class PyPixelPayloadDecoder {
 public:
 	PyPixelPayloadDecoder(const PyPixelPayloadDecodeDescriptor& desc,
 	    nb::handle pixel_payload) {
-		PyBufferView view(pixel_payload);
-		const Py_buffer& info = view.view();
+		auto view = std::make_unique<PyBufferView>(pixel_payload);
+		const Py_buffer& info = view->view();
 		require_1d_contiguous_buffer(info, "PixelPayloadDecoder pixel_payload");
 		const auto elem_size =
 		    static_cast<std::size_t>(info.itemsize <= 0 ? 1 : info.itemsize);
@@ -2236,6 +2236,7 @@ public:
 		payload_owner_ = nb::borrow<nb::object>(pixel_payload);
 		decoder_ = std::make_unique<dicom::pixel::PixelPayloadDecoder>(
 		    desc.view(), payload_span);
+		payload_view_ = std::move(view);
 	}
 
 	[[nodiscard]] dicom::pixel::PixelPayloadDecoder& decoder() {
@@ -2247,8 +2248,9 @@ public:
 	}
 
 private:
-	std::unique_ptr<dicom::pixel::PixelPayloadDecoder> decoder_{};
+	std::unique_ptr<PyBufferView> payload_view_{};
 	nb::object payload_owner_{};
+	std::unique_ptr<dicom::pixel::PixelPayloadDecoder> decoder_{};
 };
 
 DecodedArrayLayout payload_decoder_layout_or_throw(
