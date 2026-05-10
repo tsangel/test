@@ -67,7 +67,7 @@ dicom::DataSetSelection selection{
 };
 
 dicom::ReadOptions selected_options;
-selected_options.load_until = "Columns"_tag;  // optional cap for selected read
+selected_options.load_until = "7fe0,0010"_tag;  // cap selected read at PixelData
 dicom::continue_read_selected(*file, selection, selected_options);
 ```
 
@@ -98,7 +98,7 @@ df = dicom.read_file_selected("sample.dcm", selection)
 df = dicom.read_file_selected(
     "sample.dcm",
     selection,
-    load_until=dicom.Tag("Columns"),
+    load_until=dicom.Tag("7fe0,0010"),
 )
 ```
 
@@ -137,7 +137,7 @@ df = dicom.read_file("sample.dcm", load_until=dicom.Tag("0002,0010"))
 dicom.continue_read_selected(
     df,
     ["PatientName", "StudyInstanceUID", "Rows", "Columns"],
-    load_until=dicom.Tag("Columns"),
+    load_until=dicom.Tag("7fe0,0010"),
 )
 ```
 
