@@ -34,9 +34,10 @@ DICOM JSON Model の読み書きについては
 ## Selected read
 
 - `DataSetSelection([...])` は canonicalized nested selection tree を構築します。
-- `read_file_selected(path, selection, keep_on_error=None)` は、選択した tag と nested sequence child だけを保持する `DicomFile` をディスクから読みます。
-- `read_bytes_selected(data, selection, name="<memory>", keep_on_error=None, copy=True)` は
+- `read_file_selected(path, selection, keep_on_error=None, *, load_until=None)` は、選択した tag と nested sequence child だけを保持する `DicomFile` をディスクから読みます。
+- `read_bytes_selected(data, selection, name="<memory>", keep_on_error=None, copy=True, *, load_until=None)` は
   bytes-like object から同じ選択結果を読みます。
+- `continue_read_selected(file, selection, *, load_until=None, keep_on_error=None)` は、部分的に読み込まれた `DicomFile` の現在の stream 位置から selected read を in-place で続行します。
 - `selection` には再利用用の `DataSetSelection` も渡せますし、one-shot 呼び出し用に
   leaf tag と `(tag, children)` pair からなる raw nested Python sequence を
   そのまま渡すこともできます。

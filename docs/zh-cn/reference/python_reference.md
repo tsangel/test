@@ -33,9 +33,10 @@ Use that page for:
 ## Selected read
 
 - `DataSetSelection([...])` 会构造 canonicalized nested selection tree。
-- `read_file_selected(path, selection, keep_on_error=None)` 会从磁盘读取只包含所选 tag 和嵌套 sequence child 的 `DicomFile`。
-- `read_bytes_selected(data, selection, name="<memory>", keep_on_error=None, copy=True)` 会从
+- `read_file_selected(path, selection, keep_on_error=None, *, load_until=None)` 会从磁盘读取只包含所选 tag 和嵌套 sequence child 的 `DicomFile`。
+- `read_bytes_selected(data, selection, name="<memory>", keep_on_error=None, copy=True, *, load_until=None)` 会从
   bytes-like object 读取同样的选择结果。
+- `continue_read_selected(file, selection, *, load_until=None, keep_on_error=None)` 会从部分读取的 `DicomFile` 当前 stream 位置继续 in-place selected read。
 - `selection` 既可以是可复用的 `DataSetSelection`，也可以是 one-shot 调用里直接传入的
   raw nested Python sequence，由 leaf tag 和 `(tag, children)` pair 组成。
 - `TransferSyntaxUID` 和 `SpecificCharacterSet` 即使没有写进 selection，也始终会在

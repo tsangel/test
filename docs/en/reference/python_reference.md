@@ -29,11 +29,11 @@ For DICOM JSON Model read/write, see [DICOM JSON](../guide/dicom_json.md).
 ## Selected read
 
 - `DataSetSelection([...])` builds a canonicalized nested selection tree.
-- `read_file_selected(path, selection, load_until=None, keep_on_error=None)`
+- `read_file_selected(path, selection, keep_on_error=None, *, load_until=None)`
   reads a `DicomFile` that keeps only the selected tags and nested sequence children.
-- `read_bytes_selected(data, selection, name="<memory>", load_until=None, keep_on_error=None, copy=True)`
+- `read_bytes_selected(data, selection, name="<memory>", keep_on_error=None, copy=True, *, load_until=None)`
   reads the same selected result from a bytes-like object.
-- `continue_read_selected(file, selection, load_until=None, keep_on_error=None)`
+- `continue_read_selected(file, selection, *, load_until=None, keep_on_error=None)`
   continues selected reading in-place from the current stream position of a
   partially read `DicomFile`. Existing elements are preserved.
 - `selection` may be a reusable `DataSetSelection` or a raw nested Python

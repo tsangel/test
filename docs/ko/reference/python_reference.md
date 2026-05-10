@@ -29,11 +29,11 @@ DICOM JSON Model ?쎄린/?곌린????댁꽌??[DICOM JSON](../guide/dicom_json.m
 ## Selected read
 
 - `DataSetSelection([...])`은 canonicalized nested selection tree를 만듭니다.
-- `read_file_selected(path, selection, load_until=None, keep_on_error=None)`는
+- `read_file_selected(path, selection, keep_on_error=None, *, load_until=None)`는
   디스크에서 선택한 tag와 nested sequence child만 유지하는 `DicomFile`을 읽습니다.
-- `read_bytes_selected(data, selection, name="<memory>", load_until=None, keep_on_error=None, copy=True)`는
+- `read_bytes_selected(data, selection, name="<memory>", keep_on_error=None, copy=True, *, load_until=None)`는
   bytes-like object에서 같은 selected 결과를 읽습니다.
-- `continue_read_selected(file, selection, load_until=None, keep_on_error=None)`는
+- `continue_read_selected(file, selection, *, load_until=None, keep_on_error=None)`는
   일부만 읽힌 `DicomFile`의 현재 stream 위치부터 selected read를 in-place로 이어갑니다.
   기존 element는 유지됩니다.
 - `selection`에는 재사용 가능한 `DataSetSelection`을 넘길 수도 있고, one-shot 호출에서는

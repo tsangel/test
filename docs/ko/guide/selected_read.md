@@ -64,7 +64,7 @@ dicom::DataSetSelection selection{
 };
 
 dicom::ReadOptions selected_options;
-selected_options.load_until = "7fe0,0010"_tag;  // PixelData 전까지만 selected read
+selected_options.load_until = "Columns"_tag;  // selected read의 선택적 상한
 dicom::continue_read_selected(*file, selection, selected_options);
 ```
 
@@ -95,7 +95,7 @@ df = dicom.read_file_selected("sample.dcm", selection)
 df = dicom.read_file_selected(
     "sample.dcm",
     selection,
-    load_until=dicom.Tag("7fe0,0010"),
+    load_until=dicom.Tag("Columns"),
 )
 ```
 
@@ -134,7 +134,7 @@ df = dicom.read_file("sample.dcm", load_until=dicom.Tag("0002,0010"))
 dicom.continue_read_selected(
     df,
     ["PatientName", "StudyInstanceUID", "Rows", "Columns"],
-    load_until=dicom.Tag("7fe0,0010"),
+    load_until=dicom.Tag("Columns"),
 )
 ```
 
