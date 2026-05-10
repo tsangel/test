@@ -274,42 +274,46 @@ split_pixeldata_payload_loaded_or_empty(
 
 } // namespace
 
-	SplitPixelDataPayloadResult split_pixeldata_payload(
-	    const DataSetSelection& selection, const std::filesystem::path& path) {
-		ReadOptions preflight_options;
-		preflight_options.keep_on_error = true;
-		preflight_options.load_until = "TransferSyntaxUID"_tag;
-		if (auto preflight = read_file(path, preflight_options)) {
-			if (auto error = split_pixeldata_payload_preflight_error(*preflight)) {
-				return split_pixeldata_payload_error_result(std::move(*error));
-			}
-		}
-
-		ReadOptions options;
-		options.keep_on_error = true;
-		auto file = read_file_selected(path, split_pixeldata_augmented_selection(selection), options);
-		return split_pixeldata_payload_loaded_or_empty(std::move(file));
+SplitPixelDataPayloadResult split_pixeldata_payload(
+    const DataSetSelection& selection, const std::filesystem::path& path) {
+	ReadOptions preflight_options;
+	preflight_options.keep_on_error = true;
+	preflight_options.load_until = "TransferSyntaxUID"_tag;
+	auto file = read_file(path, preflight_options);
+	if (!file) {
+		return split_pixeldata_payload_error_result(
+		    fmt::format("split_pixeldata_payload file={} reason=failed to open file",
+		        path.string()));
 	}
+	if (auto error = split_pixeldata_payload_preflight_error(*file)) {
+		return split_pixeldata_payload_error_result(std::move(*error));
+	}
+	ReadOptions options;
+	options.keep_on_error = true;
+	continue_read_selected(*file, split_pixeldata_augmented_selection(selection), options);
+	return split_pixeldata_payload_loaded_or_empty(std::move(file));
+}
 
-	SplitPixelDataPayloadResult split_pixeldata_payload(
-	    const DataSetSelection& selection, std::string_view name,
-	    std::span<const std::uint8_t> bytes) {
-		ReadOptions preflight_options;
-		preflight_options.keep_on_error = true;
-		preflight_options.copy = false;
-		preflight_options.load_until = "TransferSyntaxUID"_tag;
-		if (auto preflight = read_bytes(std::string{name}, bytes.data(), bytes.size(),
-		        preflight_options)) {
-			if (auto error = split_pixeldata_payload_preflight_error(*preflight)) {
-				return split_pixeldata_payload_error_result(std::move(*error));
-			}
-		}
-
-		ReadOptions options;
-		options.keep_on_error = true;
-		options.copy = false;
-	auto file = read_bytes_selected(std::string(name), bytes.data(), bytes.size(),
-	    split_pixeldata_augmented_selection(selection), options);
+SplitPixelDataPayloadResult split_pixeldata_payload(
+    const DataSetSelection& selection, std::string_view name,
+    std::span<const std::uint8_t> bytes) {
+	ReadOptions preflight_options;
+	preflight_options.keep_on_error = true;
+	preflight_options.copy = false;
+	preflight_options.load_until = "TransferSyntaxUID"_tag;
+	auto file = read_bytes(std::string{name}, bytes.data(), bytes.size(), preflight_options);
+	if (!file) {
+		return split_pixeldata_payload_error_result(
+		    fmt::format("split_pixeldata_payload file={} reason=failed to read bytes",
+		        name));
+	}
+	if (auto error = split_pixeldata_payload_preflight_error(*file)) {
+		return split_pixeldata_payload_error_result(std::move(*error));
+	}
+	ReadOptions options;
+	options.keep_on_error = true;
+	options.copy = false;
+	continue_read_selected(*file, split_pixeldata_augmented_selection(selection), options);
 	return split_pixeldata_payload_loaded_or_empty(std::move(file));
 }
 

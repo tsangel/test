@@ -3037,7 +3037,7 @@ public:
 	/// path after the iterator advances. Walking only traverses the dataset state
 	/// that is already loaded; it does not implicitly call ensure_loaded() or
 	/// ensure_dataelement(). On partially loaded attached datasets, tags beyond
-	/// the loaded frontier are simply not visited; fully load first or call
+	/// the parsed frontier are simply not visited; fully load first or call
 	/// ensure_loaded(tag) before using walk() for full-dataset passes.
 	[[nodiscard]] DataSetWalker walk();
 
@@ -3045,7 +3045,7 @@ public:
 	/// On failure these return false and leave the DataSet valid, but the destination
 	/// element state is unspecified. Callers that need rollback semantics must preserve
 	/// and restore the previous element value themselves. On partially loaded attached
-	/// datasets, these throw when the target tag lies beyond the current loaded frontier.
+	/// datasets, these throw when the target tag lies beyond the current parsed frontier.
 	[[nodiscard]] bool set_value(Tag tag, int value);
 	[[nodiscard]] bool set_value(Tag tag, long value);
 	[[nodiscard]] bool set_value(Tag tag, long long value);
@@ -3116,6 +3116,15 @@ private:
 	friend class DicomFile;
 	friend class DataElement;
 	friend class Sequence;
+	static constexpr Tag kFileMetaReadUntilTag{0x0002u, 0xffffu};
+	// Internal parsed-frontier sentinel. Group 0003 is not a standard Part 10
+	// file-meta group and is below normal root dataset tags such as (0008,xxxx).
+	// We set the root parsed frontier to this value after a Deflated or Big
+	// Endian body stream has been prepared for the internal Explicit VR Little
+	// Endian parser, even if no body element has been materialized yet. That lets
+	// continuation reads distinguish "file meta only, body not prepared" from
+	// "body stream prepared, next body tag still unread" without an extra flag.
+	static constexpr Tag kDatasetBodyPreparedTag{0x0003u, 0x0000u};
 	friend const charset::detail::CharsetSpec*
 	charset::detail::parse_dataset_charset(const DataSet& dataset, std::string* out_error);
 	friend bool charset::detail::apply_declared_charset(
@@ -3124,10 +3133,10 @@ private:
 	using element_index_iterator = std::vector<ElementRef>::iterator;
 	[[nodiscard]] element_index_iterator lower_bound_element_index_mutable(std::uint32_t tag_value);
 	[[nodiscard]] bool should_append_to_elements(std::uint32_t tag_value) const noexcept;
-	[[nodiscard]] bool is_beyond_last_loaded_tag(Tag tag) const noexcept {
-		return tag > last_tag_loaded_;
+	[[nodiscard]] bool is_beyond_last_parsed_tag(Tag tag) const noexcept {
+		return tag > last_tag_parsed_;
 	}
-	[[noreturn]] void throw_beyond_last_loaded_tag(
+	[[noreturn]] void throw_beyond_last_parsed_tag(
 	    Tag tag,
 	    std::source_location location = std::source_location::current()) const;
 	[[nodiscard]] DataElement* find_dataelement_in_elements(std::uint32_t tag_value);
@@ -3141,6 +3150,7 @@ private:
 	DataElement& add_dataelement_nocheck(Tag tag, VR vr, std::size_t offset, std::size_t length);
 	void remove_dataelement_nocheck(Tag tag);
 	void attach_to_stream(std::string identifier, std::unique_ptr<InStream> stream);
+	void prepare_attached_stream_for_transfer_syntax(const char* context);
 	void set_root_file(DicomFile* root_file) noexcept { root_file_ = root_file; }
 	void on_specific_character_set_changed() noexcept;
 	template <typename AssignFn>
@@ -3158,7 +3168,7 @@ private:
 	DataSet* root_dataset_{nullptr};
 	DataSet* parent_dataset_{nullptr};
 	mutable const charset::detail::CharsetSpec* effective_charset_{nullptr};
-	Tag last_tag_loaded_{Tag(0xFFFFu, 0xFFFFu)};
+	Tag last_tag_parsed_{Tag(0xFFFFu, 0xFFFFu)};
 	bool explicit_vr_{true};
 	std::size_t offset_{0};  // absolute offset within the root stream where this dataset starts
 	std::size_t active_element_count_{0};
@@ -3611,6 +3621,11 @@ private:
 	    const pixel::EncoderContext& encoder_ctx);
 	void apply_transfer_syntax(uid::WellKnown transfer_syntax,
 	    std::span<const pixel::CodecOptionTextKv> codec_opt_override);
+	void capture_read_errors(const ReadOptions& options,
+	    std::string_view unknown_read_error,
+	    std::string_view unknown_nonstd_exception,
+	    const std::function<void()>& read_operation,
+	    const std::function<void()>& on_error = {});
 	void clear_error_state() noexcept;
 	void set_error_state(std::string message);
 	void clear_json_doc_owner() noexcept { json_doc_owner_.reset(); }
@@ -4227,10 +4242,10 @@ std::unique_ptr<DicomFile> read_bytes_with_pixeldata_payload(const std::string& 
 [[nodiscard]] JsonReadResult read_json(
     std::string name, std::vector<std::uint8_t>&& buffer, JsonReadOptions options = {});
 /// Read from disk while materializing only the selected tags and nested sequence children.
-/// Selected-read APIs reuse ReadOptions.keep_on_error and, for memory overloads,
-/// ReadOptions.copy. ReadOptions.load_until is ignored and replaced by a frontier
-/// derived from `selection`. Malformed data outside the selected/visited region
-/// may not surface as read errors.
+/// Selected-read APIs reuse ReadOptions.keep_on_error, ReadOptions.load_until as
+/// an upper bound on the selection frontier, and, for memory overloads,
+/// ReadOptions.copy. Malformed data outside the selected/visited region may not
+/// surface as read errors.
 std::unique_ptr<DicomFile> read_file_selected(
     const std::filesystem::path& path, const DataSetSelection& selection,
     ReadOptions options = {});
@@ -4249,6 +4264,12 @@ std::unique_ptr<DicomFile> read_bytes_selected(
 std::unique_ptr<DicomFile> read_bytes_selected(
     std::string name, std::vector<std::uint8_t>&& buffer,
     const DataSetSelection& selection, ReadOptions options = {});
+/// Continue reading an already attached/partially read DicomFile while only
+/// materializing the selected tags from the current stream position onward.
+/// Existing loaded elements are preserved. ReadOptions.load_until is an upper
+/// bound on the selection frontier.
+void continue_read_selected(
+    DicomFile& file, const DataSetSelection& selection, ReadOptions options = {});
 /// Return the current adaptive reserve hint used by root DataSet::read_attached_stream().
 [[nodiscard]] std::size_t load_root_elements_reserve_hint() noexcept;
 /// Reset the adaptive reserve hint used by root DataSet::read_attached_stream().

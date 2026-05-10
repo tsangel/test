@@ -1886,7 +1886,11 @@ void DicomFile::set_error_state(std::string message) {
 	error_message_ = std::move(message);
 }
 
-void DicomFile::read_attached_stream(const ReadOptions& options) {
+void DicomFile::capture_read_errors(const ReadOptions& options,
+    std::string_view unknown_read_error,
+    std::string_view unknown_nonstd_exception,
+    const std::function<void()>& read_operation,
+    const std::function<void()>& on_error) {
 	clear_error_state();
 
 	std::shared_ptr<diag::Reporter> downstream = diag::thread_reporter_slot();
@@ -1897,28 +1901,31 @@ void DicomFile::read_attached_stream(const ReadOptions& options) {
 	ThreadReporterGuard reporter_scope(capturing_reporter);
 
 	try {
-		root_dataset_.read_attached_stream(options);
-		external_pixel_payload_.attach_pending_or_throw(*this);
+		read_operation();
 	} catch (const std::exception& ex) {
-		external_pixel_payload_.clear_pending();
+		if (on_error) {
+			on_error();
+		}
 		const std::string_view what = ex.what();
 		if (!what.empty()) {
 			set_error_state(std::string(what));
 		} else if (capturing_reporter->has_error()) {
 			set_error_state(capturing_reporter->last_error_message());
 		} else {
-			set_error_state("DicomFile::read_attached_stream reason=unknown read error");
+			set_error_state(std::string(unknown_read_error));
 		}
 
 		if (!options.keep_on_error) {
 			throw;
 		}
 	} catch (...) {
-		external_pixel_payload_.clear_pending();
+		if (on_error) {
+			on_error();
+		}
 		if (capturing_reporter->has_error()) {
 			set_error_state(capturing_reporter->last_error_message());
 		} else {
-			set_error_state("DicomFile::read_attached_stream reason=unknown non-std exception");
+			set_error_state(std::string(unknown_nonstd_exception));
 		}
 
 		if (!options.keep_on_error) {
@@ -1929,6 +1936,19 @@ void DicomFile::read_attached_stream(const ReadOptions& options) {
 	if (!has_error_ && capturing_reporter->has_error()) {
 		set_error_state(capturing_reporter->last_error_message());
 	}
+}
+
+void DicomFile::read_attached_stream(const ReadOptions& options) {
+	capture_read_errors(options,
+	    "DicomFile::read_attached_stream reason=unknown read error",
+	    "DicomFile::read_attached_stream reason=unknown non-std exception",
+	    [&] {
+		    root_dataset_.read_attached_stream(options);
+		    external_pixel_payload_.attach_pending_or_throw(*this);
+	    },
+	    [&] {
+		    external_pixel_payload_.clear_pending();
+	    });
 }
 
 bool DicomFile::has_pixel_data() const {

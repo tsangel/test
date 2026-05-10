@@ -80,6 +80,7 @@ __all__ = [
     "split_pixeldata_payload",
     "join_pixeldata_payload",
     "read_bytes_selected",
+    "continue_read_selected",
     "load_root_elements_reserve_hint",
     "reset_root_elements_reserve_hint",
     "set_htj2k_decoder_backend",
@@ -1441,6 +1442,8 @@ def read_file_selected(
     path: str | os.PathLike[str],
     selection: DataSetSelectionLike,
     keep_on_error: bool | None = ...,
+    *,
+    load_until: Tag | None = ...,
 ) -> DicomFile: ...
 
 def is_dicom_file(path: str | os.PathLike[str], /) -> bool: ...
@@ -1481,7 +1484,18 @@ def read_bytes_selected(
     name: str = "<memory>",
     keep_on_error: bool | None = ...,
     copy: bool = ...,
+    *,
+    load_until: Tag | None = ...,
 ) -> DicomFile: ...
+
+
+def continue_read_selected(
+    file: DicomFile,
+    selection: DataSetSelectionLike,
+    *,
+    load_until: Tag | None = ...,
+    keep_on_error: bool | None = ...,
+) -> None: ...
 
 
 def load_root_elements_reserve_hint() -> int: ...

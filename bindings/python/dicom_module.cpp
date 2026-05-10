@@ -6511,11 +6511,15 @@ m.def("read_file",
     "    Inspect DicomFile.has_error and DicomFile.error_message after reading.\n");
 
 	m.def("read_file_selected",
-	    [](nb::handle path, nb::handle selection_value, std::optional<bool> keep_on_error) {
+	    [](nb::handle path, nb::handle selection_value, std::optional<bool> keep_on_error,
+	        std::optional<Tag> load_until) {
 		    const auto selection = selection_from_py(selection_value, "selection");
 		    dicom::ReadOptions opts;
 		    if (keep_on_error) {
 			    opts.keep_on_error = *keep_on_error;
+		    }
+		    if (load_until) {
+			    opts.load_until = *load_until;
 		    }
 		    return dicom::read_file_selected(
 		        python_path_to_filesystem_path(path, "path"), selection, opts);
@@ -6523,6 +6527,8 @@ m.def("read_file",
 	    nb::arg("path"),
 	    nb::arg("selection"),
 	    nb::arg("keep_on_error") = nb::none(),
+	    nb::kw_only(),
+	    nb::arg("load_until") = nb::none(),
 	    "Read a DICOM file from disk using a nested DataSetSelection.\n"
 	    "\n"
 	    "The returned DicomFile keeps only the selected elements and nested\n"
@@ -6541,7 +6547,9 @@ m.def("read_file",
 	    "    want to validate/canonicalize once and reuse the same selection.\n"
 	    "keep_on_error : bool | None, optional\n"
 	    "    When True, keep partially read selected data instead of raising on parse errors.\n"
-	    "    Inspect DicomFile.has_error and DicomFile.error_message after reading.\n");
+	    "    Inspect DicomFile.has_error and DicomFile.error_message after reading.\n"
+	    "load_until : Tag | None, optional\n"
+	    "    Upper bound for selected-read parsing. Defaults to the last selected root tag.\n");
 
 m.def("is_dicom_file",
     [](nb::handle path) {
@@ -6805,7 +6813,7 @@ m.def("read_bytes",
 
 	m.def("read_bytes_selected",
 	    [](nb::object buffer, nb::handle selection_value, const std::string& name,
-	        std::optional<bool> keep_on_error, bool copy) {
+	        std::optional<bool> keep_on_error, bool copy, std::optional<Tag> load_until) {
 		    const auto selection = selection_from_py(selection_value, "selection");
 		    PyBufferView view(buffer);
 		    const Py_buffer& info = view.view();
@@ -6824,6 +6832,9 @@ m.def("read_bytes",
 		    dicom::ReadOptions opts;
 		    if (keep_on_error) {
 			    opts.keep_on_error = *keep_on_error;
+		    }
+		    if (load_until) {
+			    opts.load_until = *load_until;
 		    }
 		    opts.copy = copy;
 
@@ -6854,6 +6865,8 @@ m.def("read_bytes",
 	    nb::arg("name") = std::string{"<memory>"},
 	    nb::arg("keep_on_error") = nb::none(),
 	    nb::arg("copy") = true,
+	    nb::kw_only(),
+	    nb::arg("load_until") = nb::none(),
 	    "Read a DicomFile from a bytes-like object while keeping only the selected tags\n"
 	    "and nested sequence children.\n"
 	    "\n"
@@ -6875,7 +6888,30 @@ m.def("read_bytes",
 	    "    Inspect DicomFile.has_error and DicomFile.error_message after reading.\n"
 	    "copy : bool, optional\n"
 	    "    When False, avoid copying and reference the caller's buffer; caller must keep\n"
-	    "    the buffer alive while the returned DicomFile exists.\n");
+	    "    the buffer alive while the returned DicomFile exists.\n"
+	    "load_until : Tag | None, optional\n"
+	    "    Upper bound for selected-read parsing. Defaults to the last selected root tag.\n");
+
+	m.def("continue_read_selected",
+	    [](dicom::DicomFile& file, nb::handle selection_value,
+	        std::optional<Tag> load_until, std::optional<bool> keep_on_error) {
+		    const auto selection = selection_from_py(selection_value, "selection");
+		    dicom::ReadOptions opts;
+		    if (load_until) {
+			    opts.load_until = *load_until;
+		    }
+		    if (keep_on_error) {
+			    opts.keep_on_error = *keep_on_error;
+		    }
+		    dicom::continue_read_selected(file, selection, opts);
+	    },
+	    nb::arg("file"),
+	    nb::arg("selection"),
+	    nb::kw_only(),
+	    nb::arg("load_until") = nb::none(),
+	    nb::arg("keep_on_error") = nb::none(),
+	    "Continue selected reading from the current stream position of an existing DicomFile.\n"
+	    "Already loaded elements are preserved; only matching future elements are materialized.\n");
 
 m.def("load_root_elements_reserve_hint",
     []() {
@@ -7425,9 +7461,10 @@ m.def("generate_study_instance_uid",
 	    "is_dicom_file",
 	    "read_bytes",
 	    "read_bytes_with_pixeldata_payload",
-		    "split_pixeldata_payload",
+	    "split_pixeldata_payload",
 	    "join_pixeldata_payload",
 	    "read_bytes_selected",
+	    "continue_read_selected",
 	    "load_root_elements_reserve_hint",
 	    "reset_root_elements_reserve_hint",
 	    "set_htj2k_decoder_backend",
