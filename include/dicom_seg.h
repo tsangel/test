@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <iterator>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
@@ -432,6 +433,8 @@ private:
 	detail::SegmentationIndex index_{};
 	std::size_t rows_{0};
 	std::size_t columns_{0};
+	mutable std::mutex fractional_decode_plan_mutex_{};
+	mutable std::optional<pixel::DecodePlan> fractional_decode_plan_{};
 
 	friend class SegmentListView;
 	friend class SegmentListView::iterator;

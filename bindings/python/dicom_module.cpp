@@ -3954,6 +3954,11 @@ struct PySegmentFrameList {
 	}
 };
 
+struct PySegmentFrameIterator {
+	PySegmentFrameList frames{};
+	std::size_t ordinal{0};
+};
+
 struct PySourceImageRefList {
 	std::shared_ptr<PySegmentationOwner> owner{};
 	std::size_t frame_index{0};
@@ -4143,6 +4148,16 @@ void py_seg_decode_frame_into(
 	return PySegmentFrame{self.owner, self.frame_index_from_ordinal(ordinal)};
 }
 
+[[nodiscard]] PySegmentFrame py_segment_frame_iterator_next(
+    PySegmentFrameIterator& self) {
+	if (self.ordinal >= self.frames.size()) {
+		throw nb::stop_iteration();
+	}
+	return PySegmentFrame{
+	    self.frames.owner,
+	    self.frames.frame_index_from_ordinal(self.ordinal++)};
+}
+
 [[nodiscard]] PySourceImageRef py_source_image_ref_list_get(
     const PySourceImageRefList& self, std::ptrdiff_t index) {
 	const auto ordinal = normalize_py_index(index, self.size(), "SourceImageRefList");
@@ -4154,21 +4169,6 @@ void py_seg_decode_frame_into(
 	const auto size = self.size();
 	for (std::size_t i = 0; i < size; ++i) {
 		items.append(nb::cast(py_segment_list_get(
-		    self, static_cast<std::ptrdiff_t>(i))));
-	}
-	PyObject* iterator = PyObject_GetIter(items.ptr());
-	if (!iterator) {
-		throw nb::python_error();
-	}
-	return nb::steal<nb::object>(iterator);
-}
-
-[[nodiscard]] nb::object py_segment_frame_list_iter(
-    const PySegmentFrameList& self) {
-	nb::list items;
-	const auto size = self.size();
-	for (std::size_t i = 0; i < size; ++i) {
-		items.append(nb::cast(py_segment_frame_list_get(
 		    self, static_cast<std::ptrdiff_t>(i))));
 	}
 	PyObject* iterator = PyObject_GetIter(items.ptr());
@@ -6889,11 +6889,21 @@ NB_MODULE(_dicomsdl, m) {
 			    return oss.str();
 		    });
 
+	nb::class_<PySegmentFrameIterator>(seg, "SegmentFrameIterator")
+		.def("__iter__",
+		    [](PySegmentFrameIterator& self) -> PySegmentFrameIterator& {
+			    return self;
+		    })
+		.def("__next__", &py_segment_frame_iterator_next);
+
 	nb::class_<PySegmentFrameList>(seg, "SegmentFrameList",
 	    "Sequence-like view over stored SEG frames.")
 		.def("__len__", [](const PySegmentFrameList& self) { return self.size(); })
 		.def("__bool__", [](const PySegmentFrameList& self) { return self.size() != 0; })
-		.def("__iter__", &py_segment_frame_list_iter)
+		.def("__iter__",
+		    [](const PySegmentFrameList& self) {
+			    return PySegmentFrameIterator{self, 0};
+		    })
 		.def("__getitem__", &py_segment_frame_list_get, nb::arg("index"))
 		.def("__repr__",
 		    [](const PySegmentFrameList& self) {
@@ -7076,24 +7086,6 @@ NB_MODULE(_dicomsdl, m) {
 	    nb::arg("validate_required_modules") = true,
 	    "Recommended fast path: read SEG bytes into an owned DicomFile and "
 	    "adapt them as DICOM Segmentation Storage.");
-	seg.def("from_dicomfile",
-	    [](DicomFile& file, bool allow_partial_source,
-	        bool validate_required_modules) {
-		    auto bytes = file.write_bytes(make_write_options(
-		        true, true, true));
-		    auto owned_file = dicom::read_bytes(
-		        std::string{"<seg-from-dicomfile-copy>"}, std::move(bytes));
-		    return py_segmentation_from_unique(dicom::seg::from_dicomfile(
-		        std::move(owned_file),
-		        make_seg_options(allow_partial_source, validate_required_modules)));
-	    },
-	    nb::arg("dicom_file"),
-	    nb::kw_only(),
-	    nb::arg("allow_partial_source") = false,
-	    nb::arg("validate_required_modules") = true,
-	    "Adapt a Python DicomFile as SEG by serializing it into an owned copy. "
-	    "Python cannot move ownership out of an existing DicomFile object, so "
-	    "use seg.from_file/from_bytes for the direct ownership path.");
 
 	m.def("create_encoder_context",
 	    [](const Uid& transfer_syntax, nb::handle options) {

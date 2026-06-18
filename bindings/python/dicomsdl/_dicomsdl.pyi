@@ -1525,6 +1525,11 @@ class _SegmentFrameList:
     def __getitem__(self, index: int, /) -> _SegmentFrame: ...
 
 
+class _SegmentFrameIterator:
+    def __iter__(self) -> _SegmentFrameIterator: ...
+    def __next__(self) -> _SegmentFrame: ...
+
+
 class _Segmentation:
     @property
     def is_valid(self) -> bool: ...
@@ -1568,6 +1573,7 @@ class _SegModule:
     SegmentList: type[_SegmentList]
     SegmentFrame: type[_SegmentFrame]
     SegmentFrameList: type[_SegmentFrameList]
+    SegmentFrameIterator: type[_SegmentFrameIterator]
     SourceImageRef: type[_SourceImageRef]
     SourceImageRefList: type[_SourceImageRefList]
     def is_segmentation_storage(self, source: DicomFile | DataSet, /) -> bool: ...
@@ -1590,14 +1596,6 @@ class _SegModule:
         load_until: Tag | None = ...,
         keep_on_error: bool | None = ...,
         copy: bool = ...,
-        allow_partial_source: bool = ...,
-        validate_required_modules: bool = ...,
-    ) -> _Segmentation: ...
-    def from_dicomfile(
-        self,
-        dicom_file: DicomFile,
-        /,
-        *,
         allow_partial_source: bool = ...,
         validate_required_modules: bool = ...,
     ) -> _Segmentation: ...

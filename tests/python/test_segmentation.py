@@ -16,6 +16,10 @@ def _set_vr(df: dicom.DicomFile, key: str, vr: dicom.VR, value: object) -> None:
     assert df.set_value(key, vr, value) is True
 
 
+def _seg_from_dicomfile_copy(df: dicom.DicomFile) -> dicom.seg.Segmentation:
+    return dicom.seg.from_bytes(df.write_bytes())
+
+
 def _populate_common_binary_seg(df: dicom.DicomFile) -> None:
     seg_uid = dicom.uid_from_keyword("SegmentationStorage").value
     sop_uid = "1.2.826.0.1.3680043.10.543.400"
@@ -134,11 +138,11 @@ def _make_fractional_seg() -> dicom.DicomFile:
     return df
 
 
-def test_segmentation_from_dicomfile_decodes_binary_frames() -> None:
+def test_segmentation_from_bytes_decodes_binary_frames() -> None:
     df = _make_binary_seg()
 
     assert dicom.seg.is_segmentation_storage(df)
-    seg = dicom.seg.from_dicomfile(df)
+    seg = _seg_from_dicomfile_copy(df)
 
     assert seg.is_valid
     assert seg.segmentation_type is dicom.seg.SegmentationType.binary
@@ -209,6 +213,8 @@ def test_segmentation_from_file_and_from_bytes(tmp_path) -> None:
     path = tmp_path / "seg.dcm"
     df.write_file(path)
 
+    assert not hasattr(dicom.seg, "from_dicomfile")
+
     from_file = dicom.seg.from_file(path)
     assert from_file.segment_count == 2
     assert from_file.frames_for_segment(1)[0].referenced_segment_number == 1
@@ -223,7 +229,7 @@ def test_segmentation_from_file_and_from_bytes(tmp_path) -> None:
 
 
 def test_fractional_segmentation_returns_raw_uint8_samples() -> None:
-    seg = dicom.seg.from_dicomfile(_make_fractional_seg())
+    seg = _seg_from_dicomfile_copy(_make_fractional_seg())
 
     assert seg.segmentation_type is dicom.seg.SegmentationType.fractional
     assert seg.fractional_type is dicom.seg.SegmentationFractionalType.probability
@@ -247,14 +253,14 @@ def test_unsupported_segmentation_errors_are_explicit() -> None:
     labelmap = _make_binary_seg()
     _set(labelmap, "SegmentationType", "LABELMAP")
     with pytest.raises(Exception, match="LABELMAP SEG"):
-        dicom.seg.from_dicomfile(labelmap)
+        _seg_from_dicomfile_copy(labelmap)
 
     labelmap_sop = _make_binary_seg()
     labelmap_uid = dicom.uid_from_keyword("LabelMapSegmentationStorage").value
     _set(labelmap_sop, "SOPClassUID", labelmap_uid)
     _set(labelmap_sop, "MediaStorageSOPClassUID", labelmap_uid)
     with pytest.raises(Exception, match="LABELMAP SEG"):
-        dicom.seg.from_dicomfile(labelmap_sop)
+        _seg_from_dicomfile_copy(labelmap_sop)
 
     explicit_uid = dicom.uid_from_keyword("ExplicitVRLittleEndian").value.encode("ascii")
     rle_uid = dicom.uid_from_keyword("RLELossless").value.encode("ascii")
@@ -267,24 +273,24 @@ def test_unsupported_segmentation_errors_are_explicit() -> None:
 
     short_pixel_data = _make_binary_seg()
     _set_vr(short_pixel_data, "PixelData", dicom.VR.OB, b"\x00")
-    seg = dicom.seg.from_dicomfile(short_pixel_data)
+    seg = _seg_from_dicomfile_copy(short_pixel_data)
     with pytest.raises(Exception, match="PixelData size mismatch"):
         seg.decode_frame(0)
 
     missing_segment_sequence = _make_binary_seg()
     missing_segment_sequence.remove_dataelement("SegmentSequence")
     with pytest.raises(Exception, match="SegmentSequence"):
-        dicom.seg.from_dicomfile(missing_segment_sequence)
+        _seg_from_dicomfile_copy(missing_segment_sequence)
 
     missing_per_frame_sequence = _make_binary_seg()
     missing_per_frame_sequence.remove_dataelement("PerFrameFunctionalGroupsSequence")
     with pytest.raises(Exception, match="PerFrameFunctionalGroupsSequence"):
-        dicom.seg.from_dicomfile(missing_per_frame_sequence)
+        _seg_from_dicomfile_copy(missing_per_frame_sequence)
 
     missing_geometry = _make_binary_seg()
     missing_geometry.remove_dataelement("SharedFunctionalGroupsSequence")
     with pytest.raises(Exception, match="SharedFunctionalGroupsSequence"):
-        dicom.seg.from_dicomfile(missing_geometry)
+        _seg_from_dicomfile_copy(missing_geometry)
 
 
 def test_optional_local_seg_sample_regression() -> None:

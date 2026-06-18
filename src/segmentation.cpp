@@ -600,7 +600,14 @@ void Segmentation::decode_frame_into(
 		if (bits_allocated != 8) {
 			throw_decode("FRACTIONAL SEG MVP requires BitsAllocated=8");
 		}
-		const auto plan = file_->create_decode_plan();
+		pixel::DecodePlan plan;
+		{
+			std::lock_guard lock(fractional_decode_plan_mutex_);
+			if (!fractional_decode_plan_) {
+				fractional_decode_plan_ = file_->create_decode_plan();
+			}
+			plan = *fractional_decode_plan_;
+		}
 		file_->decode_into(frame_index, out, plan);
 		return;
 	}

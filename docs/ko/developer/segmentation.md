@@ -18,7 +18,7 @@
 
 ## 필수 Metadata
 
-`from_dicomfile()`은 기본적으로 MVP에 필요한 metadata를 검증한다.
+SEG adapter는 기본적으로 MVP에 필요한 metadata를 검증한다.
 
 - `FrameOfReferenceUID`는 필수이며, SEG를 다른 영상에 직접 overlay할 수 있는지 판단하는 1차 key다. `SourceImageSequence`는 provenance metadata이므로 반드시 그 영상에만 표시해야 한다는 뜻은 아니다.
 - `Rows`, `Columns`, `SegmentSequence`, `PerFrameFunctionalGroupsSequence`는 필수다.
@@ -70,7 +70,7 @@ seg = dicom.seg.from_file(path)
 seg = dicom.seg.from_bytes(data, copy=False)
 ```
 
-`dicom.seg.from_dicomfile(df)`도 제공하지만, Python에서는 기존 `DicomFile` 객체에서 C++ unique ownership을 move할 수 없다. 그래서 내부적으로 serialize 후 owned copy를 다시 읽는다. 성능 경로는 `from_file()`과 `from_bytes()`다.
+Python에는 `from_dicomfile()`을 노출하지 않는다. 기존 `DicomFile` 객체에서 C++ unique ownership을 move할 수 없어서, 지원하려면 serialize 후 owned copy를 다시 읽는 느린 경로가 되기 때문이다.
 
 ## Regression Test
 

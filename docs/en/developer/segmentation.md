@@ -18,7 +18,7 @@ This page records the first DicomSDL contract for the high-level DICOM SEG adapt
 
 ## Required Metadata
 
-`from_dicomfile()` validates the metadata needed by this MVP by default:
+The SEG adapter validates the metadata needed by this MVP by default:
 
 - `FrameOfReferenceUID` is required and is the primary key for deciding whether a SEG can be directly overlaid on another image. `SourceImageSequence` is provenance metadata and does not have to be the only possible display target.
 - `Rows`, `Columns`, `SegmentSequence`, and `PerFrameFunctionalGroupsSequence` are required.
@@ -70,7 +70,7 @@ seg = dicom.seg.from_file(path)
 seg = dicom.seg.from_bytes(data, copy=False)
 ```
 
-`dicom.seg.from_dicomfile(df)` exists for convenience, but Python cannot move ownership out of an existing `DicomFile` object. It serializes the object into an owned copy internally, so `from_file()` and `from_bytes()` are the recommended fast paths.
+Python does not expose `from_dicomfile()` because Python cannot move ownership out of an existing `DicomFile` object without serializing it into another owned copy.
 
 ## Regression Tests
 

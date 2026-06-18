@@ -28,7 +28,7 @@ auto file = dicom::read_file(path);
 auto seg = dicom::seg::from_dicomfile(std::move(file));
 ```
 
-Python users should prefer `dicom.seg.from_file()` and `dicom.seg.from_bytes()`. `dicom.seg.from_dicomfile(df)` serializes the existing `DicomFile` into an owned copy because Python cannot move C++ unique ownership out of the object.
+Python users should use `dicom.seg.from_file()` or `dicom.seg.from_bytes()`. Python does not expose `from_dicomfile()` because it cannot move C++ unique ownership out of an existing `DicomFile` object without serializing it into another owned copy.
 
 ```python
 raw = seg.to_array(0)  # dtype uint8
