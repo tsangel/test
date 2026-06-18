@@ -243,6 +243,10 @@ int main() {
 		        "1.2.826.0.1.3680043.10.543.42") {
 			fail("FrameOfReferenceUID mismatch");
 		}
+		if (seg->rows() != 2 || seg->columns() != 8 ||
+		    seg->segment_count() != 2 || seg->frame_count() != 2) {
+			fail("basic SEG accessor mismatch");
+		}
 		if (seg->segments().size() != 2) {
 			fail("segment count mismatch");
 		}
@@ -397,6 +401,36 @@ int main() {
 	}
 
 	{
+		auto compressed_file = make_binary_seg_file();
+		compressed_file->set_transfer_syntax_state_only("RLELossless"_uid);
+		auto seg = dicom::seg::from_dicomfile(std::move(compressed_file));
+		std::vector<std::uint8_t> decoded(16);
+		expect_throw_contains("compressed binary SEG decode",
+		    [&] { seg->decode_frame_into(0, decoded); },
+		    "compressed/encapsulated BINARY SEG");
+
+		auto deflated_frame_file = make_binary_seg_file();
+		deflated_frame_file->set_transfer_syntax_state_only(
+		    "DeflatedImageFrameCompression"_uid);
+		auto deflated_frame_seg =
+		    dicom::seg::from_dicomfile(std::move(deflated_frame_file));
+		expect_throw_contains("Deflated Image Frame binary SEG decode",
+		    [&] { deflated_frame_seg->decode_frame_into(0, decoded); },
+		    "compressed/encapsulated BINARY SEG");
+	}
+
+	{
+		auto short_pixel_data = make_binary_seg_file();
+		short_pixel_data->set_native_pixel_data(
+		    std::vector<std::uint8_t>{0x00}, dicom::VR::OB);
+		auto seg = dicom::seg::from_dicomfile(std::move(short_pixel_data));
+		std::vector<std::uint8_t> decoded(16);
+		expect_throw_contains("short binary SEG PixelData",
+		    [&] { seg->decode_frame_into(0, decoded); },
+		    "PixelData size mismatch");
+	}
+
+	{
 		auto seg = dicom::seg::from_dicomfile(make_fractional_seg_file());
 		if (seg->segmentation_type() != dicom::seg::SegmentationType::fractional ||
 		    seg->fractional_type() !=
@@ -409,6 +443,11 @@ int main() {
 		seg->decode_frame_into(0, decoded);
 		if (decoded != std::vector<std::uint8_t>{0, 128, 255, 64}) {
 			fail("fractional frame decode mismatch");
+		}
+		const auto scaled_second =
+		    static_cast<double>(decoded[1]) / *seg->maximum_fractional_value();
+		if (scaled_second < 0.501 || scaled_second > 0.503) {
+			fail("fractional MaximumFractionalValue scaling mismatch");
 		}
 	}
 
@@ -429,6 +468,56 @@ int main() {
 			    (void)dicom::seg::from_dicomfile(std::move(missing_maximum));
 		    },
 		    "MaximumFractionalValue");
+	}
+
+	{
+		auto labelmap_type = make_binary_seg_file();
+		set_text(*labelmap_type, "SegmentationType", "LABELMAP");
+		expect_throw_contains("LABELMAP SegmentationType",
+		    [&] { (void)dicom::seg::from_dicomfile(std::move(labelmap_type)); },
+		    "LABELMAP SEG");
+
+		auto labelmap_sop_class = make_binary_seg_file();
+		set_text(*labelmap_sop_class, "SOPClassUID",
+		    "LabelMapSegmentationStorage"_uid.value());
+		set_text(*labelmap_sop_class, "MediaStorageSOPClassUID",
+		    "LabelMapSegmentationStorage"_uid.value());
+		expect_throw_contains("LABELMAP SOP Class",
+		    [&] {
+			    (void)dicom::seg::from_dicomfile(std::move(labelmap_sop_class));
+		    },
+		    "LABELMAP SEG");
+	}
+
+	{
+		auto missing_segment_sequence = make_binary_seg_file();
+		missing_segment_sequence->remove_dataelement("SegmentSequence"_tag);
+		expect_throw_contains("missing SegmentSequence",
+		    [&] {
+			    (void)dicom::seg::from_dicomfile(
+			        std::move(missing_segment_sequence));
+		    },
+		    "SegmentSequence");
+
+		auto missing_per_frame_sequence = make_binary_seg_file();
+		missing_per_frame_sequence->remove_dataelement(
+		    "PerFrameFunctionalGroupsSequence"_tag);
+		expect_throw_contains("missing PerFrameFunctionalGroupsSequence",
+		    [&] {
+			    (void)dicom::seg::from_dicomfile(
+			        std::move(missing_per_frame_sequence));
+		    },
+		    "PerFrameFunctionalGroupsSequence");
+
+		auto missing_shared_geometry = make_binary_seg_file();
+		missing_shared_geometry->remove_dataelement(
+		    "SharedFunctionalGroupsSequence"_tag);
+		expect_throw_contains("missing SharedFunctionalGroupsSequence",
+		    [&] {
+			    (void)dicom::seg::from_dicomfile(
+			        std::move(missing_shared_geometry));
+		    },
+		    "SharedFunctionalGroupsSequence");
 	}
 
 	{

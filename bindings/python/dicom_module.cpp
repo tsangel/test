@@ -8,6 +8,7 @@
 #include <memory>
 #include <new>
 #include <optional>
+#include <span>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -28,6 +29,7 @@
 
 #include <dicom.h>
 #include <dicom_endian.h>
+#include <dicom_seg.h>
 #include <diagnostics.h>
 #include <photometric_text_detail.hpp>
 #include "pixel/host/adapter/host_adapter.hpp"
@@ -3838,6 +3840,359 @@ dicom::DataSetWalkPathRef PyDataSetWalkPath::ref() const noexcept {
 	return state_->iterator->current_path();
 }
 
+struct PySegCode {
+	std::string value{};
+	std::string scheme_designator{};
+	std::string scheme_version{};
+	std::string meaning{};
+};
+
+struct PySegmentationOwner {
+	std::shared_ptr<dicom::seg::Segmentation> segmentation{};
+	nb::object buffer_owner{};
+
+	[[nodiscard]] const dicom::seg::Segmentation& get() const {
+		if (!segmentation) {
+			throw nb::value_error("Segmentation object is empty");
+		}
+		return *segmentation;
+	}
+};
+
+struct PySegmentation {
+	std::shared_ptr<PySegmentationOwner> owner{};
+
+	[[nodiscard]] const dicom::seg::Segmentation& get() const {
+		if (!owner) {
+			throw nb::value_error("Segmentation object is empty");
+		}
+		return owner->get();
+	}
+};
+
+struct PySegment {
+	std::shared_ptr<PySegmentationOwner> owner{};
+	std::uint16_t number{0};
+
+	[[nodiscard]] dicom::seg::SegmentView view() const {
+		if (!owner) {
+			throw nb::value_error("Segment object is empty");
+		}
+		auto segment = owner->get().segment_by_number(number);
+		if (!segment) {
+			throw nb::value_error("Segment no longer exists in the owning Segmentation");
+		}
+		return *segment;
+	}
+};
+
+struct PySegmentFrame {
+	std::shared_ptr<PySegmentationOwner> owner{};
+	std::size_t frame_index{0};
+
+	[[nodiscard]] dicom::seg::SegmentFrameView view() const {
+		if (!owner) {
+			throw nb::value_error("SegmentFrame object is empty");
+		}
+		if (frame_index >= owner->get().frame_count()) {
+			throw nb::index_error("SegmentFrame index out of range");
+		}
+		return owner->get().frames()[frame_index];
+	}
+};
+
+struct PySourceImageRef {
+	std::shared_ptr<PySegmentationOwner> owner{};
+	std::size_t frame_index{0};
+	std::size_t source_index{0};
+
+	[[nodiscard]] dicom::seg::SourceImageRefView view() const {
+		if (!owner) {
+			throw nb::value_error("SourceImageRef object is empty");
+		}
+		if (frame_index >= owner->get().frame_count()) {
+			throw nb::index_error("SourceImageRef frame index out of range");
+		}
+		const auto refs = owner->get().frames()[frame_index].source_images();
+		if (source_index >= refs.size()) {
+			throw nb::index_error("SourceImageRef index out of range");
+		}
+		return refs[source_index];
+	}
+};
+
+struct PySegmentList {
+	std::shared_ptr<PySegmentationOwner> owner{};
+
+	[[nodiscard]] std::size_t size() const {
+		return owner ? owner->get().segment_count() : 0;
+	}
+};
+
+struct PySegmentFrameList {
+	std::shared_ptr<PySegmentationOwner> owner{};
+	std::optional<std::uint16_t> segment_number{};
+
+	[[nodiscard]] std::size_t size() const {
+		if (!owner) {
+			return 0;
+		}
+		if (segment_number) {
+			return owner->get().frames_for_segment(*segment_number).size();
+		}
+		return owner->get().frame_count();
+	}
+
+	[[nodiscard]] std::size_t frame_index_from_ordinal(std::size_t ordinal) const {
+		if (!owner) {
+			throw nb::value_error("SegmentFrameList object is empty");
+		}
+		if (segment_number) {
+			return owner->get().frames_for_segment(*segment_number)[ordinal].index();
+		}
+		return owner->get().frames()[ordinal].index();
+	}
+};
+
+struct PySourceImageRefList {
+	std::shared_ptr<PySegmentationOwner> owner{};
+	std::size_t frame_index{0};
+
+	[[nodiscard]] std::size_t size() const {
+		if (!owner || frame_index >= owner->get().frame_count()) {
+			return 0;
+		}
+		return owner->get().frames()[frame_index].source_images().size();
+	}
+};
+
+[[nodiscard]] std::size_t normalize_py_index(
+    std::ptrdiff_t index, std::size_t size, const char* label) {
+	auto normalized = index;
+	if (normalized < 0) {
+		normalized += static_cast<std::ptrdiff_t>(size);
+	}
+	if (normalized < 0 ||
+	    static_cast<std::size_t>(normalized) >= size) {
+		throw nb::index_error((std::string(label) + " index out of range").c_str());
+	}
+	return static_cast<std::size_t>(normalized);
+}
+
+[[nodiscard]] std::size_t normalize_py_seg_frame_index(
+    const dicom::seg::Segmentation& segmentation, std::ptrdiff_t frame) {
+	return normalize_py_index(frame, segmentation.frame_count(), "SEG frame");
+}
+
+[[nodiscard]] std::size_t checked_seg_frame_sample_count(
+    const dicom::seg::Segmentation& segmentation) {
+	const auto rows = segmentation.rows();
+	const auto columns = segmentation.columns();
+	if (rows != 0 &&
+	    columns > (std::numeric_limits<std::size_t>::max() / rows)) {
+		throw std::overflow_error("SEG frame size overflow");
+	}
+	return rows * columns;
+}
+
+[[nodiscard]] PySegmentation py_segmentation_from_unique(
+    std::unique_ptr<dicom::seg::Segmentation> segmentation) {
+	if (!segmentation) {
+		throw nb::value_error("SEG construction returned an empty adapter");
+	}
+	auto owner = std::make_shared<PySegmentationOwner>();
+	owner->segmentation =
+	    std::shared_ptr<dicom::seg::Segmentation>(std::move(segmentation));
+	return PySegmentation{std::move(owner)};
+}
+
+[[nodiscard]] dicom::seg::Options make_seg_options(
+    bool allow_partial_source, bool validate_required_modules) {
+	dicom::seg::Options options;
+	options.allow_partial_source = allow_partial_source;
+	options.validate_required_modules = validate_required_modules;
+	return options;
+}
+
+[[nodiscard]] dicom::ReadOptions make_read_options(
+    std::optional<Tag> load_until, std::optional<bool> keep_on_error,
+    bool copy = true) {
+	dicom::ReadOptions options;
+	if (load_until) {
+		options.load_until = *load_until;
+	}
+	if (keep_on_error) {
+		options.keep_on_error = *keep_on_error;
+	}
+	options.copy = copy;
+	return options;
+}
+
+[[nodiscard]] PySegCode py_seg_code_from_view(const dicom::seg::CodeView& view) {
+	return PySegCode{
+	    std::string(view.value),
+	    std::string(view.scheme_designator),
+	    std::string(view.scheme_version),
+	    std::string(view.meaning)};
+}
+
+[[nodiscard]] nb::object py_optional_seg_code(
+    const std::optional<dicom::seg::CodeView>& code) {
+	if (!code) {
+		return nb::none();
+	}
+	return nb::cast(py_seg_code_from_view(*code));
+}
+
+[[nodiscard]] nb::object py_optional_string_view(
+    const std::optional<std::string_view>& value) {
+	if (!value) {
+		return nb::none();
+	}
+	return nb::str(value->data(), value->size());
+}
+
+template <typename T, std::size_t N>
+[[nodiscard]] nb::object py_optional_array_tuple(
+    const std::optional<std::array<T, N>>& value) {
+	if (!value) {
+		return nb::none();
+	}
+	nb::tuple out = nb::steal<nb::tuple>(PyTuple_New(static_cast<Py_ssize_t>(N)));
+	for (std::size_t i = 0; i < N; ++i) {
+		nb::object item_obj = nb::cast((*value)[i]);
+		PyObject* item = new_reference_or_null(item_obj.ptr());
+		if (PyTuple_SetItem(out.ptr(), static_cast<Py_ssize_t>(i), item) < 0) {
+			Py_DECREF(item);
+			throw nb::python_error();
+		}
+	}
+	return out;
+}
+
+[[nodiscard]] nb::object py_seg_frame_array(
+    const dicom::seg::Segmentation& segmentation, std::size_t frame_index) {
+	const auto rows = segmentation.rows();
+	const auto columns = segmentation.columns();
+	const auto required_bytes = checked_seg_frame_sample_count(segmentation);
+	std::array<std::size_t, 4> shape{rows, columns, 0, 0};
+	std::array<std::int64_t, 4> strides{
+	    static_cast<std::int64_t>(columns), 1, 0, 0};
+	auto out = make_writable_numpy_array(
+	    2, shape, strides, decoded_array_spec(dicom::pixel::DataType::u8).dtype,
+	    required_bytes);
+	{
+		nb::gil_scoped_release release;
+		segmentation.decode_frame_into(frame_index, out.bytes);
+	}
+	return nb::cast(std::move(out.array));
+}
+
+void py_seg_decode_frame_into(
+    const dicom::seg::Segmentation& segmentation, std::size_t frame_index,
+    nb::handle out) {
+	PyWritableBufferView writable(out);
+	const auto& view = writable.view();
+	if (view.itemsize <= 0) {
+		throw nb::value_error("seg.decode_frame_into requires a valid output itemsize");
+	}
+	if (static_cast<std::size_t>(view.itemsize) != 1) {
+		throw nb::value_error(
+		    "seg.decode_frame_into output itemsize must be 1 byte");
+	}
+	if (view.len < 0) {
+		throw nb::value_error("seg.decode_frame_into output buffer length is invalid");
+	}
+	const auto expected_bytes = checked_seg_frame_sample_count(segmentation);
+	const auto actual_bytes = static_cast<std::size_t>(view.len);
+	if (actual_bytes != expected_bytes) {
+		throw nb::value_error(
+		    "seg.decode_frame_into output buffer size does not match expected frame size");
+	}
+	if (expected_bytes > 0 && view.buf == nullptr) {
+		throw nb::value_error("seg.decode_frame_into output buffer is null");
+	}
+	auto out_span = std::span<std::uint8_t>(
+	    static_cast<std::uint8_t*>(view.buf), actual_bytes);
+	{
+		nb::gil_scoped_release release;
+		segmentation.decode_frame_into(frame_index, out_span);
+	}
+}
+
+[[nodiscard]] nb::bytes py_seg_decode_frame_bytes(
+    const dicom::seg::Segmentation& segmentation, std::size_t frame_index) {
+	std::vector<std::uint8_t> bytes(checked_seg_frame_sample_count(segmentation));
+	{
+		nb::gil_scoped_release release;
+		segmentation.decode_frame_into(frame_index, bytes);
+	}
+	return to_python_bytes(std::move(bytes));
+}
+
+[[nodiscard]] PySegment py_segment_list_get(
+    const PySegmentList& self, std::ptrdiff_t index) {
+	const auto ordinal = normalize_py_index(index, self.size(), "SegmentList");
+	const auto segment = self.owner->get().segments()[ordinal];
+	return PySegment{self.owner, segment.number()};
+}
+
+[[nodiscard]] PySegmentFrame py_segment_frame_list_get(
+    const PySegmentFrameList& self, std::ptrdiff_t index) {
+	const auto ordinal = normalize_py_index(index, self.size(), "SegmentFrameList");
+	return PySegmentFrame{self.owner, self.frame_index_from_ordinal(ordinal)};
+}
+
+[[nodiscard]] PySourceImageRef py_source_image_ref_list_get(
+    const PySourceImageRefList& self, std::ptrdiff_t index) {
+	const auto ordinal = normalize_py_index(index, self.size(), "SourceImageRefList");
+	return PySourceImageRef{self.owner, self.frame_index, ordinal};
+}
+
+[[nodiscard]] nb::object py_segment_list_iter(const PySegmentList& self) {
+	nb::list items;
+	const auto size = self.size();
+	for (std::size_t i = 0; i < size; ++i) {
+		items.append(nb::cast(py_segment_list_get(
+		    self, static_cast<std::ptrdiff_t>(i))));
+	}
+	PyObject* iterator = PyObject_GetIter(items.ptr());
+	if (!iterator) {
+		throw nb::python_error();
+	}
+	return nb::steal<nb::object>(iterator);
+}
+
+[[nodiscard]] nb::object py_segment_frame_list_iter(
+    const PySegmentFrameList& self) {
+	nb::list items;
+	const auto size = self.size();
+	for (std::size_t i = 0; i < size; ++i) {
+		items.append(nb::cast(py_segment_frame_list_get(
+		    self, static_cast<std::ptrdiff_t>(i))));
+	}
+	PyObject* iterator = PyObject_GetIter(items.ptr());
+	if (!iterator) {
+		throw nb::python_error();
+	}
+	return nb::steal<nb::object>(iterator);
+}
+
+[[nodiscard]] nb::object py_source_image_ref_list_iter(
+    const PySourceImageRefList& self) {
+	nb::list items;
+	const auto size = self.size();
+	for (std::size_t i = 0; i < size; ++i) {
+		items.append(nb::cast(py_source_image_ref_list_get(
+		    self, static_cast<std::ptrdiff_t>(i))));
+	}
+	PyObject* iterator = PyObject_GetIter(items.ptr());
+	if (!iterator) {
+		throw nb::python_error();
+	}
+	return nb::steal<nb::object>(iterator);
+}
+
 }  // namespace
 
 NB_MODULE(_dicomsdl, m) {
@@ -6342,6 +6697,404 @@ NB_MODULE(_dicomsdl, m) {
 			    return oss.str();
 		    });
 
+	auto seg = m.def_submodule(
+	    "seg", "High-level helpers for DICOM Segmentation Storage instances.");
+
+	nb::enum_<dicom::seg::SegmentationType>(seg, "SegmentationType",
+	    "DICOM SEG SegmentationType values.")
+		.value("unknown", dicom::seg::SegmentationType::unknown)
+		.value("binary", dicom::seg::SegmentationType::binary)
+		.value("fractional", dicom::seg::SegmentationType::fractional)
+		.value("labelmap", dicom::seg::SegmentationType::labelmap);
+
+	nb::enum_<dicom::seg::SegmentationFractionalType>(
+	    seg, "SegmentationFractionalType",
+	    "DICOM SEG SegmentationFractionalType values.")
+		.value("none", dicom::seg::SegmentationFractionalType::none)
+		.value("probability", dicom::seg::SegmentationFractionalType::probability)
+		.value("occupancy", dicom::seg::SegmentationFractionalType::occupancy)
+		.value("unknown", dicom::seg::SegmentationFractionalType::unknown);
+
+	nb::enum_<dicom::seg::SegmentAlgorithmType>(
+	    seg, "SegmentAlgorithmType", "DICOM SEG SegmentAlgorithmType values.")
+		.value("unknown", dicom::seg::SegmentAlgorithmType::unknown)
+		.value("automatic", dicom::seg::SegmentAlgorithmType::automatic_)
+		.value("semiautomatic", dicom::seg::SegmentAlgorithmType::semiautomatic)
+		.value("manual", dicom::seg::SegmentAlgorithmType::manual);
+
+	nb::class_<PySegCode>(seg, "Code",
+	    "Owning Python copy of one DICOM code-sequence item.")
+		.def_prop_ro("value", [](const PySegCode& self) { return self.value; })
+		.def_prop_ro("scheme_designator",
+		    [](const PySegCode& self) { return self.scheme_designator; })
+		.def_prop_ro("scheme_version",
+		    [](const PySegCode& self) { return self.scheme_version; })
+		.def_prop_ro("meaning", [](const PySegCode& self) { return self.meaning; })
+		.def("__repr__",
+		    [](const PySegCode& self) {
+			    std::ostringstream oss;
+			    oss << "Code(value='" << self.value << "', scheme_designator='"
+			        << self.scheme_designator << "', meaning='" << self.meaning << "')";
+			    return oss.str();
+		    });
+
+	nb::class_<PySegment>(seg, "Segment",
+	    "Borrowed view of one SegmentSequence item. Keeps the owning Segmentation alive.")
+		.def_prop_ro("number", [](const PySegment& self) { return self.view().number(); })
+		.def_prop_ro("label",
+		    [](const PySegment& self) { return std::string(self.view().label()); })
+		.def_prop_ro("description",
+		    [](const PySegment& self) { return std::string(self.view().description()); })
+		.def_prop_ro("algorithm_name",
+		    [](const PySegment& self) { return std::string(self.view().algorithm_name()); })
+		.def_prop_ro("algorithm_type",
+		    [](const PySegment& self) { return self.view().algorithm_type(); })
+		.def_prop_ro("property_category",
+		    [](const PySegment& self) { return py_optional_seg_code(self.view().property_category()); })
+		.def_prop_ro("property_type",
+		    [](const PySegment& self) { return py_optional_seg_code(self.view().property_type()); })
+		.def_prop_ro("anatomic_region",
+		    [](const PySegment& self) { return py_optional_seg_code(self.view().anatomic_region()); })
+		.def_prop_ro("recommended_display_cielab",
+		    [](const PySegment& self) {
+			    return py_optional_array_tuple(self.view().recommended_display_cielab());
+		    })
+		.def_prop_ro("dataset",
+		    [](const PySegment& self) -> const DataSet& { return self.view().dataset(); },
+		    nb::rv_policy::reference_internal)
+		.def("__repr__",
+		    [](const PySegment& self) {
+			    const auto view = self.view();
+			    std::ostringstream oss;
+			    oss << "Segment(number=" << view.number() << ", label='"
+			        << view.label() << "')";
+			    return oss.str();
+		    });
+
+	nb::class_<PySourceImageRef>(seg, "SourceImageRef",
+	    "Borrowed view of one SourceImageSequence item for a SEG frame.")
+		.def_prop_ro("sop_class_uid",
+		    [](const PySourceImageRef& self) {
+			    return std::string(self.view().sop_class_uid());
+		    })
+		.def_prop_ro("sop_instance_uid",
+		    [](const PySourceImageRef& self) {
+			    return std::string(self.view().sop_instance_uid());
+		    })
+		.def_prop_ro("referenced_frame_numbers",
+		    [](const PySourceImageRef& self) {
+			    const auto frames = self.view().referenced_frame_numbers();
+			    return std::vector<std::uint32_t>(frames.begin(), frames.end());
+		    })
+		.def_prop_ro("dataset",
+		    [](const PySourceImageRef& self) -> const DataSet& {
+			    return self.view().dataset();
+		    },
+		    nb::rv_policy::reference_internal)
+		.def("__repr__",
+		    [](const PySourceImageRef& self) {
+			    const auto view = self.view();
+			    std::ostringstream oss;
+			    oss << "SourceImageRef(sop_instance_uid='"
+			        << view.sop_instance_uid() << "')";
+			    return oss.str();
+		    });
+
+	nb::class_<PySourceImageRefList>(seg, "SourceImageRefList",
+	    "Sequence-like view of source image references for one SEG frame.")
+		.def("__len__", [](const PySourceImageRefList& self) { return self.size(); })
+		.def("__bool__", [](const PySourceImageRefList& self) { return self.size() != 0; })
+		.def("__iter__", &py_source_image_ref_list_iter)
+		.def("__getitem__", &py_source_image_ref_list_get, nb::arg("index"))
+		.def("__repr__",
+		    [](const PySourceImageRefList& self) {
+			    std::ostringstream oss;
+			    oss << "SourceImageRefList(size=" << self.size() << ")";
+			    return oss.str();
+		    });
+
+	nb::class_<PySegmentFrame>(seg, "SegmentFrame",
+	    "Borrowed view of one stored SEG frame.")
+		.def_prop_ro("index", [](const PySegmentFrame& self) { return self.view().index(); })
+		.def_prop_ro("referenced_segment_number",
+		    [](const PySegmentFrame& self) {
+			    return self.view().referenced_segment_number();
+		    })
+		.def_prop_ro("image_position_patient",
+		    [](const PySegmentFrame& self) {
+			    return py_optional_array_tuple(self.view().image_position_patient());
+		    })
+		.def_prop_ro("image_orientation_patient",
+		    [](const PySegmentFrame& self) {
+			    return py_optional_array_tuple(self.view().image_orientation_patient());
+		    })
+		.def_prop_ro("pixel_spacing",
+		    [](const PySegmentFrame& self) {
+			    return py_optional_array_tuple(self.view().pixel_spacing());
+		    })
+		.def_prop_ro("slice_thickness",
+		    [](const PySegmentFrame& self) -> nb::object {
+			    const auto value = self.view().slice_thickness();
+			    if (!value) {
+				    return nb::none();
+			    }
+			    return nb::cast(*value);
+		    })
+		.def_prop_ro("source_images",
+		    [](const PySegmentFrame& self) {
+			    return PySourceImageRefList{self.owner, self.frame_index};
+		    })
+		.def_prop_ro("per_frame_functional_groups_item",
+		    [](const PySegmentFrame& self) -> const DataSet& {
+			    return self.view().per_frame_functional_groups_item();
+		    },
+		    nb::rv_policy::reference_internal)
+		.def("to_array",
+		    [](const PySegmentFrame& self) {
+			    return py_seg_frame_array(self.owner->get(), self.frame_index);
+		    },
+		    "Decode this SEG frame as a uint8 NumPy array with shape (rows, columns).")
+		.def("decode_frame",
+		    [](const PySegmentFrame& self) {
+			    return py_seg_decode_frame_bytes(self.owner->get(), self.frame_index);
+		    },
+		    "Decode this SEG frame and return raw uint8 bytes.")
+		.def("decode_frame_into",
+		    [](const PySegmentFrame& self, nb::handle out) -> nb::object {
+			    py_seg_decode_frame_into(self.owner->get(), self.frame_index, out);
+			    return nb::borrow<nb::object>(out);
+		    },
+		    nb::arg("out"),
+		    "Decode this SEG frame into a writable byte-sized C-contiguous buffer.")
+		.def("__repr__",
+		    [](const PySegmentFrame& self) {
+			    const auto view = self.view();
+			    std::ostringstream oss;
+			    oss << "SegmentFrame(index=" << view.index()
+			        << ", referenced_segment_number="
+			        << view.referenced_segment_number() << ")";
+			    return oss.str();
+		    });
+
+	nb::class_<PySegmentList>(seg, "SegmentList",
+	    "Sequence-like view over SegmentSequence items.")
+		.def("__len__", [](const PySegmentList& self) { return self.size(); })
+		.def("__bool__", [](const PySegmentList& self) { return self.size() != 0; })
+		.def("__iter__", &py_segment_list_iter)
+		.def("__getitem__", &py_segment_list_get, nb::arg("index"))
+		.def("__repr__",
+		    [](const PySegmentList& self) {
+			    std::ostringstream oss;
+			    oss << "SegmentList(size=" << self.size() << ")";
+			    return oss.str();
+		    });
+
+	nb::class_<PySegmentFrameList>(seg, "SegmentFrameList",
+	    "Sequence-like view over stored SEG frames.")
+		.def("__len__", [](const PySegmentFrameList& self) { return self.size(); })
+		.def("__bool__", [](const PySegmentFrameList& self) { return self.size() != 0; })
+		.def("__iter__", &py_segment_frame_list_iter)
+		.def("__getitem__", &py_segment_frame_list_get, nb::arg("index"))
+		.def("__repr__",
+		    [](const PySegmentFrameList& self) {
+			    std::ostringstream oss;
+			    oss << "SegmentFrameList(size=" << self.size() << ")";
+			    return oss.str();
+		    });
+
+	nb::class_<PySegmentation>(seg, "Segmentation",
+	    "Owning high-level adapter for a DICOM Segmentation Storage instance.")
+		.def_prop_ro("is_valid", [](const PySegmentation& self) { return self.get().is_valid(); })
+		.def_prop_ro("segmentation_type",
+		    [](const PySegmentation& self) { return self.get().segmentation_type(); })
+		.def_prop_ro("fractional_type",
+		    [](const PySegmentation& self) { return self.get().fractional_type(); })
+		.def_prop_ro("maximum_fractional_value",
+		    [](const PySegmentation& self) { return self.get().maximum_fractional_value(); })
+		.def_prop_ro("frame_of_reference_uid",
+		    [](const PySegmentation& self) {
+			    return py_optional_string_view(self.get().frame_of_reference_uid());
+		    })
+		.def_prop_ro("rows", [](const PySegmentation& self) { return self.get().rows(); })
+		.def_prop_ro("columns",
+		    [](const PySegmentation& self) { return self.get().columns(); })
+		.def_prop_ro("segment_count",
+		    [](const PySegmentation& self) { return self.get().segment_count(); })
+		.def_prop_ro("frame_count",
+		    [](const PySegmentation& self) { return self.get().frame_count(); })
+		.def_prop_ro("shared_functional_groups_item",
+		    [](const PySegmentation& self) -> const DataSet& {
+			    return self.get().shared_functional_groups_item();
+		    },
+		    nb::rv_policy::reference_internal)
+		.def_prop_ro("segments",
+		    [](const PySegmentation& self) { return PySegmentList{self.owner}; })
+		.def_prop_ro("frames",
+		    [](const PySegmentation& self) {
+			    return PySegmentFrameList{self.owner, std::nullopt};
+		    })
+		.def("segment_by_number",
+		    [](const PySegmentation& self, std::uint16_t segment_number) -> nb::object {
+			    if (!self.get().segment_by_number(segment_number)) {
+				    return nb::none();
+			    }
+			    return nb::cast(PySegment{self.owner, segment_number});
+		    },
+		    nb::arg("segment_number"),
+		    "Return one Segment by DICOM SegmentNumber, or None when absent.")
+		.def("frames_for_segment",
+		    [](const PySegmentation& self, std::uint16_t segment_number) {
+			    return PySegmentFrameList{self.owner, segment_number};
+		    },
+		    nb::arg("segment_number"),
+		    "Return stored frames whose ReferencedSegmentNumber matches segment_number.")
+		.def("segment_frame_count",
+		    [](const PySegmentation& self, std::uint16_t segment_number) {
+			    return self.get().segment_frame_count(segment_number);
+		    },
+		    nb::arg("segment_number"))
+		.def("to_array",
+		    [](const PySegmentation& self, std::ptrdiff_t frame) {
+			    const auto frame_index = normalize_py_seg_frame_index(self.get(), frame);
+			    return py_seg_frame_array(self.get(), frame_index);
+		    },
+		    nb::arg("frame") = 0,
+		    "Decode one SEG frame as a uint8 NumPy array with shape (rows, columns).")
+		.def("decode_frame",
+		    [](const PySegmentation& self, std::ptrdiff_t frame) {
+			    const auto frame_index = normalize_py_seg_frame_index(self.get(), frame);
+			    return py_seg_decode_frame_bytes(self.get(), frame_index);
+		    },
+		    nb::arg("frame") = 0,
+		    "Decode one SEG frame and return raw uint8 bytes.")
+		.def("decode_frame_into",
+		    [](const PySegmentation& self, std::ptrdiff_t frame, nb::handle out) -> nb::object {
+			    const auto frame_index = normalize_py_seg_frame_index(self.get(), frame);
+			    py_seg_decode_frame_into(self.get(), frame_index, out);
+			    return nb::borrow<nb::object>(out);
+		    },
+		    nb::arg("frame"),
+		    nb::arg("out"),
+		    "Decode one SEG frame into a writable byte-sized C-contiguous buffer.")
+		.def("__repr__",
+		    [](const PySegmentation& self) {
+			    std::ostringstream oss;
+			    oss << "Segmentation(type=";
+			    switch (self.get().segmentation_type()) {
+			    case dicom::seg::SegmentationType::binary:
+				    oss << "binary";
+				    break;
+			    case dicom::seg::SegmentationType::fractional:
+				    oss << "fractional";
+				    break;
+			    case dicom::seg::SegmentationType::labelmap:
+				    oss << "labelmap";
+				    break;
+			    case dicom::seg::SegmentationType::unknown:
+			    default:
+				    oss << "unknown";
+				    break;
+			    }
+			    oss << ", segments=" << self.get().segment_count()
+			        << ", frames=" << self.get().frame_count() << ")";
+			    return oss.str();
+		    });
+
+	seg.def("is_segmentation_storage",
+	    [](const DicomFile& file) { return dicom::seg::is_segmentation_storage(file); },
+	    nb::arg("dicom_file"),
+	    "Return True when dicom_file declares the Segmentation Storage SOP Class UID.");
+	seg.def("is_segmentation_storage",
+	    [](const DataSet& dataset) { return dicom::seg::is_segmentation_storage(dataset); },
+	    nb::arg("dataset"),
+	    "Return True when dataset declares the Segmentation Storage SOP Class UID.");
+	seg.def("from_file",
+	    [](nb::handle path, std::optional<Tag> load_until,
+	        std::optional<bool> keep_on_error, bool allow_partial_source,
+	        bool validate_required_modules) {
+		    auto file = dicom::read_file(python_path_to_filesystem_path(path, "path"),
+		        make_read_options(load_until, keep_on_error));
+		    return py_segmentation_from_unique(dicom::seg::from_dicomfile(
+		        std::move(file),
+		        make_seg_options(allow_partial_source, validate_required_modules)));
+	    },
+	    nb::arg("path"),
+	    nb::kw_only(),
+	    nb::arg("load_until") = nb::none(),
+	    nb::arg("keep_on_error") = nb::none(),
+	    nb::arg("allow_partial_source") = false,
+	    nb::arg("validate_required_modules") = true,
+	    "Recommended fast path: read a DICOM file into an owned DicomFile and "
+	    "adapt it as DICOM Segmentation Storage.");
+	seg.def("from_bytes",
+	    [](nb::object buffer, const std::string& name,
+	        std::optional<Tag> load_until, std::optional<bool> keep_on_error,
+	        bool copy, bool allow_partial_source, bool validate_required_modules) {
+		    PyBufferView view(buffer);
+		    const Py_buffer& info = view.view();
+		    if (info.ndim != 1) {
+			    throw std::invalid_argument("seg.from_bytes expects a 1-D bytes-like object");
+		    }
+		    if (!PyBuffer_IsContiguous(&info, 'C')) {
+			    throw std::invalid_argument(
+			        "seg.from_bytes expects a contiguous bytes-like object");
+		    }
+		    const std::size_t elem_size =
+		        static_cast<std::size_t>(info.itemsize <= 0 ? 1 : info.itemsize);
+		    const std::size_t total = static_cast<std::size_t>(info.len);
+		    auto read_options = make_read_options(load_until, keep_on_error, copy);
+		    std::unique_ptr<dicom::DicomFile> file;
+		    if (copy || total == 0) {
+			    std::vector<std::uint8_t> owned(total);
+			    if (total > 0) {
+				    std::memcpy(owned.data(), info.buf, total);
+			    }
+			    file = dicom::read_bytes(std::string{name}, std::move(owned), read_options);
+		    } else {
+			    if (elem_size != 1) {
+				    throw std::invalid_argument(
+				        "seg.from_bytes(copy=False) requires a byte-oriented buffer");
+			    }
+			    file = dicom::read_bytes(std::string{name},
+			        static_cast<const std::uint8_t*>(info.buf), total, read_options);
+		    }
+		    auto segmentation = py_segmentation_from_unique(dicom::seg::from_dicomfile(
+		        std::move(file),
+		        make_seg_options(allow_partial_source, validate_required_modules)));
+		    if (!copy && total > 0) {
+			    segmentation.owner->buffer_owner = std::move(buffer);
+		    }
+		    return segmentation;
+	    },
+	    nb::arg("data"),
+	    nb::kw_only(),
+	    nb::arg("name") = std::string{"<memory>"},
+	    nb::arg("load_until") = nb::none(),
+	    nb::arg("keep_on_error") = nb::none(),
+	    nb::arg("copy") = true,
+	    nb::arg("allow_partial_source") = false,
+	    nb::arg("validate_required_modules") = true,
+	    "Recommended fast path: read SEG bytes into an owned DicomFile and "
+	    "adapt them as DICOM Segmentation Storage.");
+	seg.def("from_dicomfile",
+	    [](DicomFile& file, bool allow_partial_source,
+	        bool validate_required_modules) {
+		    auto bytes = file.write_bytes(make_write_options(
+		        true, true, true));
+		    auto owned_file = dicom::read_bytes(
+		        std::string{"<seg-from-dicomfile-copy>"}, std::move(bytes));
+		    return py_segmentation_from_unique(dicom::seg::from_dicomfile(
+		        std::move(owned_file),
+		        make_seg_options(allow_partial_source, validate_required_modules)));
+	    },
+	    nb::arg("dicom_file"),
+	    nb::kw_only(),
+	    nb::arg("allow_partial_source") = false,
+	    nb::arg("validate_required_modules") = true,
+	    "Adapt a Python DicomFile as SEG by serializing it into an owned copy. "
+	    "Python cannot move ownership out of an existing DicomFile object, so "
+	    "use seg.from_file/from_bytes for the direct ownership path.");
+
 	m.def("create_encoder_context",
 	    [](const Uid& transfer_syntax, nb::handle options) {
 		    return create_encoder_context_with_options(
@@ -7409,6 +8162,7 @@ m.def("generate_study_instance_uid",
 	    "IMPLEMENTATION_CLASS_UID",
 	    "IMPLEMENTATION_VERSION_NAME",
 	    "PIXELDATA_PAYLOAD_PLACEHOLDER_MAGIC",
+	    "seg",
 	    "log_info",
 	    "log_warn",
 	    "log_error",

@@ -226,6 +226,23 @@ template <std::size_t N>
 	return false;
 }
 
+[[nodiscard]] bool dataset_has_labelmap_segmentation_sop_class(
+    const DataSet& dataset) {
+	const auto labelmap_segmentation_storage =
+	    "LabelMapSegmentationStorage"_uid.value();
+	if (const auto sop_class_uid = string_value(dataset, "SOPClassUID"_tag);
+	    sop_class_uid && *sop_class_uid == labelmap_segmentation_storage) {
+		return true;
+	}
+	if (const auto media_sop_class_uid =
+	        string_value(dataset, "MediaStorageSOPClassUID"_tag);
+	    media_sop_class_uid &&
+	    *media_sop_class_uid == labelmap_segmentation_storage) {
+		return true;
+	}
+	return false;
+}
+
 [[noreturn]] void throw_seg(std::string_view reason) {
 	diag::error_and_throw("seg::from_dicomfile reason={}", reason);
 }
@@ -401,7 +418,7 @@ void Segmentation::extract_instance_metadata(const Options& options) {
 	}
 	if (segmentation_type_ == SegmentationType::labelmap &&
 	    options.validate_required_modules) {
-		throw_seg("Label Map Segmentation Storage is outside the SEG MVP scope");
+		throw_seg("LABELMAP SEG is outside the SEG MVP scope");
 	}
 	if (!frame_of_reference_uid_ && options.validate_required_modules) {
 		throw_seg("FrameOfReferenceUID is missing");
@@ -463,6 +480,22 @@ const DataSet& Segmentation::shared_functional_groups_item() const {
 	return *shared_functional_groups_item_;
 }
 
+std::size_t Segmentation::rows() const noexcept {
+	return rows_;
+}
+
+std::size_t Segmentation::columns() const noexcept {
+	return columns_;
+}
+
+std::size_t Segmentation::segment_count() const noexcept {
+	return index_.segments.size();
+}
+
+std::size_t Segmentation::frame_count() const noexcept {
+	return index_.frames.size();
+}
+
 SegmentListView Segmentation::segments() const noexcept {
 	return SegmentListView(this);
 }
@@ -507,6 +540,13 @@ void Segmentation::decode_frame_into(
 	if (segmentation_type_ == SegmentationType::binary) {
 		// DICOM BINARY SEG stores one bit per pixel across the multi-frame
 		// native PixelData stream. Expose it as one byte per pixel for callers.
+		const auto transfer_syntax = file_->transfer_syntax_uid();
+		if (transfer_syntax &&
+		    (!transfer_syntax.is_uncompressed() ||
+		        transfer_syntax.is_encapsulated())) {
+			throw_decode(
+			    "compressed/encapsulated BINARY SEG PixelData is not supported");
+		}
 		const auto bits_allocated =
 		    file_->get_dataelement("BitsAllocated"_tag).to_long().value_or(0);
 		const auto bits_stored =
@@ -529,15 +569,19 @@ void Segmentation::decode_frame_into(
 		const auto frame_bit_offset = frame_index * pixels_per_frame;
 		const auto total_bits = index_.frames.size() * pixels_per_frame;
 		const auto& pixel_data = file_->get_dataelement("PixelData"_tag);
-		if (!pixel_data || pixel_data.as_pixel_sequence()) {
-			throw_decode("BINARY SEG native PixelData is missing");
+		if (!pixel_data) {
+			throw_decode("BINARY SEG PixelData is missing");
+		}
+		if (pixel_data.as_pixel_sequence()) {
+			throw_decode(
+			    "compressed/encapsulated BINARY SEG PixelData is not supported");
 		}
 		if (dicom::detail::is_detached_pixel_payload_marker(pixel_data)) {
 			throw_decode("BINARY SEG PixelData payload is detached");
 		}
 		const auto bytes = pixel_data.value_span();
 		if (bytes.size() < (total_bits + 7u) / 8u) {
-			throw_decode("BINARY SEG PixelData is shorter than expected");
+			throw_decode("BINARY SEG PixelData size mismatch");
 		}
 		for (std::size_t pixel_index = 0; pixel_index < pixels_per_frame; ++pixel_index) {
 			const auto bit_index = frame_bit_offset + pixel_index;
@@ -894,6 +938,9 @@ std::unique_ptr<Segmentation> from_dicomfile(
 	}
 	if (file->has_error() && !options.allow_partial_source) {
 		throw_seg("input DicomFile has a read error");
+	}
+	if (dataset_has_labelmap_segmentation_sop_class(file->dataset())) {
+		throw_seg("LABELMAP SEG is outside the SEG MVP scope");
 	}
 	if (!is_segmentation_storage(*file)) {
 		throw_seg("input DicomFile is not Segmentation Storage");

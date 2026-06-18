@@ -376,6 +376,18 @@ public:
 	/// Throws when the item is missing because this is a raw DICOM item accessor.
 	[[nodiscard]] const DataSet& shared_functional_groups_item() const;
 
+	/// Rows (0028,0010) for one stored SEG frame.
+	[[nodiscard]] std::size_t rows() const noexcept;
+
+	/// Columns (0028,0011) for one stored SEG frame.
+	[[nodiscard]] std::size_t columns() const noexcept;
+
+	/// Number of SegmentSequence items indexed by this adapter.
+	[[nodiscard]] std::size_t segment_count() const noexcept;
+
+	/// Number of stored frames indexed by this adapter.
+	[[nodiscard]] std::size_t frame_count() const noexcept;
+
 	/// All segments described by SegmentSequence.
 	[[nodiscard]] SegmentListView segments() const noexcept;
 

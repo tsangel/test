@@ -1,0 +1,84 @@
+# DICOM Segmentation MVP
+
+이 문서는 DicomSDL의 첫 high-level DICOM SEG adapter 계약을 정리한다. core DICOM 읽기는 `dicom.h`에 두고, SEG 해석은 선택적으로 include하는 public header `dicom_seg.h`에 둔다.
+
+## 지원 범위
+
+- SOP Class는 Segmentation Storage (`1.2.840.10008.5.1.4.1.1.66.4`)만 지원한다.
+- BINARY SEG는 native 1-bit multi-frame PixelData를 지원한다. `decode_frame_into()`는 저장된 한 frame을 unpack해서 pixel당 1바이트, 값 `0` 또는 `1`로 돌려준다.
+- FRACTIONAL SEG는 native 8-bit PixelData를 지원한다. decode 결과는 raw `uint8` sample이며, caller가 `raw_value / MaximumFractionalValue`로 fractional value를 해석한다.
+- metadata view는 `SegmentSequence`, `PerFrameFunctionalGroupsSequence`, `SharedFunctionalGroupsSequence`, source image reference, `FrameOfReferenceUID`를 frame 단위로 index한다.
+
+## Post-MVP
+
+- LABELMAP SEG와 Label Map Segmentation Storage.
+- frame mask들을 3D array로 조립하는 volume reconstruction API.
+- SEG frame을 표시 대상 영상에 올리기 위한 affine/overlay helper.
+- RLE 같은 encapsulated transfer syntax를 포함한 compressed/encapsulated BINARY SEG PixelData.
+
+## 필수 Metadata
+
+`from_dicomfile()`은 기본적으로 MVP에 필요한 metadata를 검증한다.
+
+- `FrameOfReferenceUID`는 필수이며, SEG를 다른 영상에 직접 overlay할 수 있는지 판단하는 1차 key다. `SourceImageSequence`는 provenance metadata이므로 반드시 그 영상에만 표시해야 한다는 뜻은 아니다.
+- `Rows`, `Columns`, `SegmentSequence`, `PerFrameFunctionalGroupsSequence`는 필수다.
+- `SharedFunctionalGroupsSequence`는 정확히 하나의 item을 가져야 한다.
+- 각 frame은 하나의 `ReferencedSegmentNumber`로 해석되어야 한다.
+- FRACTIONAL SEG는 `SegmentationFractionalType`과 `MaximumFractionalValue`가 필요하다.
+
+조건을 만족하지 않으면 이상한 mask를 조용히 반환하지 말고 명확한 error를 내야 한다.
+
+## Pixel 계약
+
+BINARY SEG MVP는 native 1-bit DICOM PixelData를 지원한다. public API는 packed bit가 아니라 decoded 8-bit frame을 반환한다.
+
+```cpp
+std::vector<std::uint8_t> mask(seg->rows() * seg->columns());
+seg->decode_frame_into(frame_index, mask);
+// mask 값은 0 또는 1
+```
+
+FRACTIONAL SEG MVP는 저장된 raw 8-bit sample을 그대로 반환한다.
+
+```python
+raw = seg.to_array(0)  # dtype uint8
+fraction = raw.astype("float32") / seg.maximum_fractional_value
+```
+
+scaling은 caller가 수행한다. probability/occupancy 소비자가 원하는 precision과 memory layout을 선택할 수 있게 하기 위해서다.
+
+## API Pattern
+
+C++에서는 core API로 DICOM을 먼저 읽고, 그 `DicomFile`의 소유권을 SEG adapter로 넘긴다.
+
+```cpp
+#include <dicom.h>
+#include <dicom_seg.h>
+
+auto file = dicom::read_file(path);
+auto seg = dicom::seg::from_dicomfile(std::move(file));
+```
+
+C++ adapter가 `DicomFile`을 소유하므로 segment/frame view는 내부 DICOM dataset을 복사하지 않고 빌려 쓴다. 문자열과 item copy를 피하면서 lifetime을 단순하게 유지하는 구조다.
+
+Python에서는 direct ownership helper를 권장한다.
+
+```python
+import dicomsdl as dicom
+
+seg = dicom.seg.from_file(path)
+seg = dicom.seg.from_bytes(data, copy=False)
+```
+
+`dicom.seg.from_dicomfile(df)`도 제공하지만, Python에서는 기존 `DicomFile` 객체에서 C++ unique ownership을 move할 수 없다. 그래서 내부적으로 serialize 후 owned copy를 다시 읽는다. 성능 경로는 `from_file()`과 `from_bytes()`다.
+
+## Regression Test
+
+저장소에는 synthetic BINARY/FRACTIONAL SEG C++/Python 테스트를 둔다. 실제 sample은 private data일 수 있으므로 환경변수로 optional local regression을 켠다.
+
+```powershell
+$env:DICOMSDL_SEG_SAMPLE_PATH = "C:\path\to\sample-seg.dcm"
+python -m pytest tests/python/test_segmentation.py -q
+```
+
+Python wheel은 `package_data`로 stub을 포함한다. CMake target은 저장소의 `include/`를 노출하므로 source tree를 소비하는 build에서는 `<dicom_seg.h>`를 사용할 수 있다. 정식 CMake install/export rule은 이 MVP 밖의 작업이다.

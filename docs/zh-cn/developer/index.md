@@ -13,6 +13,7 @@ dev_notes
 translation_workflow
 logging
 split_pixel_payload
+segmentation
 cpp_build_from_source
 build_python_from_source
 python_dataset_access_benchmarks
