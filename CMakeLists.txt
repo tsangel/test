@@ -132,6 +132,7 @@ add_library(dicomsdl STATIC
     src/json_write.cpp
     src/p10_pixeldata_payload.cpp
     src/selected_read.cpp
+    src/segmentation.cpp
     src/writing/direct_write.cpp
     src/writing/transcoded_write.cpp
     src/person_name.cpp
