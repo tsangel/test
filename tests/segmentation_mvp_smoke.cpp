@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <exception>
 #include <filesystem>
 #include <iostream>
 #include <memory>
@@ -19,6 +20,24 @@ using namespace dicom::literals;
 [[noreturn]] void fail(const std::string& message) {
 	std::cerr << message << std::endl;
 	std::exit(1);
+}
+
+void expect_contains(std::string_view haystack, std::string_view needle,
+    std::string_view label) {
+	if (haystack.find(needle) == std::string_view::npos) {
+		fail(std::string(label) + " missing token: " + std::string(needle));
+	}
+}
+
+template <typename Fn>
+void expect_throw_contains(
+    std::string_view label, Fn&& fn, std::string_view token) {
+	try {
+		fn();
+		fail(std::string(label) + " should throw");
+	} catch (const std::exception& e) {
+		expect_contains(e.what(), token, label);
+	}
 }
 
 void set_long(dicom::DicomFile& file, std::string_view key, long value) {
@@ -56,6 +75,32 @@ void set_ints(dicom::DicomFile& file, std::string_view key,
 	if (!file.set_value(key, std::span<const int>(values.data(), values.size()))) {
 		fail("failed to set " + std::string(key));
 	}
+}
+
+void append_u32_le(std::vector<std::uint8_t>& out, std::uint32_t value) {
+	out.push_back(static_cast<std::uint8_t>(value & 0xFFu));
+	out.push_back(static_cast<std::uint8_t>((value >> 8) & 0xFFu));
+	out.push_back(static_cast<std::uint8_t>((value >> 16) & 0xFFu));
+	out.push_back(static_cast<std::uint8_t>((value >> 24) & 0xFFu));
+}
+
+void append_u64_le(std::vector<std::uint8_t>& out, std::uint64_t value) {
+	for (int shift = 0; shift < 64; shift += 8) {
+		out.push_back(static_cast<std::uint8_t>((value >> shift) & 0xFFu));
+	}
+}
+
+std::vector<std::uint8_t> detached_pixel_payload_marker(
+    char vr0, char vr1, std::uint32_t value_length,
+    std::uint64_t payload_length) {
+	std::vector<std::uint8_t> marker{
+	    dicom::kPixelDataPayloadPlaceholderMagic.begin(),
+	    dicom::kPixelDataPayloadPlaceholderMagic.end()};
+	marker.push_back(static_cast<std::uint8_t>(vr0));
+	marker.push_back(static_cast<std::uint8_t>(vr1));
+	append_u32_le(marker, value_length);
+	append_u64_le(marker, payload_length);
+	return marker;
 }
 
 void populate_common_seg_metadata(dicom::DicomFile& file, std::string_view type,
@@ -314,6 +359,44 @@ int main() {
 	}
 
 	{
+		auto file = make_binary_seg_file();
+		const auto path = unique_temp_seg_path();
+		std::error_code cleanup_error;
+		std::filesystem::remove(path, cleanup_error);
+
+		file->write_file(path);
+		dicom::ReadOptions partial_options;
+		partial_options.load_until = "DoubleFloatPixelData"_tag;
+		auto partial_file = dicom::read_file(path, partial_options);
+		if (!partial_file || partial_file->has_error()) {
+			fail("partial SEG file should be readable");
+		}
+		if (partial_file->get_dataelement("PixelData"_tag)) {
+			fail("partial read should not load PixelData before decode");
+		}
+
+		auto seg = dicom::seg::from_dicomfile(std::move(partial_file));
+		std::vector<std::uint8_t> decoded(16);
+		seg->decode_frame_into(0, decoded);
+		std::filesystem::remove(path, cleanup_error);
+		const std::vector<std::uint8_t> expected{
+		    1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 0, 0, 0, 0};
+		if (decoded != expected) {
+			fail("partial read SEG binary frame unpack mismatch");
+		}
+	}
+
+	{
+		auto detached_file = make_binary_seg_file();
+		detached_file->set_native_pixel_data(
+		    detached_pixel_payload_marker('O', 'B', 4, 4), dicom::VR::OB);
+		auto seg = dicom::seg::from_dicomfile(std::move(detached_file));
+		std::vector<std::uint8_t> decoded(16);
+		expect_throw_contains("detached binary SEG decode",
+		    [&] { seg->decode_frame_into(0, decoded); }, "detached");
+	}
+
+	{
 		auto seg = dicom::seg::from_dicomfile(make_fractional_seg_file());
 		if (seg->segmentation_type() != dicom::seg::SegmentationType::fractional ||
 		    seg->fractional_type() !=
@@ -327,6 +410,25 @@ int main() {
 		if (decoded != std::vector<std::uint8_t>{0, 128, 255, 64}) {
 			fail("fractional frame decode mismatch");
 		}
+	}
+
+	{
+		auto missing_fractional_type = make_fractional_seg_file();
+		missing_fractional_type->remove_dataelement("SegmentationFractionalType"_tag);
+		expect_throw_contains("missing SegmentationFractionalType",
+		    [&] {
+			    (void)dicom::seg::from_dicomfile(
+			        std::move(missing_fractional_type));
+		    },
+		    "SegmentationFractionalType");
+
+		auto missing_maximum = make_fractional_seg_file();
+		missing_maximum->remove_dataelement("MaximumFractionalValue"_tag);
+		expect_throw_contains("missing MaximumFractionalValue",
+		    [&] {
+			    (void)dicom::seg::from_dicomfile(std::move(missing_maximum));
+		    },
+		    "MaximumFractionalValue");
 	}
 
 	{

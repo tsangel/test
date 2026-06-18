@@ -409,6 +409,16 @@ void Segmentation::extract_instance_metadata(const Options& options) {
 	if ((rows_ == 0 || columns_ == 0) && options.validate_required_modules) {
 		throw_seg("Rows or Columns is missing");
 	}
+	if (segmentation_type_ == SegmentationType::fractional &&
+	    options.validate_required_modules) {
+		if (fractional_type_ == SegmentationFractionalType::none ||
+		    fractional_type_ == SegmentationFractionalType::unknown) {
+			throw_seg("FRACTIONAL SEG requires SegmentationFractionalType");
+		}
+		if (!maximum_fractional_value_ || *maximum_fractional_value_ == 0) {
+			throw_seg("FRACTIONAL SEG requires MaximumFractionalValue");
+		}
+	}
 
 	const auto* shared_sequence =
 	    sequence_value(dataset, "SharedFunctionalGroupsSequence"_tag);
@@ -492,6 +502,8 @@ void Segmentation::decode_frame_into(
 		throw_decode("frame index out of range");
 	}
 
+	file_->ensure_loaded("PixelData"_tag);
+
 	if (segmentation_type_ == SegmentationType::binary) {
 		// DICOM BINARY SEG stores one bit per pixel across the multi-frame
 		// native PixelData stream. Expose it as one byte per pixel for callers.
@@ -519,6 +531,9 @@ void Segmentation::decode_frame_into(
 		const auto& pixel_data = file_->get_dataelement("PixelData"_tag);
 		if (!pixel_data || pixel_data.as_pixel_sequence()) {
 			throw_decode("BINARY SEG native PixelData is missing");
+		}
+		if (dicom::detail::is_detached_pixel_payload_marker(pixel_data)) {
+			throw_decode("BINARY SEG PixelData payload is detached");
 		}
 		const auto bytes = pixel_data.value_span();
 		if (bytes.size() < (total_bits + 7u) / 8u) {
