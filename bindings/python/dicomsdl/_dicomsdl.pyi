@@ -1600,7 +1600,6 @@ class _SegModule:
         validate_required_modules: bool = ...,
     ) -> _Segmentation: ...
 
-
 seg: _SegModule
 
 

@@ -251,16 +251,16 @@ template <std::size_t N>
 	diag::error_and_throw("seg::Segmentation::decode_frame_into reason={}", reason);
 }
 
-void collect_source_image_refs(
-    const DataSet& frame_item, const DataSet* shared_item,
-    detail::SegmentFrameRecord& frame) {
+[[nodiscard]] std::vector<detail::SourceImageRefRecord> collect_source_image_refs(
+    const DataSet& frame_item, const DataSet* shared_item) {
 	// SourceImageSequence is nested under DerivationImageSequence in SEG. These
-	// references are provenance metadata, so they are indexed but not used to
-	// decide spatial overlay compatibility.
+	// references are provenance metadata, so they are cached lazily only when a
+	// caller asks for them.
+	std::vector<detail::SourceImageRefRecord> refs;
 	const auto* derivation_sequence = functional_group_sequence(
 	    frame_item, shared_item, "DerivationImageSequence"_tag);
 	if (!derivation_sequence) {
-		return;
+		return refs;
 	}
 	for (std::size_t derivation_index = 0;
 	     derivation_index < static_cast<std::size_t>(derivation_sequence->size());
@@ -281,13 +281,14 @@ void collect_source_image_refs(
 			if (!source_item) {
 				continue;
 			}
-			frame.source_images.push_back(detail::SourceImageRefRecord{
+			refs.push_back(detail::SourceImageRefRecord{
 			    .item = source_item,
 			    .referenced_frame_numbers = uint32_values(
 			        source_item->get_dataelement("ReferencedFrameNumber"_tag)),
 			});
 		}
 	}
+	return refs;
 }
 
 } // namespace
@@ -392,7 +393,6 @@ void Segmentation::index_per_frame_functional_group_items(const Options& options
 		    .functional_group_item = frame_item,
 		    .referenced_segment_number = *segment_number,
 		};
-		collect_source_image_refs(*frame_item, shared_functional_groups_item_, frame);
 		index_.frame_indices_by_segment[*segment_number].push_back(frame_index);
 		index_.frames.push_back(std::move(frame));
 	}
@@ -494,6 +494,31 @@ std::size_t Segmentation::segment_count() const noexcept {
 
 std::size_t Segmentation::frame_count() const noexcept {
 	return index_.frames.size();
+}
+
+const std::vector<detail::SourceImageRefRecord>&
+Segmentation::source_image_refs_for_frame(std::size_t frame_index) const {
+	static const std::vector<detail::SourceImageRefRecord> empty_refs{};
+	if (frame_index >= index_.frames.size()) {
+		return empty_refs;
+	}
+	const auto& frame = index_.frames[frame_index];
+	if (!frame.functional_group_item) {
+		return empty_refs;
+	}
+	if (!frame.source_images_cache) {
+		frame.source_images_cache = collect_source_image_refs(
+		    *frame.functional_group_item, shared_functional_groups_item_);
+	}
+	return *frame.source_images_cache;
+}
+
+const pixel::DecodePlan& Segmentation::fractional_decode_plan() const {
+	std::lock_guard lock(fractional_decode_plan_mutex_);
+	if (!fractional_decode_plan_) {
+		fractional_decode_plan_ = file_->create_decode_plan();
+	}
+	return *fractional_decode_plan_;
 }
 
 SegmentListView Segmentation::segments() const noexcept {
@@ -600,14 +625,7 @@ void Segmentation::decode_frame_into(
 		if (bits_allocated != 8) {
 			throw_decode("FRACTIONAL SEG MVP requires BitsAllocated=8");
 		}
-		pixel::DecodePlan plan;
-		{
-			std::lock_guard lock(fractional_decode_plan_mutex_);
-			if (!fractional_decode_plan_) {
-				fractional_decode_plan_ = file_->create_decode_plan();
-			}
-			plan = *fractional_decode_plan_;
-		}
+		const auto& plan = fractional_decode_plan();
 		file_->decode_into(frame_index, out, plan);
 		return;
 	}
@@ -880,7 +898,7 @@ std::size_t SourceImageRefListView::size() const noexcept {
 	if (!segmentation_ || frame_index_ >= segmentation_->index_.frames.size()) {
 		return 0;
 	}
-	return segmentation_->index_.frames[frame_index_].source_images.size();
+	return segmentation_->source_image_refs_for_frame(frame_index_).size();
 }
 
 bool SourceImageRefListView::empty() const noexcept {
@@ -891,7 +909,7 @@ SourceImageRefView SourceImageRefListView::operator[](std::size_t index) const {
 	if (!segmentation_ || frame_index_ >= segmentation_->index_.frames.size()) {
 		diag::throw_exception("seg::SourceImageRefListView::operator[] invalid frame");
 	}
-	const auto& refs = segmentation_->index_.frames[frame_index_].source_images;
+	const auto& refs = segmentation_->source_image_refs_for_frame(frame_index_);
 	if (index >= refs.size()) {
 		diag::throw_exception("seg::SourceImageRefListView::operator[] index out of range");
 	}

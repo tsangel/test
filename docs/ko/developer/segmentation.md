@@ -61,7 +61,7 @@ auto seg = dicom::seg::from_dicomfile(std::move(file));
 
 C++ adapter가 `DicomFile`을 소유하므로 segment/frame view는 내부 DICOM dataset을 복사하지 않고 빌려 쓴다. 문자열과 item copy를 피하면서 lifetime을 단순하게 유지하는 구조다.
 
-Python에서는 direct ownership helper를 권장한다.
+Python에서는 direct ownership helper만 제공한다.
 
 ```python
 import dicomsdl as dicom
@@ -70,7 +70,7 @@ seg = dicom.seg.from_file(path)
 seg = dicom.seg.from_bytes(data, copy=False)
 ```
 
-Python에는 `from_dicomfile()`을 노출하지 않는다. 기존 `DicomFile` 객체에서 C++ unique ownership을 move할 수 없어서, 지원하려면 serialize 후 owned copy를 다시 읽는 느린 경로가 되기 때문이다.
+Python `dicom.seg.from_dicomfile(df)` helper는 제공하지 않는다. Python에서는 기존 `DicomFile` 객체에서 C++ unique ownership을 move할 수 없고, 이를 흉내 내려면 전체 dataset을 복사/재파싱해야 한다. 큰 SEG에서 너무 쉽게 비용이 커질 수 있으므로 Python API는 `from_file()`과 `from_bytes()`만 둔다.
 
 ## Regression Test
 

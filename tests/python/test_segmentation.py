@@ -16,7 +16,7 @@ def _set_vr(df: dicom.DicomFile, key: str, vr: dicom.VR, value: object) -> None:
     assert df.set_value(key, vr, value) is True
 
 
-def _seg_from_dicomfile_copy(df: dicom.DicomFile) -> dicom.seg.Segmentation:
+def _seg_from_synthetic(df: dicom.DicomFile) -> dicom.seg.Segmentation:
     return dicom.seg.from_bytes(df.write_bytes())
 
 
@@ -142,7 +142,7 @@ def test_segmentation_from_bytes_decodes_binary_frames() -> None:
     df = _make_binary_seg()
 
     assert dicom.seg.is_segmentation_storage(df)
-    seg = _seg_from_dicomfile_copy(df)
+    seg = _seg_from_synthetic(df)
 
     assert seg.is_valid
     assert seg.segmentation_type is dicom.seg.SegmentationType.binary
@@ -201,6 +201,13 @@ def test_segmentation_from_bytes_decodes_binary_frames() -> None:
         "1.2.826.0.1.3680043.10.543.300"
     ]
 
+    frame_iter = iter(seg.frames)
+    assert frame_iter is iter(frame_iter)
+    assert next(frame_iter).index == 0
+    assert next(frame_iter).index == 1
+    with pytest.raises(StopIteration):
+        next(frame_iter)
+
     assert seg.decode_frame(0) == expected0.tobytes()
     out = np.empty((2, 8), dtype=np.uint8)
     returned = seg.decode_frame_into(1, out)
@@ -228,8 +235,12 @@ def test_segmentation_from_file_and_from_bytes(tmp_path) -> None:
     assert borrowed_frame.decode_frame() == from_file.decode_frame(1)
 
 
+def test_segmentation_python_api_keeps_only_direct_ownership_paths() -> None:
+    assert not hasattr(dicom.seg, "from_dicomfile")
+
+
 def test_fractional_segmentation_returns_raw_uint8_samples() -> None:
-    seg = _seg_from_dicomfile_copy(_make_fractional_seg())
+    seg = _seg_from_synthetic(_make_fractional_seg())
 
     assert seg.segmentation_type is dicom.seg.SegmentationType.fractional
     assert seg.fractional_type is dicom.seg.SegmentationFractionalType.probability
@@ -253,14 +264,14 @@ def test_unsupported_segmentation_errors_are_explicit() -> None:
     labelmap = _make_binary_seg()
     _set(labelmap, "SegmentationType", "LABELMAP")
     with pytest.raises(Exception, match="LABELMAP SEG"):
-        _seg_from_dicomfile_copy(labelmap)
+        _seg_from_synthetic(labelmap)
 
     labelmap_sop = _make_binary_seg()
     labelmap_uid = dicom.uid_from_keyword("LabelMapSegmentationStorage").value
     _set(labelmap_sop, "SOPClassUID", labelmap_uid)
     _set(labelmap_sop, "MediaStorageSOPClassUID", labelmap_uid)
     with pytest.raises(Exception, match="LABELMAP SEG"):
-        _seg_from_dicomfile_copy(labelmap_sop)
+        _seg_from_synthetic(labelmap_sop)
 
     explicit_uid = dicom.uid_from_keyword("ExplicitVRLittleEndian").value.encode("ascii")
     rle_uid = dicom.uid_from_keyword("RLELossless").value.encode("ascii")
@@ -273,24 +284,24 @@ def test_unsupported_segmentation_errors_are_explicit() -> None:
 
     short_pixel_data = _make_binary_seg()
     _set_vr(short_pixel_data, "PixelData", dicom.VR.OB, b"\x00")
-    seg = _seg_from_dicomfile_copy(short_pixel_data)
+    seg = _seg_from_synthetic(short_pixel_data)
     with pytest.raises(Exception, match="PixelData size mismatch"):
         seg.decode_frame(0)
 
     missing_segment_sequence = _make_binary_seg()
     missing_segment_sequence.remove_dataelement("SegmentSequence")
     with pytest.raises(Exception, match="SegmentSequence"):
-        _seg_from_dicomfile_copy(missing_segment_sequence)
+        _seg_from_synthetic(missing_segment_sequence)
 
     missing_per_frame_sequence = _make_binary_seg()
     missing_per_frame_sequence.remove_dataelement("PerFrameFunctionalGroupsSequence")
     with pytest.raises(Exception, match="PerFrameFunctionalGroupsSequence"):
-        _seg_from_dicomfile_copy(missing_per_frame_sequence)
+        _seg_from_synthetic(missing_per_frame_sequence)
 
     missing_geometry = _make_binary_seg()
     missing_geometry.remove_dataelement("SharedFunctionalGroupsSequence")
     with pytest.raises(Exception, match="SharedFunctionalGroupsSequence"):
-        _seg_from_dicomfile_copy(missing_geometry)
+        _seg_from_synthetic(missing_geometry)
 
 
 def test_optional_local_seg_sample_regression() -> None:

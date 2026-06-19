@@ -87,7 +87,7 @@ struct SegmentRecord {
 	std::uint16_t number{0};
 };
 
-/// Borrowed SourceImageSequence item plus copied ReferencedFrameNumber values.
+/// Borrowed SourceImageSequence item plus cached ReferencedFrameNumber values.
 /// Source images are provenance; overlay decisions should start from
 /// FrameOfReferenceUID rather than assuming these are the only display targets.
 struct SourceImageRefRecord {
@@ -101,7 +101,7 @@ struct SourceImageRefRecord {
 struct SegmentFrameRecord {
 	const DataSet* functional_group_item{nullptr};
 	std::uint16_t referenced_segment_number{0};
-	std::vector<SourceImageRefRecord> source_images{};
+	mutable std::optional<std::vector<SourceImageRefRecord>> source_images_cache{};
 };
 
 /// Internal catalog-like lookup index built by from_dicomfile().
@@ -237,8 +237,7 @@ public:
 	/// ReferencedSOPInstanceUID from the source image item.
 	[[nodiscard]] std::string_view sop_instance_uid() const;
 
-	/// ReferencedFrameNumber values, copied into the Segmentation index so the
-	/// returned span stays stable with the parent Segmentation.
+	/// ReferencedFrameNumber values, cached lazily in the parent Segmentation.
 	[[nodiscard]] std::span<const std::uint32_t> referenced_frame_numbers() const noexcept;
 
 	/// Raw item access for attributes without a dedicated accessor.
@@ -409,7 +408,7 @@ public:
 
 	/// Decode one SEG frame into caller-provided 8-bit samples.
 	/// BINARY SEG is unpacked to 0/1 bytes. FRACTIONAL SEG currently supports the
-	/// MVP native 8-bit case and delegates frame decode to DicomFile.
+	/// MVP native 8-bit case and reuses one DicomFile decode plan.
 	void decode_frame_into(std::size_t frame_index,
 	    std::span<std::uint8_t> out) const;
 
@@ -421,6 +420,11 @@ private:
 	void index_segment_sequence_items(const Options& options);
 	/// Build frame records and SegmentNumber -> frame-index lists.
 	void index_per_frame_functional_group_items(const Options& options);
+	/// Build and cache provenance/source-image refs only when requested.
+	[[nodiscard]] const std::vector<detail::SourceImageRefRecord>&
+	source_image_refs_for_frame(std::size_t frame_index) const;
+	/// Reuse the native decode plan for repeated FRACTIONAL frame decodes.
+	[[nodiscard]] const pixel::DecodePlan& fractional_decode_plan() const;
 
 	// Own the DicomFile so every view can borrow DataSet pointers/string_views.
 	std::unique_ptr<DicomFile> file_;

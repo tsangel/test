@@ -3971,6 +3971,16 @@ struct PySourceImageRefList {
 	}
 };
 
+struct PySegmentListIterator {
+	PySegmentList list{};
+	std::size_t ordinal{0};
+};
+
+struct PySourceImageRefListIterator {
+	PySourceImageRefList list{};
+	std::size_t ordinal{0};
+};
+
 [[nodiscard]] std::size_t normalize_py_index(
     std::ptrdiff_t index, std::size_t size, const char* label) {
 	auto normalized = index;
@@ -4164,33 +4174,22 @@ void py_seg_decode_frame_into(
 	return PySourceImageRef{self.owner, self.frame_index, ordinal};
 }
 
-[[nodiscard]] nb::object py_segment_list_iter(const PySegmentList& self) {
-	nb::list items;
-	const auto size = self.size();
-	for (std::size_t i = 0; i < size; ++i) {
-		items.append(nb::cast(py_segment_list_get(
-		    self, static_cast<std::ptrdiff_t>(i))));
+[[nodiscard]] PySegment py_segment_list_iterator_next(
+    PySegmentListIterator& self) {
+	if (self.ordinal >= self.list.size()) {
+		throw nb::stop_iteration();
 	}
-	PyObject* iterator = PyObject_GetIter(items.ptr());
-	if (!iterator) {
-		throw nb::python_error();
-	}
-	return nb::steal<nb::object>(iterator);
+	return py_segment_list_get(
+	    self.list, static_cast<std::ptrdiff_t>(self.ordinal++));
 }
 
-[[nodiscard]] nb::object py_source_image_ref_list_iter(
-    const PySourceImageRefList& self) {
-	nb::list items;
-	const auto size = self.size();
-	for (std::size_t i = 0; i < size; ++i) {
-		items.append(nb::cast(py_source_image_ref_list_get(
-		    self, static_cast<std::ptrdiff_t>(i))));
+[[nodiscard]] PySourceImageRef py_source_image_ref_list_iterator_next(
+    PySourceImageRefListIterator& self) {
+	if (self.ordinal >= self.list.size()) {
+		throw nb::stop_iteration();
 	}
-	PyObject* iterator = PyObject_GetIter(items.ptr());
-	if (!iterator) {
-		throw nb::python_error();
-	}
-	return nb::steal<nb::object>(iterator);
+	return py_source_image_ref_list_get(
+	    self.list, static_cast<std::ptrdiff_t>(self.ordinal++));
 }
 
 }  // namespace
@@ -6800,11 +6799,21 @@ NB_MODULE(_dicomsdl, m) {
 			    return oss.str();
 		    });
 
+	nb::class_<PySourceImageRefListIterator>(seg, "_SourceImageRefListIterator")
+		.def("__iter__",
+		    [](PySourceImageRefListIterator& self)
+		        -> PySourceImageRefListIterator& { return self; },
+		    nb::rv_policy::reference_internal)
+		.def("__next__", &py_source_image_ref_list_iterator_next);
+
 	nb::class_<PySourceImageRefList>(seg, "SourceImageRefList",
 	    "Sequence-like view of source image references for one SEG frame.")
 		.def("__len__", [](const PySourceImageRefList& self) { return self.size(); })
 		.def("__bool__", [](const PySourceImageRefList& self) { return self.size() != 0; })
-		.def("__iter__", &py_source_image_ref_list_iter)
+		.def("__iter__",
+		    [](const PySourceImageRefList& self) {
+			    return PySourceImageRefListIterator{self, 0};
+		    })
 		.def("__getitem__", &py_source_image_ref_list_get, nb::arg("index"))
 		.def("__repr__",
 		    [](const PySourceImageRefList& self) {
@@ -6876,11 +6885,22 @@ NB_MODULE(_dicomsdl, m) {
 			    return oss.str();
 		    });
 
+	nb::class_<PySegmentListIterator>(seg, "_SegmentListIterator")
+		.def("__iter__",
+		    [](PySegmentListIterator& self) -> PySegmentListIterator& {
+			    return self;
+		    },
+		    nb::rv_policy::reference_internal)
+		.def("__next__", &py_segment_list_iterator_next);
+
 	nb::class_<PySegmentList>(seg, "SegmentList",
 	    "Sequence-like view over SegmentSequence items.")
 		.def("__len__", [](const PySegmentList& self) { return self.size(); })
 		.def("__bool__", [](const PySegmentList& self) { return self.size() != 0; })
-		.def("__iter__", &py_segment_list_iter)
+		.def("__iter__",
+		    [](const PySegmentList& self) {
+			    return PySegmentListIterator{self, 0};
+		    })
 		.def("__getitem__", &py_segment_list_get, nb::arg("index"))
 		.def("__repr__",
 		    [](const PySegmentList& self) {
@@ -6893,7 +6913,8 @@ NB_MODULE(_dicomsdl, m) {
 		.def("__iter__",
 		    [](PySegmentFrameIterator& self) -> PySegmentFrameIterator& {
 			    return self;
-		    })
+		    },
+		    nb::rv_policy::reference_internal)
 		.def("__next__", &py_segment_frame_iterator_next);
 
 	nb::class_<PySegmentFrameList>(seg, "SegmentFrameList",

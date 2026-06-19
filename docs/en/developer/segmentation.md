@@ -61,7 +61,7 @@ auto seg = dicom::seg::from_dicomfile(std::move(file));
 
 The C++ adapter owns the `DicomFile`; returned segment and frame views borrow from it. This avoids copying strings and DICOM items while keeping view lifetimes simple.
 
-Python users should prefer the direct ownership helpers:
+Python intentionally exposes only direct ownership helpers:
 
 ```python
 import dicomsdl as dicom
@@ -70,7 +70,7 @@ seg = dicom.seg.from_file(path)
 seg = dicom.seg.from_bytes(data, copy=False)
 ```
 
-Python does not expose `from_dicomfile()` because Python cannot move ownership out of an existing `DicomFile` object without serializing it into another owned copy.
+There is no Python `dicom.seg.from_dicomfile(df)` helper. Python cannot move ownership out of an existing `DicomFile` object without copying the full dataset, which is too easy to choose accidentally for large SEG instances.
 
 ## Regression Tests
 
