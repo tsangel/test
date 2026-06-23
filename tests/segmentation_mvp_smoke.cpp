@@ -12,6 +12,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -316,6 +317,35 @@ int main() {
 		const auto ref_frames = refs[0].referenced_frame_numbers();
 		if (ref_frames.size() != 2 || ref_frames[0] != 1 || ref_frames[1] != 2) {
 			fail("source image referenced frame numbers mismatch");
+		}
+		std::vector<std::thread> source_ref_threads;
+		source_ref_threads.reserve(8);
+		for (std::size_t thread_index = 0; thread_index < 8; ++thread_index) {
+			source_ref_threads.emplace_back([&seg] {
+				for (std::size_t iteration = 0; iteration < 500; ++iteration) {
+					const auto threaded_refs = seg->frames()[0].source_images();
+					if (threaded_refs.size() != 1 || threaded_refs.empty()) {
+						fail("threaded source image ref size mismatch");
+					}
+					const auto threaded_ref = threaded_refs[0];
+					if (threaded_ref.sop_class_uid() !=
+					        "1.2.840.10008.5.1.4.1.1.2" ||
+					    threaded_ref.sop_instance_uid() !=
+					        "1.2.826.0.1.3680043.10.543.100") {
+						fail("threaded source image ref metadata mismatch");
+					}
+					const auto threaded_ref_frames =
+					    threaded_ref.referenced_frame_numbers();
+					if (threaded_ref_frames.size() != 2 ||
+					    threaded_ref_frames[0] != 1 ||
+					    threaded_ref_frames[1] != 2) {
+						fail("threaded source image referenced frame numbers mismatch");
+					}
+				}
+			});
+		}
+		for (auto& thread : source_ref_threads) {
+			thread.join();
 		}
 
 		std::vector<std::uint8_t> decoded0(16);

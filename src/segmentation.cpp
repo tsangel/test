@@ -254,8 +254,8 @@ template <std::size_t N>
 [[nodiscard]] std::vector<detail::SourceImageRefRecord> collect_source_image_refs(
     const DataSet& frame_item, const DataSet* shared_item) {
 	// SourceImageSequence is nested under DerivationImageSequence in SEG. These
-	// references are provenance metadata, so they are cached lazily only when a
-	// caller asks for them.
+	// provenance references are cached with the frame index so const accessors
+	// never need to mutate the Segmentation.
 	std::vector<detail::SourceImageRefRecord> refs;
 	const auto* derivation_sequence = functional_group_sequence(
 	    frame_item, shared_item, "DerivationImageSequence"_tag);
@@ -380,8 +380,11 @@ void Segmentation::index_per_frame_functional_group_items(const Options& options
 			if (options.validate_required_modules) {
 				throw_seg("frame is missing a single ReferencedSegmentNumber");
 			}
-			index_.frames.push_back(
-			    detail::SegmentFrameRecord{.functional_group_item = frame_item});
+			index_.frames.push_back(detail::SegmentFrameRecord{
+			    .functional_group_item = frame_item,
+			    .source_images = collect_source_image_refs(
+			        *frame_item, shared_functional_groups_item_),
+			});
 			continue;
 		}
 		if (!index_.segment_index_by_number.contains(*segment_number) &&
@@ -392,6 +395,8 @@ void Segmentation::index_per_frame_functional_group_items(const Options& options
 		detail::SegmentFrameRecord frame{
 		    .functional_group_item = frame_item,
 		    .referenced_segment_number = *segment_number,
+		    .source_images = collect_source_image_refs(
+		        *frame_item, shared_functional_groups_item_),
 		};
 		index_.frame_indices_by_segment[*segment_number].push_back(frame_index);
 		index_.frames.push_back(std::move(frame));
@@ -400,7 +405,8 @@ void Segmentation::index_per_frame_functional_group_items(const Options& options
 
 void Segmentation::extract_instance_metadata(const Options& options) {
 	// Cache instance-level values that are cheap and central to the API. Segment
-	// and frame attributes remain lazy through their borrowed DataSet views.
+	// attributes and most frame attributes remain lazy through borrowed DataSet
+	// views; source-image provenance is indexed with each frame.
 	auto& dataset = file_->dataset();
 
 	segmentation_type_ = parse_segmentation_type(
@@ -502,15 +508,7 @@ Segmentation::source_image_refs_for_frame(std::size_t frame_index) const {
 	if (frame_index >= index_.frames.size()) {
 		return empty_refs;
 	}
-	const auto& frame = index_.frames[frame_index];
-	if (!frame.functional_group_item) {
-		return empty_refs;
-	}
-	if (!frame.source_images_cache) {
-		frame.source_images_cache = collect_source_image_refs(
-		    *frame.functional_group_item, shared_functional_groups_item_);
-	}
-	return *frame.source_images_cache;
+	return index_.frames[frame_index].source_images;
 }
 
 const pixel::DecodePlan& Segmentation::fractional_decode_plan() const {

@@ -101,7 +101,7 @@ struct SourceImageRefRecord {
 struct SegmentFrameRecord {
 	const DataSet* functional_group_item{nullptr};
 	std::uint16_t referenced_segment_number{0};
-	mutable std::optional<std::vector<SourceImageRefRecord>> source_images_cache{};
+	std::vector<SourceImageRefRecord> source_images{};
 };
 
 /// Internal catalog-like lookup index built by from_dicomfile().
@@ -237,7 +237,7 @@ public:
 	/// ReferencedSOPInstanceUID from the source image item.
 	[[nodiscard]] std::string_view sop_instance_uid() const;
 
-	/// ReferencedFrameNumber values, cached lazily in the parent Segmentation.
+	/// ReferencedFrameNumber values, cached in the parent Segmentation index.
 	[[nodiscard]] std::span<const std::uint32_t> referenced_frame_numbers() const noexcept;
 
 	/// Raw item access for attributes without a dedicated accessor.
@@ -420,7 +420,7 @@ private:
 	void index_segment_sequence_items(const Options& options);
 	/// Build frame records and SegmentNumber -> frame-index lists.
 	void index_per_frame_functional_group_items(const Options& options);
-	/// Build and cache provenance/source-image refs only when requested.
+	/// Return provenance/source-image refs cached during frame indexing.
 	[[nodiscard]] const std::vector<detail::SourceImageRefRecord>&
 	source_image_refs_for_frame(std::size_t frame_index) const;
 	/// Reuse the native decode plan for repeated FRACTIONAL frame decodes.
