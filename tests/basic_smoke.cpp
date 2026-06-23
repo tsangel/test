@@ -2058,6 +2058,153 @@ int main() {
 		}
 	}
 	{
+		dicom::DataSet dataset;
+		const std::string patient_name = "Path^Root";
+		const std::string referenced_uid = "1.2.840.10008.5.1.4.1.1.2.123";
+		if (!dataset.set_value("PatientName"_tag, patient_name)) {
+			fail("ElementPath smoke should populate root PatientName");
+		}
+		auto* study_sequence =
+		    dataset.ensure_dataelement("ReferencedStudySequence"_tag, dicom::VR::SQ)
+		        .as_sequence();
+		if (study_sequence == nullptr) {
+			fail("ElementPath smoke should create root sequence");
+		}
+		auto* study_item = study_sequence->add_dataset();
+		if (study_item == nullptr) {
+			fail("ElementPath smoke should create first sequence item");
+		}
+		auto* image_sequence =
+		    study_item->ensure_dataelement("ReferencedImageSequence"_tag, dicom::VR::SQ)
+		        .as_sequence();
+		if (image_sequence == nullptr) {
+			fail("ElementPath smoke should create nested sequence");
+		}
+		auto* image_item = image_sequence->add_dataset();
+		if (image_item == nullptr ||
+		    !image_item->set_value("ReferencedSOPInstanceUID"_tag, referenced_uid)) {
+			fail("ElementPath smoke should populate nested leaf");
+		}
+
+		auto root_path = dicom::ElementPath{};
+		root_path.element("PatientName"_tag);
+		if (!root_path.ok() || root_path.depth() != 0 || !root_path.view().valid()) {
+			fail("ElementPath root leaf path should be valid");
+		}
+		const auto root_value = dataset.get_dataelement(root_path).to_string_view();
+		if (!root_value || *root_value != patient_name) {
+			fail("ElementPath root lookup mismatch");
+		}
+
+		auto nested_path = dicom::ElementPath{};
+		nested_path
+		    .item("ReferencedStudySequence"_tag, 0)
+		    .item("ReferencedImageSequence"_tag, 0)
+		    .element("ReferencedSOPInstanceUID"_tag);
+		if (!nested_path.ok() || nested_path.depth() != 2 ||
+		    nested_path.parents()[0].item_index != 0 ||
+		    nested_path.leaf_tag() != "ReferencedSOPInstanceUID"_tag) {
+			fail("ElementPath nested path metadata mismatch");
+		}
+		const auto nested_value = dataset.get_dataelement(nested_path).to_uid_string();
+		if (!nested_value || *nested_value != referenced_uid) {
+			fail("ElementPath nested mutable lookup mismatch");
+		}
+		const dicom::DataSet& const_dataset = dataset;
+		const auto const_nested_value =
+		    const_dataset.get_dataelement(nested_path).to_uid_string();
+		if (!const_nested_value || *const_nested_value != referenced_uid) {
+			fail("ElementPath nested const lookup mismatch");
+		}
+		if (dataset.sequence_item("ReferencedStudySequence"_tag, 0) != study_item ||
+		    const_dataset.sequence_item("ReferencedStudySequence"_tag, 0) != study_item ||
+		    dataset.sequence_item("ReferencedStudySequence"_tag, 99) != nullptr ||
+		    dataset.sequence_item("PatientName"_tag, 0) != nullptr) {
+			fail("DataSet::sequence_item should resolve only existing SQ items");
+		}
+
+		const auto root_size_before_missing_lookup = dataset.size();
+		if (dataset.get_dataelement(dicom::ElementPathView{}).is_present()) {
+			fail("invalid ElementPathView should resolve as missing");
+		}
+		if (dicom::ElementPath{}.ok()) {
+			fail("empty ElementPath should not be ok");
+		}
+		auto item_only_path = dicom::ElementPath{};
+		item_only_path.item("ReferencedStudySequence"_tag, 0);
+		if (item_only_path.ok() || dataset.get_dataelement(item_only_path).is_present()) {
+			fail("ElementPath without a leaf should resolve as missing");
+		}
+		auto duplicate_leaf_path = dicom::ElementPath{};
+		duplicate_leaf_path.element("PatientName"_tag).element("Rows"_tag);
+		if (duplicate_leaf_path.ok() ||
+		    dataset.get_dataelement(duplicate_leaf_path).is_present()) {
+			fail("ElementPath should reject multiple leaf elements");
+		}
+		auto item_after_leaf_path = dicom::ElementPath{};
+		item_after_leaf_path.element("PatientName"_tag).item("ReferencedStudySequence"_tag, 0);
+		if (item_after_leaf_path.ok() ||
+		    dataset.get_dataelement(item_after_leaf_path).is_present()) {
+			fail("ElementPath should reject sequence steps after leaf element");
+		}
+		auto invalid_item_tag_path = dicom::ElementPath{};
+		invalid_item_tag_path.item(dicom::Tag{}, 0).element("PatientName"_tag);
+		if (invalid_item_tag_path.ok() ||
+		    dataset.get_dataelement(invalid_item_tag_path).is_present()) {
+			fail("ElementPath should reject empty sequence tags");
+		}
+		auto invalid_leaf_tag_path = dicom::ElementPath{};
+		invalid_leaf_tag_path.element(dicom::Tag{});
+		if (invalid_leaf_tag_path.ok() ||
+		    dataset.get_dataelement(invalid_leaf_tag_path).is_present()) {
+			fail("ElementPath should reject empty leaf tags");
+		}
+		auto out_of_range_path = dicom::ElementPath{};
+		out_of_range_path
+		    .item("ReferencedStudySequence"_tag, 4999)
+		    .element("ReferencedSOPInstanceUID"_tag);
+		if (!out_of_range_path.ok() || out_of_range_path.depth() != 1 ||
+		    !dataset.get_dataelement(out_of_range_path).is_missing()) {
+			fail("ElementPath out-of-range item should resolve as missing");
+		}
+		auto non_sequence_parent_path = dicom::ElementPath{};
+		non_sequence_parent_path
+		    .item("PatientName"_tag, 0)
+		    .element("ReferencedSOPInstanceUID"_tag);
+		if (!non_sequence_parent_path.ok() ||
+		    !dataset.get_dataelement(non_sequence_parent_path).is_missing()) {
+			fail("ElementPath non-sequence parent should resolve as missing");
+		}
+		auto capacity_path = dicom::BasicElementPath<1>{};
+		capacity_path
+		    .item("ReferencedStudySequence"_tag, 0)
+		    .item("ReferencedImageSequence"_tag, 0)
+		    .element("ReferencedSOPInstanceUID"_tag);
+		if (capacity_path.ok() || dataset.get_dataelement(capacity_path).is_present()) {
+			fail("BasicElementPath should reject capacity overflow");
+		}
+		auto wider_path = dicom::BasicElementPath<32>{};
+		wider_path
+		    .item("ReferencedStudySequence"_tag, 0)
+		    .item("ReferencedImageSequence"_tag, 0)
+		    .element("ReferencedSOPInstanceUID"_tag);
+		if (!wider_path.ok() ||
+		    dataset.get_dataelement(wider_path).to_uid_string().value_or("") != referenced_uid) {
+			fail("BasicElementPath with wider inline capacity should resolve nested element");
+		}
+		auto deep_builder_path = dicom::BasicElementPath<32>{};
+		for (int i = 0; i < 17; ++i) {
+			deep_builder_path.item("ReferencedStudySequence"_tag, 0);
+		}
+		deep_builder_path.element("ReferencedSOPInstanceUID"_tag);
+		if (!deep_builder_path.ok() || deep_builder_path.depth() != 17) {
+			fail("BasicElementPath with wider inline capacity should represent deep paths");
+		}
+		if (dataset.size() != root_size_before_missing_lookup) {
+			fail("ElementPath missing lookup should not create root elements");
+		}
+	}
+	{
 		dicom::DataElement missing_elem;
 		if (missing_elem.is_present()) {
 			fail("default DataElement should be missing");

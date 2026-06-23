@@ -1248,6 +1248,93 @@ struct DataSetVisitPathStep {
 	std::uint32_t item_index{0};
 };
 
+struct SequenceItemStep {
+	Tag sequence_tag{};
+	std::uint32_t item_index{0};
+};
+
+/// Borrowed, typed path to one DataElement: zero or more sequence items plus a
+/// leaf tag. An empty/default view is invalid and resolves as missing.
+class ElementPathView {
+public:
+	constexpr ElementPathView() noexcept = default;
+	constexpr ElementPathView(
+	    std::span<const SequenceItemStep> parents, Tag leaf_tag) noexcept
+	    : parents_(parents), leaf_tag_(leaf_tag) {}
+
+	[[nodiscard]] constexpr bool valid() const noexcept {
+		return static_cast<bool>(leaf_tag_);
+	}
+	[[nodiscard]] constexpr std::span<const SequenceItemStep> parents() const noexcept {
+		return valid() ? parents_ : std::span<const SequenceItemStep>{};
+	}
+	[[nodiscard]] constexpr Tag leaf_tag() const noexcept {
+		return valid() ? leaf_tag_ : Tag{};
+	}
+	[[nodiscard]] constexpr std::size_t depth() const noexcept {
+		return parents().size();
+	}
+
+private:
+	std::span<const SequenceItemStep> parents_{};
+	Tag leaf_tag_{};
+};
+
+template <std::size_t InlineSteps = 16>
+class BasicElementPath {
+public:
+	static_assert(
+	    InlineSteps <= static_cast<std::size_t>(std::numeric_limits<std::uint16_t>::max()),
+	    "BasicElementPath inline capacity must fit uint16_t");
+	static constexpr std::size_t kMaxInlineSteps = InlineSteps;
+
+	constexpr BasicElementPath() noexcept = default;
+
+	constexpr BasicElementPath& item(Tag sequence_tag, std::uint32_t item_index) noexcept {
+		if (!ok_ || has_leaf_ || !sequence_tag || parent_count_ >= InlineSteps) {
+			ok_ = false;
+			return *this;
+		}
+		parents_[parent_count_++] = SequenceItemStep{sequence_tag, item_index};
+		return *this;
+	}
+
+	constexpr BasicElementPath& element(Tag leaf_tag) noexcept {
+		if (!ok_ || has_leaf_ || !leaf_tag) {
+			ok_ = false;
+			return *this;
+		}
+		leaf_tag_ = leaf_tag;
+		has_leaf_ = true;
+		return *this;
+	}
+
+	[[nodiscard]] constexpr bool ok() const noexcept {
+		return ok_ && has_leaf_;
+	}
+	[[nodiscard]] constexpr bool has_leaf() const noexcept { return has_leaf_; }
+	[[nodiscard]] constexpr std::size_t depth() const noexcept { return parent_count_; }
+	[[nodiscard]] constexpr bool empty() const noexcept {
+		return parent_count_ == 0 && !has_leaf_;
+	}
+	[[nodiscard]] constexpr std::span<const SequenceItemStep> parents() const noexcept {
+		return {parents_.data(), parent_count_};
+	}
+	[[nodiscard]] constexpr Tag leaf_tag() const noexcept { return leaf_tag_; }
+	[[nodiscard]] constexpr ElementPathView view() const noexcept {
+		return ok() ? ElementPathView{parents(), leaf_tag_} : ElementPathView{};
+	}
+
+private:
+	std::array<SequenceItemStep, InlineSteps> parents_{};
+	std::uint16_t parent_count_{0};
+	Tag leaf_tag_{};
+	bool has_leaf_{false};
+	bool ok_{true};
+};
+
+using ElementPath = BasicElementPath<16>;
+
 class DataSetVisitPathRef {
 public:
 	constexpr DataSetVisitPathRef() noexcept = default;
@@ -2920,6 +3007,31 @@ public:
 	/// Caller must ensure_loaded() the needed prefixes.
 	/// Missing lookups return a falsey DataElement (VR::None).
 	const DataElement& get_dataelement(std::string_view tag_path) const;
+
+	/// Low-level typed nested resolver. The path is zero or more sequence item
+	/// steps followed by a leaf tag. Missing/invalid paths return a falsey
+	/// DataElement and never create elements.
+	DataElement& get_dataelement(ElementPathView path);
+
+	/// Const low-level typed nested resolver.
+	const DataElement& get_dataelement(ElementPathView path) const;
+
+	template <std::size_t N>
+	DataElement& get_dataelement(const BasicElementPath<N>& path) {
+		return get_dataelement(path.ok() ? path.view() : ElementPathView{});
+	}
+
+	template <std::size_t N>
+	const DataElement& get_dataelement(const BasicElementPath<N>& path) const {
+		return get_dataelement(path.ok() ? path.view() : ElementPathView{});
+	}
+
+	/// Return one item dataset from a sequence element, or nullptr when the tag
+	/// is missing, not SQ, or the item index is out of range.
+	DataSet* sequence_item(Tag sequence_tag, std::uint32_t item_index);
+
+	/// Const sequence item helper.
+	const DataSet* sequence_item(Tag sequence_tag, std::uint32_t item_index) const;
 
 	/// Convenience typed lookup by tag.
 	/// Does not implicitly continue partial loading; unread future tags behave as missing
