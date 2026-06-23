@@ -2116,6 +2116,40 @@ int main() {
 		if (!const_nested_value || *const_nested_value != referenced_uid) {
 			fail("ElementPath nested const lookup mismatch");
 		}
+		dicom::DicomFile file;
+		auto& file_dataset = file.dataset();
+		auto* file_study_sequence =
+		    file_dataset.ensure_dataelement("ReferencedStudySequence"_tag, dicom::VR::SQ)
+		        .as_sequence();
+		if (file_study_sequence == nullptr) {
+			fail("DicomFile ElementPath smoke should create root sequence");
+		}
+		auto* file_study_item = file_study_sequence->add_dataset();
+		if (file_study_item == nullptr) {
+			fail("DicomFile ElementPath smoke should create first sequence item");
+		}
+		auto* file_image_sequence =
+		    file_study_item->ensure_dataelement("ReferencedImageSequence"_tag, dicom::VR::SQ)
+		        .as_sequence();
+		if (file_image_sequence == nullptr) {
+			fail("DicomFile ElementPath smoke should create nested sequence");
+		}
+		auto* file_image_item = file_image_sequence->add_dataset();
+		if (file_image_item == nullptr ||
+		    !file_image_item->set_value("ReferencedSOPInstanceUID"_tag, referenced_uid)) {
+			fail("DicomFile ElementPath smoke should populate nested leaf");
+		}
+		if (file.get_dataelement(nested_path).to_uid_string().value_or("") != referenced_uid) {
+			fail("DicomFile ElementPath mutable forwarding mismatch");
+		}
+		const dicom::DicomFile& const_file = file;
+		if (const_file.get_dataelement(nested_path).to_uid_string().value_or("") !=
+		    referenced_uid) {
+			fail("DicomFile ElementPath const forwarding mismatch");
+		}
+		if (file.get_dataelement(dicom::ElementPathView{}).is_present()) {
+			fail("DicomFile invalid ElementPathView should resolve as missing");
+		}
 		if (dataset.sequence_item("ReferencedStudySequence"_tag, 0) != study_item ||
 		    const_dataset.sequence_item("ReferencedStudySequence"_tag, 0) != study_item ||
 		    dataset.sequence_item("ReferencedStudySequence"_tag, 99) != nullptr ||
@@ -2126,6 +2160,49 @@ int main() {
 		const auto root_size_before_missing_lookup = dataset.size();
 		if (dataset.get_dataelement(dicom::ElementPathView{}).is_present()) {
 			fail("invalid ElementPathView should resolve as missing");
+		}
+		auto& missing_from_invalid_path = dataset.get_dataelement(dicom::ElementPathView{});
+		const std::array<std::uint8_t, 2> sentinel_bytes{0x11, 0x22};
+		bool reserve_threw = false;
+		try {
+			missing_from_invalid_path.reserve_value_bytes(4);
+		} catch (const std::exception&) {
+			reserve_threw = true;
+		}
+		if (!reserve_threw) {
+			fail("NullElement should reject reserve_value_bytes");
+		}
+		bool set_bytes_threw = false;
+		try {
+			missing_from_invalid_path.set_value_bytes(sentinel_bytes);
+		} catch (const std::exception&) {
+			set_bytes_threw = true;
+		}
+		if (!set_bytes_threw) {
+			fail("NullElement should reject set_value_bytes");
+		}
+		bool adopt_bytes_threw = false;
+		try {
+			std::vector<std::uint8_t> owned_sentinel_bytes{0x33, 0x44};
+			missing_from_invalid_path.adopt_value_bytes(std::move(owned_sentinel_bytes));
+		} catch (const std::exception&) {
+			adopt_bytes_threw = true;
+		}
+		if (!adopt_bytes_threw) {
+			fail("NullElement should reject adopt_value_bytes");
+		}
+		if (missing_from_invalid_path.from_string_view("should-not-stick")) {
+			fail("NullElement should reject from_string_view");
+		}
+		const auto& missing_after_failed_mutations =
+		    dataset.get_dataelement(dicom::ElementPathView{});
+		if (!missing_after_failed_mutations.is_missing() ||
+		    missing_after_failed_mutations.length() != 0 ||
+		    !missing_after_failed_mutations.value_span().empty()) {
+			fail("NullElement should remain missing after rejected mutations");
+		}
+		if (!dataset.get_dataelement(dicom::Tag(0x7777, 0x7777)).is_missing()) {
+			fail("NullElement mutation should not pollute later missing lookups");
 		}
 		if (dicom::ElementPath{}.ok()) {
 			fail("empty ElementPath should not be ok");

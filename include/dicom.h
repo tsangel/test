@@ -3375,6 +3375,16 @@ public:
 	const DataElement& get_dataelement(Tag tag) const;
 	DataElement& get_dataelement(std::string_view tag_path);
 	const DataElement& get_dataelement(std::string_view tag_path) const;
+	DataElement& get_dataelement(ElementPathView path);
+	const DataElement& get_dataelement(ElementPathView path) const;
+	template <std::size_t N>
+	DataElement& get_dataelement(const BasicElementPath<N>& path) {
+		return root_dataset_.get_dataelement(path);
+	}
+	template <std::size_t N>
+	const DataElement& get_dataelement(const BasicElementPath<N>& path) const {
+		return root_dataset_.get_dataelement(path);
+	}
 	void ensure_loaded(Tag tag);
 	void ensure_loaded(Tag tag) const;
 	template <typename T>

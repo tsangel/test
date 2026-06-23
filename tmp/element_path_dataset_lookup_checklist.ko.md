@@ -19,6 +19,7 @@
 - [x] `ElementPath = BasicElementPath<16>`: 일반 image/SEG/enhanced metadata용 기본 path.
 - [x] SR처럼 더 깊은 구조는 SR 도메인에서 `using SrElementPath = BasicElementPath<32>;`처럼 별도 alias로 둔다.
 - [x] `DataSet::get_dataelement(...)`: path를 실제 `DataSet` 위에서 resolve하는 기본 public API.
+- [x] `DicomFile::get_dataelement(...)`: root dataset으로 forwarding하는 파일 단위 편의 API.
 - [x] `DataSet::sequence_item(...)`: 단일 sequence item으로 내려가는 얇은 helper.
 
 ## 구현 전 확정 결정
@@ -48,6 +49,7 @@
 - [x] namespace: `dicom`.
 - [x] `ElementPath`는 `DataSet*` / `DataElement*`를 저장하지 않는다.
 - [x] `DataSet` lookup method는 `ElementPathView`와 `BasicElementPath<N>` overload를 제공한다.
+- [x] `DicomFile` lookup method도 같은 `ElementPathView`와 `BasicElementPath<N>` overload를 제공한다.
 - [x] `ElementPathView`는 valid path만 표현한다고 명시한다.
 - [x] invalid/capacity-failed owning path는 `DataSet::get_dataelement(const BasicElementPath<N>&)` overload에서 `NullElement`로 처리한다.
 - [x] MVP에서는 value extraction helper를 추가하지 않고, 찾은 `DataElement`의 기존 변환 API를 사용한다.
@@ -129,6 +131,22 @@ public:
                                  std::uint32_t item_index) const;
 };
 
+class DicomFile {
+public:
+    DataElement& get_dataelement(ElementPathView path);
+    const DataElement& get_dataelement(ElementPathView path) const;
+
+    template <std::size_t N>
+    DataElement& get_dataelement(const BasicElementPath<N>& path) {
+        return dataset().get_dataelement(path);
+    }
+
+    template <std::size_t N>
+    const DataElement& get_dataelement(const BasicElementPath<N>& path) const {
+        return dataset().get_dataelement(path);
+    }
+};
+
 } // namespace dicom
 ```
 
@@ -157,6 +175,7 @@ if (elem.is_missing()) {
 - [x] `get_dataelement(ElementPath...)`의 실패 판정은 기존 DicomSDL 스타일에 맞춰 `element.is_missing()` / falsey element로 한다.
 - [x] MVP에서는 value extraction helper를 추가하지 않고, hot path에서는 `get_dataelement()` 후 직접 `DataElement` API를 사용한다.
 - [x] debug string 변환은 lookup path에서 호출하지 않는다.
+- [x] `ElementPath` resolver는 매 호출 root부터 sequence item chain을 따라간다. 수천 frame 반복 metadata 접근에서는 domain reader가 `sequence_item()`으로 per-frame item `DataSet*`를 캐시한 뒤 leaf lookup을 반복한다.
 - [ ] 수천 frame 반복 metadata 접근은 `FrameGeometryReader`처럼 caller-specific reader가 sequence pointer를 캐시해서 처리한다.
 
 ## 구현 체크리스트
@@ -170,6 +189,9 @@ if (elem.is_missing()) {
 - [x] `DataSet::get_dataelement(ElementPathView)` 추가
 - [x] `DataSet::get_dataelement(ElementPathView) const` 추가
 - [x] `DataSet::get_dataelement(const BasicElementPath<N>&)` template overload 추가
+- [x] `DicomFile::get_dataelement(ElementPathView)` forwarding 추가
+- [x] `DicomFile::get_dataelement(ElementPathView) const` forwarding 추가
+- [x] `DicomFile::get_dataelement(const BasicElementPath<N>&)` template forwarding 추가
 - [x] `DataSet::sequence_item(Tag, std::uint32_t)` 추가
 - [x] value extraction helper는 MVP에서 제외한다.
 - [x] `ElementPath` capacity 초과 시 `ok()==false`가 되도록 구현
@@ -193,8 +215,10 @@ if (elem.is_missing()) {
 - [x] `BasicElementPath<1>`에서 capacity 초과 시 `ok()==false`가 되는지 검증
 - [x] `BasicElementPath<32>`가 16 step보다 깊은 path를 표현할 수 있는지 검증
 - [x] `get_dataelement(ElementPath...)`가 정상 nested element를 찾는지 검증
+- [x] `DicomFile::get_dataelement(ElementPath...)`가 root dataset으로 forwarding하는지 검증
 - [x] `get_dataelement(ElementPathView{})`가 `NullElement`를 반환하는지 검증
 - [x] mutable `get_dataelement(ElementPath...)`도 missing/intermediate failure에서 새 element를 만들지 않고 `NullElement`를 반환하는지 검증
+- [x] `NullElement`에 쓰기성 API를 시도해도 sentinel이 오염되지 않는지 검증
 - [x] missing element는 `NullElement` / `is_missing()`으로 표현되는지 검증
 - [x] sequence가 아닌 element에 item step을 적용하면 `NullElement`로 표현되는지 검증
 - [x] item index 범위를 벗어나면 `NullElement`로 표현되는지 검증
