@@ -1,27 +1,20 @@
-# SEG and Geometry
+# SEG 与 Geometry
 
-Use these APIs when you need to inspect DICOM SEG metadata, decode SEG frames,
-build image-plane geometry, plan slice stacks, or check whether masks and images
-can be overlaid safely.
+当你需要查看 DICOM SEG 元数据、解码 SEG frame、构建 image-plane geometry、规划 slice stack，或检查 mask 与 image 是否可以安全叠加时，可以使用这些 API。
 
-The examples below use Python and build on the ordinary `dicom.read_file()`
-workflow. The geometry layer does not build viewers, allocate final output
-volumes, choose a dominant grid, or resample masks.
+下面的示例使用 Python，并接在普通的 `dicom.read_file()` 工作流之后。Geometry layer 不负责构建 viewer、分配最终输出 volume、选择 dominant grid，也不会 resample mask。
 
-Install NumPy support for the mask examples:
+mask 示例需要 NumPy 支持。
 
 ```bash
 pip install "dicomsdl[numpy]"
 ```
 
-Output values depend on the input file. The SEG excerpts below are adapted from
-one binary FDG/FBB brain SEG sample.
+输出值会随输入文件而变化。下面的 SEG 输出摘自一个 binary FDG/FBB brain SEG sample。
 
-## Open a DICOM SEG File
+## 打开 DICOM SEG 文件
 
-Open DICOM Segmentation Storage or Label Map Segmentation Storage with
-`dicom.seg.read_file()`. It returns a `Segmentation` object instead of a plain
-`DicomFile`.
+DICOM Segmentation Storage 和 Label Map Segmentation Storage 都使用 `dicom.seg.read_file()` 打开。它返回的是 `Segmentation` 对象，而不是普通的 `DicomFile`。
 
 ```python
 from pathlib import Path
@@ -39,7 +32,7 @@ print(seg.frame_of_reference_uid)
 print(seg.rows, seg.columns, seg.segment_count, seg.frame_count)
 ```
 
-Example output:
+示例输出：
 
 ```text
 True
@@ -50,28 +43,20 @@ None
 256 256 97 2885
 ```
 
-If you already have bytes, use `read_bytes()`:
+如果你已经有字节数据，可以使用 `read_bytes()`。
 
 ```python
 data = seg_path.read_bytes()
 seg = dicom.seg.read_bytes(data, copy=False)
 ```
 
-In Python, SEG input starts with `read_file()` or `read_bytes()`. There is no
-`dicom.seg.from_dicomfile(df)` entry point because it would need to copy and
-reparse the existing `DicomFile`.
+Python 中的 SEG 输入入口是 `read_file()` 和 `read_bytes()`。没有 `dicom.seg.from_dicomfile(df)`，因为从已有 Python `DicomFile` 生成 SEG 对象需要复制大数据集并重新解析。
 
-DicomSDL supports BINARY and FRACTIONAL SEG through Segmentation Storage, and
-LABELMAP SEG through Label Map Segmentation Storage. The adapter opens SEG
-metadata without scanning all PixelData up front; LABELMAP stored label values
-are validated when frames are decoded or scanned, or when
-`validate_label_values()` is called explicitly.
+DicomSDL 通过 Segmentation Storage 支持 BINARY/FRACTIONAL SEG，通过 Label Map Segmentation Storage 支持 LABELMAP SEG。SEG adapter 在打开文件时只索引 metadata，不会预先扫描全部 PixelData。LABELMAP stored label value 会在 frame decode/presence scan 时验证，也可以通过显式调用 `validate_label_values()` 验证。
 
-## Inspect Segments
+## 查看 Segment
 
-In DICOM SEG, `SegmentSequence` describes the labels carried by the object. Each
-item is one semantic class, such as a brain structure, tumor, organ, or derived
-mask class.
+DICOM SEG 中的 `SegmentSequence` 描述该对象包含的 label。每个 item 都是一个语义类别，例如脑结构、肿瘤、器官或派生 mask class。
 
 ```python
 for segment in seg.segments:
@@ -85,7 +70,7 @@ for segment in seg.segments:
     print()
 ```
 
-Output excerpt:
+输出片段：
 
 ```text
 number: 1
@@ -107,7 +92,7 @@ display: (19516, 47118, 22528)
 ...
 ```
 
-You can also look up a segment by its DICOM segment number:
+也可以按 DICOM segment number 查找。
 
 ```python
 left_white_matter = seg.segment_by_number(1)
@@ -115,20 +100,17 @@ if left_white_matter is not None:
     print(left_white_matter.label)
 ```
 
-Example output:
+示例输出：
 
 ```text
 Left-Cerebral-White-Matter
 ```
 
-Segment numbers are not the same as Python list indices. Prefer
-`segment.number` when you are matching frames to labels.
+Segment number 不是 Python list index。把 frame 与 label 对应起来时，优先使用 `segment.number`。
 
-## Inspect SEG Frames
+## 查看 SEG frame
 
-SEG Pixel Data is multi-frame. For BINARY and FRACTIONAL SEG, each stored frame
-belongs to one referenced segment number. A segment usually has many frames,
-often one per stored slice.
+SEG Pixel Data 是 multi-frame。对于 BINARY/FRACTIONAL SEG，每个已存储的 frame 属于一个 referenced segment number。一个 segment 通常有多个 frame，常见情况是每个 frame 对应一张 slice 的 mask。
 
 ```python
 frame = seg.frames[0]
@@ -141,7 +123,7 @@ print(frame.pixel_spacing)
 print(frame.slice_thickness)
 ```
 
-Example output:
+示例输出：
 
 ```text
 0
@@ -152,23 +134,19 @@ Example output:
 1.0
 ```
 
-Use `present_segment_numbers()` when you want code that also works for
-LABELMAP SEG. For BINARY and FRACTIONAL SEG it returns the declared
-`ReferencedSegmentNumber`; for LABELMAP SEG it returns the non-background label
-values actually present in that frame. `referenced_segment_number` is a
-compatibility accessor and is not defined for LABELMAP frames.
+如果要编写同时适用于 LABELMAP 的代码，请使用 `present_segment_numbers()`。对于 BINARY/FRACTIONAL SEG，它返回声明的 `ReferencedSegmentNumber`；对于 LABELMAP SEG，它返回该 frame 中实际出现的 non-background label value。`referenced_segment_number` 是兼容用 accessor，在 LABELMAP frame 中没有定义。
 
 ```python
 print(frame.present_segment_numbers())
 ```
 
-Example output for a BINARY frame:
+BINARY frame 的示例输出：
 
 ```text
 (1,)
 ```
 
-Frames can also contain source image references:
+Frame 也可能包含 source image reference。
 
 ```python
 for ref in frame.source_images:
@@ -177,7 +155,7 @@ for ref in frame.source_images:
     print(ref.referenced_frame_numbers)
 ```
 
-Example output:
+示例输出：
 
 ```text
 1.2.840.10008.5.1.4.1.1.2
@@ -185,14 +163,11 @@ Example output:
 []
 ```
 
-Source image references are provenance metadata. They tell you which images were
-used to create the SEG, but they are not the only possible display target. For
-overlay, compare `FrameOfReferenceUID` first.
+Source image reference 是来源元数据。它说明 SEG 是由哪些 image 生成的，但并不表示 overlay target 必须是这些 image。做 overlay 时，应先比较 `FrameOfReferenceUID`。
 
-## Decode a BINARY SEG Mask
+## 解码 BINARY SEG mask
 
-For BINARY SEG, DICOM stores native 1-bit pixels. DicomSDL returns an unpacked
-`uint8` mask with values `0` and `1`.
+BINARY SEG 在 DICOM 中以 native 1-bit pixel 存储。DicomSDL 会 unpack，并返回值为 `0` 或 `1` 的 `uint8` mask。
 
 ```python
 mask = seg.to_array(0)
@@ -200,14 +175,14 @@ print(mask.shape, mask.dtype)
 print(mask.min(), mask.max())
 ```
 
-Example output:
+示例输出：
 
 ```text
 (256, 256) uint8
 0 1
 ```
 
-Decode all frames for one segment:
+解码某个 segment 的所有 frame：
 
 ```python
 masks_for_segment = []
@@ -219,13 +194,13 @@ for frame in seg.frames_for_segment(1):
 print("decoded frames:", len(masks_for_segment))
 ```
 
-Example output:
+示例输出：
 
 ```text
 decoded frames: 87
 ```
 
-If you want to reuse an output array:
+如果想复用输出数组，可以使用 `decode_frame_into()`。
 
 ```python
 import numpy as np
@@ -236,17 +211,16 @@ print(returned is out)
 print(out.shape, out.dtype, out.min(), out.max())
 ```
 
-Example output:
+示例输出：
 
 ```text
 True
 (256, 256) uint8 0 1
 ```
 
-## Decode a FRACTIONAL SEG Mask
+## 解码 FRACTIONAL SEG mask
 
-FRACTIONAL SEG stores 8-bit raw samples. DicomSDL returns those raw samples and
-leaves scaling to the caller.
+FRACTIONAL SEG 存储 8-bit raw sample。DicomSDL 返回这些 raw sample，scaling 由调用方明确完成。
 
 ```python
 import numpy as np
@@ -260,23 +234,17 @@ if seg.segmentation_type is dicom.seg.SegmentationType.fractional:
     print(values.min(), values.max())
 ```
 
-The sample output above is from a BINARY SEG, so this FRACTIONAL block prints
-nothing for that file. On a FRACTIONAL SEG whose raw values span the full stored
-range, the output would look like:
+上面的 sample 是 BINARY SEG，因此这个 FRACTIONAL block 对该文件不会打印任何内容。如果 FRACTIONAL SEG 的 raw 值覆盖完整存储范围，输出会类似下面这样：
 
 ```text
 0.0 1.0
 ```
 
-This keeps probability and occupancy workflows explicit. The caller can choose
-`float32`, `float64`, thresholded boolean masks, or another downstream layout.
+这样可以让 probability、occupancy、thresholded boolean mask 等后续流程明确选择所需的精度和数据布局。
 
-## Decode a LABELMAP SEG Frame
+## 解码 LABELMAP SEG frame
 
-LABELMAP SEG stores label values directly in PixelData. Label value `0` is
-background; non-zero values correspond to `SegmentSequence` segment numbers.
-DicomSDL preserves the stored representation: 8-bit label maps decode to
-`uint8`, and 16-bit label maps decode to native-endian `uint16`.
+LABELMAP SEG 会把 label value 直接存储在 PixelData 中。Label value `0` 表示 background，非零值对应 `SegmentSequence` 中的 segment number。DicomSDL 会保留存储表示：8-bit label map 解码为 `uint8`，16-bit label map 解码为 native-endian `uint16`。
 
 ```python
 if seg.segmentation_type is dicom.seg.SegmentationType.labelmap:
@@ -285,20 +253,16 @@ if seg.segmentation_type is dicom.seg.SegmentationType.labelmap:
     print(seg.present_segment_numbers(0))
 ```
 
-Example output:
+示例输出：
 
 ```text
 (512, 512) uint16
 (1, 24, 300)
 ```
 
-Palette lookup, color mapping, opacity, and legend rendering are viewer/UI
-responsibilities. DicomSDL returns stored label samples and metadata; it does
-not render a palette image.
+Palette lookup、color mapping、opacity 和 legend rendering 是 viewer/UI layer 的职责。DicomSDL 返回 stored label sample 和 metadata，不渲染 palette image。
 
-To get a semantic mask for one segment, use `mask_for_segment()`. This API works
-across BINARY, FRACTIONAL, and LABELMAP SEG. For FRACTIONAL SEG, the threshold
-is applied in normalized `[0, 1]` units.
+如果需要某个 segment 的 semantic mask，请使用 `mask_for_segment()`。这个 API 在 BINARY、FRACTIONAL 和 LABELMAP SEG 中通用。对于 FRACTIONAL SEG，threshold 使用 normalized `[0, 1]` 单位。
 
 ```python
 segment_number = 24
@@ -306,21 +270,17 @@ mask = seg.mask_for_segment(0, segment_number)
 print(mask.shape, mask.dtype, mask.min(), mask.max())
 ```
 
-Example output:
+示例输出：
 
 ```text
 (512, 512) uint8 0 1
 ```
 
-`present_segment_numbers(frame)` scans only the requested LABELMAP frame and
-caches the result. `frames_for_segment(segment_number)` and
-`validate_label_values()` may scan all LABELMAP frames on first use, so treat
-them as explicit validation/indexing operations for large multi-frame SEG
-objects.
+`present_segment_numbers(frame)` 只扫描请求的 LABELMAP frame，并缓存结果。`frames_for_segment(segment_number)` 和 `validate_label_values()` 第一次调用时可能扫描全部 LABELMAP frame；在大型 multi-frame SEG 中，应把它们视为显式 validation/indexing 操作。
 
-## Convert DICOM Plane Tags to Geometry
+## 将 DICOM plane tag 转为 geometry
 
-The geometry module turns DICOM image plane metadata into validated objects.
+Geometry module 会把 DICOM image plane 元数据转换成经过验证的 geometry 对象。
 
 ```python
 g = dicom.geometry
@@ -335,39 +295,36 @@ print(world)
 print(index)
 ```
 
-Example output for a 1 mm axial slice:
+对于 1 mm axial slice，示例输出如下：
 
 ```text
 Point3d(x=-28.000061, y=-11.25, z=-38.999939)
 ImagePoint2D(i=100, j=120)
 ```
 
-DicomSDL uses these index names:
+DicomSDL 使用以下 image index 名称：
 
-- `i`: column-like image index.
-- `j`: row-like image index.
-- `k`: slice/frame index for volumes.
+- `i`：column 方向的 image index。
+- `j`：row 方向的 image index。
+- `k`：volume 的 slice/frame index。
 
-DICOM `PixelSpacing` is `[row_spacing, column_spacing]`, so DicomSDL maps it
-to `spacing_j` and `spacing_i`.
+DICOM `PixelSpacing` 的顺序是 `[row_spacing, column_spacing]`。DicomSDL 将其映射为 `spacing_j` 和 `spacing_i`。
 
 ```python
 print("columns, rows:", plane.columns, plane.rows)
 print("spacing_i, spacing_j:", plane.spacing_i, plane.spacing_j)
 ```
 
-Example output:
+示例输出：
 
 ```text
 columns, rows: 512 512
 spacing_i, spacing_j: 1.0 1.0
 ```
 
-## Plan a Classic Slice Stack
+## 规划 Classic slice stack
 
-Classic CT/MR/PET studies are often one SOP instance per slice. `plan_slice_stack`
-sorts those files into physical slice order and returns a volume geometry plus a
-placement list.
+Classic CT/MR/PET series 通常每张 slice 对应一个 SOP instance。`plan_slice_stack()` 会按物理 slice 顺序排序这些文件，并返回 volume geometry 与 placement list。
 
 ```python
 from pathlib import Path
@@ -394,7 +351,7 @@ for item in plan.placements[:5]:
     print("source file", item.source_index, "frame", item.frame_index, "-> k", item.target_k)
 ```
 
-Example output:
+示例输出：
 
 ```text
 256 256 91
@@ -406,7 +363,7 @@ source file 3 frame 0 -> k 3
 source file 4 frame 0 -> k 4
 ```
 
-To assemble pixels yourself:
+如果要自己组装 pixel volume，可以使用 placement。
 
 ```python
 import numpy as np
@@ -422,20 +379,17 @@ for item in plan.placements:
 print(volume.shape, volume.dtype)
 ```
 
-Example output:
+示例输出：
 
 ```text
 (91, 256, 256) uint16
 ```
 
-The geometry layer does not decode pixels or allocate the output volume. That
-keeps viewers, batch jobs, and resampling pipelines free to choose their own
-memory layout and policy.
+Geometry layer 不解码 pixel，也不分配输出 volume。这样 viewer、batch job 和 resampling pipeline 可以自行选择 memory layout 与策略。
 
-## Check SEG/Image Overlay Compatibility
+## 检查 SEG/Image overlay compatibility
 
-Overlay checks use already-built geometry and frame-of-reference UIDs. They do
-not walk datasets and are intended to stay lightweight.
+Overlay check 使用已经构建好的 geometry 与 frame-of-reference UID。它不会再次遍历数据集，因此可以低成本地重复调用。
 
 ```python
 from pathlib import Path
@@ -470,7 +424,7 @@ else:
     print("target_k_range:", check.target_k_range.begin, check.target_k_range.end)
 ```
 
-Example output for a same-grid SEG frame:
+同一 grid 上的 SEG frame 示例输出：
 
 ```text
 OverlayCompatibility.compatible
@@ -481,17 +435,14 @@ overlaps_extent: True
 target_k_range: 35 36
 ```
 
-Read these fields as:
+这些字段可以这样理解：
 
-- `can_direct_overlay`: grids line up closely enough for direct index copy.
-- `requires_resampling`: the same frame of reference is usable, but grid mapping
-  requires interpolation or resampling.
-- `different_extent`: grids line up, but one extent is smaller or larger; this
-  is usually crop, pad, or clip policy.
-- `different_frame_of_reference`: do not overlay without external registration.
+- `can_direct_overlay`：grid 足够一致，可以直接按 index copy。
+- `requires_resampling`：同一 frame of reference 可用，但 grid mapping 需要 interpolation 或 resampling。
+- `different_extent`：grid 一致，但一侧 extent 更小或更大；通常交给 crop、pad 或 clip 策略处理。
+- `different_frame_of_reference`：没有外部 registration 时不要 overlay。
 
-When `can_transform` is true, build the transform once and reuse it inside the
-paint or sampling loop:
+当 `can_transform` 为 true 时，先构建一次 transform，再在 paint 或 sampling loop 中复用。
 
 ```python
 if check.can_transform:
@@ -500,16 +451,15 @@ if check.can_transform:
     print(transform.target_index_from_source_index(center))
 ```
 
-Example output:
+示例输出：
 
 ```text
 ImagePoint3D(i=128, j=128, k=35)
 ```
 
-## Work with Enhanced Multi-frame Images
+## 处理 Enhanced multi-frame image
 
-Enhanced CT/MR/PET can store many frames in one file. A single file may contain
-more than one stack, time point, phase, or echo, so start by grouping frames.
+Enhanced CT/MR/PET 可以在一个文件中存储许多 frame。一个文件中可能混有多个 stack、time point、phase 或 echo，因此应先对 frame 分组。
 
 ```python
 g = dicom.geometry
@@ -536,7 +486,7 @@ for group_index, group in enumerate(stacks.groups):
         print("plan:", plan.status, "placements:", len(plan.placements))
 ```
 
-Example output for a single enhanced CT stack:
+单个 enhanced CT stack 的示例输出：
 
 ```text
 frame kind: ImageFrameGeometryKind.regular_plane
@@ -550,13 +500,9 @@ analysis: SliceStackStatus.ok
 plan: SliceStackStatus.ok placements: 120
 ```
 
-`plane_from_multiframe_image(file, frame_index)` is the direct overlay helper.
-It returns only regular slice planes. `frame_geometry_from_multiframe_image()`
-keeps the `ImageFrameGeometryKind` so callers can inspect sampled projection or
-distorted frame metadata without accidentally treating it as a normal slice.
+`plane_from_multiframe_image(file, frame_index)` 是 direct overlay helper，只返回 regular slice plane。`frame_geometry_from_multiframe_image()` 会保留 `ImageFrameGeometryKind`，因此调用方可以检查 sampled projection 或 distorted frame metadata，而不会误把它们当作普通 slice 处理。
 
-Use `plan_image_frame_stack(file)` only when the whole file is expected to be
-one stack. If the file may contain multiple groups, plan each group explicitly.
+只有在确认整个文件就是一个 stack 时，才直接使用 `plan_image_frame_stack(file)`。如果文件可能包含多个 group，请显式按 group 的 frame list 进行 plan。
 
 ```python
 single_plan = g.plan_image_frame_stack(file)
@@ -565,16 +511,15 @@ if not single_plan.ok:
         print(issue.status, issue.frame_index, issue.tag, issue.message)
 ```
 
-If the file contains more than one stack, output may look like:
+如果文件包含多个 stack，输出可能类似：
 
 ```text
 SliceStackStatus.multiple_frame_stacks 0 (0020,9157) file contains multiple frame stacks
 ```
 
-## Work with Reconstructed NM TOMO Stacks
+## 处理 Reconstructed NM TOMO stack
 
-Nuclear Medicine Image Storage uses older frame organization tags. DicomSDL has
-a purpose-built adapter for reconstructed TOMO stacks.
+Nuclear Medicine Image Storage 使用较早的 frame organization tags，和 enhanced image 不同。DicomSDL 为 reconstructed TOMO stack 提供了专用 adapter。
 
 ```python
 nm = dicom.read_file(r"C:\data\nm-recon-tomo.dcm")
@@ -591,22 +536,18 @@ else:
     print([(item.frame_index, item.target_k) for item in plan.placements[:10]])
 ```
 
-Example output:
+示例输出：
 
 ```text
 128 128 64
 [(0, 0), (1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (6, 6), (7, 7), (8, 8), (9, 9)]
 ```
 
-The current NM adapter accepts `RECON TOMO` and `RECON GATED TOMO` only when
-`NumberOfFrames` is present and `FrameIncrementPointer` contains exactly one
-value, `SliceVector`. Projection acquisitions and extra vectors such as time or
-energy are rejected instead of being silently inferred.
+当前 NM adapter 只接受 `RECON TOMO` 和 `RECON GATED TOMO` 中同时满足以下条件的对象：存在 `NumberOfFrames`，且 `FrameIncrementPointer` 正好只有一个值 `SliceVector`。Projection acquisition 或包含 time/energy 等额外 vector 的对象会被拒绝，而不是被静默推断。
 
-## Diagnose Stack Failures
+## 诊断 stack failure
 
-Analysis objects keep structured issues so a viewer or batch script can decide
-what to do next.
+Analysis 对象会保留结构化 issue，方便 viewer 或 batch script 决定下一步。
 
 ```python
 analysis = dicom.geometry.analyze_slice_stack(files)
@@ -625,7 +566,7 @@ for issue in analysis.issues:
     print("message:", issue.message)
 ```
 
-Example output for a non-uniform stack:
+Non-uniform stack 的示例输出：
 
 ```text
 status: SliceStackStatus.non_uniform_spacing
@@ -639,25 +580,20 @@ path depth: 0 leaf: (0020,0032)
 message: slice spacing is not uniform
 ```
 
-Typical statuses:
+常见 status：
 
-- `missing_geometry`: required plane tags could not be resolved.
-- `missing_dimension_module`: enhanced grouping metadata is missing.
-- `multiple_frame_stacks`: a whole-file convenience call saw more than one stack.
-- `duplicate_slice_position`: two frames occupy the same slice position.
-- `non_uniform_spacing`: the stack is useful to inspect, but not a single
-  uniform volume grid.
-- `inconsistent_slice_origin`: slice origins drift in-plane and cannot be
-  represented by one rectilinear affine volume.
+- `missing_geometry`：无法解析必要的 plane tag。
+- `missing_dimension_module`：缺少 enhanced grouping metadata。
+- `multiple_frame_stacks`：面向整个文件的 convenience call 发现了多个 stack。
+- `duplicate_slice_position`：两个 frame 位于同一 slice position。
+- `non_uniform_spacing`：stack 可以分析，但不是单一 uniform volume grid。
+- `inconsistent_slice_origin`：slice origin 出现 in-plane drift，不能用一个 rectilinear affine volume 表达。
 
-For non-uniform input, `uniform_runs` can still identify useful contiguous
-sub-ranges. DicomSDL reports them, but it does not choose a dominant grid or
-resample into it.
+即使输入不是 uniform，`uniform_runs` 也能指出有用的连续子范围。DicomSDL 会报告这些范围，但不会选择 dominant grid，也不会 resample 到该 grid。
 
-## Build Synthetic Geometry for Tests
+## 为测试构建 geometry
 
-You do not need a DICOM file to test overlay math. You can build geometry
-objects directly.
+测试 overlay 的坐标计算不一定需要真实 DICOM 文件。你可以直接构建 geometry 对象。
 
 ```python
 g = dicom.geometry
@@ -687,12 +623,11 @@ transform = g.make_plane_to_volume_transform(seg_plane, image_volume)
 print(transform.target_index_from_source_index(g.ImagePoint2D(10.0, 20.0)))
 ```
 
-Expected output:
+预期输出：
 
 ```text
 OverlayCompatibility.compatible 4 5
 ImagePoint3D(i=10, j=20, k=4)
 ```
 
-This is a simple way to unit-test application code that uses DicomSDL geometry
-without carrying real patient data in the test suite.
+这样可以在 test suite 中不携带真实 patient data 的情况下，对使用 DicomSDL geometry 的应用代码做 unit test。

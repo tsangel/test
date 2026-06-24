@@ -1,27 +1,20 @@
-# SEG and Geometry
+# SEG と Geometry
 
-Use these APIs when you need to inspect DICOM SEG metadata, decode SEG frames,
-build image-plane geometry, plan slice stacks, or check whether masks and images
-can be overlaid safely.
+DICOM SEG の metadata 確認、SEG frame の decode、image-plane geometry の作成、slice stack の計画、mask と image を安全に重ね合わせられるかの確認に使う API です。
 
-The examples below use Python and build on the ordinary `dicom.read_file()`
-workflow. The geometry layer does not build viewers, allocate final output
-volumes, choose a dominant grid, or resample masks.
+以下の例は Python で、通常の `dicom.read_file()` ワークフローから始めます。Geometry layer は viewer を作成したり、最終的な出力 volume を確保したり、dominant grid を選んだり、mask を resample したりしません。
 
-Install NumPy support for the mask examples:
+mask の例では NumPy 対応を使います。
 
 ```bash
 pip install "dicomsdl[numpy]"
 ```
 
-Output values depend on the input file. The SEG excerpts below are adapted from
-one binary FDG/FBB brain SEG sample.
+出力値は入力ファイルによって変わります。以下の SEG の出力例は、binary FDG/FBB brain SEG sample から一部を抜粋したものです。
 
-## Open a DICOM SEG File
+## DICOM SEG ファイルを開く
 
-Open DICOM Segmentation Storage or Label Map Segmentation Storage with
-`dicom.seg.read_file()`. It returns a `Segmentation` object instead of a plain
-`DicomFile`.
+DICOM Segmentation Storage と Label Map Segmentation Storage は `dicom.seg.read_file()` で開きます。戻り値は通常の `DicomFile` ではなく `Segmentation` オブジェクトです。
 
 ```python
 from pathlib import Path
@@ -39,7 +32,7 @@ print(seg.frame_of_reference_uid)
 print(seg.rows, seg.columns, seg.segment_count, seg.frame_count)
 ```
 
-Example output:
+出力例:
 
 ```text
 True
@@ -50,28 +43,20 @@ None
 256 256 97 2885
 ```
 
-If you already have bytes, use `read_bytes()`:
+すでに byte 列を持っている場合は `read_bytes()` を使います。
 
 ```python
 data = seg_path.read_bytes()
 seg = dicom.seg.read_bytes(data, copy=False)
 ```
 
-In Python, SEG input starts with `read_file()` or `read_bytes()`. There is no
-`dicom.seg.from_dicomfile(df)` entry point because it would need to copy and
-reparse the existing `DicomFile`.
+Python で SEG を読むときは `read_file()` または `read_bytes()` から始めます。`dicom.seg.from_dicomfile(df)` は用意していません。既存の Python `DicomFile` から SEG オブジェクトを作るには、大きなデータセットをコピーして再解析する必要があるためです。
 
-DicomSDL supports BINARY and FRACTIONAL SEG through Segmentation Storage, and
-LABELMAP SEG through Label Map Segmentation Storage. The adapter opens SEG
-metadata without scanning all PixelData up front; LABELMAP stored label values
-are validated when frames are decoded or scanned, or when
-`validate_label_values()` is called explicitly.
+DicomSDL は BINARY/FRACTIONAL SEG を Segmentation Storage 経由で、LABELMAP SEG を Label Map Segmentation Storage 経由でサポートします。SEG adapter は open 時点で全 PixelData を scan せず、metadata だけを index します。LABELMAP の stored label value は frame decode/presence scan 時、または明示的に `validate_label_values()` を呼んだ時に検証されます。
 
-## Inspect Segments
+## Segment を確認する
 
-In DICOM SEG, `SegmentSequence` describes the labels carried by the object. Each
-item is one semantic class, such as a brain structure, tumor, organ, or derived
-mask class.
+DICOM SEG の `SegmentSequence` は、そのオブジェクトに含まれる label を説明します。各 item は 1 つの意味上のクラスで、脳構造、腫瘍、臓器、派生 mask class などに対応します。
 
 ```python
 for segment in seg.segments:
@@ -85,7 +70,7 @@ for segment in seg.segments:
     print()
 ```
 
-Output excerpt:
+出力の抜粋:
 
 ```text
 number: 1
@@ -107,7 +92,7 @@ display: (19516, 47118, 22528)
 ...
 ```
 
-You can also look up a segment by its DICOM segment number:
+DICOM segment number で直接探すこともできます。
 
 ```python
 left_white_matter = seg.segment_by_number(1)
@@ -115,20 +100,17 @@ if left_white_matter is not None:
     print(left_white_matter.label)
 ```
 
-Example output:
+出力例:
 
 ```text
 Left-Cerebral-White-Matter
 ```
 
-Segment numbers are not the same as Python list indices. Prefer
-`segment.number` when you are matching frames to labels.
+Segment number は Python の list index ではありません。frame と label を対応させるときは `segment.number` を基準にしてください。
 
-## Inspect SEG Frames
+## SEG frame を確認する
 
-SEG Pixel Data is multi-frame. For BINARY and FRACTIONAL SEG, each stored frame
-belongs to one referenced segment number. A segment usually has many frames,
-often one per stored slice.
+SEG Pixel Data は multi-frame です。BINARY/FRACTIONAL SEG では、保存された frame は 1 つの referenced segment number に属します。1 つの segment が多くの frame を持ち、各 frame が 1 slice の mask になることがよくあります。
 
 ```python
 frame = seg.frames[0]
@@ -141,7 +123,7 @@ print(frame.pixel_spacing)
 print(frame.slice_thickness)
 ```
 
-Example output:
+出力例:
 
 ```text
 0
@@ -152,23 +134,19 @@ Example output:
 1.0
 ```
 
-Use `present_segment_numbers()` when you want code that also works for
-LABELMAP SEG. For BINARY and FRACTIONAL SEG it returns the declared
-`ReferencedSegmentNumber`; for LABELMAP SEG it returns the non-background label
-values actually present in that frame. `referenced_segment_number` is a
-compatibility accessor and is not defined for LABELMAP frames.
+LABELMAP も扱う code では `present_segment_numbers()` を使います。BINARY/FRACTIONAL SEG では宣言された `ReferencedSegmentNumber` を返し、LABELMAP SEG ではその frame に実際に存在する non-background label value を返します。`referenced_segment_number` は互換用 accessor で、LABELMAP frame では定義されません。
 
 ```python
 print(frame.present_segment_numbers())
 ```
 
-Example output for a BINARY frame:
+BINARY frame の出力例:
 
 ```text
 (1,)
 ```
 
-Frames can also contain source image references:
+Frame には source image reference が含まれることがあります。
 
 ```python
 for ref in frame.source_images:
@@ -177,7 +155,7 @@ for ref in frame.source_images:
     print(ref.referenced_frame_numbers)
 ```
 
-Example output:
+出力例:
 
 ```text
 1.2.840.10008.5.1.4.1.1.2
@@ -185,14 +163,11 @@ Example output:
 []
 ```
 
-Source image references are provenance metadata. They tell you which images were
-used to create the SEG, but they are not the only possible display target. For
-overlay, compare `FrameOfReferenceUID` first.
+Source image reference は、SEG がどの image から作られたかを示す由来 metadata です。ただし、overlay 先が必ずその image でなければならないという意味ではありません。Overlay ではまず `FrameOfReferenceUID` を比較します。
 
-## Decode a BINARY SEG Mask
+## BINARY SEG mask を decode する
 
-For BINARY SEG, DICOM stores native 1-bit pixels. DicomSDL returns an unpacked
-`uint8` mask with values `0` and `1`.
+BINARY SEG は native 1-bit pixel として DICOM に保存されます。DicomSDL はこれを unpack し、値が `0` または `1` の `uint8` mask を返します。
 
 ```python
 mask = seg.to_array(0)
@@ -200,14 +175,14 @@ print(mask.shape, mask.dtype)
 print(mask.min(), mask.max())
 ```
 
-Example output:
+出力例:
 
 ```text
 (256, 256) uint8
 0 1
 ```
 
-Decode all frames for one segment:
+1 つの segment に属する frame をすべて decode します。
 
 ```python
 masks_for_segment = []
@@ -219,13 +194,13 @@ for frame in seg.frames_for_segment(1):
 print("decoded frames:", len(masks_for_segment))
 ```
 
-Example output:
+出力例:
 
 ```text
 decoded frames: 87
 ```
 
-If you want to reuse an output array:
+出力配列を再利用したい場合は `decode_frame_into()` を使います。
 
 ```python
 import numpy as np
@@ -236,17 +211,16 @@ print(returned is out)
 print(out.shape, out.dtype, out.min(), out.max())
 ```
 
-Example output:
+出力例:
 
 ```text
 True
 (256, 256) uint8 0 1
 ```
 
-## Decode a FRACTIONAL SEG Mask
+## FRACTIONAL SEG mask を decode する
 
-FRACTIONAL SEG stores 8-bit raw samples. DicomSDL returns those raw samples and
-leaves scaling to the caller.
+FRACTIONAL SEG は 8-bit raw sample を保存します。DicomSDL は raw sample をそのまま返し、scaling は呼び出し側で明示的に行います。
 
 ```python
 import numpy as np
@@ -260,23 +234,17 @@ if seg.segmentation_type is dicom.seg.SegmentationType.fractional:
     print(values.min(), values.max())
 ```
 
-The sample output above is from a BINARY SEG, so this FRACTIONAL block prints
-nothing for that file. On a FRACTIONAL SEG whose raw values span the full stored
-range, the output would look like:
+上の sample は BINARY SEG なので、この FRACTIONAL block は何も出力しません。Raw 値が保存範囲全体に広がる FRACTIONAL SEG では、次のような出力になります。
 
 ```text
 0.0 1.0
 ```
 
-This keeps probability and occupancy workflows explicit. The caller can choose
-`float32`, `float64`, thresholded boolean masks, or another downstream layout.
+こうしておくと、probability、occupancy、thresholded boolean mask などの後段処理で、必要な精度とデータ配置を呼び出し側が選べます。
 
-## Decode a LABELMAP SEG Frame
+## LABELMAP SEG frame を decode する
 
-LABELMAP SEG stores label values directly in PixelData. Label value `0` is
-background; non-zero values correspond to `SegmentSequence` segment numbers.
-DicomSDL preserves the stored representation: 8-bit label maps decode to
-`uint8`, and 16-bit label maps decode to native-endian `uint16`.
+LABELMAP SEG は label value を PixelData に直接保存します。Label value `0` は background で、0 以外の値は `SegmentSequence` の segment number に対応します。DicomSDL は保存表現を保ちます。8-bit label map は `uint8`、16-bit label map は native-endian `uint16` として decode されます。
 
 ```python
 if seg.segmentation_type is dicom.seg.SegmentationType.labelmap:
@@ -285,20 +253,16 @@ if seg.segmentation_type is dicom.seg.SegmentationType.labelmap:
     print(seg.present_segment_numbers(0))
 ```
 
-Example output:
+出力例:
 
 ```text
 (512, 512) uint16
 (1, 24, 300)
 ```
 
-Palette lookup, color mapping, opacity, and legend rendering are viewer/UI
-responsibilities. DicomSDL returns stored label samples and metadata; it does
-not render a palette image.
+Palette lookup、color mapping、opacity、legend rendering は viewer/UI layer の責任です。DicomSDL は stored label sample と metadata を返し、palette image は描画しません。
 
-To get a semantic mask for one segment, use `mask_for_segment()`. This API works
-across BINARY, FRACTIONAL, and LABELMAP SEG. For FRACTIONAL SEG, the threshold
-is applied in normalized `[0, 1]` units.
+特定の segment の semantic mask が必要な場合は `mask_for_segment()` を使います。この API は BINARY、FRACTIONAL、LABELMAP SEG で共通に動作します。FRACTIONAL SEG では threshold が normalized `[0, 1]` 単位で適用されます。
 
 ```python
 segment_number = 24
@@ -306,21 +270,17 @@ mask = seg.mask_for_segment(0, segment_number)
 print(mask.shape, mask.dtype, mask.min(), mask.max())
 ```
 
-Example output:
+出力例:
 
 ```text
 (512, 512) uint8 0 1
 ```
 
-`present_segment_numbers(frame)` scans only the requested LABELMAP frame and
-caches the result. `frames_for_segment(segment_number)` and
-`validate_label_values()` may scan all LABELMAP frames on first use, so treat
-them as explicit validation/indexing operations for large multi-frame SEG
-objects.
+`present_segment_numbers(frame)` は指定された LABELMAP frame だけを scan して結果を cache します。`frames_for_segment(segment_number)` と `validate_label_values()` は初回呼び出し時に全 LABELMAP frame を scan することがあるため、大きな multi-frame SEG では明示的な validation/indexing 操作として扱ってください。
 
-## Convert DICOM Plane Tags to Geometry
+## DICOM plane tag を geometry に変換する
 
-The geometry module turns DICOM image plane metadata into validated objects.
+Geometry module は DICOM image plane metadata を検証済みの geometry オブジェクトに変換します。
 
 ```python
 g = dicom.geometry
@@ -335,39 +295,36 @@ print(world)
 print(index)
 ```
 
-Example output for a 1 mm axial slice:
+1 mm axial slice の出力例:
 
 ```text
 Point3d(x=-28.000061, y=-11.25, z=-38.999939)
 ImagePoint2D(i=100, j=120)
 ```
 
-DicomSDL uses these index names:
+DicomSDL では index 名を次のように使います。
 
-- `i`: column-like image index.
-- `j`: row-like image index.
-- `k`: slice/frame index for volumes.
+- `i`: column 方向の image index。
+- `j`: row 方向の image index。
+- `k`: volume の slice/frame index。
 
-DICOM `PixelSpacing` is `[row_spacing, column_spacing]`, so DicomSDL maps it
-to `spacing_j` and `spacing_i`.
+DICOM `PixelSpacing` は `[row_spacing, column_spacing]` の順です。DicomSDL はこれを `spacing_j` と `spacing_i` に分けます。
 
 ```python
 print("columns, rows:", plane.columns, plane.rows)
 print("spacing_i, spacing_j:", plane.spacing_i, plane.spacing_j)
 ```
 
-Example output:
+出力例:
 
 ```text
 columns, rows: 512 512
 spacing_i, spacing_j: 1.0 1.0
 ```
 
-## Plan a Classic Slice Stack
+## Classic slice stack を計画する
 
-Classic CT/MR/PET studies are often one SOP instance per slice. `plan_slice_stack`
-sorts those files into physical slice order and returns a volume geometry plus a
-placement list.
+Classic CT/MR/PET series は、slice ごとに 1 つの SOP instance を持つことがよくあります。`plan_slice_stack()` はそれらのファイルを物理 slice 順に並べ、volume geometry と placement list を返します。
 
 ```python
 from pathlib import Path
@@ -394,7 +351,7 @@ for item in plan.placements[:5]:
     print("source file", item.source_index, "frame", item.frame_index, "-> k", item.target_k)
 ```
 
-Example output:
+出力例:
 
 ```text
 256 256 91
@@ -406,7 +363,7 @@ source file 3 frame 0 -> k 3
 source file 4 frame 0 -> k 4
 ```
 
-To assemble pixels yourself:
+pixel volume を自分で組み立てる場合は placement を使います。
 
 ```python
 import numpy as np
@@ -422,20 +379,17 @@ for item in plan.placements:
 print(volume.shape, volume.dtype)
 ```
 
-Example output:
+出力例:
 
 ```text
 (91, 256, 256) uint16
 ```
 
-The geometry layer does not decode pixels or allocate the output volume. That
-keeps viewers, batch jobs, and resampling pipelines free to choose their own
-memory layout and policy.
+Geometry layer は pixel を decode したり、出力 volume を確保したりしません。viewer、batch job、resampling pipeline がそれぞれの memory layout と方針を選べるようにするためです。
 
-## Check SEG/Image Overlay Compatibility
+## SEG/Image overlay compatibility を確認する
 
-Overlay checks use already-built geometry and frame-of-reference UIDs. They do
-not walk datasets and are intended to stay lightweight.
+Overlay check は、すでに作成済みの geometry と frame-of-reference UID だけを使います。Dataset を再走査しないため、低コストで繰り返し呼び出せます。
 
 ```python
 from pathlib import Path
@@ -470,7 +424,7 @@ else:
     print("target_k_range:", check.target_k_range.begin, check.target_k_range.end)
 ```
 
-Example output for a same-grid SEG frame:
+同じ grid 上の SEG frame では、次のような出力になります。
 
 ```text
 OverlayCompatibility.compatible
@@ -481,17 +435,14 @@ overlaps_extent: True
 target_k_range: 35 36
 ```
 
-Read these fields as:
+主なフィールドは次のように読みます。
 
-- `can_direct_overlay`: grids line up closely enough for direct index copy.
-- `requires_resampling`: the same frame of reference is usable, but grid mapping
-  requires interpolation or resampling.
-- `different_extent`: grids line up, but one extent is smaller or larger; this
-  is usually crop, pad, or clip policy.
-- `different_frame_of_reference`: do not overlay without external registration.
+- `can_direct_overlay`: grid が十分一致しており、直接 index copy できる。
+- `requires_resampling`: 同じ frame of reference にあるが、grid mapping に interpolation または resampling が必要。
+- `different_extent`: grid は一致するが、片方の extent が小さい、または大きい。通常は crop、pad、clip の方針で扱う問題。
+- `different_frame_of_reference`: 外部 registration なしで overlay してはいけない。
 
-When `can_transform` is true, build the transform once and reuse it inside the
-paint or sampling loop:
+`can_transform` が true の場合、transform を 1 回だけ作り、paint loop や sampling loop で再利用します。
 
 ```python
 if check.can_transform:
@@ -500,16 +451,15 @@ if check.can_transform:
     print(transform.target_index_from_source_index(center))
 ```
 
-Example output:
+出力例:
 
 ```text
 ImagePoint3D(i=128, j=128, k=35)
 ```
 
-## Work with Enhanced Multi-frame Images
+## Enhanced multi-frame image を扱う
 
-Enhanced CT/MR/PET can store many frames in one file. A single file may contain
-more than one stack, time point, phase, or echo, so start by grouping frames.
+Enhanced CT/MR/PET は 1 つのファイルに多くの frame を保存できます。1 つのファイルの中に複数の stack、time point、phase、echo が混在する場合があるため、最初に frame を group に分けます。
 
 ```python
 g = dicom.geometry
@@ -536,7 +486,7 @@ for group_index, group in enumerate(stacks.groups):
         print("plan:", plan.status, "placements:", len(plan.placements))
 ```
 
-Example output for a single enhanced CT stack:
+単一の enhanced CT stack では、次のような出力になります。
 
 ```text
 frame kind: ImageFrameGeometryKind.regular_plane
@@ -550,13 +500,9 @@ analysis: SliceStackStatus.ok
 plan: SliceStackStatus.ok placements: 120
 ```
 
-`plane_from_multiframe_image(file, frame_index)` is the direct overlay helper.
-It returns only regular slice planes. `frame_geometry_from_multiframe_image()`
-keeps the `ImageFrameGeometryKind` so callers can inspect sampled projection or
-distorted frame metadata without accidentally treating it as a normal slice.
+`plane_from_multiframe_image(file, frame_index)` は direct overlay 用の helper で、regular slice plane だけを返します。`frame_geometry_from_multiframe_image()` は `ImageFrameGeometryKind` を保持するため、sampled projection や distorted frame metadata を確認しつつ、それらを通常の slice として誤って扱うことを避けられます。
 
-Use `plan_image_frame_stack(file)` only when the whole file is expected to be
-one stack. If the file may contain multiple groups, plan each group explicitly.
+ファイル全体が 1 つの stack だと分かっている場合だけ `plan_image_frame_stack(file)` を直接使います。複数 group があり得る場合は、group ごとの frame list を明示して plan してください。
 
 ```python
 single_plan = g.plan_image_frame_stack(file)
@@ -565,16 +511,15 @@ if not single_plan.ok:
         print(issue.status, issue.frame_index, issue.tag, issue.message)
 ```
 
-If the file contains more than one stack, output may look like:
+ファイルに複数の stack が含まれる場合、出力は次のようになります。
 
 ```text
 SliceStackStatus.multiple_frame_stacks 0 (0020,9157) file contains multiple frame stacks
 ```
 
-## Work with Reconstructed NM TOMO Stacks
+## Reconstructed NM TOMO stack を扱う
 
-Nuclear Medicine Image Storage uses older frame organization tags. DicomSDL has
-a purpose-built adapter for reconstructed TOMO stacks.
+Nuclear Medicine Image Storage は、Enhanced image とは異なる古い frame organization tag を使います。DicomSDL には reconstructed TOMO stack 用の adapter があります。
 
 ```python
 nm = dicom.read_file(r"C:\data\nm-recon-tomo.dcm")
@@ -591,22 +536,18 @@ else:
     print([(item.frame_index, item.target_k) for item in plan.placements[:10]])
 ```
 
-Example output:
+出力例:
 
 ```text
 128 128 64
 [(0, 0), (1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (6, 6), (7, 7), (8, 8), (9, 9)]
 ```
 
-The current NM adapter accepts `RECON TOMO` and `RECON GATED TOMO` only when
-`NumberOfFrames` is present and `FrameIncrementPointer` contains exactly one
-value, `SliceVector`. Projection acquisitions and extra vectors such as time or
-energy are rejected instead of being silently inferred.
+現在の NM adapter は、`RECON TOMO` と `RECON GATED TOMO` のうち、`NumberOfFrames` があり、`FrameIncrementPointer` が正確に 1 つの値 `SliceVector` だけを持つ場合を受け入れます。Projection acquisition や、time/energy などの追加 vector が混在する場合は、推測せずに拒否します。
 
-## Diagnose Stack Failures
+## Stack failure を診断する
 
-Analysis objects keep structured issues so a viewer or batch script can decide
-what to do next.
+Analysis オブジェクトは構造化された issue を保持するため、viewer や batch script が次の動作を決めやすくなります。
 
 ```python
 analysis = dicom.geometry.analyze_slice_stack(files)
@@ -625,7 +566,7 @@ for issue in analysis.issues:
     print("message:", issue.message)
 ```
 
-Example output for a non-uniform stack:
+Non-uniform stack の出力例:
 
 ```text
 status: SliceStackStatus.non_uniform_spacing
@@ -639,25 +580,20 @@ path depth: 0 leaf: (0020,0032)
 message: slice spacing is not uniform
 ```
 
-Typical statuses:
+よく見る status は次のとおりです。
 
-- `missing_geometry`: required plane tags could not be resolved.
-- `missing_dimension_module`: enhanced grouping metadata is missing.
-- `multiple_frame_stacks`: a whole-file convenience call saw more than one stack.
-- `duplicate_slice_position`: two frames occupy the same slice position.
-- `non_uniform_spacing`: the stack is useful to inspect, but not a single
-  uniform volume grid.
-- `inconsistent_slice_origin`: slice origins drift in-plane and cannot be
-  represented by one rectilinear affine volume.
+- `missing_geometry`: 必要な plane tag を解決できない。
+- `missing_dimension_module`: enhanced grouping metadata がない。
+- `multiple_frame_stacks`: ファイル全体を対象にした convenience call で複数 stack が見つかった。
+- `duplicate_slice_position`: 2 つの frame が同じ slice position にある。
+- `non_uniform_spacing`: stack は解析できるが、1 つの uniform volume grid ではない。
+- `inconsistent_slice_origin`: slice origin が in-plane にずれており、1 つの rectilinear affine volume として表せない。
 
-For non-uniform input, `uniform_runs` can still identify useful contiguous
-sub-ranges. DicomSDL reports them, but it does not choose a dominant grid or
-resample into it.
+Non-uniform input でも `uniform_runs` は有用な連続部分範囲を示します。DicomSDL はそれを報告しますが、dominant grid を選んだり、その grid に resample したりはしません。
 
-## Build Synthetic Geometry for Tests
+## テスト用の geometry を作る
 
-You do not need a DICOM file to test overlay math. You can build geometry
-objects directly.
+Overlay の座標計算をテストするために、実際の DICOM ファイルは必須ではありません。Geometry オブジェクトは直接作れます。
 
 ```python
 g = dicom.geometry
@@ -687,12 +623,11 @@ transform = g.make_plane_to_volume_transform(seg_plane, image_volume)
 print(transform.target_index_from_source_index(g.ImagePoint2D(10.0, 20.0)))
 ```
 
-Expected output:
+期待される出力:
 
 ```text
 OverlayCompatibility.compatible 4 5
 ImagePoint3D(i=10, j=20, k=4)
 ```
 
-This is a simple way to unit-test application code that uses DicomSDL geometry
-without carrying real patient data in the test suite.
+実際の patient data を test suite に入れずに、DicomSDL geometry を使うアプリケーションコードを unit test するのに便利です。
