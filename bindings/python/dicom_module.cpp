@@ -4206,6 +4206,14 @@ struct PySliceStackInputStore {
 	return rows * columns;
 }
 
+[[nodiscard]] dicom::seg::SegmentMaskOptions make_seg_mask_options(
+    double fractional_threshold, bool error_when_not_present_in_frame) {
+	dicom::seg::SegmentMaskOptions options;
+	options.fractional_threshold = fractional_threshold;
+	options.error_when_not_present_in_frame = error_when_not_present_in_frame;
+	return options;
+}
+
 [[nodiscard]] PySegmentation py_segmentation_from_unique(
     std::unique_ptr<dicom::seg::Segmentation> segmentation) {
 	if (!segmentation) {
@@ -4285,18 +4293,46 @@ template <typename T, std::size_t N>
     const dicom::seg::Segmentation& segmentation, std::size_t frame_index) {
 	const auto rows = segmentation.rows();
 	const auto columns = segmentation.columns();
-	const auto required_bytes = checked_seg_frame_sample_count(segmentation);
+	const auto samples = checked_seg_frame_sample_count(segmentation);
+	const auto labelmap_bits = segmentation.labelmap_bits_allocated();
+	const auto is_labelmap_u16 =
+	    segmentation.segmentation_type() == dicom::seg::SegmentationType::labelmap &&
+	    labelmap_bits && *labelmap_bits == 16;
+	const auto data_type = is_labelmap_u16 ? dicom::pixel::DataType::u16
+	                                      : dicom::pixel::DataType::u8;
+	const auto spec = decoded_array_spec(data_type);
+	const auto required_bytes = samples * spec.bytes_per_sample;
 	std::array<std::size_t, 4> shape{rows, columns, 0, 0};
 	std::array<std::int64_t, 4> strides{
 	    static_cast<std::int64_t>(columns), 1, 0, 0};
 	auto out = make_writable_numpy_array(
-	    2, shape, strides, decoded_array_spec(dicom::pixel::DataType::u8).dtype,
-	    required_bytes);
+	    2, shape, strides, spec.dtype, required_bytes);
 	{
 		nb::gil_scoped_release release;
-		segmentation.decode_frame_into(frame_index, out.bytes);
+		if (is_labelmap_u16) {
+			auto samples_out = std::span<std::uint16_t>(
+			    reinterpret_cast<std::uint16_t*>(out.bytes.data()), samples);
+			segmentation.decode_labelmap_frame_into(frame_index, samples_out);
+		} else {
+			segmentation.decode_frame_into(frame_index, out.bytes);
+		}
 	}
 	return nb::cast(std::move(out.array));
+}
+
+[[nodiscard]] bool py_buffer_has_unsigned_format(
+    const Py_buffer& view, char expected_core, const char* context) {
+	if (view.format == nullptr || view.format[0] == '\0') {
+		throw nb::value_error(
+		    (std::string(context) + " output buffer must expose dtype format").c_str());
+	}
+	const auto format = std::string_view(view.format);
+	if (!format.empty() && (format.front() == '>' || format.front() == '!')) {
+		throw nb::value_error(
+		    (std::string(context) + " output buffer must be native-endian").c_str());
+	}
+	const auto core = strip_pep3118_endianness_prefix(format);
+	return core.size() == 1 && core.front() == expected_core;
 }
 
 void py_seg_decode_frame_into(
@@ -4307,14 +4343,30 @@ void py_seg_decode_frame_into(
 	if (view.itemsize <= 0) {
 		throw nb::value_error("seg.decode_frame_into requires a valid output itemsize");
 	}
-	if (static_cast<std::size_t>(view.itemsize) != 1) {
+	const auto labelmap_bits = segmentation.labelmap_bits_allocated();
+	const auto expected_itemsize =
+	    segmentation.segmentation_type() == dicom::seg::SegmentationType::labelmap &&
+	            labelmap_bits && *labelmap_bits == 16
+	        ? std::size_t{2}
+	        : std::size_t{1};
+	if (static_cast<std::size_t>(view.itemsize) != expected_itemsize) {
 		throw nb::value_error(
-		    "seg.decode_frame_into output itemsize must be 1 byte");
+		    "seg.decode_frame_into output itemsize does not match decoded sample size");
 	}
 	if (view.len < 0) {
 		throw nb::value_error("seg.decode_frame_into output buffer length is invalid");
 	}
-	const auto expected_bytes = checked_seg_frame_sample_count(segmentation);
+	if (expected_itemsize == 1) {
+		if (!py_buffer_has_unsigned_format(view, 'B', "seg.decode_frame_into")) {
+			throw nb::value_error(
+			    "seg.decode_frame_into output buffer dtype must be uint8");
+		}
+	} else if (!py_buffer_has_unsigned_format(view, 'H', "seg.decode_frame_into")) {
+		throw nb::value_error(
+		    "seg.decode_frame_into output buffer dtype must be native uint16");
+	}
+	const auto expected_bytes =
+	    checked_seg_frame_sample_count(segmentation) * expected_itemsize;
 	const auto actual_bytes = static_cast<std::size_t>(view.len);
 	if (actual_bytes != expected_bytes) {
 		throw nb::value_error(
@@ -4323,22 +4375,113 @@ void py_seg_decode_frame_into(
 	if (expected_bytes > 0 && view.buf == nullptr) {
 		throw nb::value_error("seg.decode_frame_into output buffer is null");
 	}
-	auto out_span = std::span<std::uint8_t>(
-	    static_cast<std::uint8_t*>(view.buf), actual_bytes);
 	{
 		nb::gil_scoped_release release;
-		segmentation.decode_frame_into(frame_index, out_span);
+		if (expected_itemsize == 2) {
+			auto out_span = std::span<std::uint16_t>(
+			    static_cast<std::uint16_t*>(view.buf),
+			    actual_bytes / sizeof(std::uint16_t));
+			segmentation.decode_labelmap_frame_into(frame_index, out_span);
+		} else {
+			auto out_span = std::span<std::uint8_t>(
+			    static_cast<std::uint8_t*>(view.buf), actual_bytes);
+			segmentation.decode_frame_into(frame_index, out_span);
+		}
 	}
 }
 
 [[nodiscard]] nb::bytes py_seg_decode_frame_bytes(
     const dicom::seg::Segmentation& segmentation, std::size_t frame_index) {
+	if (segmentation.segmentation_type() == dicom::seg::SegmentationType::labelmap) {
+		std::vector<std::uint8_t> bytes;
+		{
+			nb::gil_scoped_release release;
+			bytes = segmentation.decode_labelmap_frame_bytes(frame_index);
+		}
+		return to_python_bytes(std::move(bytes));
+	}
 	std::vector<std::uint8_t> bytes(checked_seg_frame_sample_count(segmentation));
 	{
 		nb::gil_scoped_release release;
 		segmentation.decode_frame_into(frame_index, bytes);
 	}
 	return to_python_bytes(std::move(bytes));
+}
+
+[[nodiscard]] nb::tuple py_seg_present_segment_numbers(
+    const dicom::seg::Segmentation& segmentation, std::size_t frame_index) {
+	std::vector<std::uint16_t> numbers;
+	{
+		nb::gil_scoped_release release;
+		const auto span = segmentation.present_segment_numbers(frame_index);
+		numbers.assign(span.begin(), span.end());
+	}
+	nb::tuple out =
+	    nb::steal<nb::tuple>(PyTuple_New(static_cast<Py_ssize_t>(numbers.size())));
+	for (std::size_t index = 0; index < numbers.size(); ++index) {
+		PyObject* item = PyLong_FromUnsignedLong(numbers[index]);
+		if (item == nullptr) {
+			throw nb::python_error();
+		}
+		if (PyTuple_SetItem(out.ptr(), static_cast<Py_ssize_t>(index), item) < 0) {
+			Py_DECREF(item);
+			throw nb::python_error();
+		}
+	}
+	return out;
+}
+
+[[nodiscard]] nb::object py_seg_mask_array(
+    const dicom::seg::Segmentation& segmentation, std::size_t frame_index,
+    std::uint16_t segment_number, const dicom::seg::SegmentMaskOptions& options) {
+	const auto rows = segmentation.rows();
+	const auto columns = segmentation.columns();
+	const auto required_bytes = checked_seg_frame_sample_count(segmentation);
+	std::array<std::size_t, 4> shape{rows, columns, 0, 0};
+	std::array<std::int64_t, 4> strides{
+	    static_cast<std::int64_t>(columns), 1, 0, 0};
+	auto out = make_writable_numpy_array(
+	    2, shape, strides, decoded_array_spec(dicom::pixel::DataType::u8).dtype,
+	    required_bytes);
+	{
+		nb::gil_scoped_release release;
+		segmentation.mask_for_segment_into(frame_index, segment_number, out.bytes, options);
+	}
+	return nb::cast(std::move(out.array));
+}
+
+void py_seg_mask_for_segment_into(
+    const dicom::seg::Segmentation& segmentation, std::size_t frame_index,
+    std::uint16_t segment_number, nb::handle out,
+    const dicom::seg::SegmentMaskOptions& options) {
+	PyWritableBufferView writable(out);
+	const auto& view = writable.view();
+	if (view.itemsize <= 0) {
+		throw nb::value_error("seg.mask_for_segment_into requires a valid output itemsize");
+	}
+	if (static_cast<std::size_t>(view.itemsize) != 1 ||
+	    !py_buffer_has_unsigned_format(view, 'B', "seg.mask_for_segment_into")) {
+		throw nb::value_error("seg.mask_for_segment_into output buffer dtype must be uint8");
+	}
+	if (view.len < 0) {
+		throw nb::value_error("seg.mask_for_segment_into output buffer length is invalid");
+	}
+	const auto expected_bytes = checked_seg_frame_sample_count(segmentation);
+	const auto actual_bytes = static_cast<std::size_t>(view.len);
+	if (actual_bytes != expected_bytes) {
+		throw nb::value_error(
+		    "seg.mask_for_segment_into output buffer size does not match expected frame size");
+	}
+	if (expected_bytes > 0 && view.buf == nullptr) {
+		throw nb::value_error("seg.mask_for_segment_into output buffer is null");
+	}
+	auto out_span = std::span<std::uint8_t>(
+	    static_cast<std::uint8_t*>(view.buf), actual_bytes);
+	{
+		nb::gil_scoped_release release;
+		segmentation.mask_for_segment_into(
+		    frame_index, segment_number, out_span, options);
+	}
 }
 
 [[nodiscard]] PySegment py_segment_list_get(
@@ -7962,6 +8105,10 @@ NB_MODULE(_dicomsdl, m) {
 		    [](const PySegmentFrame& self) {
 			    return self.view().referenced_segment_number();
 		    })
+		.def_prop_ro("present_segment_numbers",
+		    [](const PySegmentFrame& self) {
+			    return py_seg_present_segment_numbers(self.owner->get(), self.frame_index);
+		    })
 		.def_prop_ro("image_position_patient",
 		    [](const PySegmentFrame& self) {
 			    return py_optional_array_tuple(self.view().image_position_patient());
@@ -8007,14 +8154,46 @@ NB_MODULE(_dicomsdl, m) {
 			    return nb::borrow<nb::object>(out);
 		    },
 		    nb::arg("out"),
-		    "Decode this SEG frame into a writable byte-sized C-contiguous buffer.")
+		    "Decode this SEG frame into a writable C-contiguous buffer.")
+		.def("mask_for_segment",
+		    [](const PySegmentFrame& self, std::uint16_t segment_number,
+		        double fractional_threshold, bool error_when_not_present_in_frame) {
+			    return py_seg_mask_array(self.owner->get(), self.frame_index,
+			        segment_number,
+			        make_seg_mask_options(
+			            fractional_threshold, error_when_not_present_in_frame));
+		    },
+		    nb::arg("segment_number"), nb::kw_only(),
+		    nb::arg("fractional_threshold") = 0.0,
+		    nb::arg("error_when_not_present_in_frame") = false,
+		    "Decode this SEG frame as a uint8 0/1 mask for one segment.")
+		.def("mask_for_segment_into",
+		    [](const PySegmentFrame& self, std::uint16_t segment_number,
+		        nb::handle out, double fractional_threshold,
+		        bool error_when_not_present_in_frame) -> nb::object {
+			    py_seg_mask_for_segment_into(self.owner->get(), self.frame_index,
+			        segment_number, out,
+			        make_seg_mask_options(
+			            fractional_threshold, error_when_not_present_in_frame));
+			    return nb::borrow<nb::object>(out);
+		    },
+		    nb::arg("segment_number"), nb::arg("out"), nb::kw_only(),
+		    nb::arg("fractional_threshold") = 0.0,
+		    nb::arg("error_when_not_present_in_frame") = false,
+		    "Decode this SEG frame into a writable uint8 0/1 mask buffer.")
 		.def("__repr__",
 		    [](const PySegmentFrame& self) {
 			    const auto view = self.view();
 			    std::ostringstream oss;
-			    oss << "SegmentFrame(index=" << view.index()
-			        << ", referenced_segment_number="
-			        << view.referenced_segment_number() << ")";
+			    oss << "SegmentFrame(index=" << view.index();
+			    if (self.owner->get().segmentation_type() ==
+			        dicom::seg::SegmentationType::labelmap) {
+				    oss << ", type=labelmap";
+			    } else {
+				    oss << ", referenced_segment_number="
+				        << view.referenced_segment_number();
+			    }
+			    oss << ")";
 			    return oss.str();
 		    });
 
@@ -8073,6 +8252,14 @@ NB_MODULE(_dicomsdl, m) {
 		    [](const PySegmentation& self) { return self.get().segmentation_type(); })
 		.def_prop_ro("fractional_type",
 		    [](const PySegmentation& self) { return self.get().fractional_type(); })
+		.def_prop_ro("labelmap_bits_allocated",
+		    [](const PySegmentation& self) -> nb::object {
+			    const auto value = self.get().labelmap_bits_allocated();
+			    if (!value) {
+				    return nb::none();
+			    }
+			    return nb::cast(*value);
+		    })
 		.def_prop_ro("maximum_fractional_value",
 		    [](const PySegmentation& self) { return self.get().maximum_fractional_value(); })
 		.def_prop_ro("frame_of_reference_uid",
@@ -8108,15 +8295,27 @@ NB_MODULE(_dicomsdl, m) {
 		    "Return one Segment by DICOM SegmentNumber, or None when absent.")
 		.def("frames_for_segment",
 		    [](const PySegmentation& self, std::uint16_t segment_number) {
+			    {
+				    nb::gil_scoped_release release;
+				    (void)self.get().frames_for_segment(segment_number).size();
+			    }
 			    return PySegmentFrameList{self.owner, segment_number};
 		    },
 		    nb::arg("segment_number"),
-		    "Return stored frames whose ReferencedSegmentNumber matches segment_number.")
+		    "Return stored frames that contain segment_number.")
 		.def("segment_frame_count",
 		    [](const PySegmentation& self, std::uint16_t segment_number) {
+			    nb::gil_scoped_release release;
 			    return self.get().segment_frame_count(segment_number);
 		    },
 		    nb::arg("segment_number"))
+		.def("present_segment_numbers",
+		    [](const PySegmentation& self, std::ptrdiff_t frame) {
+			    const auto frame_index = normalize_py_seg_frame_index(self.get(), frame);
+			    return py_seg_present_segment_numbers(self.get(), frame_index);
+		    },
+		    nb::arg("frame") = 0,
+		    "Return segment numbers represented by one frame.")
 		.def("to_array",
 		    [](const PySegmentation& self, std::ptrdiff_t frame) {
 			    const auto frame_index = normalize_py_seg_frame_index(self.get(), frame);
@@ -8139,7 +8338,42 @@ NB_MODULE(_dicomsdl, m) {
 		    },
 		    nb::arg("frame"),
 		    nb::arg("out"),
-		    "Decode one SEG frame into a writable byte-sized C-contiguous buffer.")
+		    "Decode one SEG frame into a writable C-contiguous buffer.")
+		.def("mask_for_segment",
+		    [](const PySegmentation& self, std::ptrdiff_t frame,
+		        std::uint16_t segment_number, double fractional_threshold,
+		        bool error_when_not_present_in_frame) {
+			    const auto frame_index = normalize_py_seg_frame_index(self.get(), frame);
+			    return py_seg_mask_array(self.get(), frame_index, segment_number,
+			        make_seg_mask_options(
+			            fractional_threshold, error_when_not_present_in_frame));
+		    },
+		    nb::arg("frame"), nb::arg("segment_number"), nb::kw_only(),
+		    nb::arg("fractional_threshold") = 0.0,
+		    nb::arg("error_when_not_present_in_frame") = false,
+		    "Decode one SEG frame as a uint8 0/1 mask for one segment.")
+		.def("mask_for_segment_into",
+		    [](const PySegmentation& self, std::ptrdiff_t frame,
+		        std::uint16_t segment_number, nb::handle out,
+		        double fractional_threshold,
+		        bool error_when_not_present_in_frame) -> nb::object {
+			    const auto frame_index = normalize_py_seg_frame_index(self.get(), frame);
+			    py_seg_mask_for_segment_into(self.get(), frame_index, segment_number,
+			        out,
+			        make_seg_mask_options(
+			            fractional_threshold, error_when_not_present_in_frame));
+			    return nb::borrow<nb::object>(out);
+		    },
+		    nb::arg("frame"), nb::arg("segment_number"), nb::arg("out"),
+		    nb::kw_only(), nb::arg("fractional_threshold") = 0.0,
+		    nb::arg("error_when_not_present_in_frame") = false,
+		    "Decode one SEG frame into a writable uint8 0/1 mask buffer.")
+		.def("validate_label_values",
+		    [](const PySegmentation& self) {
+			    nb::gil_scoped_release release;
+			    self.get().validate_label_values();
+		    },
+		    "Validate all LABELMAP stored label values against SegmentSequence.")
 		.def("__repr__",
 		    [](const PySegmentation& self) {
 			    std::ostringstream oss;
@@ -8188,6 +8422,30 @@ NB_MODULE(_dicomsdl, m) {
 	    [](const DataSet& dataset) { return dicom::seg::is_segmentation_storage(dataset); },
 	    nb::arg("dataset"),
 	    "Return True when dataset declares the Segmentation Storage SOP Class UID.");
+	seg.def("is_labelmap_segmentation_storage",
+	    [](const DicomFile& file) {
+		    return dicom::seg::is_labelmap_segmentation_storage(file);
+	    },
+	    nb::arg("dicom_file"),
+	    "Return True when dicom_file declares the Label Map Segmentation Storage SOP Class UID.");
+	seg.def("is_labelmap_segmentation_storage",
+	    [](const DataSet& dataset) {
+		    return dicom::seg::is_labelmap_segmentation_storage(dataset);
+	    },
+	    nb::arg("dataset"),
+	    "Return True when dataset declares the Label Map Segmentation Storage SOP Class UID.");
+	seg.def("is_any_segmentation_storage",
+	    [](const DicomFile& file) {
+		    return dicom::seg::is_any_segmentation_storage(file);
+	    },
+	    nb::arg("dicom_file"),
+	    "Return True when dicom_file declares any supported Segmentation Storage SOP Class UID.");
+	seg.def("is_any_segmentation_storage",
+	    [](const DataSet& dataset) {
+		    return dicom::seg::is_any_segmentation_storage(dataset);
+	    },
+	    nb::arg("dataset"),
+	    "Return True when dataset declares any supported Segmentation Storage SOP Class UID.");
 	seg.def("read_file",
 	    [](nb::handle path, std::optional<Tag> load_until,
 	        std::optional<bool> keep_on_error, bool allow_partial_source,

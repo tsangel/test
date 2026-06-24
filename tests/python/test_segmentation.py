@@ -106,6 +106,25 @@ def _populate_frame(
     )
 
 
+def _populate_labelmap_frame(
+    df: dicom.DicomFile, frame_index: int, z_position: float
+) -> None:
+    base = f"PerFrameFunctionalGroupsSequence.{frame_index}."
+    _set(df, base + "PlanePositionSequence.0.ImagePositionPatient", [0, 0, z_position])
+    _set(
+        df,
+        base
+        + "DerivationImageSequence.0.SourceImageSequence.0.ReferencedSOPClassUID",
+        "1.2.840.10008.5.1.4.1.1.2",
+    )
+    _set(
+        df,
+        base
+        + "DerivationImageSequence.0.SourceImageSequence.0.ReferencedSOPInstanceUID",
+        f"1.2.826.0.1.3680043.10.543.{500 + frame_index}",
+    )
+
+
 def _make_binary_seg() -> dicom.DicomFile:
     df = dicom.DicomFile()
     _populate_common_binary_seg(df)
@@ -135,6 +154,77 @@ def _make_fractional_seg() -> dicom.DicomFile:
     _populate_segment(df, 0, 1, "Probability")
     _populate_frame(df, 0, 1, 10.0)
     _set_vr(df, "PixelData", dicom.VR.OB, bytes([0, 128, 255, 64]))
+    return df
+
+
+def _make_labelmap_seg8(pixel_data: bytes | None = None) -> dicom.DicomFile:
+    df = dicom.DicomFile()
+    _populate_common_binary_seg(df)
+    labelmap_uid = dicom.uid_from_keyword("LabelMapSegmentationStorage").value
+    _set(df, "SOPClassUID", labelmap_uid)
+    _set(df, "MediaStorageSOPClassUID", labelmap_uid)
+    _set(df, "SegmentationType", "LABELMAP")
+    _set(df, "Rows", 2)
+    _set(df, "Columns", 3)
+    _set(df, "NumberOfFrames", 2)
+    _set(df, "BitsAllocated", 8)
+    _set(df, "BitsStored", 8)
+    _set(df, "HighBit", 7)
+    _set(df, "SegmentsOverlap", "NO")
+    _populate_segment(df, 0, 1, "One")
+    _populate_segment(df, 1, 2, "Two")
+    _populate_segment(df, 2, 7, "Absent")
+    _populate_labelmap_frame(df, 0, 10.0)
+    _populate_labelmap_frame(df, 1, 20.0)
+    _set_vr(
+        df,
+        "PixelData",
+        dicom.VR.OB,
+        pixel_data
+        if pixel_data is not None
+        else bytes([0, 1, 2, 2, 0, 1, 0, 0, 2, 0, 0, 0]),
+    )
+    return df
+
+
+def _make_labelmap_seg16() -> dicom.DicomFile:
+    df = dicom.DicomFile()
+    _populate_common_binary_seg(df)
+    labelmap_uid = dicom.uid_from_keyword("LabelMapSegmentationStorage").value
+    _set(df, "SOPClassUID", labelmap_uid)
+    _set(df, "MediaStorageSOPClassUID", labelmap_uid)
+    _set(df, "SegmentationType", "LABELMAP")
+    _set(df, "Rows", 2)
+    _set(df, "Columns", 2)
+    _set(df, "NumberOfFrames", 1)
+    _set(df, "BitsAllocated", 16)
+    _set(df, "BitsStored", 16)
+    _set(df, "HighBit", 15)
+    _populate_segment(df, 0, 1, "One")
+    _populate_segment(df, 1, 300, "Three Hundred")
+    _populate_labelmap_frame(df, 0, 10.0)
+    values = np.array([[0, 1], [300, 300]], dtype=np.uint16)
+    _set_vr(df, "PixelData", dicom.VR.OW, values.tobytes())
+    return df
+
+
+def _make_labelmap_seg8_odd_frame(pixel_data: bytes) -> dicom.DicomFile:
+    df = dicom.DicomFile()
+    _populate_common_binary_seg(df)
+    labelmap_uid = dicom.uid_from_keyword("LabelMapSegmentationStorage").value
+    _set(df, "SOPClassUID", labelmap_uid)
+    _set(df, "MediaStorageSOPClassUID", labelmap_uid)
+    _set(df, "SegmentationType", "LABELMAP")
+    _set(df, "Rows", 1)
+    _set(df, "Columns", 3)
+    _set(df, "NumberOfFrames", 1)
+    _set(df, "BitsAllocated", 8)
+    _set(df, "BitsStored", 8)
+    _set(df, "HighBit", 7)
+    _populate_segment(df, 0, 1, "One")
+    _populate_segment(df, 1, 2, "Two")
+    _populate_labelmap_frame(df, 0, 10.0)
+    _set_vr(df, "PixelData", dicom.VR.OB, pixel_data)
     return df
 
 
@@ -195,6 +285,11 @@ def test_segmentation_read_bytes_decodes_binary_frames() -> None:
     np.testing.assert_array_equal(seg.to_array(0), expected0)
     np.testing.assert_array_equal(frame0.to_array(), expected0)
     np.testing.assert_array_equal(seg.frames_for_segment(2)[0].to_array(), expected1)
+    assert frame0.present_segment_numbers == (1,)
+    np.testing.assert_array_equal(seg.mask_for_segment(0, 1), expected0)
+    np.testing.assert_array_equal(
+        seg.mask_for_segment(0, 2), np.zeros((2, 8), dtype=np.uint8)
+    )
     assert [segment.number for segment in seg.segments] == [1, 2]
     assert [frame.index for frame in seg.frames] == [0, 1]
     assert [ref.sop_instance_uid for ref in refs] == [
@@ -257,6 +352,12 @@ def test_fractional_segmentation_returns_raw_uint8_samples() -> None:
     raw = seg.to_array(0)
     expected = np.array([[0, 128], [255, 64]], dtype=np.uint8)
     np.testing.assert_array_equal(raw, expected)
+    np.testing.assert_array_equal(
+        seg.mask_for_segment(0, 1, fractional_threshold=0.5),
+        np.array([[0, 1], [1, 0]], dtype=np.uint8),
+    )
+    with pytest.raises(Exception, match="fractional_threshold"):
+        seg.mask_for_segment(0, 1, fractional_threshold=1.5)
     scaled = raw.astype(np.float32) / seg.maximum_fractional_value
     np.testing.assert_allclose(
         scaled,
@@ -267,14 +368,14 @@ def test_fractional_segmentation_returns_raw_uint8_samples() -> None:
 def test_unsupported_segmentation_errors_are_explicit() -> None:
     labelmap = _make_binary_seg()
     _set(labelmap, "SegmentationType", "LABELMAP")
-    with pytest.raises(Exception, match="LABELMAP SEG"):
+    with pytest.raises(Exception, match="Label Map|LABELMAP|Segmentation Storage"):
         _seg_from_synthetic(labelmap)
 
     labelmap_sop = _make_binary_seg()
     labelmap_uid = dicom.uid_from_keyword("LabelMapSegmentationStorage").value
     _set(labelmap_sop, "SOPClassUID", labelmap_uid)
     _set(labelmap_sop, "MediaStorageSOPClassUID", labelmap_uid)
-    with pytest.raises(Exception, match="LABELMAP SEG"):
+    with pytest.raises(Exception, match="SegmentationType=LABELMAP"):
         _seg_from_synthetic(labelmap_sop)
 
     explicit_uid = dicom.uid_from_keyword("ExplicitVRLittleEndian").value.encode("ascii")
@@ -306,6 +407,183 @@ def test_unsupported_segmentation_errors_are_explicit() -> None:
     missing_geometry.remove_dataelement("SharedFunctionalGroupsSequence")
     with pytest.raises(Exception, match="SharedFunctionalGroupsSequence"):
         _seg_from_synthetic(missing_geometry)
+
+
+def test_labelmap_segmentation_storage_decodes_and_indexes_labels() -> None:
+    df = _make_labelmap_seg8()
+
+    assert not dicom.seg.is_segmentation_storage(df)
+    assert dicom.seg.is_labelmap_segmentation_storage(df)
+    assert dicom.seg.is_any_segmentation_storage(df)
+
+    seg = _seg_from_synthetic(df)
+    assert seg.segmentation_type is dicom.seg.SegmentationType.labelmap
+    assert seg.labelmap_bits_allocated == 8
+    assert seg.segment_count == 3
+    assert seg.frame_count == 2
+    assert repr(seg.frames[0]) == "SegmentFrame(index=0, type=labelmap)"
+    with pytest.raises(Exception, match="referenced_segment_number"):
+        _ = seg.frames[0].referenced_segment_number
+
+    expected0 = np.array([[0, 1, 2], [2, 0, 1]], dtype=np.uint8)
+    expected1 = np.array([[0, 0, 2], [0, 0, 0]], dtype=np.uint8)
+    np.testing.assert_array_equal(seg.to_array(0), expected0)
+    np.testing.assert_array_equal(seg.frames[1].to_array(), expected1)
+    assert seg.present_segment_numbers(0) == (1, 2)
+    assert seg.frames[0].present_segment_numbers == (1, 2)
+    assert seg.present_segment_numbers(1) == (2,)
+
+    out = bytearray(6)
+    returned = seg.decode_frame_into(0, out)
+    assert returned is out
+    assert bytes(out) == expected0.tobytes()
+
+    np.testing.assert_array_equal(
+        seg.mask_for_segment(0, 1),
+        np.array([[0, 1, 0], [0, 0, 1]], dtype=np.uint8),
+    )
+    np.testing.assert_array_equal(
+        seg.frames[0].mask_for_segment(2),
+        np.array([[0, 0, 1], [1, 0, 0]], dtype=np.uint8),
+    )
+    np.testing.assert_array_equal(
+        seg.mask_for_segment(0, 7), np.zeros((2, 3), dtype=np.uint8)
+    )
+    with pytest.raises(Exception, match="not present"):
+        seg.mask_for_segment(0, 7, error_when_not_present_in_frame=True)
+    with pytest.raises(Exception, match="SegmentSequence"):
+        seg.mask_for_segment(0, 99)
+
+    assert [frame.index for frame in seg.frames_for_segment(2)] == [0, 1]
+    assert len(seg.frames_for_segment(7)) == 0
+    assert seg.segment_frame_count(7) == 0
+    assert len(seg.frames_for_segment(99)) == 0
+    assert seg.segment_frame_count(99) == 0
+    seg.validate_label_values()
+
+
+def test_labelmap_sop_class_conflict_and_metadata_validation() -> None:
+    conflict = _make_labelmap_seg8()
+    seg_uid = dicom.uid_from_keyword("SegmentationStorage").value
+    _set(conflict, "SOPClassUID", seg_uid)
+    assert not dicom.seg.is_segmentation_storage(conflict)
+    assert not dicom.seg.is_labelmap_segmentation_storage(conflict)
+    assert not dicom.seg.is_any_segmentation_storage(conflict)
+    with pytest.raises(Exception, match="disagree"):
+        _seg_from_synthetic(conflict)
+
+    palette = _make_labelmap_seg8()
+    _set(palette, "PhotometricInterpretation", "PALETTE COLOR")
+    np.testing.assert_array_equal(
+        _seg_from_synthetic(palette).to_array(0),
+        np.array([[0, 1, 2], [2, 0, 1]], dtype=np.uint8),
+    )
+
+    bad_photo = _make_labelmap_seg8()
+    _set(bad_photo, "PhotometricInterpretation", "RGB")
+    with pytest.raises(Exception, match="PhotometricInterpretation"):
+        _seg_from_synthetic(bad_photo)
+
+    pixel_padding = _make_labelmap_seg8()
+    _set(pixel_padding, "PixelPaddingValue", 255)
+    with pytest.raises(Exception, match="PixelPaddingValue"):
+        _seg_from_synthetic(pixel_padding)
+
+    zero_segment = _make_labelmap_seg8()
+    _set(zero_segment, "SegmentSequence.0.SegmentNumber", 0)
+    with pytest.raises(Exception, match="SegmentNumber"):
+        _seg_from_synthetic(zero_segment)
+
+
+def test_labelmap_pixeldata_payload_policy_is_lazy_and_strict() -> None:
+    missing_pixel_data = _make_labelmap_seg8()
+    missing_pixel_data.remove_dataelement("PixelData")
+    seg = _seg_from_synthetic(missing_pixel_data)
+    with pytest.raises(Exception, match="PixelData is missing"):
+        seg.decode_frame(0)
+
+    legal_padding = _seg_from_synthetic(_make_labelmap_seg8_odd_frame(b"\x00\x01\x02\x00"))
+    np.testing.assert_array_equal(
+        legal_padding.to_array(),
+        np.array([[0, 1, 2]], dtype=np.uint8),
+    )
+
+    bad_padding = _seg_from_synthetic(_make_labelmap_seg8_odd_frame(b"\x00\x01\x02\x03"))
+    with pytest.raises(Exception, match="PixelData size mismatch"):
+        bad_padding.decode_frame()
+
+    trailing_data = _seg_from_synthetic(_make_labelmap_seg8(bytes(range(13))))
+    with pytest.raises(Exception, match="PixelData size mismatch"):
+        trailing_data.decode_frame(0)
+
+    explicit_uid = dicom.uid_from_keyword("ExplicitVRLittleEndian").value.encode("ascii")
+    rle_uid = dicom.uid_from_keyword("RLELossless").value.encode("ascii")
+    compressed_bytes = bytearray(_make_labelmap_seg8().write_bytes())
+    assert compressed_bytes.count(explicit_uid) >= 1
+    compressed_bytes = compressed_bytes.replace(explicit_uid, rle_uid, 1)
+    compressed = dicom.seg.read_bytes(compressed_bytes)
+    with pytest.raises(Exception, match="compressed/encapsulated Label Map SEG"):
+        compressed.decode_frame(0)
+
+    big_endian_bytes = _make_labelmap_seg8().write_bytes_with_transfer_syntax(
+        "ExplicitVRBigEndian"
+    )
+    big_endian = dicom.seg.read_bytes(big_endian_bytes)
+    with pytest.raises(Exception, match="Big Endian LABELMAP"):
+        big_endian.decode_frame(0)
+
+
+def test_labelmap_metadata_only_absent_segment_and_exact_buffer_contract() -> None:
+    df = _make_labelmap_seg8()
+    _populate_segment(df, 3, 300, "Metadata Only")
+    seg = _seg_from_synthetic(df)
+
+    assert seg.segment_count == 4
+    assert seg.present_segment_numbers(0) == (1, 2)
+    np.testing.assert_array_equal(
+        seg.mask_for_segment(0, 300), np.zeros((2, 3), dtype=np.uint8)
+    )
+    assert len(seg.frames_for_segment(300)) == 0
+    assert seg.segment_frame_count(300) == 0
+
+
+def test_labelmap_unknown_pixel_label_is_lazy_validation_error() -> None:
+    seg = _seg_from_synthetic(_make_labelmap_seg8(bytes([0, 1, 9, 0, 0, 0] * 2)))
+
+    assert seg.segment_count == 3
+    with pytest.raises(Exception, match="undefined segment number"):
+        seg.present_segment_numbers(0)
+    with pytest.raises(Exception, match="undefined segment number"):
+        seg.decode_frame(0)
+    with pytest.raises(Exception, match="undefined segment number"):
+        seg.validate_label_values()
+
+
+def test_labelmap_16bit_uses_uint16_decode_contract() -> None:
+    seg = _seg_from_synthetic(_make_labelmap_seg16())
+
+    assert seg.labelmap_bits_allocated == 16
+    expected = np.array([[0, 1], [300, 300]], dtype=np.uint16)
+    decoded = seg.to_array()
+    assert decoded.dtype == np.uint16
+    np.testing.assert_array_equal(decoded, expected)
+    assert seg.decode_frame() == expected.tobytes()
+    assert seg.present_segment_numbers() == (1, 300)
+
+    out16 = np.empty((2, 2), dtype=np.uint16)
+    returned = seg.decode_frame_into(0, out16)
+    assert returned is out16
+    np.testing.assert_array_equal(out16, expected)
+    with pytest.raises(Exception, match="itemsize|uint16|sample size"):
+        seg.decode_frame_into(0, np.empty((2, 2), dtype=np.uint8))
+    with pytest.raises(Exception, match="uint16"):
+        seg.decode_frame_into(0, np.empty((2, 2), dtype=np.int16))
+    with pytest.raises(Exception, match="native-endian"):
+        seg.decode_frame_into(0, np.empty((2, 2), dtype=">u2"))
+    np.testing.assert_array_equal(
+        seg.mask_for_segment(0, 300),
+        np.array([[0, 0], [1, 1]], dtype=np.uint8),
+    )
 
 
 def test_optional_local_seg_sample_regression() -> None:

@@ -3,6 +3,7 @@
 #include "dicom.h"
 
 #include <array>
+#include <bitset>
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
@@ -74,6 +75,19 @@ struct Options {
 	bool validate_required_modules{true};
 };
 
+/// Options for semantic segment-mask extraction across SEG storage forms.
+struct SegmentMaskOptions {
+	/// FRACTIONAL threshold in normalized [0, 1] units. The default 0.0 means
+	/// "sample > 0"; otherwise samples pass when sample/MaximumFractionalValue
+	/// is greater than or equal to this threshold.
+	double fractional_threshold{0.0};
+
+	/// When true, a known segment that is not present in a specific frame causes
+	/// mask extraction to throw instead of returning an all-zero mask. Segment
+	/// numbers absent from SegmentSequence always throw.
+	bool error_when_not_present_in_frame{false};
+};
+
 class Segmentation;
 class SegmentView;
 class SegmentFrameView;
@@ -102,6 +116,21 @@ struct SegmentFrameRecord {
 	const DataSet* functional_group_item{nullptr};
 	std::uint16_t referenced_segment_number{0};
 	std::vector<SourceImageRefRecord> source_images{};
+};
+
+/// Immutable LABELMAP presence cache for one frame. Empty labels is a valid
+/// ready state for all-background frames; `ready` distinguishes it from
+/// uninitialized cache.
+struct LabelmapFramePresenceCache {
+	bool ready{false};
+	std::shared_ptr<const std::vector<std::uint16_t>> labels{};
+};
+
+/// Immutable all-frame LABELMAP index built lazily after successful validation.
+struct LabelmapFrameIndex {
+	std::unordered_map<std::uint16_t, std::vector<std::size_t>>
+	    frame_indices_by_segment{};
+	std::vector<std::size_t> empty_frame_indices{};
 };
 
 /// Internal catalog-like lookup index built by from_dicomfile().
@@ -311,7 +340,15 @@ public:
 	[[nodiscard]] std::size_t index() const noexcept;
 
 	/// ReferencedSegmentNumber from SegmentIdentificationSequence.
+	/// LABELMAP frames may contain multiple segments; this compatibility
+	/// accessor throws for LABELMAP. Use present_segment_numbers() instead.
 	[[nodiscard]] std::uint16_t referenced_segment_number() const;
+
+	/// Segment numbers represented by this frame.
+	/// BINARY/FRACTIONAL returns the declared ReferencedSegmentNumber without
+	/// scanning PixelData. LABELMAP returns actual non-background stored label
+	/// values and validates unknown labels while scanning lazily.
+	[[nodiscard]] std::span<const std::uint16_t> present_segment_numbers() const;
 
 	/// ImagePositionPatient from PlanePositionSequence, per-frame first and then
 	/// SharedFunctionalGroupsSequence fallback.
@@ -334,6 +371,16 @@ public:
 
 	/// Raw item for PerFrameFunctionalGroupsSequence at this frame index.
 	[[nodiscard]] const DataSet& per_frame_functional_groups_item() const;
+
+	/// Decode this frame into a semantic 0/1 mask for one segment.
+	[[nodiscard]] std::vector<std::uint8_t>
+	mask_for_segment(std::uint16_t segment_number,
+	    const SegmentMaskOptions& options = {}) const;
+
+	/// Decode this frame into a caller-provided semantic 0/1 mask.
+	void mask_for_segment_into(std::uint16_t segment_number,
+	    std::span<std::uint8_t> out,
+	    const SegmentMaskOptions& options = {}) const;
 
 private:
 	friend class SegmentFrameListView;
@@ -362,6 +409,10 @@ public:
 
 	/// Instance-level SegmentationFractionalType (0062,0010).
 	[[nodiscard]] SegmentationFractionalType fractional_type() const noexcept;
+
+	/// BitsAllocated for LABELMAP samples, or nullopt for non-LABELMAP SEG.
+	[[nodiscard]] std::optional<std::uint16_t>
+	labelmap_bits_allocated() const noexcept;
 
 	/// MaximumFractionalValue (0062,000E), meaningful for FRACTIONAL SEG.
 	[[nodiscard]] std::optional<std::uint16_t>
@@ -408,18 +459,52 @@ public:
 	segment_by_number(std::uint16_t segment_number) const noexcept;
 
 	/// Frames whose ReferencedSegmentNumber matches `segment_number`.
+	/// For LABELMAP this lazily validates every frame and builds an immutable
+	/// all-frame presence index. Unknown SegmentSequence numbers return empty.
 	[[nodiscard]] SegmentFrameListView
-	frames_for_segment(std::uint16_t segment_number) const noexcept;
+	frames_for_segment(std::uint16_t segment_number) const;
 
 	/// Number of frames belonging to one DICOM SegmentNumber.
 	[[nodiscard]] std::size_t
-	segment_frame_count(std::uint16_t segment_number) const noexcept;
+	segment_frame_count(std::uint16_t segment_number) const;
+
+	/// Segment numbers represented by one frame.
+	[[nodiscard]] std::span<const std::uint16_t>
+	present_segment_numbers(std::size_t frame_index) const;
 
 	/// Decode one SEG frame into caller-provided 8-bit samples.
 	/// BINARY SEG is unpacked to 0/1 bytes. FRACTIONAL SEG currently supports the
-	/// MVP native 8-bit case and reuses one DicomFile decode plan.
+	/// MVP native 8-bit case and reuses one DicomFile decode plan. LABELMAP is
+	/// supported here only when BitsAllocated == 8.
 	void decode_frame_into(std::size_t frame_index,
 	    std::span<std::uint8_t> out) const;
+
+	/// Decode an 8-bit LABELMAP frame as stored label values.
+	void decode_labelmap_frame_into(std::size_t frame_index,
+	    std::span<std::uint8_t> out) const;
+
+	/// Decode a 16-bit LABELMAP frame as native-endian stored label values.
+	void decode_labelmap_frame_into(std::size_t frame_index,
+	    std::span<std::uint16_t> out) const;
+
+	/// Decode a LABELMAP frame as validated native-endian typed sample bytes.
+	/// This is not the raw PixelData value byte order.
+	[[nodiscard]] std::vector<std::uint8_t>
+	decode_labelmap_frame_bytes(std::size_t frame_index) const;
+
+	/// Decode one SEG frame into a semantic 0/1 mask for one segment.
+	[[nodiscard]] std::vector<std::uint8_t>
+	mask_for_segment(std::size_t frame_index, std::uint16_t segment_number,
+	    const SegmentMaskOptions& options = {}) const;
+
+	/// Decode one SEG frame into a caller-provided semantic 0/1 mask.
+	void mask_for_segment_into(std::size_t frame_index,
+	    std::uint16_t segment_number, std::span<std::uint8_t> out,
+	    const SegmentMaskOptions& options = {}) const;
+
+	/// Validate all LABELMAP stored label values against SegmentSequence.
+	/// Non-LABELMAP SEG instances are a no-op.
+	void validate_label_values() const;
 
 private:
 	explicit Segmentation(std::unique_ptr<DicomFile> file) noexcept;
@@ -434,20 +519,31 @@ private:
 	source_image_refs_for_frame(std::size_t frame_index) const;
 	/// Reuse the native decode plan for repeated FRACTIONAL frame decodes.
 	[[nodiscard]] const pixel::DecodePlan& fractional_decode_plan() const;
+	[[nodiscard]] std::shared_ptr<const std::vector<std::uint16_t>>
+	labelmap_presence_for_frame(std::size_t frame_index) const;
+	[[nodiscard]] std::shared_ptr<const detail::LabelmapFrameIndex>
+	ensure_labelmap_frame_index() const;
 
 	// Own the DicomFile so every view can borrow DataSet pointers/string_views.
 	std::unique_ptr<DicomFile> file_;
 	SegmentationType segmentation_type_{SegmentationType::unknown};
 	SegmentationFractionalType fractional_type_{SegmentationFractionalType::none};
+	std::optional<std::uint16_t> labelmap_bits_allocated_{};
 	std::optional<std::uint16_t> maximum_fractional_value_{};
 	std::optional<std::string_view> frame_of_reference_uid_{};
 	const DataSet* shared_functional_groups_item_{nullptr};
+	std::bitset<65536> labelmap_valid_labels_{};
 	// Small catalog/index built once at construction time for fast view lookups.
 	detail::SegmentationIndex index_{};
 	std::size_t rows_{0};
 	std::size_t columns_{0};
 	mutable std::mutex fractional_decode_plan_mutex_{};
 	mutable std::optional<pixel::DecodePlan> fractional_decode_plan_{};
+	mutable std::mutex labelmap_cache_mutex_{};
+	mutable std::vector<detail::LabelmapFramePresenceCache>
+	    labelmap_presence_cache_{};
+	mutable std::shared_ptr<const detail::LabelmapFrameIndex>
+	    labelmap_frame_index_{};
 
 	friend class SegmentListView;
 	friend class SegmentListView::iterator;
@@ -462,6 +558,10 @@ private:
 /// Return true when the file/dataset declares Segmentation Storage SOP Class UID.
 [[nodiscard]] bool is_segmentation_storage(const DicomFile& file) noexcept;
 [[nodiscard]] bool is_segmentation_storage(const DataSet& ds) noexcept;
+[[nodiscard]] bool is_labelmap_segmentation_storage(const DicomFile& file) noexcept;
+[[nodiscard]] bool is_labelmap_segmentation_storage(const DataSet& ds) noexcept;
+[[nodiscard]] bool is_any_segmentation_storage(const DicomFile& file) noexcept;
+[[nodiscard]] bool is_any_segmentation_storage(const DataSet& ds) noexcept;
 
 /// Transfer an already-read DicomFile into the SEG adapter.
 /// This is the low-level ownership adapter for callers that already have a

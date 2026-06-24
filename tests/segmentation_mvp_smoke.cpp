@@ -187,6 +187,24 @@ void populate_frame(dicom::DicomFile& file, int frame_index, long segment_number
 	    source_frames);
 }
 
+void populate_labelmap_frame(dicom::DicomFile& file, int frame_index,
+    double z_position) {
+	const auto base = std::string("PerFrameFunctionalGroupsSequence.") +
+	    std::to_string(frame_index) + ".";
+	const std::array<double, 3> position{0.0, 0.0, z_position};
+	set_doubles(file, base + "PlanePositionSequence.0.ImagePositionPatient",
+	    position);
+	set_text(file,
+	    base + "DerivationImageSequence.0.SourceImageSequence.0."
+	    "ReferencedSOPClassUID",
+	    "1.2.840.10008.5.1.4.1.1.2");
+	set_text(file,
+	    base + "DerivationImageSequence.0.SourceImageSequence.0."
+	    "ReferencedSOPInstanceUID",
+	    frame_index == 0 ? "1.2.826.0.1.3680043.10.543.500"
+	                     : "1.2.826.0.1.3680043.10.543.501");
+}
+
 std::unique_ptr<dicom::DicomFile> make_binary_seg_file() {
 	auto file = std::make_unique<dicom::DicomFile>();
 	populate_common_seg_metadata(*file, "BINARY", 2, 2, 8);
@@ -214,6 +232,45 @@ std::unique_ptr<dicom::DicomFile> make_fractional_seg_file() {
 	populate_frame(*file, 0, 1, 1.0);
 	file->set_native_pixel_data(
 	    std::vector<std::uint8_t>{0, 128, 255, 64}, dicom::VR::OB);
+	return file;
+}
+
+std::unique_ptr<dicom::DicomFile> make_labelmap_seg8_file(
+    std::vector<std::uint8_t> pixel_data =
+        std::vector<std::uint8_t>{0, 1, 2, 2, 0, 1, 0, 0, 2, 0, 0, 0}) {
+	auto file = std::make_unique<dicom::DicomFile>();
+	populate_common_seg_metadata(*file, "LABELMAP", 2, 2, 3);
+	set_text(*file, "SOPClassUID", "LabelMapSegmentationStorage"_uid.value());
+	set_text(*file, "MediaStorageSOPClassUID",
+	    "LabelMapSegmentationStorage"_uid.value());
+	set_long(*file, "BitsAllocated", 8);
+	set_long(*file, "BitsStored", 8);
+	set_long(*file, "HighBit", 7);
+	set_text(*file, "SegmentsOverlap", "NO");
+	populate_segment(*file, 0, 1, "One");
+	populate_segment(*file, 1, 2, "Two");
+	populate_segment(*file, 2, 7, "Absent");
+	populate_labelmap_frame(*file, 0, 10.0);
+	populate_labelmap_frame(*file, 1, 20.0);
+	file->set_native_pixel_data(std::move(pixel_data), dicom::VR::OB);
+	return file;
+}
+
+std::unique_ptr<dicom::DicomFile> make_labelmap_seg16_file() {
+	auto file = std::make_unique<dicom::DicomFile>();
+	populate_common_seg_metadata(*file, "LABELMAP", 1, 2, 2);
+	set_text(*file, "SOPClassUID", "LabelMapSegmentationStorage"_uid.value());
+	set_text(*file, "MediaStorageSOPClassUID",
+	    "LabelMapSegmentationStorage"_uid.value());
+	set_long(*file, "BitsAllocated", 16);
+	set_long(*file, "BitsStored", 16);
+	set_long(*file, "HighBit", 15);
+	populate_segment(*file, 0, 1, "One");
+	populate_segment(*file, 1, 300, "Three Hundred");
+	populate_labelmap_frame(*file, 0, 10.0);
+	file->set_native_pixel_data(
+	    std::vector<std::uint8_t>{0, 0, 1, 0, 0x2C, 0x01, 0x2C, 0x01},
+	    dicom::VR::OW);
 	return file;
 }
 
@@ -520,9 +577,9 @@ int main() {
 	{
 		auto labelmap_type = make_binary_seg_file();
 		set_text(*labelmap_type, "SegmentationType", "LABELMAP");
-		expect_throw_contains("LABELMAP SegmentationType",
+		expect_throw_contains("LABELMAP SegmentationType with legacy SOP",
 		    [&] { (void)dicom::seg::from_dicomfile(std::move(labelmap_type)); },
-		    "LABELMAP SEG");
+		    "Label Map");
 
 		auto labelmap_sop_class = make_binary_seg_file();
 		set_text(*labelmap_sop_class, "SOPClassUID",
@@ -533,7 +590,98 @@ int main() {
 		    [&] {
 			    (void)dicom::seg::from_dicomfile(std::move(labelmap_sop_class));
 		    },
-		    "LABELMAP SEG");
+		    "SegmentationType=LABELMAP");
+	}
+
+	{
+		auto file = make_labelmap_seg8_file();
+		if (dicom::seg::is_segmentation_storage(*file) ||
+		    !dicom::seg::is_labelmap_segmentation_storage(*file) ||
+		    !dicom::seg::is_any_segmentation_storage(*file)) {
+			fail("labelmap SOP classification mismatch");
+		}
+		auto seg = dicom::seg::from_dicomfile(std::move(file));
+		if (seg->segmentation_type() != dicom::seg::SegmentationType::labelmap ||
+		    !seg->labelmap_bits_allocated() || *seg->labelmap_bits_allocated() != 8) {
+			fail("labelmap metadata mismatch");
+		}
+		const auto frame0 = seg->frames()[0];
+		expect_throw_contains("labelmap referenced_segment_number",
+		    [&] { (void)frame0.referenced_segment_number(); },
+		    "LABELMAP");
+		const auto present0 = frame0.present_segment_numbers();
+		if (present0.size() != 2 || present0[0] != 1 || present0[1] != 2) {
+			fail("labelmap frame presence mismatch");
+		}
+		std::vector<std::uint8_t> decoded0(6);
+		seg->decode_frame_into(0, decoded0);
+		if (decoded0 != std::vector<std::uint8_t>{0, 1, 2, 2, 0, 1}) {
+			fail("labelmap 8-bit decode mismatch");
+		}
+		const auto mask1 = seg->mask_for_segment(0, 1);
+		if (mask1 != std::vector<std::uint8_t>{0, 1, 0, 0, 0, 1}) {
+			fail("labelmap segment mask mismatch");
+		}
+		if (seg->frames_for_segment(2).size() != 2 ||
+		    seg->segment_frame_count(7) != 0 ||
+		    seg->frames_for_segment(99).size() != 0) {
+			fail("labelmap frames_for_segment mismatch");
+		}
+		seg->validate_label_values();
+	}
+
+	{
+		auto bad_label = make_labelmap_seg8_file(
+		    std::vector<std::uint8_t>{0, 1, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0});
+		auto seg = dicom::seg::from_dicomfile(std::move(bad_label));
+		expect_throw_contains("labelmap unknown label validation",
+		    [&] { (void)seg->present_segment_numbers(0); },
+		    "undefined segment");
+	}
+
+	{
+		auto missing_pixel_data = make_labelmap_seg8_file();
+		missing_pixel_data->remove_dataelement("PixelData"_tag);
+		auto seg = dicom::seg::from_dicomfile(std::move(missing_pixel_data));
+		std::vector<std::uint8_t> decoded(6);
+		expect_throw_contains("missing labelmap PixelData",
+		    [&] { seg->decode_frame_into(0, decoded); },
+		    "PixelData is missing");
+
+		auto detached_file = make_labelmap_seg8_file();
+		detached_file->set_native_pixel_data(
+		    detached_pixel_payload_marker('O', 'B', 12, 12), dicom::VR::OB);
+		auto detached_seg = dicom::seg::from_dicomfile(std::move(detached_file));
+		expect_throw_contains("detached labelmap PixelData",
+		    [&] { detached_seg->decode_frame_into(0, decoded); },
+		    "detached");
+
+		auto pixel_sequence_file = make_labelmap_seg8_file();
+		pixel_sequence_file->reset_encapsulated_pixel_data(2);
+		pixel_sequence_file->set_transfer_syntax_state_only(
+		    "ExplicitVRLittleEndian"_uid);
+		auto pixel_sequence_seg =
+		    dicom::seg::from_dicomfile(std::move(pixel_sequence_file));
+		expect_throw_contains("labelmap PixelSequence",
+		    [&] { pixel_sequence_seg->decode_frame_into(0, decoded); },
+		    "PixelSequence");
+	}
+
+	{
+		auto seg = dicom::seg::from_dicomfile(make_labelmap_seg16_file());
+		std::vector<std::uint16_t> decoded(4);
+		seg->decode_labelmap_frame_into(0, decoded);
+		if (decoded != std::vector<std::uint16_t>{0, 1, 300, 300}) {
+			fail("labelmap 16-bit decode mismatch");
+		}
+		const auto bytes = seg->decode_labelmap_frame_bytes(0);
+		if (bytes != std::vector<std::uint8_t>{0, 0, 1, 0, 0x2C, 0x01, 0x2C, 0x01}) {
+			fail("labelmap 16-bit native bytes mismatch");
+		}
+		const auto present = seg->present_segment_numbers(0);
+		if (present.size() != 2 || present[0] != 1 || present[1] != 300) {
+			fail("labelmap 16-bit presence mismatch");
+		}
 	}
 
 	{

@@ -3,9 +3,12 @@
 #include "diagnostics.h"
 
 #include <algorithm>
+#include <cstring>
 #include <limits>
+#include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace dicom::seg {
 using namespace dicom::literals;
@@ -211,36 +214,43 @@ template <std::size_t N>
 	return SegmentAlgorithmType::unknown;
 }
 
-[[nodiscard]] bool dataset_has_segmentation_sop_class(const DataSet& dataset) {
-	const auto segmentation_storage = "SegmentationStorage"_uid.value();
-	if (const auto sop_class_uid = string_value(dataset, "SOPClassUID"_tag);
-	    sop_class_uid && *sop_class_uid == segmentation_storage) {
-		return true;
-	}
-	if (const auto media_sop_class_uid =
-	        string_value(dataset, "MediaStorageSOPClassUID"_tag);
-	    media_sop_class_uid &&
-	    *media_sop_class_uid == segmentation_storage) {
-		return true;
-	}
-	return false;
-}
+enum class SopClassKind : std::uint8_t {
+	none,
+	segmentation,
+	labelmap,
+	conflict,
+};
 
-[[nodiscard]] bool dataset_has_labelmap_segmentation_sop_class(
-    const DataSet& dataset) {
+[[nodiscard]] SopClassKind sop_class_kind_from_value(
+    std::string_view value) noexcept {
+	const auto segmentation_storage = "SegmentationStorage"_uid.value();
+	if (value == segmentation_storage) {
+		return SopClassKind::segmentation;
+	}
 	const auto labelmap_segmentation_storage =
 	    "LabelMapSegmentationStorage"_uid.value();
-	if (const auto sop_class_uid = string_value(dataset, "SOPClassUID"_tag);
-	    sop_class_uid && *sop_class_uid == labelmap_segmentation_storage) {
-		return true;
+	if (value == labelmap_segmentation_storage) {
+		return SopClassKind::labelmap;
 	}
+	return SopClassKind::none;
+}
+
+[[nodiscard]] SopClassKind declared_sop_class_kind(const DataSet& dataset) {
+	const auto sop_class_uid = string_value(dataset, "SOPClassUID"_tag);
 	if (const auto media_sop_class_uid =
 	        string_value(dataset, "MediaStorageSOPClassUID"_tag);
-	    media_sop_class_uid &&
-	    *media_sop_class_uid == labelmap_segmentation_storage) {
-		return true;
+	    sop_class_uid && media_sop_class_uid &&
+	    *sop_class_uid != *media_sop_class_uid) {
+		return SopClassKind::conflict;
 	}
-	return false;
+	if (sop_class_uid) {
+		return sop_class_kind_from_value(*sop_class_uid);
+	}
+	if (const auto media_sop_class_uid =
+	        string_value(dataset, "MediaStorageSOPClassUID"_tag)) {
+		return sop_class_kind_from_value(*media_sop_class_uid);
+	}
+	return SopClassKind::none;
 }
 
 [[noreturn]] void throw_seg(std::string_view reason) {
@@ -291,6 +301,199 @@ template <std::size_t N>
 	return refs;
 }
 
+struct LabelmapFrameScanRequest {
+	std::span<std::uint8_t> decoded_u8{};
+	std::span<std::uint16_t> decoded_u16{};
+	std::span<std::uint8_t> mask_out{};
+	std::optional<std::uint16_t> target_segment{};
+	bool collect_presence{true};
+};
+
+struct LabelmapFrameScanResult {
+	std::shared_ptr<const std::vector<std::uint16_t>> present_labels{};
+	bool decoded_written{false};
+	bool mask_written{false};
+};
+
+template <typename T, typename U>
+[[nodiscard]] bool spans_overlap(std::span<T> lhs, std::span<U> rhs) noexcept {
+	if (lhs.empty() || rhs.empty()) {
+		return false;
+	}
+	const auto lhs_begin =
+	    reinterpret_cast<std::uintptr_t>(lhs.data());
+	const auto rhs_begin =
+	    reinterpret_cast<std::uintptr_t>(rhs.data());
+	const auto lhs_end = lhs_begin + lhs.size_bytes();
+	const auto rhs_end = rhs_begin + rhs.size_bytes();
+	return lhs_begin < rhs_end && rhs_begin < lhs_end;
+}
+
+[[nodiscard]] std::size_t checked_frame_sample_count(
+    std::size_t rows, std::size_t columns) {
+	if (rows == 0 || columns == 0 ||
+	    columns > std::numeric_limits<std::size_t>::max() / rows) {
+		throw_decode("invalid Rows or Columns");
+	}
+	return rows * columns;
+}
+
+[[nodiscard]] std::span<const std::uint8_t> labelmap_pixeldata_bytes(
+    const DicomFile& file, std::size_t frame_count,
+    std::size_t pixels_per_frame, std::uint16_t bits_allocated) {
+	const auto transfer_syntax = file.transfer_syntax_uid();
+	if (transfer_syntax == "ExplicitVRBigEndian"_uid) {
+		throw_decode("Big Endian LABELMAP PixelData is not supported");
+	}
+	if (transfer_syntax &&
+	    (!transfer_syntax.is_uncompressed() || transfer_syntax.is_encapsulated())) {
+		throw_decode(
+		    "compressed/encapsulated Label Map SEG PixelData is not supported");
+	}
+
+	file.ensure_loaded("PixelData"_tag);
+	const auto& pixel_data = file.get_dataelement("PixelData"_tag);
+	if (!pixel_data) {
+		throw_decode("LABELMAP PixelData is missing");
+	}
+	if (pixel_data.as_pixel_sequence()) {
+		throw_decode("LABELMAP PixelData must be native binary, not PixelSequence");
+	}
+	if (dicom::detail::is_detached_pixel_payload_marker(pixel_data)) {
+		throw_decode("LABELMAP PixelData payload is detached");
+	}
+
+	const auto bytes_per_sample = bits_allocated / 8u;
+	if (bytes_per_sample == 0 ||
+	    pixels_per_frame > std::numeric_limits<std::size_t>::max() / bytes_per_sample) {
+		throw_decode("LABELMAP PixelData size overflow");
+	}
+	const auto bytes_per_frame = pixels_per_frame * bytes_per_sample;
+	if (frame_count != 0 &&
+	    bytes_per_frame > std::numeric_limits<std::size_t>::max() / frame_count) {
+		throw_decode("LABELMAP PixelData size overflow");
+	}
+	const auto expected = bytes_per_frame * frame_count;
+	const auto bytes = pixel_data.value_span();
+	if (bytes.size() != expected) {
+		const auto has_legal_padding =
+		    (expected % 2u) == 1u && bytes.size() == expected + 1u &&
+		    bytes.size() > 0 && bytes[expected] == 0u;
+		if (!has_legal_padding) {
+			throw_decode("LABELMAP PixelData size mismatch");
+		}
+	}
+	return bytes;
+}
+
+[[nodiscard]] LabelmapFrameScanResult decode_and_scan_labelmap_frame(
+    const DicomFile& file, std::size_t frame_count, std::size_t frame_index,
+    std::size_t rows, std::size_t columns, std::uint16_t bits_allocated,
+    const std::bitset<65536>& valid_labels,
+    const LabelmapFrameScanRequest& request) {
+	if (frame_index >= frame_count) {
+		throw_decode("frame index out of range");
+	}
+	if (bits_allocated != 8 && bits_allocated != 16) {
+		throw_decode("LABELMAP requires BitsAllocated=8 or 16");
+	}
+	if (!request.decoded_u8.empty() && !request.decoded_u16.empty()) {
+		throw_decode("LABELMAP decode request has multiple decoded outputs");
+	}
+	if (spans_overlap(request.decoded_u8, request.mask_out) ||
+	    spans_overlap(request.decoded_u16, request.mask_out) ||
+	    spans_overlap(request.decoded_u8, request.decoded_u16)) {
+		throw_decode("LABELMAP output buffers must not overlap");
+	}
+
+	const auto pixels_per_frame = checked_frame_sample_count(rows, columns);
+	if (!request.decoded_u8.empty()) {
+		if (bits_allocated != 8) {
+			throw_decode("LABELMAP uint8 output requires BitsAllocated=8");
+		}
+		if (request.decoded_u8.size() < pixels_per_frame) {
+			throw_decode("destination buffer is smaller than decoded frame");
+		}
+	}
+	if (!request.decoded_u16.empty()) {
+		if (bits_allocated != 16) {
+			throw_decode("LABELMAP uint16 output requires BitsAllocated=16");
+		}
+		if (request.decoded_u16.size() < pixels_per_frame) {
+			throw_decode("destination buffer is smaller than decoded frame");
+		}
+	}
+	if (!request.mask_out.empty() && request.mask_out.size() < pixels_per_frame) {
+		throw_decode("destination buffer is smaller than decoded frame");
+	}
+
+	const auto bytes = labelmap_pixeldata_bytes(
+	    file, frame_count, pixels_per_frame, bits_allocated);
+	const auto bytes_per_sample = static_cast<std::size_t>(bits_allocated / 8u);
+	if (frame_index >
+	    std::numeric_limits<std::size_t>::max() / pixels_per_frame ||
+	    frame_index * pixels_per_frame >
+	        std::numeric_limits<std::size_t>::max() / bytes_per_sample) {
+		throw_decode("LABELMAP frame offset overflow");
+	}
+	const auto frame_offset = frame_index * pixels_per_frame * bytes_per_sample;
+
+	const auto word_count = bits_allocated == 8 ? std::size_t{4} : std::size_t{1024};
+	std::vector<std::uint64_t> seen_words(
+	    request.collect_presence ? word_count : std::size_t{0}, 0u);
+	std::vector<std::uint16_t> present;
+	const auto mark_seen = [&](std::uint16_t value) {
+		if (!request.collect_presence) {
+			return;
+		}
+		const auto word = static_cast<std::size_t>(value / 64u);
+		const auto mask = std::uint64_t{1} << (value % 64u);
+		if ((seen_words[word] & mask) == 0u) {
+			seen_words[word] |= mask;
+			present.push_back(value);
+		}
+	};
+
+	const auto target = request.target_segment.value_or(0);
+	for (std::size_t pixel_index = 0; pixel_index < pixels_per_frame; ++pixel_index) {
+		std::uint16_t value = 0;
+		if (bits_allocated == 8) {
+			value = bytes[frame_offset + pixel_index];
+			if (!request.decoded_u8.empty()) {
+				request.decoded_u8[pixel_index] = static_cast<std::uint8_t>(value);
+			}
+		} else {
+			const auto byte_offset = frame_offset + pixel_index * 2u;
+			value = static_cast<std::uint16_t>(
+			    bytes[byte_offset] |
+			    (static_cast<std::uint16_t>(bytes[byte_offset + 1u]) << 8u));
+			if (!request.decoded_u16.empty()) {
+				request.decoded_u16[pixel_index] = value;
+			}
+		}
+
+		if (value != 0) {
+			if (!valid_labels.test(value)) {
+				throw_decode(
+				    "LABELMAP PixelData references an undefined segment number");
+			}
+			mark_seen(value);
+		}
+		if (!request.mask_out.empty()) {
+			request.mask_out[pixel_index] =
+			    static_cast<std::uint8_t>(value == target ? 1u : 0u);
+		}
+	}
+
+	std::sort(present.begin(), present.end());
+	return LabelmapFrameScanResult{
+	    .present_labels =
+	        std::make_shared<const std::vector<std::uint16_t>>(std::move(present)),
+	    .decoded_written = !request.decoded_u8.empty() || !request.decoded_u16.empty(),
+	    .mask_written = !request.mask_out.empty(),
+	};
+}
+
 } // namespace
 
 void Segmentation::index_segment_sequence_items(const Options& options) {
@@ -330,6 +533,9 @@ void Segmentation::index_segment_sequence_items(const Options& options) {
 		}
 		index_.segment_index_by_number.emplace(*number, index_.segments.size());
 		index_.segments.push_back(detail::SegmentRecord{.item = item, .number = *number});
+		if (segmentation_type_ == SegmentationType::labelmap) {
+			labelmap_valid_labels_.set(*number);
+		}
 	}
 }
 
@@ -371,6 +577,15 @@ void Segmentation::index_per_frame_functional_group_items(const Options& options
 				throw_seg("PerFrameFunctionalGroupsSequence contains a missing item");
 			}
 			index_.frames.push_back(detail::SegmentFrameRecord{});
+			continue;
+		}
+
+		if (segmentation_type_ == SegmentationType::labelmap) {
+			index_.frames.push_back(detail::SegmentFrameRecord{
+			    .functional_group_item = frame_item,
+			    .source_images = collect_source_image_refs(
+			        *frame_item, shared_functional_groups_item_),
+			});
 			continue;
 		}
 
@@ -417,14 +632,11 @@ void Segmentation::extract_instance_metadata(const Options& options) {
 	frame_of_reference_uid_ = string_value(dataset, "FrameOfReferenceUID"_tag);
 	rows_ = size_value(dataset, "Rows"_tag).value_or(0);
 	columns_ = size_value(dataset, "Columns"_tag).value_or(0);
+	labelmap_bits_allocated_.reset();
 
 	if (segmentation_type_ == SegmentationType::unknown &&
 	    options.validate_required_modules) {
 		throw_seg("SegmentationType is missing or unsupported");
-	}
-	if (segmentation_type_ == SegmentationType::labelmap &&
-	    options.validate_required_modules) {
-		throw_seg("LABELMAP SEG is outside the SEG MVP scope");
 	}
 	if (!frame_of_reference_uid_ && options.validate_required_modules) {
 		throw_seg("FrameOfReferenceUID is missing");
@@ -440,6 +652,64 @@ void Segmentation::extract_instance_metadata(const Options& options) {
 		}
 		if (!maximum_fractional_value_ || *maximum_fractional_value_ == 0) {
 			throw_seg("FRACTIONAL SEG requires MaximumFractionalValue");
+		}
+	}
+	const auto sop_kind = declared_sop_class_kind(dataset);
+	if (options.validate_required_modules) {
+		if (segmentation_type_ == SegmentationType::labelmap &&
+		    sop_kind != SopClassKind::labelmap) {
+			throw_seg("LABELMAP SegmentationType requires Label Map Segmentation Storage");
+		}
+		if (sop_kind == SopClassKind::labelmap &&
+		    segmentation_type_ != SegmentationType::labelmap) {
+			throw_seg("Label Map Segmentation Storage requires SegmentationType=LABELMAP");
+		}
+		if (sop_kind == SopClassKind::segmentation &&
+		    segmentation_type_ == SegmentationType::labelmap) {
+			throw_seg("Segmentation Storage does not support SegmentationType=LABELMAP");
+		}
+	}
+	if (segmentation_type_ == SegmentationType::labelmap) {
+		const auto bits_allocated = uint16_value(dataset, "BitsAllocated"_tag);
+		const auto bits_stored = uint16_value(dataset, "BitsStored"_tag);
+		const auto high_bit = uint16_value(dataset, "HighBit"_tag);
+		const auto pixel_representation =
+		    uint16_value(dataset, "PixelRepresentation"_tag);
+		const auto samples_per_pixel =
+		    uint16_value(dataset, "SamplesPerPixel"_tag);
+		const auto photometric =
+		    string_value_or_empty(dataset, "PhotometricInterpretation"_tag);
+		if (bits_allocated) {
+			labelmap_bits_allocated_ = *bits_allocated;
+		}
+		if (options.validate_required_modules) {
+			if (!bits_allocated || (*bits_allocated != 8 && *bits_allocated != 16)) {
+				throw_seg("LABELMAP requires BitsAllocated=8 or 16");
+			}
+			if (!bits_stored || *bits_stored != *bits_allocated) {
+				throw_seg("LABELMAP requires BitsStored to match BitsAllocated");
+			}
+			if (!high_bit || *high_bit != static_cast<std::uint16_t>(*bits_allocated - 1u)) {
+				throw_seg("LABELMAP requires HighBit=BitsAllocated-1");
+			}
+			if (!pixel_representation || *pixel_representation != 0) {
+				throw_seg("LABELMAP requires PixelRepresentation=0");
+			}
+			if (!samples_per_pixel || *samples_per_pixel != 1) {
+				throw_seg("LABELMAP requires SamplesPerPixel=1");
+			}
+			if (photometric != "MONOCHROME2" && photometric != "PALETTE COLOR") {
+				throw_seg(
+				    "LABELMAP requires PhotometricInterpretation MONOCHROME2 or PALETTE COLOR");
+			}
+			if (dataset.get_dataelement("PixelPaddingValue"_tag)) {
+				throw_seg("LABELMAP PixelPaddingValue is not supported");
+			}
+			if (const auto segments_overlap =
+			        string_value(dataset, "SegmentsOverlap"_tag);
+			    segments_overlap && *segments_overlap != "NO") {
+				throw_seg("LABELMAP requires SegmentsOverlap=NO when present");
+			}
 		}
 	}
 
@@ -469,6 +739,11 @@ SegmentationType Segmentation::segmentation_type() const noexcept {
 
 SegmentationFractionalType Segmentation::fractional_type() const noexcept {
 	return fractional_type_;
+}
+
+std::optional<std::uint16_t>
+Segmentation::labelmap_bits_allocated() const noexcept {
+	return labelmap_bits_allocated_;
 }
 
 std::optional<std::uint16_t> Segmentation::maximum_fractional_value() const noexcept {
@@ -531,6 +806,87 @@ const pixel::DecodePlan& Segmentation::fractional_decode_plan() const {
 	return *fractional_decode_plan_;
 }
 
+std::shared_ptr<const std::vector<std::uint16_t>>
+Segmentation::labelmap_presence_for_frame(std::size_t frame_index) const {
+	if (segmentation_type_ != SegmentationType::labelmap) {
+		throw_decode("present label cache is only available for LABELMAP SEG");
+	}
+	if (frame_index >= index_.frames.size()) {
+		throw_decode("frame index out of range");
+	}
+	{
+		std::lock_guard lock(labelmap_cache_mutex_);
+		const auto& cache = labelmap_presence_cache_[frame_index];
+		if (cache.ready) {
+			return cache.labels;
+		}
+	}
+
+	const auto result = decode_and_scan_labelmap_frame(*file_, index_.frames.size(),
+	    frame_index, rows_, columns_, labelmap_bits_allocated_.value_or(0),
+	    labelmap_valid_labels_, LabelmapFrameScanRequest{.collect_presence = true});
+
+	std::lock_guard lock(labelmap_cache_mutex_);
+	auto& cache = labelmap_presence_cache_[frame_index];
+	if (!cache.ready) {
+		cache.ready = true;
+		cache.labels = result.present_labels;
+	}
+	return cache.labels;
+}
+
+std::shared_ptr<const detail::LabelmapFrameIndex>
+Segmentation::ensure_labelmap_frame_index() const {
+	if (segmentation_type_ != SegmentationType::labelmap) {
+		throw_decode("LABELMAP frame index requested for non-LABELMAP SEG");
+	}
+	{
+		std::lock_guard lock(labelmap_cache_mutex_);
+		if (labelmap_frame_index_) {
+			return labelmap_frame_index_;
+		}
+	}
+
+	std::vector<std::shared_ptr<const std::vector<std::uint16_t>>> frame_labels(
+	    index_.frames.size());
+	detail::LabelmapFrameIndex local_index{};
+	for (std::size_t frame_index = 0; frame_index < index_.frames.size(); ++frame_index) {
+		{
+			std::lock_guard lock(labelmap_cache_mutex_);
+			const auto& cache = labelmap_presence_cache_[frame_index];
+			if (cache.ready) {
+				frame_labels[frame_index] = cache.labels;
+			}
+		}
+		if (!frame_labels[frame_index]) {
+			const auto result = decode_and_scan_labelmap_frame(*file_,
+			    index_.frames.size(), frame_index, rows_, columns_,
+			    labelmap_bits_allocated_.value_or(0), labelmap_valid_labels_,
+			    LabelmapFrameScanRequest{.collect_presence = true});
+			frame_labels[frame_index] = result.present_labels;
+		}
+		for (const auto label : *frame_labels[frame_index]) {
+			local_index.frame_indices_by_segment[label].push_back(frame_index);
+		}
+	}
+
+	auto published =
+	    std::make_shared<const detail::LabelmapFrameIndex>(std::move(local_index));
+	std::lock_guard lock(labelmap_cache_mutex_);
+	if (labelmap_frame_index_) {
+		return labelmap_frame_index_;
+	}
+	for (std::size_t frame_index = 0; frame_index < frame_labels.size(); ++frame_index) {
+		auto& cache = labelmap_presence_cache_[frame_index];
+		if (!cache.ready) {
+			cache.ready = true;
+			cache.labels = frame_labels[frame_index];
+		}
+	}
+	labelmap_frame_index_ = std::move(published);
+	return labelmap_frame_index_;
+}
+
 SegmentListView Segmentation::segments() const noexcept {
 	return SegmentListView(this);
 }
@@ -550,7 +906,19 @@ std::optional<SegmentView> Segmentation::segment_by_number(
 }
 
 SegmentFrameListView Segmentation::frames_for_segment(
-    std::uint16_t segment_number) const noexcept {
+    std::uint16_t segment_number) const {
+	if (!index_.segment_index_by_number.contains(segment_number)) {
+		return SegmentFrameListView(this, &index_.empty_frame_indices);
+	}
+	if (segmentation_type_ == SegmentationType::labelmap) {
+		const auto labelmap_index = ensure_labelmap_frame_index();
+		const auto found =
+		    labelmap_index->frame_indices_by_segment.find(segment_number);
+		if (found == labelmap_index->frame_indices_by_segment.end()) {
+			return SegmentFrameListView(this, &labelmap_index->empty_frame_indices);
+		}
+		return SegmentFrameListView(this, &found->second);
+	}
 	const auto found = index_.frame_indices_by_segment.find(segment_number);
 	if (found == index_.frame_indices_by_segment.end()) {
 		return SegmentFrameListView(this, &index_.empty_frame_indices);
@@ -559,15 +927,42 @@ SegmentFrameListView Segmentation::frames_for_segment(
 }
 
 std::size_t Segmentation::segment_frame_count(
-    std::uint16_t segment_number) const noexcept {
+    std::uint16_t segment_number) const {
+	if (!index_.segment_index_by_number.contains(segment_number)) {
+		return 0u;
+	}
+	if (segmentation_type_ == SegmentationType::labelmap) {
+		return frames_for_segment(segment_number).size();
+	}
 	const auto found = index_.frame_indices_by_segment.find(segment_number);
 	return found == index_.frame_indices_by_segment.end() ? 0u : found->second.size();
+}
+
+std::span<const std::uint16_t>
+Segmentation::present_segment_numbers(std::size_t frame_index) const {
+	if (frame_index >= index_.frames.size()) {
+		throw_decode("frame index out of range");
+	}
+	if (segmentation_type_ == SegmentationType::labelmap) {
+		const auto labels = labelmap_presence_for_frame(frame_index);
+		return std::span<const std::uint16_t>(labels->data(), labels->size());
+	}
+	const auto value = index_.frames[frame_index].referenced_segment_number;
+	if (value == 0) {
+		return {};
+	}
+	return std::span<const std::uint16_t>(&index_.frames[frame_index].referenced_segment_number, 1);
 }
 
 void Segmentation::decode_frame_into(
     std::size_t frame_index, std::span<std::uint8_t> out) const {
 	if (frame_index >= index_.frames.size()) {
 		throw_decode("frame index out of range");
+	}
+
+	if (segmentation_type_ == SegmentationType::labelmap) {
+		decode_labelmap_frame_into(frame_index, out);
+		return;
 	}
 
 	file_->ensure_loaded("PixelData"_tag);
@@ -641,6 +1036,174 @@ void Segmentation::decode_frame_into(
 	}
 
 	throw_decode("unsupported SegmentationType for frame decode");
+}
+
+void Segmentation::decode_labelmap_frame_into(
+    std::size_t frame_index, std::span<std::uint8_t> out) const {
+	if (segmentation_type_ != SegmentationType::labelmap) {
+		throw_decode("decode_labelmap_frame_into requires LABELMAP SEG");
+	}
+	if (labelmap_bits_allocated_.value_or(0) != 8) {
+		throw_decode("LABELMAP uint8 output requires BitsAllocated=8");
+	}
+	const auto result = decode_and_scan_labelmap_frame(*file_,
+	    index_.frames.size(), frame_index, rows_, columns_,
+	    labelmap_bits_allocated_.value_or(0), labelmap_valid_labels_,
+	    LabelmapFrameScanRequest{
+	        .decoded_u8 = out,
+	        .collect_presence = true,
+	    });
+	std::lock_guard lock(labelmap_cache_mutex_);
+	auto& cache = labelmap_presence_cache_[frame_index];
+	if (!cache.ready) {
+		cache.ready = true;
+		cache.labels = result.present_labels;
+	}
+}
+
+void Segmentation::decode_labelmap_frame_into(
+    std::size_t frame_index, std::span<std::uint16_t> out) const {
+	if (segmentation_type_ != SegmentationType::labelmap) {
+		throw_decode("decode_labelmap_frame_into requires LABELMAP SEG");
+	}
+	if (labelmap_bits_allocated_.value_or(0) != 16) {
+		throw_decode("LABELMAP uint16 output requires BitsAllocated=16");
+	}
+	const auto result = decode_and_scan_labelmap_frame(*file_,
+	    index_.frames.size(), frame_index, rows_, columns_,
+	    labelmap_bits_allocated_.value_or(0), labelmap_valid_labels_,
+	    LabelmapFrameScanRequest{
+	        .decoded_u16 = out,
+	        .collect_presence = true,
+	    });
+	std::lock_guard lock(labelmap_cache_mutex_);
+	auto& cache = labelmap_presence_cache_[frame_index];
+	if (!cache.ready) {
+		cache.ready = true;
+		cache.labels = result.present_labels;
+	}
+}
+
+std::vector<std::uint8_t>
+Segmentation::decode_labelmap_frame_bytes(std::size_t frame_index) const {
+	const auto pixels_per_frame = checked_frame_sample_count(rows_, columns_);
+	if (labelmap_bits_allocated_.value_or(0) == 8) {
+		std::vector<std::uint8_t> out(pixels_per_frame);
+		decode_labelmap_frame_into(frame_index, out);
+		return out;
+	}
+	if (labelmap_bits_allocated_.value_or(0) == 16) {
+		std::vector<std::uint16_t> samples(pixels_per_frame);
+		decode_labelmap_frame_into(frame_index, samples);
+		std::vector<std::uint8_t> out(samples.size() * sizeof(std::uint16_t));
+		if (!out.empty()) {
+			std::memcpy(out.data(), samples.data(), out.size());
+		}
+		return out;
+	}
+	throw_decode("LABELMAP requires BitsAllocated=8 or 16");
+}
+
+void Segmentation::mask_for_segment_into(std::size_t frame_index,
+    std::uint16_t segment_number, std::span<std::uint8_t> out,
+    const SegmentMaskOptions& options) const {
+	if (frame_index >= index_.frames.size()) {
+		throw_decode("frame index out of range");
+	}
+	const auto pixels_per_frame = checked_frame_sample_count(rows_, columns_);
+	if (out.size() < pixels_per_frame) {
+		throw_decode("destination buffer is smaller than decoded frame");
+	}
+	if (options.fractional_threshold < 0.0 || options.fractional_threshold > 1.0) {
+		throw_decode("fractional_threshold must be in [0, 1]");
+	}
+	if (!index_.segment_index_by_number.contains(segment_number)) {
+		throw_decode("mask_for_segment requested a segment absent from SegmentSequence");
+	}
+
+	const auto fill_zero_or_throw = [&] {
+		std::fill_n(out.begin(), pixels_per_frame, std::uint8_t{0});
+		if (options.error_when_not_present_in_frame) {
+			throw_decode("segment is not present in this frame");
+		}
+	};
+
+	if (segmentation_type_ == SegmentationType::binary) {
+		const auto referenced = index_.frames[frame_index].referenced_segment_number;
+		if (referenced != segment_number || referenced == 0) {
+			fill_zero_or_throw();
+			return;
+		}
+		decode_frame_into(frame_index, out);
+		return;
+	}
+
+	if (segmentation_type_ == SegmentationType::fractional) {
+		const auto referenced = index_.frames[frame_index].referenced_segment_number;
+		if (referenced != segment_number || referenced == 0) {
+			fill_zero_or_throw();
+			return;
+		}
+		decode_frame_into(frame_index, out);
+		const auto maximum = maximum_fractional_value_.value_or(0);
+		if (maximum == 0) {
+			throw_decode("FRACTIONAL SEG requires MaximumFractionalValue");
+		}
+		if (options.fractional_threshold == 0.0) {
+			for (std::size_t index = 0; index < pixels_per_frame; ++index) {
+				out[index] = static_cast<std::uint8_t>(out[index] > 0 ? 1u : 0u);
+			}
+			return;
+		}
+		const auto threshold = options.fractional_threshold *
+		    static_cast<double>(maximum);
+		for (std::size_t index = 0; index < pixels_per_frame; ++index) {
+			out[index] = static_cast<std::uint8_t>(
+			    static_cast<double>(out[index]) >= threshold ? 1u : 0u);
+		}
+		return;
+	}
+
+	if (segmentation_type_ == SegmentationType::labelmap) {
+		const auto result = decode_and_scan_labelmap_frame(*file_,
+		    index_.frames.size(), frame_index, rows_, columns_,
+		    labelmap_bits_allocated_.value_or(0), labelmap_valid_labels_,
+		    LabelmapFrameScanRequest{
+		        .mask_out = out,
+		        .target_segment = segment_number,
+		        .collect_presence = true,
+		    });
+		{
+			std::lock_guard lock(labelmap_cache_mutex_);
+			auto& cache = labelmap_presence_cache_[frame_index];
+			if (!cache.ready) {
+				cache.ready = true;
+				cache.labels = result.present_labels;
+			}
+		}
+		if (options.error_when_not_present_in_frame &&
+		    !std::binary_search(result.present_labels->begin(),
+		        result.present_labels->end(), segment_number)) {
+			throw_decode("segment is not present in this frame");
+		}
+		return;
+	}
+
+	throw_decode("unsupported SegmentationType for mask decode");
+}
+
+std::vector<std::uint8_t> Segmentation::mask_for_segment(
+    std::size_t frame_index, std::uint16_t segment_number,
+    const SegmentMaskOptions& options) const {
+	std::vector<std::uint8_t> out(checked_frame_sample_count(rows_, columns_));
+	mask_for_segment_into(frame_index, segment_number, out, options);
+	return out;
+}
+
+void Segmentation::validate_label_values() const {
+	if (segmentation_type_ == SegmentationType::labelmap) {
+		(void)ensure_labelmap_frame_index();
+	}
 }
 
 SegmentListView::SegmentListView(const Segmentation* segmentation) noexcept
@@ -843,7 +1406,23 @@ std::uint16_t SegmentFrameView::referenced_segment_number() const {
 	if (!segmentation_ || frame_index_ >= segmentation_->index_.frames.size()) {
 		diag::throw_exception("seg::SegmentFrameView::referenced_segment_number invalid frame");
 	}
+	if (segmentation_->segmentation_type_ == SegmentationType::labelmap) {
+		diag::throw_exception(
+		    "seg::SegmentFrameView::referenced_segment_number is not defined for LABELMAP frames; use present_segment_numbers()");
+	}
+	if (segmentation_->index_.frames[frame_index_].referenced_segment_number == 0) {
+		diag::throw_exception(
+		    "seg::SegmentFrameView::referenced_segment_number is missing");
+	}
 	return segmentation_->index_.frames[frame_index_].referenced_segment_number;
+}
+
+std::span<const std::uint16_t>
+SegmentFrameView::present_segment_numbers() const {
+	if (!segmentation_) {
+		diag::throw_exception("seg::SegmentFrameView::present_segment_numbers invalid frame");
+	}
+	return segmentation_->present_segment_numbers(frame_index_);
 }
 
 std::optional<std::array<double, 3>>
@@ -900,6 +1479,22 @@ const DataSet& SegmentFrameView::per_frame_functional_groups_item() const {
 	return *segmentation_->index_.frames[frame_index_].functional_group_item;
 }
 
+std::vector<std::uint8_t> SegmentFrameView::mask_for_segment(
+    std::uint16_t segment_number, const SegmentMaskOptions& options) const {
+	if (!segmentation_) {
+		diag::throw_exception("seg::SegmentFrameView::mask_for_segment invalid frame");
+	}
+	return segmentation_->mask_for_segment(frame_index_, segment_number, options);
+}
+
+void SegmentFrameView::mask_for_segment_into(std::uint16_t segment_number,
+    std::span<std::uint8_t> out, const SegmentMaskOptions& options) const {
+	if (!segmentation_) {
+		diag::throw_exception("seg::SegmentFrameView::mask_for_segment_into invalid frame");
+	}
+	segmentation_->mask_for_segment_into(frame_index_, segment_number, out, options);
+}
+
 SourceImageRefListView::SourceImageRefListView(
     const Segmentation* segmentation, std::size_t frame_index) noexcept
     : segmentation_(segmentation), frame_index_(frame_index) {}
@@ -954,7 +1549,7 @@ const DataSet& SourceImageRefView::dataset() const noexcept {
 
 bool is_segmentation_storage(const DataSet& ds) noexcept {
 	try {
-		return dataset_has_segmentation_sop_class(ds);
+		return declared_sop_class_kind(ds) == SopClassKind::segmentation;
 	} catch (...) {
 		return false;
 	}
@@ -962,6 +1557,31 @@ bool is_segmentation_storage(const DataSet& ds) noexcept {
 
 bool is_segmentation_storage(const DicomFile& file) noexcept {
 	return is_segmentation_storage(file.dataset());
+}
+
+bool is_labelmap_segmentation_storage(const DataSet& ds) noexcept {
+	try {
+		return declared_sop_class_kind(ds) == SopClassKind::labelmap;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool is_labelmap_segmentation_storage(const DicomFile& file) noexcept {
+	return is_labelmap_segmentation_storage(file.dataset());
+}
+
+bool is_any_segmentation_storage(const DataSet& ds) noexcept {
+	try {
+		const auto kind = declared_sop_class_kind(ds);
+		return kind == SopClassKind::segmentation || kind == SopClassKind::labelmap;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool is_any_segmentation_storage(const DicomFile& file) noexcept {
+	return is_any_segmentation_storage(file.dataset());
 }
 
 std::unique_ptr<Segmentation> from_dicomfile(
@@ -974,10 +1594,12 @@ std::unique_ptr<Segmentation> from_dicomfile(
 	if (file->has_error() && !options.allow_partial_source) {
 		throw_seg("input DicomFile has a read error");
 	}
-	if (dataset_has_labelmap_segmentation_sop_class(file->dataset())) {
-		throw_seg("LABELMAP SEG is outside the SEG MVP scope");
+	const auto sop_kind = declared_sop_class_kind(file->dataset());
+	if (sop_kind == SopClassKind::conflict) {
+		throw_seg("SOPClassUID and MediaStorageSOPClassUID disagree");
 	}
-	if (!is_segmentation_storage(*file)) {
+	if (sop_kind != SopClassKind::segmentation &&
+	    sop_kind != SopClassKind::labelmap) {
 		throw_seg("input DicomFile is not Segmentation Storage");
 	}
 
@@ -988,6 +1610,10 @@ std::unique_ptr<Segmentation> from_dicomfile(
 	segmentation->extract_instance_metadata(options);
 	segmentation->index_segment_sequence_items(options);
 	segmentation->index_per_frame_functional_group_items(options);
+	if (segmentation->segmentation_type_ == SegmentationType::labelmap) {
+		segmentation->labelmap_presence_cache_.resize(
+		    segmentation->index_.frames.size());
+	}
 	return segmentation;
 }
 

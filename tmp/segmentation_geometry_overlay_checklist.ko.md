@@ -437,7 +437,133 @@
 ## API 스케치
 
 ```cpp
+#include <dicom_seg.h>
 #include <dicom_geometry.h>
+
+namespace dicom::seg {
+
+enum class SegmentationType {
+    unknown,
+    binary,
+    fractional,
+    labelmap,
+};
+
+enum class SegmentationFractionalType {
+    none,
+    probability,
+    occupancy,
+    unknown,
+};
+
+struct SegmentMaskOptions {
+    // For FRACTIONAL SEG, compare raw / MaximumFractionalValue against this
+    // normalized threshold. The default 0.0 means any non-zero fractional
+    // sample is present.
+    double fractional_threshold = 0.0;
+    bool error_when_not_present_in_frame = false;
+};
+
+class SegmentFrameView {
+public:
+    std::size_t index() const noexcept;
+
+    // Preferred common API. BINARY/FRACTIONAL return a span over the existing
+    // per-frame ReferencedSegmentNumber scalar. LABELMAP returns every
+    // non-background segment label present in the decoded frame from a stable
+    // per-frame lazy cache.
+    std::span<const std::uint16_t> present_segment_numbers() const;
+
+    // Compatibility accessor for the classic BINARY/FRACTIONAL model.
+    // LABELMAP has no single referenced segment for a frame; calling this on a
+    // LABELMAP frame throws a compatibility error. Keep the return type stable.
+    std::uint16_t referenced_segment_number() const;
+
+    // Existing stored frame decode. BINARY returns uint8 0/1, FRACTIONAL
+    // returns raw uint8. LABELMAP BitsAllocated=8 can use this overload.
+    void decode_frame_into(std::span<std::uint8_t> out) const;
+
+    // Explicit LABELMAP typed decode. Use this for LABELMAP BitsAllocated=16.
+    void decode_labelmap_frame_into(std::span<std::uint8_t> out) const;
+    void decode_labelmap_frame_into(std::span<std::uint16_t> out) const;
+
+    // Common semantic mask API. Output is always uint8 0/1 and has no palette
+    // or rendering meaning.
+    void mask_for_segment_into(std::uint16_t segment_number,
+        std::span<std::uint8_t> out,
+        SegmentMaskOptions options = {}) const;
+    std::vector<std::uint8_t> mask_for_segment(
+        std::uint16_t segment_number,
+        SegmentMaskOptions options = {}) const;
+};
+
+class Segmentation {
+public:
+    SegmentationType segmentation_type() const noexcept;
+    SegmentationFractionalType fractional_type() const noexcept;
+    std::optional<std::uint16_t> maximum_fractional_value() const noexcept;
+    std::optional<unsigned> labelmap_bits_allocated() const noexcept;
+
+    std::size_t rows() const noexcept;
+    std::size_t columns() const noexcept;
+    std::size_t segment_count() const noexcept;
+    std::size_t frame_count() const noexcept;
+
+    SegmentListView segments() const noexcept;
+    SegmentFrameListView frames() const noexcept;
+    std::optional<SegmentView> segment_by_number(
+        std::uint16_t segment_number) const noexcept;
+
+    // Common semantics: frames where this segment is present.
+    // BINARY/FRACTIONAL use ReferencedSegmentNumber; LABELMAP uses the
+    // lazy per-frame present label cache. LABELMAP may decode all frames on
+    // first call and can throw label validation/decode errors. On success the
+    // segment-to-frame index is published as immutable storage borrowed by the
+    // returned SegmentFrameListView.
+    SegmentFrameListView frames_for_segment(
+        std::uint16_t segment_number) const;
+    std::size_t segment_frame_count(
+        std::uint16_t segment_number) const;
+
+    std::span<const std::uint16_t> present_segment_numbers(
+        std::size_t frame_index) const;
+
+    void decode_frame_into(
+        std::size_t frame_index,
+        std::span<std::uint8_t> out) const;
+
+    void decode_labelmap_frame_into(
+        std::size_t frame_index,
+        std::span<std::uint8_t> out) const;
+    void decode_labelmap_frame_into(
+        std::size_t frame_index,
+        std::span<std::uint16_t> out) const;
+    std::vector<std::uint8_t> decode_labelmap_frame_bytes(
+        std::size_t frame_index) const;
+
+    void mask_for_segment_into(
+        std::size_t frame_index,
+        std::uint16_t segment_number,
+        std::span<std::uint8_t> out,
+        SegmentMaskOptions options = {}) const;
+    std::vector<std::uint8_t> mask_for_segment(
+        std::size_t frame_index,
+        std::uint16_t segment_number,
+        SegmentMaskOptions options = {}) const;
+
+    // Explicit full-pixel validation for callers that want eager confidence.
+    // from_dicomfile() remains metadata-only and does not call this implicitly.
+    void validate_label_values() const;
+};
+
+bool is_segmentation_storage(const DicomFile& file) noexcept;
+bool is_segmentation_storage(const DataSet& ds) noexcept;
+bool is_labelmap_segmentation_storage(const DicomFile& file) noexcept;
+bool is_labelmap_segmentation_storage(const DataSet& ds) noexcept;
+bool is_any_segmentation_storage(const DicomFile& file) noexcept;
+bool is_any_segmentation_storage(const DataSet& ds) noexcept;
+
+} // namespace dicom::seg
 
 namespace dicom::geometry {
 
@@ -991,6 +1117,266 @@ SliceStackPlan plan_image_frame_stack(
 
 } // namespace dicom::geometry
 ```
+
+## LabelMapSegmentationStorage 구현 체크리스트
+
+### 구현 진행 현황 (2026-06-25)
+
+- [x] 1차 core 구현 완료: `LabelMapSegmentationStorage` + `SegmentationType=LABELMAP` 조합을 허용하고, 기존 `SegmentationStorage` + `LABELMAP` 조합은 strict error로 유지한다.
+- [x] `from_dicomfile()`은 metadata-only construction을 유지한다. unknown label 검증과 PixelData payload 검증은 frame decode/presence 계산 또는 `validate_label_values()` 시점에 수행한다.
+- [x] SOP Class helper 정책 구현: `is_segmentation_storage()`는 기존 SEG만, `is_labelmap_segmentation_storage()`는 Label Map SEG만, `is_any_segmentation_storage()`는 둘 중 하나만 true로 반환한다. `SOPClassUID` / `MediaStorageSOPClassUID` 충돌은 bool helper에서 false, strict classifier에서 error다.
+- [x] 공통 API 구현: `present_segment_numbers(frame)`, `mask_for_segment(frame, segment_number, options)`, `mask_for_segment_into(...)`, `validate_label_values()`를 C++/Python에 연결했다.
+- [x] LABELMAP decode 구현: 8-bit는 기존 `decode_frame_into(uint8)`와 labelmap-specific uint8 decode를 허용하고, 16-bit는 명시적 `decode_labelmap_frame_into(uint16)` / Python native `np.uint16` 경로만 허용한다.
+- [x] LABELMAP presence cache 구현: `Segmentation` 소유 fixed-size cache array, ready empty 상태, immutable `shared_ptr<const vector<uint16_t>>`, ready entry/index no-replace, caller-owned publish, duplicate concurrent scan 허용 정책을 따른다.
+- [x] payload/metadata MVP 정책 구현: native uncompressed PixelData만 지원하고, Big Endian, compressed/encapsulated, unexpected PixelSequence, detached payload, missing PixelData, invalid length/padding은 decode/validate 시 명확한 error로 처리한다. `PixelPaddingValue`는 metadata validation에서 reject한다.
+- [x] Python binding/stub 반영: `present_segment_numbers()`는 tuple, labelmap `to_array()`는 `np.uint8`/`np.uint16`, `decode_frame()` bytes는 native typed bytes, `decode_frame_into()`는 unsigned dtype/endian을 검사한다.
+- [x] 집중 테스트 추가: synthetic 8-bit/16-bit LABELMAP, lazy unknown-label validation, SOP conflict/helper, `PALETTE COLOR`, `PixelPaddingValue`, `SegmentNumber=0`, metadata-only absent segment, dtype mismatch, Big Endian/compressed/missing/trailing/padded PixelData, detached/PixSeq C++ smoke를 커버한다.
+- [ ] 남은 후속: developer/reference 문서 승격, cache 재사용을 decode-count로 검증하는 계측 테스트, concurrent lazy scan stress, `plane_from_seg_frame()` LabelMap synthetic geometry 별도 테스트, C++ header partial-write/BINARY-FRACTIONAL-LABELMAP contract 주석 보강.
+
+### 범위 결정
+
+- [ ] `LabelMapSegmentationStorage` 지원은 DicomSDL core에서 label value array를 안전하게 읽고 검증하는 범위로 한정한다.
+- [ ] palette 렌더링, color mapping, opacity, UI legend, viewport overlay composition은 GUI/viewer layer 책임으로 둔다.
+- [ ] DicomSDL SEG adapter는 `SegmentSequence` metadata와 decoded label sample을 연결할 수 있게 하고, 화면 표시 색을 직접 결정하지 않는다.
+- [ ] `from_dicomfile()`은 LABELMAP에서도 metadata-only construction을 유지한다. PixelData 전체 scan, label value presence 계산, unknown label 검증은 open 시점에 수행하지 않는다.
+- [ ] unknown label 검증은 frame decode 계열(`to_array`, `decode_frame_into`, `present_segment_numbers`, `mask_for_segment`) 또는 명시적 `validate_label_values()`에서 수행한다.
+- [ ] 1차 MVP는 `LabelMapSegmentationStorage` SOP Class + `SegmentationType=LABELMAP` 조합만 허용한다.
+- [ ] 기존 `SegmentationStorage` SOP Class에서 `SegmentationType=LABELMAP`이 들어오는 경우는 별도 호환 모드가 필요해질 때까지 strict error로 둔다.
+- [ ] `BINARY` / `FRACTIONAL` 동작과 public return contract는 기존과 호환되게 유지한다.
+
+### SOP Class / 진입 정책
+
+- [ ] `dataset_has_labelmap_segmentation_sop_class()`를 hard reject 용도가 아니라 Label Map SEG 판정 helper로 전환한다.
+- [ ] `from_dicomfile()`에서 `LabelMapSegmentationStorage`를 허용하고, labelmap-specific validation path로 분기한다.
+- [ ] SOP Class 판정은 `SOPClassUID`와 `MediaStorageSOPClassUID`가 둘 다 존재할 때 서로 일치해야 한다. 둘 중 하나가 `SegmentationStorage`이고 다른 하나가 `LabelMapSegmentationStorage`처럼 충돌하면 `from_dicomfile()`에서 strict reject한다.
+- [ ] `is_segmentation_storage()` / `is_labelmap_segmentation_storage()` bool helper는 SOP Class UID가 충돌하는 dataset에서는 `false`를 반환한다.
+- [ ] `from_dicomfile()`은 bool helper만 믿지 않고 strict SOP Class classifier를 사용한다. `SOPClassUID`와 `MediaStorageSOPClassUID` 충돌은 strict classifier에서 error로 처리한다.
+- [ ] `is_segmentation_storage()`는 기존 `SegmentationStorage` SOP Class만 의미하도록 유지한다.
+- [ ] `is_labelmap_segmentation_storage()`를 추가해 `LabelMapSegmentationStorage` SOP Class를 별도로 판정한다.
+- [ ] 필요하면 `is_any_segmentation_storage()`를 추가해 두 SOP Class를 모두 포함하는 helper로 둔다. SOP Class UID가 충돌하는 dataset에서는 `is_any_segmentation_storage()`도 `false`를 반환한다.
+- [ ] Python `dicom.seg.is_segmentation_storage()` docstring은 기존 의미를 유지하고, `dicom.seg.is_labelmap_segmentation_storage()` / `is_any_segmentation_storage()` docstring을 새로 추가한다.
+- [ ] `SegmentationType::labelmap` enum은 유지하되 "recognized but unsupported" 주석을 "supported through LabelMapSegmentationStorage path"로 바꾼다.
+- [ ] 별도 `SegmentationStorageKind` public enum은 추가하지 않는다. public semantic 분기는 `SegmentationType`을 기준으로 하고, SOP Class 판정이 필요한 code는 `is_segmentation_storage()` / `is_labelmap_segmentation_storage()` 또는 raw dataset metadata를 사용한다.
+
+### 공통 API 재설계 방향
+
+- [ ] SEG public API의 중심을 `referenced_segment_number`에서 `present_segment_numbers(frame)`와 `mask_for_segment(frame, segment_number, options)`로 옮긴다.
+- [ ] `present_segment_numbers(frame)`는 BINARY/FRACTIONAL/LABELMAP 모두에서 사용할 수 있는 공통 frame-to-segment query로 정의한다.
+- [ ] BINARY/FRACTIONAL에서 `present_segment_numbers(frame)`는 기존 `ReferencedSegmentNumber` 기반으로 단일 segment number를 반환한다.
+- [ ] BINARY/FRACTIONAL의 `present_segment_numbers(frame)`는 PixelData를 보지 않는다. 따라서 빈 BINARY frame이어도 declared `ReferencedSegmentNumber`를 반환한다는 점을 문서화한다.
+- [ ] BINARY/FRACTIONAL relaxed parse에서 `ReferencedSegmentNumber`가 없거나 0이면 `present_segment_numbers(frame)`는 empty span을 반환한다. `referenced_segment_number()` compatibility accessor는 이 경우 명확한 error를 던진다.
+- [ ] LABELMAP에서 `present_segment_numbers(frame)`는 decoded label values 또는 label presence cache 기반으로 해당 frame에 실제 등장하는 non-background segment numbers를 반환한다.
+- [ ] `mask_for_segment(frame, segment_number, options)`는 모든 SEG type에서 `rows * columns` 크기의 `uint8` 0/1 mask를 반환하는 공통 helper로 정의한다.
+- [ ] BINARY에서 `mask_for_segment()`는 frame의 `ReferencedSegmentNumber`가 요청 segment와 같으면 decoded BINARY frame을 반환하고, 다르면 zero mask를 반환한다.
+- [ ] FRACTIONAL에서 `mask_for_segment()`는 frame의 `ReferencedSegmentNumber`가 요청 segment와 같을 때 `SegmentMaskOptions::fractional_threshold`를 적용해 binary mask를 만든다.
+- [ ] `SegmentMaskOptions`는 단순하게 둔다. 1차 API는 normalized `fractional_threshold`와 `error_when_not_present_in_frame`만 포함한다.
+- [ ] `error_when_not_present_in_frame`은 `SegmentSequence`에 존재하는 segment가 해당 frame에 present하지 않을 때만 적용한다. `SegmentSequence`에 없는 segment 요청은 옵션과 무관하게 항상 error다.
+- [ ] `fractional_threshold` 범위는 `[0.0, 1.0]`로 고정하고 범위를 벗어나면 error를 낸다.
+- [ ] `fractional_threshold = 0.0` 기본값은 raw sample이 0보다 크면 present라는 의미로 정의한다. 그 외 threshold는 `sample / MaximumFractionalValue >= fractional_threshold` 비교식을 사용한다.
+- [ ] LABELMAP에서 `mask_for_segment()`는 decoded label array에서 `sample == segment_number` 비교로 mask를 만든다.
+- [ ] 8-bit LABELMAP에서 `SegmentNumber > 255`처럼 metadata-only absent segment에 대해 `mask_for_segment(segment_number)`를 호출해도 frame을 scan/decode해서 unknown label validation을 수행한 뒤 zero mask를 반환한다. validation을 건너뛰고 shortcut zero mask를 반환하지 않는다.
+- [ ] `frames_for_segment(unknown_segment)`와 `segment_frame_count(unknown_segment)`는 기존 호환성을 위해 empty/0을 반환하고 LABELMAP PixelData scan을 유발하지 않는다. `mask_for_segment(unknown_segment)`는 error로 둔다.
+- [ ] `to_array(frame)`는 stored representation에 가까운 typed frame decode API로 유지한다. BINARY는 uint8 0/1, FRACTIONAL은 raw uint8, LABELMAP은 uint8/uint16 label value array를 반환한다.
+- [ ] `decode_frame()` / `decode_frame_into()`는 low-level typed decode API로 유지하고, segment별 binary mask가 필요하면 `mask_for_segment()`를 쓰도록 문서화한다.
+- [ ] `referenced_segment_number`는 BINARY/FRACTIONAL compatibility accessor로 남기되, 공통 API로 권장하지 않는다.
+- [ ] `SegmentFrameView::referenced_segment_number()`의 C++ 반환 타입은 `std::uint16_t`로 유지한다. LABELMAP에서 호출하면 "`LABELMAP frame has no single ReferencedSegmentNumber; use present_segment_numbers()`" 계열의 명확한 compatibility error를 던진다.
+- [ ] Python `SegmentFrame.referenced_segment_number`도 기존 `int` 반환 contract를 유지한다. LABELMAP에서 접근하면 `ValueError`/`RuntimeError` 계열 예외를 던지고, 새 code path는 `frame.present_segment_numbers()`를 사용하게 한다.
+- [ ] Python `SegmentFrame.present_segment_numbers()` / `Segmentation.present_segment_numbers(frame)`는 borrowed memory view가 아니라 immutable `tuple[int, ...]`로 반환한다.
+- [ ] Python `SegmentFrame.__repr__`는 LABELMAP에서 `referenced_segment_number`를 호출하지 않는다. LABELMAP repr은 `present_segment_numbers`를 강제로 계산하지 않고 `SegmentFrame(index=..., referenced_segment_number=<labelmap>)`처럼 metadata-only로 안전하게 표시한다.
+
+### Metadata validation
+
+- [ ] `SegmentationType`은 `LABELMAP`이어야 한다.
+- [ ] `BitsAllocated`는 8 또는 16만 허용한다.
+- [ ] `BitsStored`는 `BitsAllocated`와 일치해야 한다.
+- [ ] `HighBit`는 8-bit이면 7, 16-bit이면 15여야 한다.
+- [ ] `PixelRepresentation`은 unsigned 값만 허용한다.
+- [ ] `SamplesPerPixel`은 1이어야 한다.
+- [ ] `PhotometricInterpretation`은 MVP에서 `MONOCHROME2`와 `PALETTE COLOR`만 허용한다. `PALETTE COLOR`여도 labelmap decode path는 palette/LUT/display transform을 절대 적용하지 않고 stored label value array만 반환한다.
+- [ ] `Rows`, `Columns`, `NumberOfFrames`, `FrameOfReferenceUID`, `SegmentSequence` 필수 여부를 labelmap path에서 별도로 검증한다.
+- [ ] `SegmentsOverlap`이 있으면 `NO`만 허용한다.
+- [ ] `SegmentNumber`는 unique이면 되고 1부터 연속일 필요가 없다는 점을 검증과 문서에 반영한다.
+- [ ] `SegmentNumber=0`은 background label과 충돌하므로 `SegmentSequence`에서 명확히 reject한다.
+- [ ] PixelData에 나타나는 non-background label value가 `SegmentSequence`에 없으면 명확한 error를 반환한다. 단, 이 검증은 `from_dicomfile()` 시점이 아니라 해당 frame decode/presence 계산 또는 `validate_label_values()` 시점에 수행한다.
+- [ ] background 값은 label value `0`으로 고정한다. `0`은 `SegmentSequence` 존재를 요구하지 않고 `present_segment_numbers()`에서 제외한다.
+- [ ] `PixelPaddingValue`가 있는 LABELMAP은 MVP에서 명확한 unsupported error로 reject한다. padding value를 background/ignored label로 해석하는 정책은 별도 후속 설계로 둔다.
+- [ ] 8-bit LABELMAP에서 `SegmentNumber > 255`가 `SegmentSequence`에 존재하는 것은 metadata-only absent segment로 허용한다. 해당 값은 PixelData에 나타날 수 없으므로 `present_segment_numbers()`에 나오지 않고, `mask_for_segment()`는 zero mask를 반환한다.
+- [ ] `SegmentSequence` 검증 후 instance-level `valid_label` table을 만든다. label value 공간은 최대 65536이므로 `std::bitset<65536>` 또는 동등한 compact bit table을 사용하고, `valid_label[segment_number] = true`로 채운다. `0`은 background라 valid segment로 표시하지 않는다.
+- [ ] `segment_by_number()` / requested segment validation은 기존 map을 쓰되, decoded PixelData label validation은 `valid_label[value]` table lookup으로 O(1) 처리한다.
+
+### Frame / Segment data model
+
+- [ ] public `SegmentFrameView::referenced_segment_number()` 반환 타입은 바꾸지 않는다. 내부 record는 labelmap absence를 표현할 수 있어야 하지만, public accessor는 LABELMAP에서 compatibility error를 던진다.
+- [ ] LABELMAP에서는 한 frame 안에 여러 segment label value가 공존할 수 있음을 `Segmentation` model에 반영한다.
+- [ ] `SegmentFrameRecord`는 BINARY/FRACTIONAL의 기존 `referenced_segment_number` scalar를 유지한다. BINARY/FRACTIONAL `present_segment_numbers()`는 heap allocation 없이 `std::span(&record.referenced_segment_number, 1)`를 반환한다.
+- [ ] LABELMAP present labels는 `SegmentFrameRecord` 안에 직접 저장하지 않고, `Segmentation` 소유의 fixed-size lazy cache array에 둔다. BINARY/FRACTIONAL 대량 frame에서 per-frame vector allocation이 생기지 않게 한다.
+- [ ] LABELMAP per-frame cache는 "uninitialized"와 "computed empty"를 구분해야 한다. 1차 구조는 `PresenceState { uninitialized, ready }` + `std::shared_ptr<const std::vector<std::uint16_t>> labels` 또는 동등한 immutable storage로 둔다.
+- [ ] LABELMAP per-frame persistent cache는 전체 label table을 frame마다 저장하지 않는다. ready 상태의 값은 sorted compact `std::vector<std::uint16_t>` present label list로 저장한다. all-background frame은 ready + empty vector다.
+- [ ] ready cache entry는 절대 replace하지 않는다. 이미 `present_segment_numbers()`가 반환한 span이 dangling되지 않도록, ready entry의 immutable vector storage는 `Segmentation` lifetime 동안 유지한다.
+- [ ] `validate_label_values()`나 all-frame builder가 같은 frame을 다시 scan하더라도 ready cache entry를 새 vector로 교체하지 않는다. 이미 ready인 frame은 기존 cache를 재사용하고, uninitialized entry만 publish한다.
+- [ ] `SegmentFrameView::present_segment_numbers()`를 추가한다.
+- [ ] `Segmentation::present_segment_numbers(frame_index)` convenience API를 추가한다.
+- [ ] `frames_for_segment(segment_number)`는 공통 semantics를 "해당 segment가 present인 frame 목록"으로 재정의한다.
+- [ ] BINARY/FRACTIONAL에서 `frames_for_segment()`는 기존 `ReferencedSegmentNumber` index를 그대로 사용한다.
+- [ ] LABELMAP에서 `frames_for_segment()`는 present label cache 기반으로 해당 segment label이 등장하는 frame 목록을 반환한다. 최초 호출은 모든 frame의 presence를 계산할 수 있으므로 expensive API로 문서화한다.
+- [ ] LABELMAP에서 `frames_for_segment()` / `segment_frame_count()`는 lazy all-frame scan 중 decode error 또는 unknown label validation error를 던질 수 있다. 기존 BINARY/FRACTIONAL 동작은 유지한다.
+- [ ] `segment_frame_count(segment_number)`는 `frames_for_segment(segment_number).size()`와 같은 의미로 고정한다.
+- [ ] `SegmentFrameView::referenced_segment_number`는 labelmap에서 의미가 없으므로 labelmap에서 호출 시 명확한 compatibility error를 낸다.
+- [ ] frame별 present label cache를 둔다. 반복 overlay preflight, `present_segment_numbers()`, `frames_for_segment()` 성능을 위해 lazy cache가 유력하다.
+- [ ] cache는 thread-safe lazy init으로 고정한다. construction-time full scan은 대용량 LABELMAP open 성능을 해치므로 사용하지 않는다.
+- [ ] thread-safe cache 구현은 `Segmentation` 단위 mutex + frame_count 크기의 `labelmap_presence_cache_` fixed-size array로 시작한다. `std::mutex` / `std::once_flag`를 `SegmentFrameRecord`에 직접 넣지 않는다. record가 non-movable이 되어 `std::vector<SegmentFrameRecord>`와 충돌하는 것을 피한다.
+- [ ] `labelmap_presence_cache_`는 construction 이후 resize하지 않는다. cache entry는 movable한 상태 객체만 담거나, 필요하면 `std::vector<std::unique_ptr<FramePresenceCache>>`처럼 이동 안정성을 보장하는 구조를 사용한다.
+- [ ] `present_segment_numbers(frame)`는 해당 frame만 decode/scan하고 cache한다. scan 중에는 임시 scratch `seen` table을 사용한다. 8-bit LABELMAP은 256-entry table, 16-bit LABELMAP은 65536-bit table을 사용해 label 등장 여부를 표시한다.
+- [ ] 16-bit LABELMAP의 65536-bit `seen` table은 매 호출 stack allocation으로 두지 않는다. thread-local scratch, reusable heap allocation, 또는 local heap-backed bitset 중 하나를 선택한다. persistent per-frame cache만 compact vector로 유지한다.
+- [ ] frame scan algorithm은 `sample == 0` skip, `!valid_label[sample]`이면 unknown label error, 그 외 `seen[sample] = true` 순서로 처리한다. scan 완료 후 `seen`에서 true인 label만 오름차순 compact vector로 옮겨 per-frame cache로 publish한다. label이 하나도 없으면 ready + empty vector로 publish한다.
+- [ ] labelmap scan/decode는 내부 `decode_and_scan_labelmap_frame(frame_index, options/sink)` 같은 단일 helper로 공통화한다. `to_array()`, `decode_frame()`, `decode_frame_into()`, `decode_labelmap_frame_into()`, `present_segment_numbers()`, `mask_for_segment()`, `validate_label_values()`, `frames_for_segment()`는 모두 이 helper를 사용한다.
+- [ ] helper request/result shape를 명확히 둔다. 예: `LabelmapFrameScanRequest { decoded_out?, mask_out?, target_segment?, collect_presence }`와 `LabelmapFrameScanResult { present_labels, decoded_written, mask_written }`. `present_segment_numbers()` / `validate_label_values()` 경로는 decoded output buffer를 요구하지 않아 불필요한 frame-sized allocation을 만들지 않는다.
+- [ ] `LabelmapFrameScanRequest`의 output buffers는 non-overlapping이어야 한다. `decoded_out`과 `mask_out`이 같은 메모리 또는 겹치는 메모리를 가리키는 aliasing은 unsupported로 두고 debug assert 또는 명확한 internal precondition으로 처리한다.
+- [ ] `decode_and_scan_labelmap_frame(...)` helper는 cache/index를 직접 publish하지 않는다. helper는 decoded samples write, optional mask write, sorted present labels, validation status를 담은 `LabelmapFrameScanResult` 같은 candidate/result만 반환한다.
+- [ ] publish는 caller가 담당한다. `present_segment_numbers()`는 해당 frame 단위로 publish하고, `mask_for_segment()`는 helper result에서 만든 frame cache candidate를 frame 단위로 publish할 수 있으며, `validate_label_values()` / all-frame builder는 전체 성공 후 bulk publish한다.
+- [ ] `to_array()`, `decode_frame()`, `decode_frame_into()`, `decode_labelmap_frame_into()` 같은 LABELMAP public decode API도 helper 성공 시 frame presence cache candidate를 no-replace 방식으로 publish한다. 실패 시에는 publish하지 않는다.
+- [ ] LABELMAP의 모든 public frame decode API는 stored label values를 반환하면서 동시에 membership validation을 수행한다. unknown non-background label은 decode API에서도 error다.
+- [ ] `mask_for_segment()`는 labelmap frame decode 중 presence collection과 mask generation을 한 pass에서 수행할 수 있어야 한다. presence cache가 없으면 mask 생성과 동시에 cache candidate를 만들고, helper 성공 후 caller가 frame cache publish를 시도한다.
+- [ ] 동시 lazy scan은 MVP에서 중복 수행을 허용한다. 두 thread가 같은 frame 또는 all-frame index를 동시에 scan할 수 있지만, publish는 mutex 아래에서 한 번만 성공한다. 이미 ready/published인 storage가 있으면 늦게 끝난 scan 결과는 버린다.
+- [ ] concurrent publish 순서는 `local result 완성 -> mutex 획득 -> 아직 unpublished인 entry/index만 publish -> 이미 published면 local result discard -> mutex release`로 고정한다.
+- [ ] 중복 scan을 줄이는 `in_progress` state / condition variable은 후속 최적화로 둔다. correctness와 lifetime 보장을 1차 목표로 한다.
+- [ ] 반복 호출은 cached vector/span을 재사용한다. scratch `seen` table은 호출 중 임시 저장소로만 쓰고 per-frame마다 영구 보관하지 않는다.
+- [ ] `frames_for_segment(segment_number)`는 all-frame presence index가 없으면 모든 frame의 compact presence cache를 채우며 segment-to-frame index를 만든다. 이 API는 LABELMAP에서 `noexcept`가 될 수 없으므로 C++ 선언에서 `noexcept`를 제거한다.
+- [ ] LABELMAP all-frame segment-to-frame index는 `segment_number -> vector<frame_index>` 형태로 만든다. 구현은 present segment 수가 적으면 `unordered_map<std::uint16_t, std::vector<std::size_t>>`, dense table이 더 단순하면 65536 table/vector 중 코드베이스 스타일에 맞춰 선택하되, empty vector 65536개의 overhead를 의식한다.
+- [ ] published all-frame index에서 missing key는 empty result로 해석하고 rebuild trigger가 아니다. `SegmentSequence`에는 있지만 어떤 LABELMAP frame에도 등장하지 않는 known-absent segment도 re-scan 없이 empty view / count 0을 반환한다.
+- [ ] all-frame segment-to-frame index는 local builder에서 완성한 뒤 mutex 아래에서 한 번에 immutable storage로 publish한다. 성공 publish 후에는 rehash/mutation으로 `SegmentFrameListView`가 빌린 vector 주소가 invalidate되지 않아야 한다.
+- [ ] published all-frame segment-to-frame index는 절대 replace하지 않는다. `validate_label_values()`가 나중에 성공하더라도 이미 published된 index storage를 교체하지 않는다.
+- [ ] all-frame builder는 public `present_segment_numbers()`를 mutex 안에서 호출하지 않는다. local builder에서 `decode_and_scan_labelmap_frame()` helper를 직접 호출하고, 마지막 publish 단계에서만 mutex를 잡아 deadlock/reentrant call을 피한다.
+- [ ] Python `seg.frames_for_segment(segment_number)`는 메서드 호출 시점에 C++ all-frame index build를 강제로 수행하고, 이 시점에 비용과 예외가 발생한다. 반환된 `SegmentFrameList`의 `__len__` / `__getitem__` / iteration은 이미 published된 index만 참조한다.
+- [ ] Python `SegmentFrameList.__len__` / `__getitem__`가 같은 segment에 대해 반복 호출해도 all-frame index build는 성공 후 한 번만 수행한다.
+- [ ] lazy cache error propagation 정책은 "실패는 캐시하지 않음"으로 고정한다. cache miss 중 decode/validation error가 나면 호출자에게 예외를 전달하고, 해당 uninitialized cache는 uninitialized 상태로 남겨 다음 호출에서 재시도한다. 이미 ready였던 cache entry는 그대로 유지한다. all-frame segment index도 전체 scan이 성공한 뒤에만 publish한다.
+
+### Pixel decode API
+
+- [ ] 기존 `decode_frame_into(std::span<std::uint8_t>)` contract는 유지한다. BINARY/FRACTIONAL과 8-bit LABELMAP만 이 overload를 사용한다.
+- [ ] 8-bit LABELMAP에서 `decode_frame_into(std::span<std::uint8_t>)`와 `decode_labelmap_frame_into(std::span<std::uint8_t>)`는 같은 stored label values를 쓰는 alias로 정의한다. C++ labelmap-specific code에는 명시적 `decode_labelmap_frame_into()`를 권장하지만, 기존 `decode_frame_into(uint8)` 경로도 허용한다.
+- [ ] 16-bit LABELMAP은 일반 `decode_frame_into(std::span<std::uint16_t>)` overload로 열지 않고, 명시적 `decode_labelmap_frame_into(...)` API로 시작한다. BINARY/FRACTIONAL의 `uint16_t` decode 의미가 애매해지는 것을 피한다.
+- [ ] `decode_labelmap_frame_into(std::span<std::uint8_t>)`는 `BitsAllocated=8`일 때만 성공한다. 16-bit LABELMAP을 uint8로 truncate하지 않는다.
+- [ ] `decode_labelmap_frame_into(std::span<std::uint16_t>)`는 `BitsAllocated=16`일 때만 성공한다. 8-bit LABELMAP을 uint16으로 widen하지 않는다.
+- [ ] output element type과 `BitsAllocated` mismatch는 명확한 error로 처리한다.
+- [ ] C++ API:
+  - `labelmap_bits_allocated()`
+  - `decode_labelmap_frame_into(frame, std::span<std::uint8_t>)`
+  - `decode_labelmap_frame_into(frame, std::span<std::uint16_t>)`
+  - `decode_labelmap_frame_bytes(frame)`
+- [ ] C++ `decode_labelmap_frame_bytes(frame)` 반환 bytes는 `decode_labelmap_frame_into()`가 만드는 host/native-endian typed samples의 contiguous bytes와 동일하게 정의한다. 16-bit LABELMAP bytes는 DICOM transfer syntax raw endian이 아니라 host/native-endian `uint16_t` byte order다.
+- [ ] Python `to_array()`는 labelmap에서 `np.uint8` 또는 `np.uint16` dtype을 반환하게 한다.
+- [ ] 16-bit LABELMAP decode contract: C++ typed decode는 host-endian `std::uint16_t` numeric values를 output span에 쓴다. Python `to_array()`는 native-endian `np.uint16` array를 반환한다.
+- [ ] Python `decode_frame()`가 bytes를 반환하는 기존 contract는 유지하되, 반환 bytes는 `to_array(frame).tobytes(order="C")`와 같은 native dtype byte order로 정의한다. DICOM transfer syntax raw bytes가 필요하면 raw `PixelData`에 접근하도록 문서화한다.
+- [ ] Python `decode_frame_into()`는 output itemsize뿐 아니라 buffer format/dtype과 endian도 검사한다. 8-bit LABELMAP은 unsigned byte buffer를 받으며, `bytearray` / writable `memoryview` 같은 byte-oriented buffer는 허용한다. 16-bit LABELMAP은 native-endian unsigned uint16 buffer만 받는다. `np.int16`, signed format, non-native-endian `uint16`은 명확히 reject한다.
+- [ ] `decode_frame_into()` / `decode_labelmap_frame_into()` / `mask_for_segment_into()`는 error 발생 시 output buffer strong guarantee를 제공하지 않는다. validation 또는 decode error가 나면 output buffer가 partial write 상태일 수 있음을 header/doc에 명시한다.
+- [ ] BINARY는 계속 uint8 0/1 mask를 반환하고, FRACTIONAL은 계속 uint8 raw sample을 반환한다.
+- [ ] `mask_for_segment(frame, segment_number, options)` helper를 core SEG API에 추가한다.
+- [ ] `mask_for_segment()` output은 항상 uint8 0/1이고, palette/rendering 의미를 갖지 않는다.
+- [ ] `mask_for_segment_into(frame, segment_number, out, options)` allocation-free overload를 C++/Python에 둔다.
+- [ ] requested segment가 해당 frame에 present하지 않으면 기본적으로 zero mask를 반환하고, `SegmentMaskOptions::error_when_not_present_in_frame=true`이면 error를 낸다.
+- [ ] requested segment가 `SegmentSequence`에 없는 경우는 frame presence 여부와 무관하게 명확한 error로 처리한다. 존재하지만 해당 frame에 없으면 기본 zero mask, strict 옵션에서 error로 처리한다.
+- [ ] compressed/encapsulated Label Map SEG는 MVP에서 명시적으로 unsupported로 둔다.
+- [ ] MVP는 uncompressed native PixelData만 지원한다. Big Endian transfer syntax는 1차 구현에서 명확한 unsupported error로 둔다. 지원하려면 DicomFile endian-normalized decode path와 16-bit LABELMAP 테스트를 함께 추가한다.
+- [ ] native PixelData length 검증은 DICOM element padding byte를 고려한다. expected byte count와 정확히 같거나, expected가 홀수일 때 `expected + 1`이고 마지막 byte가 `0x00`인 경우만 허용한다. 그 외 trailing data나 short data는 size mismatch error로 처리한다.
+- [ ] `validate_label_values()`를 추가하면 모든 frame을 명시적으로 decode/scan해 unknown label, unsupported compressed PixelData, bad payload length를 한 번에 확인하는 expensive API로 문서화한다.
+- [ ] all-frame segment-to-frame index가 이미 성공적으로 published된 상태라면 `validate_label_values()`는 전체 frame validation이 완료된 것으로 보고 재-scan 없이 return한다.
+- [ ] `validate_label_values()`는 성공 시 uninitialized per-frame presence cache와 all-frame segment-to-frame index를 채운다. 전체 scan 결과를 local cache/index builder에 만든 뒤 성공하면 한 번에 publish하고, 실패하면 validate 중 새로 scan한 frame cache/index는 publish하지 않는다. validate 시작 전에 이미 ready였던 cache entry는 rollback하지 않고 그대로 유지한다.
+- [ ] `validate_label_values()` publish 단계는 기존 ready per-frame cache entry와 기존 published all-frame index를 replace하지 않는다. 이미 존재하는 immutable storage는 그대로 유지한다.
+
+### Python binding policy
+
+- [ ] Python `seg.frames_for_segment(segment_number)`는 LABELMAP에서 호출 시점에 all-frame index build를 수행하고 예외도 이 시점에 발생하게 한다. lazy list view로 비용/예외를 `len()`이나 iteration까지 미루지 않는다.
+- [ ] Python `present_segment_numbers()` 반환값은 borrowed memory view가 아니라 `tuple[int, ...]`로 둔다.
+- [ ] Python LABELMAP decode, presence scan, `validate_label_values()`, `frames_for_segment()` all-frame scan은 GIL을 release한다.
+
+### Geometry / overlay 연동
+
+- [ ] `plane_from_seg_frame()`은 Label Map SEG에서도 frame geometry를 읽을 수 있어야 한다.
+- [ ] Label Map SEG frame geometry는 `PerFrameFunctionalGroupsSequence -> SharedFunctionalGroupsSequence` strict resolution을 그대로 따른다.
+- [ ] labelmap이라고 해서 root dataset geometry fallback을 추가하지 않는다.
+- [ ] overlay compatibility helper는 label value semantics를 보지 않고 geometry와 `FrameOfReferenceUID`만 판정한다.
+- [ ] labelmap frame을 target image에 직접 overlay할 수 있어도 색/alpha/palette 결정은 caller에게 맡긴다.
+- [ ] volume reconstruction이나 resampling은 labelmap 지원 MVP에 포함하지 않는다.
+
+### Tests
+
+- [ ] synthetic 8-bit `LabelMapSegmentationStorage` read test를 추가한다.
+- [ ] synthetic 16-bit `LabelMapSegmentationStorage` read test를 추가한다.
+- [ ] non-contiguous `SegmentNumber` 예: `1`, `7`, `1024`가 정상 동작하는지 검증한다.
+- [ ] PixelData에 `SegmentSequence`에 없는 label value가 있으면 `from_dicomfile()`이 아니라 해당 frame decode/presence 계산 또는 `validate_label_values()`에서 error가 나는지 검증한다.
+- [ ] unknown label 검증이 `SegmentSequence`에서 만든 `valid_label` table 기반으로 동작하는지 검증한다. 예: valid segment `1`, `7`만 있는 8-bit LABELMAP에서 pixel value `9`가 나오면 decode/presence 시점에 error.
+- [ ] background label `0` 정책을 테스트로 고정한다.
+- [ ] all-background LABELMAP frame에서 `present_segment_numbers()`가 empty list를 반환하고, 반복 호출 시 "uninitialized"로 오인해 재-scan하지 않는지 테스트한다.
+- [ ] `SegmentSequence`에 `SegmentNumber=0`이 있으면 metadata validation에서 reject되는지 테스트한다.
+- [ ] `LabelMapSegmentationStorage` SOP Class가 더 이상 `"LABELMAP SEG is outside the SEG MVP scope"`로 실패하지 않는지 검증한다.
+- [ ] 기존 `SegmentationStorage` + `SegmentationType=LABELMAP` strict reject 정책을 테스트한다.
+- [ ] `SOPClassUID`와 `MediaStorageSOPClassUID`가 `SegmentationStorage` / `LabelMapSegmentationStorage`로 서로 충돌하면 strict reject되는지 테스트한다.
+- [ ] SOP Class UID가 충돌하는 dataset에서 `is_segmentation_storage()` / `is_labelmap_segmentation_storage()` bool helper가 `false`를 반환하는지 테스트한다.
+- [ ] 기존 `is_segmentation_storage()`가 `LabelMapSegmentationStorage`를 포함하지 않고, 새 `is_labelmap_segmentation_storage()` / 필요 시 `is_any_segmentation_storage()`가 기대대로 동작하는지 검증한다. SOP Class UID 충돌 시 `is_any_segmentation_storage()`도 `false`를 반환해야 한다.
+- [ ] LABELMAP에서는 frame별 `ReferencedSegmentNumber`가 없어도 metadata index가 만들어지는지 검증한다.
+- [ ] LABELMAP에서 `referenced_segment_number()` / Python `frame.referenced_segment_number` 접근 시 명확한 compatibility error가 나는지 검증한다.
+- [ ] LABELMAP에서 `repr(frame)` / `SegmentFrame.__repr__`가 `referenced_segment_number`를 호출해 터지지 않는지 검증한다.
+- [ ] `to_array()`가 8-bit labelmap에서 `np.uint8`, 16-bit labelmap에서 `np.uint16`을 반환하는지 검증한다.
+- [ ] LABELMAP `to_array()`, `decode_frame()`, `decode_frame_into()`, `decode_labelmap_frame_into()`도 unknown label membership validation을 수행하는지 테스트한다.
+- [ ] LABELMAP `to_array()` / `decode_frame_into()` 성공 후 `present_segment_numbers()`가 재-decode 없이 decode API가 publish한 frame presence cache를 사용하는지 테스트한다.
+- [ ] 16-bit LABELMAP `decode_frame()` bytes가 `to_array().tobytes()`와 일치하는지 검증한다.
+- [ ] C++ `decode_labelmap_frame_bytes()` 16-bit bytes가 host/native-endian typed samples의 contiguous bytes와 일치하는지 테스트한다.
+- [ ] `decode_frame_into()`가 dtype/itemsize mismatch를 명확히 거부하는지 검증한다.
+- [ ] Python `decode_frame_into()`가 `np.int16`, signed format, non-native-endian `uint16`을 reject하는지 테스트한다.
+- [ ] Python 8-bit LABELMAP `decode_frame_into()`가 `bytearray` / writable byte memoryview를 허용하는지 테스트한다.
+- [ ] 8-bit LABELMAP에서 `decode_frame_into(uint8)`와 `decode_labelmap_frame_into(uint8)`가 같은 stored label values를 반환하는지 테스트한다.
+- [ ] 16-bit LABELMAP을 uint8 output으로 decode하려 하거나 8-bit LABELMAP을 uint16 output으로 decode하려 하면 exact-match error가 나는지 테스트한다.
+- [ ] `decode_frame_into()` / `decode_labelmap_frame_into()` error 시 output buffer가 partial write일 수 있다는 contract를 문서/API review로 확인한다.
+- [ ] C++ 일반 `decode_frame_into(std::span<std::uint16_t>)` overload를 추가하지 않는 정책을 header/API review로 확인한다. 16-bit LABELMAP은 `decode_labelmap_frame_into()`를 사용한다.
+- [ ] native PixelData length가 expected와 같거나 allowed padding byte 하나만 있는 경우를 허용하고, short/trailing non-zero extra data를 reject하는지 테스트한다.
+- [ ] `present_segment_numbers()`가 BINARY/FRACTIONAL에서 기존 referenced segment number를 반환하는지 검증한다.
+- [ ] BINARY/FRACTIONAL의 `present_segment_numbers()`가 PixelData를 scan하지 않고 declared `ReferencedSegmentNumber`를 반환한다는 edge case를 문서/테스트로 고정한다.
+- [ ] BINARY/FRACTIONAL relaxed parse에서 `ReferencedSegmentNumber`가 없거나 0이면 `present_segment_numbers()`가 empty를 반환하고 `referenced_segment_number()`는 error를 던지는지 테스트한다.
+- [ ] Python `present_segment_numbers()`가 `tuple[int, ...]`를 반환하는지 테스트한다.
+- [ ] `present_segment_numbers()`가 LABELMAP에서 실제 등장한 label values를 반환하는지 검증한다.
+- [ ] `present_segment_numbers()`로 받은 span/view가 존재하는 상태에서 `validate_label_values()`를 호출해도 ready cache entry가 replace되지 않아 dangling되지 않는지 테스트한다.
+- [ ] `present_segment_numbers()` 반복 호출이 동일 frame을 매번 full decode하지 않고 lazy cache를 재사용하는지 행동/계측 테스트로 검증한다.
+- [ ] per-frame persistent cache가 65536-entry table이 아니라 compact sorted vector/list로 노출되는지 검증한다. 순서는 label value 오름차순으로 고정한다.
+- [ ] `frames_for_segment()` 최초 호출이 LABELMAP에서는 all-frame scan을 유발할 수 있음을 테스트하거나 benchmark-style guard로 확인한다.
+- [ ] `frames_for_segment()` 성공 후 published index가 immutable이라 `SegmentFrameList.__len__` / `__getitem__` 반복 호출에서 재빌드나 invalidation이 없는지 테스트한다.
+- [ ] Python `seg.frames_for_segment(segment_number)`는 호출 시점에 all-frame build와 error propagation이 일어나고, 반환된 list view의 `len()` / iteration은 build를 다시 유발하지 않는지 테스트한다.
+- [ ] `frames_for_segment(unknown_segment)`와 `segment_frame_count(unknown_segment)`는 empty/0을 반환하고 LABELMAP PixelData scan을 유발하지 않는지 테스트한다.
+- [ ] published all-frame index에서 missing key인 known-absent segment가 re-scan 없이 empty view / count 0을 반환하는지 테스트한다.
+- [ ] concurrent lazy scan에서 같은 frame/all-frame scan이 중복될 수 있지만 ready/published storage는 한 번만 publish되고 늦게 끝난 결과가 버려지는지 stress/behavior test로 확인한다.
+- [ ] `mask_for_segment()`가 BINARY/FRACTIONAL/LABELMAP 모두에서 uint8 0/1 mask를 반환하는지 검증한다.
+- [ ] 8-bit LABELMAP의 metadata-only absent segment, 예: `SegmentNumber=1024`, 에 대해 `mask_for_segment(1024)`가 frame scan/unknown label validation을 수행한 뒤 zero mask를 반환하는지 테스트한다.
+- [ ] LABELMAP `mask_for_segment()`가 frame decode 중 mask와 presence cache candidate를 한 pass에서 만들고, 이후 `present_segment_numbers()`가 재-decode하지 않는지 행동/계측 테스트로 검증한다.
+- [ ] `decode_and_scan_labelmap_frame(...)` helper는 직접 cache/index를 publish하지 않고 caller만 publish한다는 점을 구현 체크리스트/API review로 확인한다.
+- [ ] `SegmentMaskOptions::error_when_not_present_in_frame`은 known segment가 해당 frame에 없을 때만 적용되고, unknown segment 요청은 옵션과 무관하게 error가 나는지 테스트한다.
+- [ ] FRACTIONAL `mask_for_segment()` threshold option 동작을 테스트로 고정한다. `fractional_threshold=0.0`은 `sample > 0`, 그 외 값은 `sample / MaximumFractionalValue >= threshold`, 범위 밖 threshold는 error다.
+- [ ] `validate_label_values()` 성공 후 `present_segment_numbers()`와 `frames_for_segment()`가 재-decode 없이 채워진 cache/index를 사용하는지 테스트한다.
+- [ ] `validate_label_values()`가 기존 ready cache entry나 published all-frame index를 replace하지 않는지 테스트한다.
+- [ ] `validate_label_values()` 실패 시 validate 중 새로 scan한 partial cache/index가 publish되지 않고 다음 호출에서 재시도되는지 테스트한다. validate 시작 전에 이미 ready였던 cache entry는 유지되는지도 확인한다.
+- [ ] BINARY/FRACTIONAL의 기존 `referenced_segment_number`, `frames_for_segment`, `decode_frame_into(uint8)` API가 깨지지 않았음을 호환성 테스트로 고정한다.
+- [ ] compressed/encapsulated Label Map SEG가 MVP에서 명확한 unsupported error를 내는지 검증한다.
+- [ ] LABELMAP PixelData missing, detached payload marker, unexpected PixelSequence 형태가 decode/validate에서 각각 명확한 error가 되는지 테스트한다.
+- [ ] Big Endian Label Map SEG가 1차 MVP에서 명확한 unsupported error를 내는지 검증한다.
+- [ ] `PhotometricInterpretation=MONOCHROME2`와 `PALETTE COLOR` allowlist, 그 외 값 reject를 테스트한다.
+- [ ] `PixelPaddingValue`가 있는 LABELMAP은 MVP에서 명확한 unsupported error가 나는지 테스트한다.
+- [ ] 8-bit LABELMAP에서 `SegmentNumber > 255`가 metadata-only absent segment로 허용되고, 해당 segment mask가 zero mask가 되는지 테스트한다.
+- [ ] `frames_for_segment()` / `segment_frame_count()`가 "segment가 present인 frame"이라는 공통 의미를 따르는지 검증한다.
+- [ ] `plane_from_seg_frame()`이 Label Map SEG synthetic sample의 geometry를 반환하는지 검증한다.
+- [ ] palette/color 관련 테스트는 core SEG adapter가 아니라 GUI/viewer test suite에서 다룬다.
+
+### 문서 / Stub
+
+- [ ] `docs/*/developer/segmentation.md`의 Post-MVP 항목에서 Label Map SEG를 supported scope로 이동한다.
+- [ ] Python stub에서 `present_segment_numbers()`, `mask_for_segment()`, `validate_label_values()`, `SegmentMaskOptions.error_when_not_present_in_frame`, labelmap `to_array()` dtype contract, `decode_frame()` native typed bytes contract, `decode_frame_into()` buffer dtype/endian contract를 반영한다.
+- [ ] C++ header 주석에서 BINARY/FRACTIONAL/LABELMAP 각각의 pixel contract를 분리해 설명한다.
+- [ ] C++ header 주석에서 LABELMAP decode API도 unknown label membership validation을 수행하며, `decode_labelmap_frame_bytes()`는 host/native-endian typed sample bytes를 반환한다고 설명한다.
+- [ ] C++ header 주석에서 `_into()` 계열 decode/mask API는 error 시 output buffer partial write가 가능하다고 설명한다.
+- [ ] 문서에서 `referenced_segment_number`는 BINARY/FRACTIONAL compatibility accessor이고 LABELMAP에서는 error를 던진다고 설명한다. 새 공통 code는 `present_segment_numbers()` / `mask_for_segment()`를 우선 사용한다고 안내한다.
+- [ ] 문서에서 concurrent LABELMAP lazy scan은 중복 수행될 수 있지만 ready cache와 published all-frame index는 한 번만 publish된다고 설명한다.
+- [ ] 문서에서 BINARY/FRACTIONAL `present_segment_numbers()`는 PixelData가 아니라 declared `ReferencedSegmentNumber` 기반이고, LABELMAP `present_segment_numbers()`는 실제 decoded non-background label 기반이라는 의미 차이를 명확히 적는다.
+- [ ] 문서에서 Big Endian Label Map SEG는 1차 MVP에서 unsupported라고 명시한다.
+- [ ] 문서에서 `from_dicomfile()`은 LABELMAP PixelData 전체를 eager validation하지 않으며, 전체 label 검증이 필요하면 `validate_label_values()`를 호출하라고 설명한다.
+- [ ] GUI/viewer 문서에는 palette rendering이 caller responsibility임을 남기고, DicomSDL core 문서에는 label value array contract만 적는다.
 
 ## Test Plan
 
