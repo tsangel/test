@@ -2,6 +2,7 @@
 #include <dicom_seg.h>
 
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -683,6 +684,90 @@ int main() {
 			fail("labelmap 16-bit presence mismatch");
 		}
 	}
+
+#ifdef DICOMSDL_SEGMENTATION_TEST_HOOKS
+	{
+		auto seg = dicom::seg::from_dicomfile(make_labelmap_seg8_file());
+		dicom::seg::detail::reset_labelmap_frame_scan_count();
+
+		std::vector<std::uint8_t> decoded0(6);
+		seg->decode_frame_into(0, decoded0);
+		if (dicom::seg::detail::labelmap_frame_scan_count() != 1) {
+			fail("labelmap decode should scan frame 0 once");
+		}
+
+		const auto present0 = seg->present_segment_numbers(0);
+		if (present0.size() != 2 || present0[0] != 1 || present0[1] != 2 ||
+		    dicom::seg::detail::labelmap_frame_scan_count() != 1) {
+			fail("present_segment_numbers should reuse decoded frame cache");
+		}
+
+		const auto segment2_frames = seg->frames_for_segment(2);
+		if (segment2_frames.size() != 2 ||
+		    dicom::seg::detail::labelmap_frame_scan_count() != 2) {
+			fail("frames_for_segment should scan only uncached labelmap frames");
+		}
+
+		seg->validate_label_values();
+		if (dicom::seg::detail::labelmap_frame_scan_count() != 2) {
+			fail("validate_label_values should reuse published all-frame index");
+		}
+
+		if (seg->segment_frame_count(7) != 0 ||
+		    dicom::seg::detail::labelmap_frame_scan_count() != 2) {
+			fail("known absent label should use published empty index result");
+		}
+	}
+
+	{
+		auto seg = dicom::seg::from_dicomfile(make_labelmap_seg8_file());
+		dicom::seg::detail::reset_labelmap_frame_scan_count();
+		std::atomic<int> failures{0};
+		std::vector<std::thread> workers;
+		workers.reserve(8);
+		for (int worker_index = 0; worker_index < 8; ++worker_index) {
+			workers.emplace_back([&] {
+				try {
+					for (int iteration = 0; iteration < 40; ++iteration) {
+						const auto frame_index =
+						    static_cast<std::size_t>(iteration % 2);
+						const auto present =
+						    seg->present_segment_numbers(frame_index);
+						if (frame_index == 0) {
+							if (present.size() != 2 || present[0] != 1 ||
+							    present[1] != 2) {
+								++failures;
+							}
+						} else if (present.size() != 1 || present[0] != 2) {
+							++failures;
+						}
+						if (seg->frames_for_segment(2).size() != 2) {
+							++failures;
+						}
+						seg->validate_label_values();
+					}
+				} catch (...) {
+					++failures;
+				}
+			});
+		}
+		for (auto& worker : workers) {
+			worker.join();
+		}
+		if (failures.load() != 0) {
+			fail("labelmap concurrent lazy scan returned inconsistent results");
+		}
+		const auto scan_count =
+		    dicom::seg::detail::labelmap_frame_scan_count();
+		if (scan_count == 0) {
+			fail("labelmap concurrent lazy scan should scan at least once");
+		}
+		seg->validate_label_values();
+		if (dicom::seg::detail::labelmap_frame_scan_count() != scan_count) {
+			fail("labelmap concurrent lazy scan should publish reusable index");
+		}
+	}
+#endif
 
 	{
 		auto missing_segment_sequence = make_binary_seg_file();

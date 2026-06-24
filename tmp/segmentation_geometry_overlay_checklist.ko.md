@@ -1133,7 +1133,8 @@ SliceStackPlan plan_image_frame_stack(
 - [x] 집중 테스트 추가: synthetic 8-bit/16-bit LABELMAP, lazy unknown-label validation, SOP conflict/helper, `PALETTE COLOR`, `PixelPaddingValue`, `SegmentNumber=0`, metadata-only absent segment, dtype mismatch, Big Endian/compressed/missing/trailing/padded PixelData, detached/PixSeq C++ smoke를 커버한다.
 - [x] 공개 계약 정리: public header, Python docstring, en/ko developer segmentation 문서에서 LABELMAP 지원 범위와 native typed sample bytes 계약을 반영했다.
 - [x] `plane_from_seg_frame()` LabelMap synthetic geometry smoke test를 추가했다.
-- [ ] 남은 후속: cache 재사용을 decode-count로 검증하는 계측 테스트, concurrent lazy scan stress, C++ header partial-write/BINARY-FRACTIONAL-LABELMAP contract 주석 보강.
+- [x] cache 재사용을 decode-count로 검증하는 test-only 계측 테스트, concurrent lazy scan stress, C++ header partial-write/BINARY-FRACTIONAL-LABELMAP contract 주석 보강을 추가했다.
+- [ ] 남은 후속: 실제 외부 LABELMAP sample 기반 regression과 compressed/encapsulated Label Map SEG 지원 여부 재검토.
 
 ### 범위 결정
 

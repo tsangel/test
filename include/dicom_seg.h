@@ -110,8 +110,8 @@ struct SourceImageRefRecord {
 };
 
 /// Borrowed entry for one item in PerFrameFunctionalGroupsSequence.
-/// A SEG frame belongs to exactly one referenced segment number, even though the
-/// same segment may span many frames.
+/// BINARY/FRACTIONAL frames belong to exactly one ReferencedSegmentNumber.
+/// LABELMAP frames may contain multiple labels and leave this scalar at 0.
 struct SegmentFrameRecord {
 	const DataSet* functional_group_item{nullptr};
 	std::uint16_t referenced_segment_number{0};
@@ -144,6 +144,12 @@ struct SegmentationIndex {
 	    frame_indices_by_segment{};
 	std::vector<std::size_t> empty_frame_indices{};
 };
+
+#ifdef DICOMSDL_SEGMENTATION_TEST_HOOKS
+/// Test-only instrumentation for LABELMAP scan/cache regression checks.
+void reset_labelmap_frame_scan_count() noexcept;
+[[nodiscard]] std::size_t labelmap_frame_scan_count() noexcept;
+#endif
 
 } // namespace detail
 
@@ -390,7 +396,7 @@ private:
 	std::size_t frame_index_{0};
 };
 
-/// Owning high-level adapter for a DICOM Segmentation Storage instance.
+/// Owning high-level adapter for a DICOM SEG or Label Map SEG instance.
 /// Construction transfers ownership of a DicomFile so all returned views can
 /// borrow string/data pointers without copying the underlying DICOM dataset.
 class Segmentation final {
@@ -458,9 +464,10 @@ public:
 	[[nodiscard]] std::optional<SegmentView>
 	segment_by_number(std::uint16_t segment_number) const noexcept;
 
-	/// Frames whose ReferencedSegmentNumber matches `segment_number`.
-	/// For LABELMAP this lazily validates every frame and builds an immutable
-	/// all-frame presence index. Unknown SegmentSequence numbers return empty.
+	/// Frames whose ReferencedSegmentNumber matches `segment_number` for
+	/// BINARY/FRACTIONAL SEG. For LABELMAP this lazily validates every frame and
+	/// builds an immutable all-frame presence index from stored label values.
+	/// Unknown SegmentSequence numbers return empty without scanning PixelData.
 	[[nodiscard]] SegmentFrameListView
 	frames_for_segment(std::uint16_t segment_number) const;
 
@@ -469,26 +476,35 @@ public:
 	segment_frame_count(std::uint16_t segment_number) const;
 
 	/// Segment numbers represented by one frame.
+	/// BINARY/FRACTIONAL returns the declared ReferencedSegmentNumber without
+	/// scanning PixelData. LABELMAP returns actual non-background stored labels
+	/// from a lazily populated immutable presence cache.
 	[[nodiscard]] std::span<const std::uint16_t>
 	present_segment_numbers(std::size_t frame_index) const;
 
 	/// Decode one SEG frame into caller-provided 8-bit samples.
 	/// BINARY SEG is unpacked to 0/1 bytes. FRACTIONAL SEG currently supports the
 	/// MVP native 8-bit case and reuses one DicomFile decode plan. LABELMAP is
-	/// supported here only when BitsAllocated == 8.
+	/// supported here only when BitsAllocated == 8. If an exception is thrown,
+	/// output contents are unspecified and may have been partially written.
 	void decode_frame_into(std::size_t frame_index,
 	    std::span<std::uint8_t> out) const;
 
 	/// Decode an 8-bit LABELMAP frame as stored label values.
+	/// The output element type must exactly match BitsAllocated; this API does
+	/// not widen or truncate. Errors may leave `out` partially written.
 	void decode_labelmap_frame_into(std::size_t frame_index,
 	    std::span<std::uint8_t> out) const;
 
 	/// Decode a 16-bit LABELMAP frame as native-endian stored label values.
+	/// The output element type must exactly match BitsAllocated; this API does
+	/// not widen or truncate. Errors may leave `out` partially written.
 	void decode_labelmap_frame_into(std::size_t frame_index,
 	    std::span<std::uint16_t> out) const;
 
 	/// Decode a LABELMAP frame as validated native-endian typed sample bytes.
-	/// This is not the raw PixelData value byte order.
+	/// This is not the raw PixelData value byte order; for 16-bit LABELMAP the
+	/// returned bytes are the platform-native representation of uint16 samples.
 	[[nodiscard]] std::vector<std::uint8_t>
 	decode_labelmap_frame_bytes(std::size_t frame_index) const;
 
@@ -498,6 +514,8 @@ public:
 	    const SegmentMaskOptions& options = {}) const;
 
 	/// Decode one SEG frame into a caller-provided semantic 0/1 mask.
+	/// If an exception is thrown, output contents are unspecified and may have
+	/// been partially written.
 	void mask_for_segment_into(std::size_t frame_index,
 	    std::uint16_t segment_number, std::span<std::uint8_t> out,
 	    const SegmentMaskOptions& options = {}) const;

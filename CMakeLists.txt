@@ -249,6 +249,10 @@ endif()
 
 target_compile_features(dicomsdl PUBLIC cxx_std_20)
 
+if(BUILD_TESTING)
+    target_compile_definitions(dicomsdl PUBLIC DICOMSDL_SEGMENTATION_TEST_HOOKS=1)
+endif()
+
 include(DicomsdlPixelTargets)
 dicomsdl_apply_pixel_static_plugin_defines(dicomsdl)
 

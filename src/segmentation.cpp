@@ -3,6 +3,7 @@
 #include "diagnostics.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -14,6 +15,10 @@ namespace dicom::seg {
 using namespace dicom::literals;
 
 namespace {
+
+#ifdef DICOMSDL_SEGMENTATION_TEST_HOOKS
+std::atomic<std::size_t> g_labelmap_frame_scan_count{0};
+#endif
 
 // Small typed readers used by the SEG adapter. They intentionally keep the
 // source DataSet as the single source of truth and avoid copying text values.
@@ -427,6 +432,10 @@ template <typename T, typename U>
 		throw_decode("destination buffer is smaller than decoded frame");
 	}
 
+#ifdef DICOMSDL_SEGMENTATION_TEST_HOOKS
+	g_labelmap_frame_scan_count.fetch_add(1, std::memory_order_relaxed);
+#endif
+
 	const auto bytes = labelmap_pixeldata_bytes(
 	    file, frame_count, pixels_per_frame, bits_allocated);
 	const auto bytes_per_sample = static_cast<std::size_t>(bits_allocated / 8u);
@@ -495,6 +504,20 @@ template <typename T, typename U>
 }
 
 } // namespace
+
+#ifdef DICOMSDL_SEGMENTATION_TEST_HOOKS
+namespace detail {
+
+void reset_labelmap_frame_scan_count() noexcept {
+	g_labelmap_frame_scan_count.store(0, std::memory_order_relaxed);
+}
+
+std::size_t labelmap_frame_scan_count() noexcept {
+	return g_labelmap_frame_scan_count.load(std::memory_order_relaxed);
+}
+
+} // namespace detail
+#endif
 
 void Segmentation::index_segment_sequence_items(const Options& options) {
 	// Build the SegmentNumber catalog first; frame indexing depends on this map
