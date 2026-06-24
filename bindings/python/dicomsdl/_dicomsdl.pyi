@@ -25,6 +25,7 @@ __all__ = [
     "IMPLEMENTATION_CLASS_UID",
     "IMPLEMENTATION_VERSION_NAME",
     "PIXELDATA_PAYLOAD_PLACEHOLDER_MAGIC",
+    "geometry",
     "seg",
     "log_info",
     "log_warn",
@@ -1414,6 +1415,378 @@ class Uid:
     def __bool__(self) -> bool: ...
 
 
+class _GeometryBuildStatus(enum.Enum):
+    ok = ...
+    missing_required_tag = ...
+    invalid_value = ...
+    invalid_size = ...
+    invalid_spacing = ...
+    invalid_orientation = ...
+    singular_matrix = ...
+    invalid_frame_index = ...
+    missing_volumetric_properties = ...
+    mixed_volumetric_properties = ...
+    unknown_volumetric_properties = ...
+    sampled_frame_geometry = ...
+    distorted_frame_geometry = ...
+    unsupported_frame_geometry = ...
+
+
+class _VolumetricPropertiesValue(enum.Enum):
+    volume = ...
+    sampled = ...
+    distorted = ...
+
+
+class _ImageFrameGeometryKind(enum.Enum):
+    regular_plane = ...
+    sampled_projection = ...
+    distorted = ...
+
+
+class _OverlayCompatibility(enum.Enum):
+    compatible = ...
+    missing_frame_of_reference = ...
+    different_frame_of_reference = ...
+    non_parallel_planes = ...
+    opposite_orientation = ...
+    out_of_plane = ...
+    different_spacing = ...
+    different_extent = ...
+    requires_resampling = ...
+
+
+class _Vec3d:
+    def __init__(self, x: float = ..., y: float = ..., z: float = ..., /) -> None: ...
+    x: float
+    y: float
+    z: float
+
+
+class _Point3d:
+    def __init__(self, x: float = ..., y: float = ..., z: float = ..., /) -> None: ...
+    x: float
+    y: float
+    z: float
+
+
+class _ImagePoint2D:
+    def __init__(self, i: float = ..., j: float = ..., /) -> None: ...
+    i: float
+    j: float
+
+
+class _ImagePoint3D:
+    def __init__(self, i: float = ..., j: float = ..., k: float = ..., /) -> None: ...
+    i: float
+    j: float
+    k: float
+
+
+class _PlaneProjection2D:
+    index: _ImagePoint2D
+    signed_normal_distance_mm: float
+
+
+class _ImageSize2D:
+    def __init__(self, i: int = ..., j: int = ..., /) -> None: ...
+    i: int
+    j: int
+
+
+class _ImageSize3D:
+    def __init__(self, i: int = ..., j: int = ..., k: int = ..., /) -> None: ...
+    i: int
+    j: int
+    k: int
+
+
+class _ImageSpacing2D:
+    def __init__(self, i: float = ..., j: float = ..., /) -> None: ...
+    i: float
+    j: float
+
+
+class _ImageSpacing3D:
+    def __init__(self, i: float = ..., j: float = ..., k: float = ..., /) -> None: ...
+    i: float
+    j: float
+    k: float
+
+
+class _GeometryTolerance:
+    def __init__(
+        self,
+        orientation_tolerance: float = ...,
+        spacing_tolerance_mm: float = ...,
+        position_tolerance_mm: float = ...,
+        normal_distance_tolerance_mm: float = ...,
+        /,
+    ) -> None: ...
+    orientation_tolerance: float
+    spacing_tolerance_mm: float
+    position_tolerance_mm: float
+    normal_distance_tolerance_mm: float
+
+
+class _Matrix4x4d:
+    @staticmethod
+    def identity() -> _Matrix4x4d: ...
+    def at(self, row: int, column: int, /) -> float: ...
+    def to_tuple(self) -> tuple[float, ...]: ...
+
+
+class _ImagePlaneGeometry:
+    @property
+    def origin(self) -> _Point3d: ...
+    @property
+    def direction_i(self) -> _Vec3d: ...
+    @property
+    def direction_j(self) -> _Vec3d: ...
+    @property
+    def normal(self) -> _Vec3d: ...
+    @property
+    def spacing(self) -> _ImageSpacing2D: ...
+    @property
+    def spacing_i(self) -> float: ...
+    @property
+    def spacing_j(self) -> float: ...
+    @property
+    def size(self) -> _ImageSize2D: ...
+    @property
+    def columns(self) -> int: ...
+    @property
+    def rows(self) -> int: ...
+    @property
+    def index_to_world_matrix(self) -> _Matrix4x4d: ...
+    @property
+    def world_to_index_matrix(self) -> _Matrix4x4d: ...
+    def world_from_index(self, index: _ImagePoint2D, /) -> _Point3d: ...
+    def index_from_world(self, world: _Point3d, /) -> _ImagePoint2D: ...
+    def normal_distance_from_world(self, world: _Point3d, /) -> float: ...
+    def contains_index(self, index: _ImagePoint2D, /) -> bool: ...
+    def contains_world(
+        self, world: _Point3d, normal_distance_tolerance_mm: float = ..., /
+    ) -> bool: ...
+
+
+class _ImageVolumeGeometry:
+    @property
+    def origin(self) -> _Point3d: ...
+    @property
+    def direction_i(self) -> _Vec3d: ...
+    @property
+    def direction_j(self) -> _Vec3d: ...
+    @property
+    def direction_k(self) -> _Vec3d: ...
+    @property
+    def spacing(self) -> _ImageSpacing3D: ...
+    @property
+    def spacing_i(self) -> float: ...
+    @property
+    def spacing_j(self) -> float: ...
+    @property
+    def spacing_k(self) -> float: ...
+    @property
+    def size(self) -> _ImageSize3D: ...
+    @property
+    def columns(self) -> int: ...
+    @property
+    def rows(self) -> int: ...
+    @property
+    def slices(self) -> int: ...
+    @property
+    def index_to_world_matrix(self) -> _Matrix4x4d: ...
+    @property
+    def world_to_index_matrix(self) -> _Matrix4x4d: ...
+    def world_from_index(self, index: _ImagePoint3D, /) -> _Point3d: ...
+    def index_from_world(self, world: _Point3d, /) -> _ImagePoint3D: ...
+    def contains_index(self, index: _ImagePoint3D, /) -> bool: ...
+    def contains_world(
+        self, world: _Point3d, tolerance: _GeometryTolerance | None = ..., /
+    ) -> bool: ...
+
+
+class _VolumetricPropertiesInfo:
+    value: _VolumetricPropertiesValue
+    @property
+    def source_depth(self) -> int: ...
+    @property
+    def source_leaf_tag(self) -> Tag: ...
+
+
+class _ImageFrameGeometry:
+    @property
+    def plane(self) -> _ImagePlaneGeometry: ...
+    kind: _ImageFrameGeometryKind
+
+
+class _OverlayCheckOptions:
+    def __init__(
+        self,
+        frame_position_tolerance_mm: float = ...,
+        normal_distance_tolerance_mm: float = ...,
+        orientation_tolerance: float = ...,
+        spacing_tolerance_mm: float = ...,
+        require_same_grid: bool = ...,
+        /,
+    ) -> None: ...
+    frame_position_tolerance_mm: float
+    normal_distance_tolerance_mm: float
+    orientation_tolerance: float
+    spacing_tolerance_mm: float
+    require_same_grid: bool
+
+
+class _IndexRange1D:
+    def __init__(self, begin: int = ..., end: int = ..., /) -> None: ...
+    begin: int
+    end: int
+    @property
+    def empty(self) -> bool: ...
+
+
+class _OverlayCheck:
+    status: _OverlayCompatibility
+    same_frame_of_reference: bool
+    can_transform: bool
+    can_direct_overlay: bool
+    same_grid: bool
+    same_spacing: bool
+    same_extent: bool
+    overlaps_extent: bool
+    source_inside_target_extent: bool
+    requires_resampling: bool
+    target_k_range: _IndexRange1D | None
+    max_position_error_mm: float
+    max_normal_distance_mm: float
+    max_orientation_error: float
+    max_spacing_error_mm: float
+    @property
+    def ok(self) -> bool: ...
+
+
+class _PlaneToPlaneTransform:
+    def target_index_from_source_index(self, source: _ImagePoint2D, /) -> _ImagePoint2D: ...
+    def source_index_from_target_index(self, target: _ImagePoint2D, /) -> _ImagePoint2D: ...
+
+
+class _PlaneToVolumeTransform:
+    def target_index_from_source_index(self, source: _ImagePoint2D, /) -> _ImagePoint3D: ...
+    def source_index_from_target_index(self, target: _ImagePoint3D, /) -> _ImagePoint2D: ...
+    def source_projection_from_target_index(
+        self, target: _ImagePoint3D, /
+    ) -> _PlaneProjection2D: ...
+
+
+class _VolumeToPlaneTransform:
+    def target_index_from_source_index(self, source: _ImagePoint3D, /) -> _ImagePoint2D: ...
+    def target_projection_from_source_index(
+        self, source: _ImagePoint3D, /
+    ) -> _PlaneProjection2D: ...
+    def source_index_from_target_index(self, target: _ImagePoint2D, /) -> _ImagePoint3D: ...
+
+
+class _VolumeToVolumeTransform:
+    def target_index_from_source_index(self, source: _ImagePoint3D, /) -> _ImagePoint3D: ...
+    def source_index_from_target_index(self, target: _ImagePoint3D, /) -> _ImagePoint3D: ...
+
+
+class _GeometryModule:
+    GeometryBuildStatus: type[_GeometryBuildStatus]
+    VolumetricPropertiesValue: type[_VolumetricPropertiesValue]
+    ImageFrameGeometryKind: type[_ImageFrameGeometryKind]
+    OverlayCompatibility: type[_OverlayCompatibility]
+    Vec3d: type[_Vec3d]
+    Point3d: type[_Point3d]
+    ImagePoint2D: type[_ImagePoint2D]
+    ImagePoint3D: type[_ImagePoint3D]
+    PlaneProjection2D: type[_PlaneProjection2D]
+    ImageSize2D: type[_ImageSize2D]
+    ImageSize3D: type[_ImageSize3D]
+    ImageSpacing2D: type[_ImageSpacing2D]
+    ImageSpacing3D: type[_ImageSpacing3D]
+    GeometryTolerance: type[_GeometryTolerance]
+    Matrix4x4d: type[_Matrix4x4d]
+    ImagePlaneGeometry: type[_ImagePlaneGeometry]
+    ImageVolumeGeometry: type[_ImageVolumeGeometry]
+    VolumetricPropertiesInfo: type[_VolumetricPropertiesInfo]
+    ImageFrameGeometry: type[_ImageFrameGeometry]
+    OverlayCheckOptions: type[_OverlayCheckOptions]
+    IndexRange1D: type[_IndexRange1D]
+    OverlayCheck: type[_OverlayCheck]
+    PlaneToPlaneTransform: type[_PlaneToPlaneTransform]
+    PlaneToVolumeTransform: type[_PlaneToVolumeTransform]
+    VolumeToPlaneTransform: type[_VolumeToPlaneTransform]
+    VolumeToVolumeTransform: type[_VolumeToVolumeTransform]
+    def dot(self, a: _Vec3d, b: _Vec3d, /) -> float: ...
+    def cross(self, a: _Vec3d, b: _Vec3d, /) -> _Vec3d: ...
+    def norm(self, v: _Vec3d, /) -> float: ...
+    def normalize(self, v: _Vec3d, /) -> _Vec3d: ...
+    def make_image_plane_geometry(
+        self,
+        origin: _Point3d,
+        direction_i: _Vec3d,
+        direction_j: _Vec3d,
+        spacing: _ImageSpacing2D,
+        size: _ImageSize2D,
+        tolerance: _GeometryTolerance | None = ...,
+        /,
+    ) -> _ImagePlaneGeometry: ...
+    def make_image_volume_geometry(
+        self,
+        origin: _Point3d,
+        direction_i: _Vec3d,
+        direction_j: _Vec3d,
+        direction_k: _Vec3d,
+        spacing: _ImageSpacing3D,
+        size: _ImageSize3D,
+        tolerance: _GeometryTolerance | None = ...,
+        /,
+    ) -> _ImageVolumeGeometry: ...
+    def plane_from_single_frame_image(
+        self, source: DicomFile | DataSet, /
+    ) -> _ImagePlaneGeometry: ...
+    def plane_from_multiframe_image(
+        self, source: DicomFile | DataSet, frame_index: int, /
+    ) -> _ImagePlaneGeometry: ...
+    def frame_geometry_from_multiframe_image(
+        self, source: DicomFile | DataSet, frame_index: int, /
+    ) -> _ImageFrameGeometry: ...
+    def volumetric_properties_from_multiframe_image(
+        self, source: DicomFile | DataSet, frame_index: int, /
+    ) -> _VolumetricPropertiesInfo: ...
+    def frame_of_reference_from_dataset(self, source: DicomFile | DataSet, /) -> str: ...
+    def plane_from_seg_frame(
+        self, segmentation: _Segmentation, frame_index: int, /
+    ) -> _ImagePlaneGeometry: ...
+    def frame_of_reference_from_segmentation(self, segmentation: _Segmentation, /) -> str: ...
+    def check_overlay_compatibility(
+        self,
+        source_frame_of_reference_uid: str,
+        source: _ImagePlaneGeometry | _ImageVolumeGeometry,
+        target_frame_of_reference_uid: str,
+        target: _ImagePlaneGeometry | _ImageVolumeGeometry,
+        options: _OverlayCheckOptions | None = ...,
+        /,
+    ) -> _OverlayCheck: ...
+    def make_plane_to_plane_transform(
+        self, source: _ImagePlaneGeometry, target: _ImagePlaneGeometry, /
+    ) -> _PlaneToPlaneTransform: ...
+    def make_plane_to_volume_transform(
+        self, source: _ImagePlaneGeometry, target: _ImageVolumeGeometry, /
+    ) -> _PlaneToVolumeTransform: ...
+    def make_volume_to_plane_transform(
+        self, source: _ImageVolumeGeometry, target: _ImagePlaneGeometry, /
+    ) -> _VolumeToPlaneTransform: ...
+    def make_volume_to_volume_transform(
+        self, source: _ImageVolumeGeometry, target: _ImageVolumeGeometry, /
+    ) -> _VolumeToVolumeTransform: ...
+
+
+geometry: _GeometryModule
+
+
 class _SegmentationType(enum.Enum):
     unknown = ...
     binary = ...
@@ -1577,7 +1950,7 @@ class _SegModule:
     SourceImageRef: type[_SourceImageRef]
     SourceImageRefList: type[_SourceImageRefList]
     def is_segmentation_storage(self, source: DicomFile | DataSet, /) -> bool: ...
-    def from_file(
+    def read_file(
         self,
         path: str | os.PathLike[str],
         /,
@@ -1587,7 +1960,7 @@ class _SegModule:
         allow_partial_source: bool = ...,
         validate_required_modules: bool = ...,
     ) -> _Segmentation: ...
-    def from_bytes(
+    def read_bytes(
         self,
         data: bytes | bytearray | memoryview,
         /,

@@ -486,6 +486,18 @@ const DataSet& Segmentation::shared_functional_groups_item() const {
 	return *shared_functional_groups_item_;
 }
 
+const DataSet* Segmentation::try_shared_functional_groups_item() const noexcept {
+	return shared_functional_groups_item_;
+}
+
+const DataSet* Segmentation::try_per_frame_functional_groups_item(
+    std::size_t frame_index) const noexcept {
+	if (frame_index >= index_.frames.size()) {
+		return nullptr;
+	}
+	return index_.frames[frame_index].functional_group_item;
+}
+
 std::size_t Segmentation::rows() const noexcept {
 	return rows_;
 }
@@ -977,6 +989,33 @@ std::unique_ptr<Segmentation> from_dicomfile(
 	segmentation->index_segment_sequence_items(options);
 	segmentation->index_per_frame_functional_group_items(options);
 	return segmentation;
+}
+
+std::unique_ptr<Segmentation> read_file(
+    const std::filesystem::path& path,
+    ReadOptions read_options, Options options) {
+	return from_dicomfile(dicom::read_file(path, read_options), options);
+}
+
+std::unique_ptr<Segmentation> read_bytes(
+    const std::uint8_t* data, std::size_t size,
+    ReadOptions read_options, Options options) {
+	return from_dicomfile(dicom::read_bytes(data, size, read_options), options);
+}
+
+std::unique_ptr<Segmentation> read_bytes(
+    const std::string& name, const std::uint8_t* data, std::size_t size,
+    ReadOptions read_options, Options options) {
+	return from_dicomfile(
+	    dicom::read_bytes(name, data, size, read_options), options);
+}
+
+std::unique_ptr<Segmentation> read_bytes(
+    std::string name, std::vector<std::uint8_t>&& buffer,
+    ReadOptions read_options, Options options) {
+	return from_dicomfile(
+	    dicom::read_bytes(std::move(name), std::move(buffer), read_options),
+	    options);
 }
 
 } // namespace dicom::seg

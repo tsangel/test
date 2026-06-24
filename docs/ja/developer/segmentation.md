@@ -18,17 +18,19 @@ This page records the first DicomSDL contract for the high-level DICOM SEG adapt
 
 ## API Pattern
 
-C++ code reads with the core API and moves ownership into SEG:
+C++ code normally uses the SEG convenience readers. Advanced callers can move an already parsed `DicomFile` into SEG:
 
 ```cpp
 #include <dicom.h>
 #include <dicom_seg.h>
 
+auto seg = dicom::seg::read_file(path);
+
 auto file = dicom::read_file(path);
-auto seg = dicom::seg::from_dicomfile(std::move(file));
+auto seg_from_file = dicom::seg::from_dicomfile(std::move(file));
 ```
 
-Python exposes only `dicom.seg.from_file()` and `dicom.seg.from_bytes()`. It does not expose `dicom.seg.from_dicomfile(df)` because Python cannot move C++ unique ownership out of an existing `DicomFile` without copying and reparsing the full dataset.
+Python exposes only `dicom.seg.read_file()` and `dicom.seg.read_bytes()`. It does not expose `dicom.seg.from_dicomfile(df)` because Python cannot move C++ unique ownership out of an existing `DicomFile` without copying and reparsing the full dataset.
 
 ```python
 raw = seg.to_array(0)  # dtype uint8

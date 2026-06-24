@@ -29,6 +29,7 @@
 
 #include <dicom.h>
 #include <dicom_endian.h>
+#include <dicom_geometry.h>
 #include <dicom_seg.h>
 #include <diagnostics.h>
 #include <photometric_text_detail.hpp>
@@ -48,6 +49,7 @@ using dicom::uid::WellKnown;
 using Uid = dicom::uid::WellKnown;
 using EncoderContext = dicom::pixel::EncoderContext;
 namespace diag = dicom::diag;
+namespace geo = dicom::geometry;
 
 namespace {
 
@@ -3582,6 +3584,85 @@ nb::object generated_uid_or_none(std::optional<dicom::uid::Generated> uid) {
 	return nb::str(uid->value().data(), uid->value().size());
 }
 
+const char* geometry_build_status_name(geo::GeometryBuildStatus status) noexcept {
+	switch (status) {
+	case geo::GeometryBuildStatus::ok:
+		return "ok";
+	case geo::GeometryBuildStatus::missing_required_tag:
+		return "missing_required_tag";
+	case geo::GeometryBuildStatus::invalid_value:
+		return "invalid_value";
+	case geo::GeometryBuildStatus::invalid_size:
+		return "invalid_size";
+	case geo::GeometryBuildStatus::invalid_spacing:
+		return "invalid_spacing";
+	case geo::GeometryBuildStatus::invalid_orientation:
+		return "invalid_orientation";
+	case geo::GeometryBuildStatus::singular_matrix:
+		return "singular_matrix";
+	case geo::GeometryBuildStatus::invalid_frame_index:
+		return "invalid_frame_index";
+	case geo::GeometryBuildStatus::missing_volumetric_properties:
+		return "missing_volumetric_properties";
+	case geo::GeometryBuildStatus::mixed_volumetric_properties:
+		return "mixed_volumetric_properties";
+	case geo::GeometryBuildStatus::unknown_volumetric_properties:
+		return "unknown_volumetric_properties";
+	case geo::GeometryBuildStatus::sampled_frame_geometry:
+		return "sampled_frame_geometry";
+	case geo::GeometryBuildStatus::distorted_frame_geometry:
+		return "distorted_frame_geometry";
+	case geo::GeometryBuildStatus::unsupported_frame_geometry:
+		return "unsupported_frame_geometry";
+	}
+	return "unknown";
+}
+
+template <typename T>
+T geometry_value_or_throw(geo::GeometryBuildResult<T>&& result, const char* operation) {
+	if (!result.ok()) {
+		std::ostringstream oss;
+		oss << operation << " failed: " << geometry_build_status_name(result.status());
+		if (result.tag()) {
+			oss << " at " << result.tag().to_string();
+		}
+		if (!result.message().empty()) {
+			oss << ": " << result.message();
+		}
+		const auto message = oss.str();
+		throw nb::value_error(message.c_str());
+	}
+	return std::move(result).value();
+}
+
+nb::tuple matrix4x4d_to_tuple(const geo::Matrix4x4d& matrix) {
+	nb::tuple out = nb::steal<nb::tuple>(PyTuple_New(16));
+	for (std::size_t row = 0; row < 4; ++row) {
+		for (std::size_t column = 0; column < 4; ++column) {
+			nb::object item_obj = nb::cast(matrix(row, column));
+			PyObject* item = new_reference_or_null(item_obj.ptr());
+			const auto index = static_cast<Py_ssize_t>(row * 4 + column);
+			if (PyTuple_SetItem(out.ptr(), index, item) < 0) {
+				Py_DECREF(item);
+				throw nb::python_error();
+			}
+		}
+	}
+	return out;
+}
+
+std::string repr_vec3d(const char* name, const geo::Vec3d& value) {
+	std::ostringstream oss;
+	oss << name << "(x=" << value.x << ", y=" << value.y << ", z=" << value.z << ")";
+	return oss.str();
+}
+
+std::string repr_point3d(const char* name, const geo::Point3d& value) {
+	std::ostringstream oss;
+	oss << name << "(x=" << value.x << ", y=" << value.y << ", z=" << value.z << ")";
+	return oss.str();
+}
+
 
 WellKnown require_uid(std::optional<WellKnown> uid, const char* origin, const std::string& text) {
 	if (!uid) {
@@ -6696,6 +6777,599 @@ NB_MODULE(_dicomsdl, m) {
 			    return oss.str();
 		    });
 
+	auto geometry = m.def_submodule(
+	    "geometry", "Geometry and overlay helpers for DICOM image planes and volumes.");
+
+	nb::enum_<geo::GeometryBuildStatus>(
+	    geometry, "GeometryBuildStatus", "C++ geometry construction status values.")
+		.value("ok", geo::GeometryBuildStatus::ok)
+		.value("missing_required_tag", geo::GeometryBuildStatus::missing_required_tag)
+		.value("invalid_value", geo::GeometryBuildStatus::invalid_value)
+		.value("invalid_size", geo::GeometryBuildStatus::invalid_size)
+		.value("invalid_spacing", geo::GeometryBuildStatus::invalid_spacing)
+		.value("invalid_orientation", geo::GeometryBuildStatus::invalid_orientation)
+		.value("singular_matrix", geo::GeometryBuildStatus::singular_matrix)
+		.value("invalid_frame_index", geo::GeometryBuildStatus::invalid_frame_index)
+		.value("missing_volumetric_properties",
+		    geo::GeometryBuildStatus::missing_volumetric_properties)
+		.value("mixed_volumetric_properties",
+		    geo::GeometryBuildStatus::mixed_volumetric_properties)
+		.value("unknown_volumetric_properties",
+		    geo::GeometryBuildStatus::unknown_volumetric_properties)
+		.value("sampled_frame_geometry", geo::GeometryBuildStatus::sampled_frame_geometry)
+		.value("distorted_frame_geometry", geo::GeometryBuildStatus::distorted_frame_geometry)
+		.value("unsupported_frame_geometry",
+		    geo::GeometryBuildStatus::unsupported_frame_geometry);
+
+	nb::enum_<geo::VolumetricPropertiesValue>(
+	    geometry, "VolumetricPropertiesValue",
+	    "Resolved DICOM VolumetricProperties values used by frame geometry.")
+		.value("volume", geo::VolumetricPropertiesValue::volume)
+		.value("sampled", geo::VolumetricPropertiesValue::sampled)
+		.value("distorted", geo::VolumetricPropertiesValue::distorted);
+
+	nb::enum_<geo::ImageFrameGeometryKind>(
+	    geometry, "ImageFrameGeometryKind",
+	    "Semantic kind of one multi-frame image frame geometry.")
+		.value("regular_plane", geo::ImageFrameGeometryKind::regular_plane)
+		.value("sampled_projection", geo::ImageFrameGeometryKind::sampled_projection)
+		.value("distorted", geo::ImageFrameGeometryKind::distorted);
+
+	nb::enum_<geo::OverlayCompatibility>(
+	    geometry, "OverlayCompatibility", "Overlay compatibility preflight status.")
+		.value("compatible", geo::OverlayCompatibility::compatible)
+		.value("missing_frame_of_reference",
+		    geo::OverlayCompatibility::missing_frame_of_reference)
+		.value("different_frame_of_reference",
+		    geo::OverlayCompatibility::different_frame_of_reference)
+		.value("non_parallel_planes", geo::OverlayCompatibility::non_parallel_planes)
+		.value("opposite_orientation", geo::OverlayCompatibility::opposite_orientation)
+		.value("out_of_plane", geo::OverlayCompatibility::out_of_plane)
+		.value("different_spacing", geo::OverlayCompatibility::different_spacing)
+		.value("different_extent", geo::OverlayCompatibility::different_extent)
+		.value("requires_resampling", geo::OverlayCompatibility::requires_resampling);
+
+	nb::class_<geo::Vec3d>(geometry, "Vec3d", "3D direction/vector in patient space.")
+		.def("__init__",
+		    [](geo::Vec3d* self, double x, double y, double z) {
+			    new (self) geo::Vec3d{x, y, z};
+		    },
+		    nb::arg("x") = 0.0, nb::arg("y") = 0.0, nb::arg("z") = 0.0)
+		.def_rw("x", &geo::Vec3d::x)
+		.def_rw("y", &geo::Vec3d::y)
+		.def_rw("z", &geo::Vec3d::z)
+		.def("__repr__",
+		    [](const geo::Vec3d& self) { return repr_vec3d("Vec3d", self); });
+
+	nb::class_<geo::Point3d>(geometry, "Point3d", "3D point in patient/world space.")
+		.def("__init__",
+		    [](geo::Point3d* self, double x, double y, double z) {
+			    new (self) geo::Point3d{x, y, z};
+		    },
+		    nb::arg("x") = 0.0, nb::arg("y") = 0.0, nb::arg("z") = 0.0)
+		.def_rw("x", &geo::Point3d::x)
+		.def_rw("y", &geo::Point3d::y)
+		.def_rw("z", &geo::Point3d::z)
+		.def("__repr__",
+		    [](const geo::Point3d& self) { return repr_point3d("Point3d", self); });
+
+	nb::class_<geo::ImagePoint2D>(geometry, "ImagePoint2D", "2D image index point.")
+		.def("__init__",
+		    [](geo::ImagePoint2D* self, double i, double j) {
+			    new (self) geo::ImagePoint2D{i, j};
+		    },
+		    nb::arg("i") = 0.0, nb::arg("j") = 0.0)
+		.def_rw("i", &geo::ImagePoint2D::i)
+		.def_rw("j", &geo::ImagePoint2D::j)
+		.def("__repr__",
+		    [](const geo::ImagePoint2D& self) {
+			    std::ostringstream oss;
+			    oss << "ImagePoint2D(i=" << self.i << ", j=" << self.j << ")";
+			    return oss.str();
+		    });
+
+	nb::class_<geo::ImagePoint3D>(geometry, "ImagePoint3D", "3D image index point.")
+		.def("__init__",
+		    [](geo::ImagePoint3D* self, double i, double j, double k) {
+			    new (self) geo::ImagePoint3D{i, j, k};
+		    },
+		    nb::arg("i") = 0.0, nb::arg("j") = 0.0, nb::arg("k") = 0.0)
+		.def_rw("i", &geo::ImagePoint3D::i)
+		.def_rw("j", &geo::ImagePoint3D::j)
+		.def_rw("k", &geo::ImagePoint3D::k)
+		.def("__repr__",
+		    [](const geo::ImagePoint3D& self) {
+			    std::ostringstream oss;
+			    oss << "ImagePoint3D(i=" << self.i << ", j=" << self.j
+			        << ", k=" << self.k << ")";
+			    return oss.str();
+		    });
+
+	nb::class_<geo::PlaneProjection2D>(
+	    geometry, "PlaneProjection2D", "Plane index plus signed normal distance.")
+		.def(nb::init<>())
+		.def_rw("index", &geo::PlaneProjection2D::index)
+		.def_rw("signed_normal_distance_mm",
+		    &geo::PlaneProjection2D::signed_normal_distance_mm);
+
+	nb::class_<geo::ImageSize2D>(geometry, "ImageSize2D", "2D image size: i=columns, j=rows.")
+		.def("__init__",
+		    [](geo::ImageSize2D* self, std::size_t i, std::size_t j) {
+			    new (self) geo::ImageSize2D{i, j};
+		    },
+		    nb::arg("i") = static_cast<std::size_t>(0),
+		    nb::arg("j") = static_cast<std::size_t>(0))
+		.def_rw("i", &geo::ImageSize2D::i)
+		.def_rw("j", &geo::ImageSize2D::j);
+
+	nb::class_<geo::ImageSize3D>(
+	    geometry, "ImageSize3D", "3D image size: i=columns, j=rows, k=slices.")
+		.def("__init__",
+		    [](geo::ImageSize3D* self, std::size_t i, std::size_t j, std::size_t k) {
+			    new (self) geo::ImageSize3D{i, j, k};
+		    },
+		    nb::arg("i") = static_cast<std::size_t>(0),
+		    nb::arg("j") = static_cast<std::size_t>(0),
+		    nb::arg("k") = static_cast<std::size_t>(0))
+		.def_rw("i", &geo::ImageSize3D::i)
+		.def_rw("j", &geo::ImageSize3D::j)
+		.def_rw("k", &geo::ImageSize3D::k);
+
+	nb::class_<geo::ImageSpacing2D>(
+	    geometry, "ImageSpacing2D", "2D image spacing in millimeters.")
+		.def("__init__",
+		    [](geo::ImageSpacing2D* self, double i, double j) {
+			    new (self) geo::ImageSpacing2D{i, j};
+		    },
+		    nb::arg("i") = 0.0, nb::arg("j") = 0.0)
+		.def_rw("i", &geo::ImageSpacing2D::i)
+		.def_rw("j", &geo::ImageSpacing2D::j);
+
+	nb::class_<geo::ImageSpacing3D>(
+	    geometry, "ImageSpacing3D", "3D image spacing in millimeters.")
+		.def("__init__",
+		    [](geo::ImageSpacing3D* self, double i, double j, double k) {
+			    new (self) geo::ImageSpacing3D{i, j, k};
+		    },
+		    nb::arg("i") = 0.0, nb::arg("j") = 0.0, nb::arg("k") = 0.0)
+		.def_rw("i", &geo::ImageSpacing3D::i)
+		.def_rw("j", &geo::ImageSpacing3D::j)
+		.def_rw("k", &geo::ImageSpacing3D::k);
+
+	nb::class_<geo::GeometryTolerance>(
+	    geometry, "GeometryTolerance", "Tolerance bundle for geometry validation/checks.")
+		.def("__init__",
+		    [](geo::GeometryTolerance* self, double orientation_tolerance,
+		        double spacing_tolerance_mm, double position_tolerance_mm,
+		        double normal_distance_tolerance_mm) {
+			    new (self) geo::GeometryTolerance{orientation_tolerance,
+			        spacing_tolerance_mm, position_tolerance_mm,
+			        normal_distance_tolerance_mm};
+		    },
+		    nb::arg("orientation_tolerance") = 1e-4,
+		    nb::arg("spacing_tolerance_mm") = 1e-3,
+		    nb::arg("position_tolerance_mm") = 1e-3,
+		    nb::arg("normal_distance_tolerance_mm") = 1e-3)
+		.def_rw("orientation_tolerance", &geo::GeometryTolerance::orientation_tolerance)
+		.def_rw("spacing_tolerance_mm", &geo::GeometryTolerance::spacing_tolerance_mm)
+		.def_rw("position_tolerance_mm", &geo::GeometryTolerance::position_tolerance_mm)
+		.def_rw("normal_distance_tolerance_mm",
+		    &geo::GeometryTolerance::normal_distance_tolerance_mm);
+
+	nb::class_<geo::Matrix4x4d>(geometry, "Matrix4x4d",
+	    "Row-major 4x4 matrix. Multiplication convention is out_h = M * in_h.")
+		.def_static("identity", &geo::Matrix4x4d::identity)
+		.def("at",
+		    [](const geo::Matrix4x4d& self, std::size_t row, std::size_t column) {
+			    if (row >= 4 || column >= 4) {
+				    throw nb::index_error("Matrix4x4d index out of range");
+			    }
+			    return self(row, column);
+		    },
+		    nb::arg("row"), nb::arg("column"))
+		.def("to_tuple", &matrix4x4d_to_tuple)
+		.def("__repr__",
+		    [](const geo::Matrix4x4d& self) {
+			    std::ostringstream oss;
+			    oss << "Matrix4x4d(";
+			    for (std::size_t i = 0; i < 16; ++i) {
+				    if (i != 0) {
+					    oss << ", ";
+				    }
+				    oss << self(i / 4, i % 4);
+			    }
+			    oss << ")";
+			    return oss.str();
+		    });
+
+	nb::class_<geo::ImagePlaneGeometry>(
+	    geometry, "ImagePlaneGeometry", "Validated 2D image plane geometry.")
+		.def_prop_ro("origin", &geo::ImagePlaneGeometry::origin)
+		.def_prop_ro("direction_i", &geo::ImagePlaneGeometry::direction_i)
+		.def_prop_ro("direction_j", &geo::ImagePlaneGeometry::direction_j)
+		.def_prop_ro("normal", &geo::ImagePlaneGeometry::normal)
+		.def_prop_ro("spacing", &geo::ImagePlaneGeometry::spacing)
+		.def_prop_ro("spacing_i", &geo::ImagePlaneGeometry::spacing_i)
+		.def_prop_ro("spacing_j", &geo::ImagePlaneGeometry::spacing_j)
+		.def_prop_ro("size", &geo::ImagePlaneGeometry::size)
+		.def_prop_ro("columns", &geo::ImagePlaneGeometry::columns)
+		.def_prop_ro("rows", &geo::ImagePlaneGeometry::rows)
+		.def_prop_ro("index_to_world_matrix",
+		    [](const geo::ImagePlaneGeometry& self) -> const geo::Matrix4x4d& {
+			    return self.index_to_world_matrix();
+		    },
+		    nb::rv_policy::reference_internal)
+		.def_prop_ro("world_to_index_matrix",
+		    [](const geo::ImagePlaneGeometry& self) -> const geo::Matrix4x4d& {
+			    return self.world_to_index_matrix();
+		    },
+		    nb::rv_policy::reference_internal)
+		.def("world_from_index", &geo::ImagePlaneGeometry::world_from_index,
+		    nb::arg("index"))
+		.def("index_from_world", &geo::ImagePlaneGeometry::index_from_world,
+		    nb::arg("world"))
+		.def("normal_distance_from_world",
+		    &geo::ImagePlaneGeometry::normal_distance_from_world,
+		    nb::arg("world"))
+		.def("contains_index", &geo::ImagePlaneGeometry::contains_index,
+		    nb::arg("index"))
+		.def("contains_world",
+		    [](const geo::ImagePlaneGeometry& self, geo::Point3d world,
+		        double normal_distance_tolerance_mm) {
+			    return self.contains_world(world, normal_distance_tolerance_mm);
+		    },
+		    nb::arg("world"), nb::arg("normal_distance_tolerance_mm") = 1e-3)
+		.def("__repr__",
+		    [](const geo::ImagePlaneGeometry& self) {
+			    std::ostringstream oss;
+			    oss << "ImagePlaneGeometry(rows=" << self.rows()
+			        << ", columns=" << self.columns() << ")";
+			    return oss.str();
+		    });
+
+	nb::class_<geo::ImageVolumeGeometry>(
+	    geometry, "ImageVolumeGeometry", "Validated rectilinear 3D image volume geometry.")
+		.def_prop_ro("origin", &geo::ImageVolumeGeometry::origin)
+		.def_prop_ro("direction_i", &geo::ImageVolumeGeometry::direction_i)
+		.def_prop_ro("direction_j", &geo::ImageVolumeGeometry::direction_j)
+		.def_prop_ro("direction_k", &geo::ImageVolumeGeometry::direction_k)
+		.def_prop_ro("spacing", &geo::ImageVolumeGeometry::spacing)
+		.def_prop_ro("spacing_i", &geo::ImageVolumeGeometry::spacing_i)
+		.def_prop_ro("spacing_j", &geo::ImageVolumeGeometry::spacing_j)
+		.def_prop_ro("spacing_k", &geo::ImageVolumeGeometry::spacing_k)
+		.def_prop_ro("size", &geo::ImageVolumeGeometry::size)
+		.def_prop_ro("columns", &geo::ImageVolumeGeometry::columns)
+		.def_prop_ro("rows", &geo::ImageVolumeGeometry::rows)
+		.def_prop_ro("slices", &geo::ImageVolumeGeometry::slices)
+		.def_prop_ro("index_to_world_matrix",
+		    [](const geo::ImageVolumeGeometry& self) -> const geo::Matrix4x4d& {
+			    return self.index_to_world_matrix();
+		    },
+		    nb::rv_policy::reference_internal)
+		.def_prop_ro("world_to_index_matrix",
+		    [](const geo::ImageVolumeGeometry& self) -> const geo::Matrix4x4d& {
+			    return self.world_to_index_matrix();
+		    },
+		    nb::rv_policy::reference_internal)
+		.def("world_from_index", &geo::ImageVolumeGeometry::world_from_index,
+		    nb::arg("index"))
+		.def("index_from_world", &geo::ImageVolumeGeometry::index_from_world,
+		    nb::arg("world"))
+		.def("contains_index", &geo::ImageVolumeGeometry::contains_index,
+		    nb::arg("index"))
+		.def("contains_world",
+		    [](const geo::ImageVolumeGeometry& self, geo::Point3d world,
+		        std::optional<geo::GeometryTolerance> tolerance) {
+			    return self.contains_world(world, tolerance.value_or(geo::GeometryTolerance{}));
+		    },
+		    nb::arg("world"), nb::arg("tolerance") = nb::none())
+		.def("__repr__",
+		    [](const geo::ImageVolumeGeometry& self) {
+			    std::ostringstream oss;
+			    oss << "ImageVolumeGeometry(rows=" << self.rows()
+			        << ", columns=" << self.columns()
+			        << ", slices=" << self.slices() << ")";
+			    return oss.str();
+		    });
+
+	nb::class_<geo::VolumetricPropertiesInfo>(
+	    geometry, "VolumetricPropertiesInfo",
+	    "Resolved VolumetricProperties value plus lightweight source metadata.")
+		.def(nb::init<>())
+		.def_ro("value", &geo::VolumetricPropertiesInfo::value)
+		.def_prop_ro("source_depth",
+		    [](const geo::VolumetricPropertiesInfo& self) {
+			    return self.source.depth();
+		    })
+		.def_prop_ro("source_leaf_tag",
+		    [](const geo::VolumetricPropertiesInfo& self) {
+			    return self.source.leaf_tag();
+		    });
+
+	nb::class_<geo::ImageFrameGeometry>(
+	    geometry, "ImageFrameGeometry",
+	    "Plane geometry plus semantic frame kind for enhanced multi-frame images.")
+		.def_prop_ro("plane",
+		    [](const geo::ImageFrameGeometry& self) -> const geo::ImagePlaneGeometry& {
+			    return self.plane;
+		    },
+		    nb::rv_policy::reference_internal)
+		.def_ro("kind", &geo::ImageFrameGeometry::kind);
+
+	nb::class_<geo::OverlayCheckOptions>(
+	    geometry, "OverlayCheckOptions", "Options for overlay compatibility checks.")
+		.def("__init__",
+		    [](geo::OverlayCheckOptions* self, double frame_position_tolerance_mm,
+		        double normal_distance_tolerance_mm, double orientation_tolerance,
+		        double spacing_tolerance_mm, bool require_same_grid) {
+			    new (self) geo::OverlayCheckOptions{frame_position_tolerance_mm,
+			        normal_distance_tolerance_mm, orientation_tolerance,
+			        spacing_tolerance_mm, require_same_grid};
+		    },
+		    nb::arg("frame_position_tolerance_mm") = 1e-3,
+		    nb::arg("normal_distance_tolerance_mm") = 1e-3,
+		    nb::arg("orientation_tolerance") = 1e-4,
+		    nb::arg("spacing_tolerance_mm") = 1e-3,
+		    nb::arg("require_same_grid") = false)
+		.def_rw("frame_position_tolerance_mm",
+		    &geo::OverlayCheckOptions::frame_position_tolerance_mm)
+		.def_rw("normal_distance_tolerance_mm",
+		    &geo::OverlayCheckOptions::normal_distance_tolerance_mm)
+		.def_rw("orientation_tolerance", &geo::OverlayCheckOptions::orientation_tolerance)
+		.def_rw("spacing_tolerance_mm", &geo::OverlayCheckOptions::spacing_tolerance_mm)
+		.def_rw("require_same_grid", &geo::OverlayCheckOptions::require_same_grid);
+
+	nb::class_<geo::IndexRange1D>(geometry, "IndexRange1D", "Half-open integer index range.")
+		.def("__init__",
+		    [](geo::IndexRange1D* self, std::size_t begin, std::size_t end) {
+			    new (self) geo::IndexRange1D{begin, end};
+		    },
+		    nb::arg("begin") = static_cast<std::size_t>(0),
+		    nb::arg("end") = static_cast<std::size_t>(0))
+		.def_rw("begin", &geo::IndexRange1D::begin)
+		.def_rw("end", &geo::IndexRange1D::end)
+		.def_prop_ro("empty", &geo::IndexRange1D::empty);
+
+	nb::class_<geo::OverlayCheck>(
+	    geometry, "OverlayCheck", "Result of an O(1) geometry overlay preflight.")
+		.def(nb::init<>())
+		.def_ro("status", &geo::OverlayCheck::status)
+		.def_ro("same_frame_of_reference", &geo::OverlayCheck::same_frame_of_reference)
+		.def_ro("can_transform", &geo::OverlayCheck::can_transform)
+		.def_ro("can_direct_overlay", &geo::OverlayCheck::can_direct_overlay)
+		.def_ro("same_grid", &geo::OverlayCheck::same_grid)
+		.def_ro("same_spacing", &geo::OverlayCheck::same_spacing)
+		.def_ro("same_extent", &geo::OverlayCheck::same_extent)
+		.def_ro("overlaps_extent", &geo::OverlayCheck::overlaps_extent)
+		.def_ro("source_inside_target_extent",
+		    &geo::OverlayCheck::source_inside_target_extent)
+		.def_ro("requires_resampling", &geo::OverlayCheck::requires_resampling)
+		.def_ro("target_k_range", &geo::OverlayCheck::target_k_range)
+		.def_ro("max_position_error_mm", &geo::OverlayCheck::max_position_error_mm)
+		.def_ro("max_normal_distance_mm", &geo::OverlayCheck::max_normal_distance_mm)
+		.def_ro("max_orientation_error", &geo::OverlayCheck::max_orientation_error)
+		.def_ro("max_spacing_error_mm", &geo::OverlayCheck::max_spacing_error_mm)
+		.def_prop_ro("ok", &geo::OverlayCheck::ok);
+
+	nb::class_<geo::PlaneToPlaneTransform>(
+	    geometry, "PlaneToPlaneTransform", "Cached plane-to-plane index transform.")
+		.def("target_index_from_source_index",
+		    &geo::PlaneToPlaneTransform::target_index_from_source_index,
+		    nb::arg("source"))
+		.def("source_index_from_target_index",
+		    &geo::PlaneToPlaneTransform::source_index_from_target_index,
+		    nb::arg("target"));
+
+	nb::class_<geo::PlaneToVolumeTransform>(
+	    geometry, "PlaneToVolumeTransform", "Cached plane-to-volume index transform.")
+		.def("target_index_from_source_index",
+		    &geo::PlaneToVolumeTransform::target_index_from_source_index,
+		    nb::arg("source"))
+		.def("source_index_from_target_index",
+		    &geo::PlaneToVolumeTransform::source_index_from_target_index,
+		    nb::arg("target"))
+		.def("source_projection_from_target_index",
+		    &geo::PlaneToVolumeTransform::source_projection_from_target_index,
+		    nb::arg("target"));
+
+	nb::class_<geo::VolumeToPlaneTransform>(
+	    geometry, "VolumeToPlaneTransform", "Cached volume-to-plane index transform.")
+		.def("target_index_from_source_index",
+		    &geo::VolumeToPlaneTransform::target_index_from_source_index,
+		    nb::arg("source"))
+		.def("target_projection_from_source_index",
+		    &geo::VolumeToPlaneTransform::target_projection_from_source_index,
+		    nb::arg("source"))
+		.def("source_index_from_target_index",
+		    &geo::VolumeToPlaneTransform::source_index_from_target_index,
+		    nb::arg("target"));
+
+	nb::class_<geo::VolumeToVolumeTransform>(
+	    geometry, "VolumeToVolumeTransform", "Cached volume-to-volume index transform.")
+		.def("target_index_from_source_index",
+		    &geo::VolumeToVolumeTransform::target_index_from_source_index,
+		    nb::arg("source"))
+		.def("source_index_from_target_index",
+		    &geo::VolumeToVolumeTransform::source_index_from_target_index,
+		    nb::arg("target"));
+
+	geometry.def("dot", &geo::dot, nb::arg("a"), nb::arg("b"));
+	geometry.def("cross", &geo::cross, nb::arg("a"), nb::arg("b"));
+	geometry.def("norm", &geo::norm, nb::arg("v"));
+	geometry.def("normalize", &geo::normalize, nb::arg("v"));
+
+	geometry.def("make_image_plane_geometry",
+	    [](geo::Point3d origin, geo::Vec3d direction_i, geo::Vec3d direction_j,
+	        geo::ImageSpacing2D spacing, geo::ImageSize2D size,
+	        std::optional<geo::GeometryTolerance> tolerance) {
+		    geo::ImagePlaneGeometryParams params;
+		    params.origin = origin;
+		    params.direction_i = direction_i;
+		    params.direction_j = direction_j;
+		    params.spacing = spacing;
+		    params.size = size;
+		    return geometry_value_or_throw(
+		        geo::make_image_plane_geometry(
+		            params, tolerance.value_or(geo::GeometryTolerance{})),
+		        "make_image_plane_geometry");
+	    },
+	    nb::arg("origin"), nb::arg("direction_i"), nb::arg("direction_j"),
+	    nb::arg("spacing"), nb::arg("size"), nb::arg("tolerance") = nb::none(),
+	    "Create a validated ImagePlaneGeometry or raise ValueError.");
+
+	geometry.def("make_image_volume_geometry",
+	    [](geo::Point3d origin, geo::Vec3d direction_i, geo::Vec3d direction_j,
+	        geo::Vec3d direction_k, geo::ImageSpacing3D spacing,
+	        geo::ImageSize3D size, std::optional<geo::GeometryTolerance> tolerance) {
+		    geo::ImageVolumeGeometryParams params;
+		    params.origin = origin;
+		    params.direction_i = direction_i;
+		    params.direction_j = direction_j;
+		    params.direction_k = direction_k;
+		    params.spacing = spacing;
+		    params.size = size;
+		    return geometry_value_or_throw(
+		        geo::make_image_volume_geometry(
+		            params, tolerance.value_or(geo::GeometryTolerance{})),
+		        "make_image_volume_geometry");
+	    },
+	    nb::arg("origin"), nb::arg("direction_i"), nb::arg("direction_j"),
+	    nb::arg("direction_k"), nb::arg("spacing"), nb::arg("size"),
+	    nb::arg("tolerance") = nb::none(),
+	    "Create a validated ImageVolumeGeometry or raise ValueError.");
+
+	geometry.def("plane_from_single_frame_image",
+	    [](const DicomFile& file) {
+		    return geometry_value_or_throw(
+		        geo::plane_from_single_frame_image(file), "plane_from_single_frame_image");
+	    },
+	    nb::arg("source"));
+	geometry.def("plane_from_single_frame_image",
+	    [](const DataSet& dataset) {
+		    return geometry_value_or_throw(
+		        geo::plane_from_single_frame_image(dataset),
+		        "plane_from_single_frame_image");
+	    },
+	    nb::arg("source"));
+	geometry.def("plane_from_multiframe_image",
+	    [](const DicomFile& file, std::size_t frame_index) {
+		    return geometry_value_or_throw(
+		        geo::plane_from_multiframe_image(file, frame_index),
+		        "plane_from_multiframe_image");
+	    },
+	    nb::arg("source"), nb::arg("frame_index"));
+	geometry.def("plane_from_multiframe_image",
+	    [](const DataSet& dataset, std::size_t frame_index) {
+		    return geometry_value_or_throw(
+		        geo::plane_from_multiframe_image(dataset, frame_index),
+		        "plane_from_multiframe_image");
+	    },
+	    nb::arg("source"), nb::arg("frame_index"));
+	geometry.def("frame_geometry_from_multiframe_image",
+	    [](const DicomFile& file, std::size_t frame_index) {
+		    return geometry_value_or_throw(
+		        geo::frame_geometry_from_multiframe_image(file, frame_index),
+		        "frame_geometry_from_multiframe_image");
+	    },
+	    nb::arg("source"), nb::arg("frame_index"));
+	geometry.def("frame_geometry_from_multiframe_image",
+	    [](const DataSet& dataset, std::size_t frame_index) {
+		    return geometry_value_or_throw(
+		        geo::frame_geometry_from_multiframe_image(dataset, frame_index),
+		        "frame_geometry_from_multiframe_image");
+	    },
+	    nb::arg("source"), nb::arg("frame_index"));
+	geometry.def("volumetric_properties_from_multiframe_image",
+	    [](const DicomFile& file, std::size_t frame_index) {
+		    return geometry_value_or_throw(
+		        geo::volumetric_properties_from_multiframe_image(file, frame_index),
+		        "volumetric_properties_from_multiframe_image");
+	    },
+	    nb::arg("source"), nb::arg("frame_index"));
+	geometry.def("volumetric_properties_from_multiframe_image",
+	    [](const DataSet& dataset, std::size_t frame_index) {
+		    return geometry_value_or_throw(
+		        geo::volumetric_properties_from_multiframe_image(dataset, frame_index),
+		        "volumetric_properties_from_multiframe_image");
+	    },
+	    nb::arg("source"), nb::arg("frame_index"));
+	geometry.def("frame_of_reference_from_dataset",
+	    [](const DicomFile& file) {
+		    return geometry_value_or_throw(
+		        geo::frame_of_reference_from_dataset(file),
+		        "frame_of_reference_from_dataset");
+	    },
+	    nb::arg("source"));
+	geometry.def("frame_of_reference_from_dataset",
+	    [](const DataSet& dataset) {
+		    return geometry_value_or_throw(
+		        geo::frame_of_reference_from_dataset(dataset),
+		        "frame_of_reference_from_dataset");
+	    },
+	    nb::arg("source"));
+
+	geometry.def("check_overlay_compatibility",
+	    [](const std::string& source_frame_of_reference_uid,
+	        const geo::ImagePlaneGeometry& source,
+	        const std::string& target_frame_of_reference_uid,
+	        const geo::ImagePlaneGeometry& target,
+	        std::optional<geo::OverlayCheckOptions> options) {
+		    return geo::check_overlay_compatibility(source_frame_of_reference_uid,
+		        source, target_frame_of_reference_uid, target,
+		        options.value_or(geo::OverlayCheckOptions{}));
+	    },
+	    nb::arg("source_frame_of_reference_uid"), nb::arg("source"),
+	    nb::arg("target_frame_of_reference_uid"), nb::arg("target"),
+	    nb::arg("options") = nb::none());
+	geometry.def("check_overlay_compatibility",
+	    [](const std::string& source_frame_of_reference_uid,
+	        const geo::ImagePlaneGeometry& source,
+	        const std::string& target_frame_of_reference_uid,
+	        const geo::ImageVolumeGeometry& target,
+	        std::optional<geo::OverlayCheckOptions> options) {
+		    return geo::check_overlay_compatibility(source_frame_of_reference_uid,
+		        source, target_frame_of_reference_uid, target,
+		        options.value_or(geo::OverlayCheckOptions{}));
+	    },
+	    nb::arg("source_frame_of_reference_uid"), nb::arg("source"),
+	    nb::arg("target_frame_of_reference_uid"), nb::arg("target"),
+	    nb::arg("options") = nb::none());
+	geometry.def("check_overlay_compatibility",
+	    [](const std::string& source_frame_of_reference_uid,
+	        const geo::ImageVolumeGeometry& source,
+	        const std::string& target_frame_of_reference_uid,
+	        const geo::ImagePlaneGeometry& target,
+	        std::optional<geo::OverlayCheckOptions> options) {
+		    return geo::check_overlay_compatibility(source_frame_of_reference_uid,
+		        source, target_frame_of_reference_uid, target,
+		        options.value_or(geo::OverlayCheckOptions{}));
+	    },
+	    nb::arg("source_frame_of_reference_uid"), nb::arg("source"),
+	    nb::arg("target_frame_of_reference_uid"), nb::arg("target"),
+	    nb::arg("options") = nb::none());
+	geometry.def("check_overlay_compatibility",
+	    [](const std::string& source_frame_of_reference_uid,
+	        const geo::ImageVolumeGeometry& source,
+	        const std::string& target_frame_of_reference_uid,
+	        const geo::ImageVolumeGeometry& target,
+	        std::optional<geo::OverlayCheckOptions> options) {
+		    return geo::check_overlay_compatibility(source_frame_of_reference_uid,
+		        source, target_frame_of_reference_uid, target,
+		        options.value_or(geo::OverlayCheckOptions{}));
+	    },
+	    nb::arg("source_frame_of_reference_uid"), nb::arg("source"),
+	    nb::arg("target_frame_of_reference_uid"), nb::arg("target"),
+	    nb::arg("options") = nb::none());
+
+	geometry.def("make_plane_to_plane_transform", &geo::make_plane_to_plane_transform,
+	    nb::arg("source"), nb::arg("target"));
+	geometry.def("make_plane_to_volume_transform", &geo::make_plane_to_volume_transform,
+	    nb::arg("source"), nb::arg("target"));
+	geometry.def("make_volume_to_plane_transform", &geo::make_volume_to_plane_transform,
+	    nb::arg("source"), nb::arg("target"));
+	geometry.def("make_volume_to_volume_transform",
+	    &geo::make_volume_to_volume_transform, nb::arg("source"), nb::arg("target"));
+
 	auto seg = m.def_submodule(
 	    "seg", "High-level helpers for DICOM Segmentation Storage instances.");
 
@@ -7031,6 +7705,22 @@ NB_MODULE(_dicomsdl, m) {
 			    return oss.str();
 		    });
 
+	geometry.def("plane_from_seg_frame",
+	    [](const PySegmentation& segmentation, std::size_t frame_index) {
+		    return geometry_value_or_throw(
+		        geo::plane_from_seg_frame(segmentation.get(), frame_index),
+		        "plane_from_seg_frame");
+	    },
+	    nb::arg("segmentation"), nb::arg("frame_index"),
+	    "Resolve one DICOM SEG frame as an ImagePlaneGeometry.");
+	geometry.def("frame_of_reference_from_segmentation",
+	    [](const PySegmentation& segmentation) {
+		    return geometry_value_or_throw(
+		        geo::frame_of_reference_from_segmentation(segmentation.get()),
+		        "frame_of_reference_from_segmentation");
+	    },
+	    nb::arg("segmentation"));
+
 	seg.def("is_segmentation_storage",
 	    [](const DicomFile& file) { return dicom::seg::is_segmentation_storage(file); },
 	    nb::arg("dicom_file"),
@@ -7039,7 +7729,7 @@ NB_MODULE(_dicomsdl, m) {
 	    [](const DataSet& dataset) { return dicom::seg::is_segmentation_storage(dataset); },
 	    nb::arg("dataset"),
 	    "Return True when dataset declares the Segmentation Storage SOP Class UID.");
-	seg.def("from_file",
+	seg.def("read_file",
 	    [](nb::handle path, std::optional<Tag> load_until,
 	        std::optional<bool> keep_on_error, bool allow_partial_source,
 	        bool validate_required_modules) {
@@ -7055,20 +7745,20 @@ NB_MODULE(_dicomsdl, m) {
 	    nb::arg("keep_on_error") = nb::none(),
 	    nb::arg("allow_partial_source") = false,
 	    nb::arg("validate_required_modules") = true,
-	    "Recommended fast path: read a DICOM file into an owned DicomFile and "
-	    "adapt it as DICOM Segmentation Storage.");
-	seg.def("from_bytes",
+	    "Read a DICOM file into an owned DicomFile and adapt it as DICOM "
+	    "Segmentation Storage.");
+	seg.def("read_bytes",
 	    [](nb::object buffer, const std::string& name,
 	        std::optional<Tag> load_until, std::optional<bool> keep_on_error,
 	        bool copy, bool allow_partial_source, bool validate_required_modules) {
 		    PyBufferView view(buffer);
 		    const Py_buffer& info = view.view();
 		    if (info.ndim != 1) {
-			    throw std::invalid_argument("seg.from_bytes expects a 1-D bytes-like object");
+			    throw std::invalid_argument("seg.read_bytes expects a 1-D bytes-like object");
 		    }
 		    if (!PyBuffer_IsContiguous(&info, 'C')) {
 			    throw std::invalid_argument(
-			        "seg.from_bytes expects a contiguous bytes-like object");
+			        "seg.read_bytes expects a contiguous bytes-like object");
 		    }
 		    const std::size_t elem_size =
 		        static_cast<std::size_t>(info.itemsize <= 0 ? 1 : info.itemsize);
@@ -7084,7 +7774,7 @@ NB_MODULE(_dicomsdl, m) {
 		    } else {
 			    if (elem_size != 1) {
 				    throw std::invalid_argument(
-				        "seg.from_bytes(copy=False) requires a byte-oriented buffer");
+				        "seg.read_bytes(copy=False) requires a byte-oriented buffer");
 			    }
 			    file = dicom::read_bytes(std::string{name},
 			        static_cast<const std::uint8_t*>(info.buf), total, read_options);
@@ -7105,8 +7795,8 @@ NB_MODULE(_dicomsdl, m) {
 	    nb::arg("copy") = true,
 	    nb::arg("allow_partial_source") = false,
 	    nb::arg("validate_required_modules") = true,
-	    "Recommended fast path: read SEG bytes into an owned DicomFile and "
-	    "adapt them as DICOM Segmentation Storage.");
+	    "Read SEG bytes into an owned DicomFile and adapt them as DICOM "
+	    "Segmentation Storage.");
 
 	m.def("create_encoder_context",
 	    [](const Uid& transfer_syntax, nb::handle options) {
@@ -8175,6 +8865,7 @@ m.def("generate_study_instance_uid",
 	    "IMPLEMENTATION_CLASS_UID",
 	    "IMPLEMENTATION_VERSION_NAME",
 	    "PIXELDATA_PAYLOAD_PLACEHOLDER_MAGIC",
+	    "geometry",
 	    "seg",
 	    "log_info",
 	    "log_warn",

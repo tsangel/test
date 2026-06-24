@@ -376,6 +376,15 @@ public:
 	/// Throws when the item is missing because this is a raw DICOM item accessor.
 	[[nodiscard]] const DataSet& shared_functional_groups_item() const;
 
+	/// Non-throwing raw SharedFunctionalGroupsSequence item access for adapters
+	/// that need to report structured errors instead of throwing.
+	[[nodiscard]] const DataSet* try_shared_functional_groups_item() const noexcept;
+
+	/// Non-throwing raw PerFrameFunctionalGroupsSequence item access for adapters
+	/// that need to report structured errors instead of throwing.
+	[[nodiscard]] const DataSet*
+	try_per_frame_functional_groups_item(std::size_t frame_index) const noexcept;
+
 	/// Rows (0028,0010) for one stored SEG frame.
 	[[nodiscard]] std::size_t rows() const noexcept;
 
@@ -455,11 +464,30 @@ private:
 [[nodiscard]] bool is_segmentation_storage(const DataSet& ds) noexcept;
 
 /// Transfer an already-read DicomFile into the SEG adapter.
-/// This mirrors DicomSDL's core read_file/read_bytes ownership style: callers
-/// read bytes with core APIs first, then adapt the resulting DicomFile into the
-/// higher-level module.
+/// This is the low-level ownership adapter for callers that already have a
+/// parsed DicomFile or need a custom read flow.
 [[nodiscard]] std::unique_ptr<Segmentation>
 from_dicomfile(std::unique_ptr<DicomFile> file,
     const Options& options = {});
+
+/// Read a DICOM file and adapt it as DICOM Segmentation Storage.
+[[nodiscard]] std::unique_ptr<Segmentation>
+read_file(const std::filesystem::path& path,
+    ReadOptions read_options = {}, Options options = {});
+
+/// Read in-memory DICOM bytes and adapt them as DICOM Segmentation Storage.
+[[nodiscard]] std::unique_ptr<Segmentation>
+read_bytes(const std::uint8_t* data, std::size_t size,
+    ReadOptions read_options = {}, Options options = {});
+
+/// Read named in-memory DICOM bytes and adapt them as DICOM Segmentation Storage.
+[[nodiscard]] std::unique_ptr<Segmentation>
+read_bytes(const std::string& name, const std::uint8_t* data,
+    std::size_t size, ReadOptions read_options = {}, Options options = {});
+
+/// Take ownership of a byte buffer and adapt it as DICOM Segmentation Storage.
+[[nodiscard]] std::unique_ptr<Segmentation>
+read_bytes(std::string name, std::vector<std::uint8_t>&& buffer,
+    ReadOptions read_options = {}, Options options = {});
 
 } // namespace dicom::seg

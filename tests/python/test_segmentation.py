@@ -17,7 +17,7 @@ def _set_vr(df: dicom.DicomFile, key: str, vr: dicom.VR, value: object) -> None:
 
 
 def _seg_from_synthetic(df: dicom.DicomFile) -> dicom.seg.Segmentation:
-    return dicom.seg.from_bytes(df.write_bytes())
+    return dicom.seg.read_bytes(df.write_bytes())
 
 
 def _populate_common_binary_seg(df: dicom.DicomFile) -> None:
@@ -138,7 +138,7 @@ def _make_fractional_seg() -> dicom.DicomFile:
     return df
 
 
-def test_segmentation_from_bytes_decodes_binary_frames() -> None:
+def test_segmentation_read_bytes_decodes_binary_frames() -> None:
     df = _make_binary_seg()
 
     assert dicom.seg.is_segmentation_storage(df)
@@ -215,28 +215,32 @@ def test_segmentation_from_bytes_decodes_binary_frames() -> None:
     np.testing.assert_array_equal(out, expected1)
 
 
-def test_segmentation_from_file_and_from_bytes(tmp_path) -> None:
+def test_segmentation_read_file_and_read_bytes(tmp_path) -> None:
     df = _make_binary_seg()
     path = tmp_path / "seg.dcm"
     df.write_file(path)
 
     assert not hasattr(dicom.seg, "from_dicomfile")
+    assert not hasattr(dicom.seg, "from_file")
+    assert not hasattr(dicom.seg, "from_bytes")
 
-    from_file = dicom.seg.from_file(path)
-    assert from_file.segment_count == 2
-    assert from_file.frames_for_segment(1)[0].referenced_segment_number == 1
+    read_file = dicom.seg.read_file(path)
+    assert read_file.segment_count == 2
+    assert read_file.frames_for_segment(1)[0].referenced_segment_number == 1
 
     source = bytearray(path.read_bytes())
-    from_bytes = dicom.seg.from_bytes(source, copy=False)
-    assert from_bytes.frame_count == 2
-    assert from_bytes.decode_frame(-1) == from_file.decode_frame(1)
+    read_bytes = dicom.seg.read_bytes(source, copy=False)
+    assert read_bytes.frame_count == 2
+    assert read_bytes.decode_frame(-1) == read_file.decode_frame(1)
 
-    borrowed_frame = dicom.seg.from_bytes(bytearray(path.read_bytes()), copy=False).frames[1]
-    assert borrowed_frame.decode_frame() == from_file.decode_frame(1)
+    borrowed_frame = dicom.seg.read_bytes(bytearray(path.read_bytes()), copy=False).frames[1]
+    assert borrowed_frame.decode_frame() == read_file.decode_frame(1)
 
 
 def test_segmentation_python_api_keeps_only_direct_ownership_paths() -> None:
     assert not hasattr(dicom.seg, "from_dicomfile")
+    assert not hasattr(dicom.seg, "from_file")
+    assert not hasattr(dicom.seg, "from_bytes")
 
 
 def test_fractional_segmentation_returns_raw_uint8_samples() -> None:
@@ -278,7 +282,7 @@ def test_unsupported_segmentation_errors_are_explicit() -> None:
     compressed_bytes = bytearray(_make_binary_seg().write_bytes())
     assert compressed_bytes.count(explicit_uid) >= 1
     compressed_bytes = compressed_bytes.replace(explicit_uid, rle_uid, 1)
-    seg = dicom.seg.from_bytes(compressed_bytes)
+    seg = dicom.seg.read_bytes(compressed_bytes)
     with pytest.raises(Exception, match="compressed/encapsulated BINARY SEG"):
         seg.decode_frame(0)
 
@@ -309,7 +313,7 @@ def test_optional_local_seg_sample_regression() -> None:
     if not path:
         pytest.skip("set DICOMSDL_SEG_SAMPLE_PATH to enable local SEG sample regression")
 
-    seg = dicom.seg.from_file(path)
+    seg = dicom.seg.read_file(path)
     assert seg.is_valid
     assert seg.segment_count > 0
     assert seg.frame_count > 0

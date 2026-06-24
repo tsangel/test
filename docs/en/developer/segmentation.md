@@ -49,25 +49,27 @@ The scaling step stays with the caller so probability and occupancy consumers ca
 
 ## API Pattern
 
-C++ code reads bytes with the core API first and then transfers ownership into the SEG adapter:
+C++ code normally uses the SEG convenience readers. Advanced callers that already own a parsed `DicomFile` can move it into the SEG adapter with `from_dicomfile()`:
 
 ```cpp
 #include <dicom.h>
 #include <dicom_seg.h>
 
+auto seg = dicom::seg::read_file(path);
+
 auto file = dicom::read_file(path);
-auto seg = dicom::seg::from_dicomfile(std::move(file));
+auto seg_from_file = dicom::seg::from_dicomfile(std::move(file));
 ```
 
 The C++ adapter owns the `DicomFile`; returned segment and frame views borrow from it. This avoids copying strings and DICOM items while keeping view lifetimes simple.
 
-Python intentionally exposes only direct ownership helpers:
+Python uses the same naming:
 
 ```python
 import dicomsdl as dicom
 
-seg = dicom.seg.from_file(path)
-seg = dicom.seg.from_bytes(data, copy=False)
+seg = dicom.seg.read_file(path)
+seg = dicom.seg.read_bytes(data, copy=False)
 ```
 
 There is no Python `dicom.seg.from_dicomfile(df)` helper. Python cannot move ownership out of an existing `DicomFile` object without copying the full dataset, which is too easy to choose accidentally for large SEG instances.

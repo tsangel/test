@@ -49,28 +49,30 @@ scaling은 caller가 수행한다. probability/occupancy 소비자가 원하는 
 
 ## API Pattern
 
-C++에서는 core API로 DICOM을 먼저 읽고, 그 `DicomFile`의 소유권을 SEG adapter로 넘긴다.
+C++에서는 보통 SEG convenience reader를 사용한다. 이미 읽은 `DicomFile`을 재사용해야 하는 고급 경로에서는 `from_dicomfile()`로 소유권을 SEG adapter에 넘긴다.
 
 ```cpp
 #include <dicom.h>
 #include <dicom_seg.h>
 
+auto seg = dicom::seg::read_file(path);
+
 auto file = dicom::read_file(path);
-auto seg = dicom::seg::from_dicomfile(std::move(file));
+auto seg_from_file = dicom::seg::from_dicomfile(std::move(file));
 ```
 
 C++ adapter가 `DicomFile`을 소유하므로 segment/frame view는 내부 DICOM dataset을 복사하지 않고 빌려 쓴다. 문자열과 item copy를 피하면서 lifetime을 단순하게 유지하는 구조다.
 
-Python에서는 direct ownership helper만 제공한다.
+Python에서도 같은 naming을 사용한다.
 
 ```python
 import dicomsdl as dicom
 
-seg = dicom.seg.from_file(path)
-seg = dicom.seg.from_bytes(data, copy=False)
+seg = dicom.seg.read_file(path)
+seg = dicom.seg.read_bytes(data, copy=False)
 ```
 
-Python `dicom.seg.from_dicomfile(df)` helper는 제공하지 않는다. Python에서는 기존 `DicomFile` 객체에서 C++ unique ownership을 move할 수 없고, 이를 흉내 내려면 전체 dataset을 복사/재파싱해야 한다. 큰 SEG에서 너무 쉽게 비용이 커질 수 있으므로 Python API는 `from_file()`과 `from_bytes()`만 둔다.
+Python `dicom.seg.from_dicomfile(df)` helper는 제공하지 않는다. Python에서는 기존 `DicomFile` 객체에서 C++ unique ownership을 move할 수 없고, 이를 흉내 내려면 전체 dataset을 복사/재파싱해야 한다. 큰 SEG에서 너무 쉽게 비용이 커질 수 있으므로 Python API는 `read_file()`과 `read_bytes()`만 둔다.
 
 ## Regression Test
 

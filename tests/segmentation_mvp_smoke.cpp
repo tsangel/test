@@ -371,24 +371,41 @@ int main() {
 		std::filesystem::remove(path, cleanup_error);
 
 		file->write_file(path);
-		auto roundtrip_file = dicom::read_file(path);
+		auto seg = dicom::seg::read_file(path);
 		std::filesystem::remove(path, cleanup_error);
-		if (!roundtrip_file || roundtrip_file->has_error()) {
-			fail("roundtrip SEG file should be readable");
-		}
-
-		auto seg = dicom::seg::from_dicomfile(std::move(roundtrip_file));
 		if (seg->segmentation_type() != dicom::seg::SegmentationType::binary ||
 		    seg->segments().size() != 2 || seg->frames().size() != 2 ||
 		    seg->frames()[1].referenced_segment_number() != 2) {
-			fail("roundtrip SEG file metadata mismatch");
+			fail("seg::read_file SEG metadata mismatch");
 		}
 		std::vector<std::uint8_t> decoded(16);
 		seg->decode_frame_into(1, decoded);
 		const std::vector<std::uint8_t> expected{
 		    0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0};
 		if (decoded != expected) {
-			fail("roundtrip SEG file binary frame unpack mismatch");
+			fail("seg::read_file binary frame unpack mismatch");
+		}
+	}
+
+	{
+		auto file = make_binary_seg_file();
+		auto bytes = file->write_bytes();
+
+		auto seg = dicom::seg::read_bytes(
+		    "synthetic-seg", bytes.data(), bytes.size());
+		if (seg->frame_count() != 2 ||
+		    seg->frames()[0].referenced_segment_number() != 1) {
+			fail("seg::read_bytes pointer path metadata mismatch");
+		}
+
+		auto owned_seg = dicom::seg::read_bytes(
+		    "synthetic-seg-owned", std::move(bytes));
+		std::vector<std::uint8_t> decoded(16);
+		owned_seg->decode_frame_into(0, decoded);
+		const std::vector<std::uint8_t> expected{
+		    1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 0, 0, 0, 0};
+		if (decoded != expected) {
+			fail("seg::read_bytes owned-buffer frame unpack mismatch");
 		}
 	}
 
