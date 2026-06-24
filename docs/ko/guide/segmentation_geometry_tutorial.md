@@ -193,6 +193,31 @@ Source image reference는 SEG가 어떤 image를 바탕으로 만들어졌는지
 이력 metadata다. 하지만 overlay target이 반드시 그 image여야 한다는 뜻은 아니다.
 Overlay에서는 먼저 `FrameOfReferenceUID`를 비교한다.
 
+## SegmentationType별 API 선택
+
+`seg.segmentation_type`은 PixelData의 저장 표현을 알려준다. BINARY, FRACTIONAL,
+LABELMAP SEG를 같이 다루는 코드는 다음 차이를 기준으로 잡는 것이 좋다.
+
+| SegmentationType | `to_array()` / `decode_frame()` | segment membership | 권장 접근 |
+| --- | --- | --- | --- |
+| `binary` | `uint8` mask 값 `0` 또는 `1` | frame마다 하나의 `ReferencedSegmentNumber` | segment 단위 순회는 `frames_for_segment()`를 사용한다. `to_array()` 결과가 이미 그 frame의 semantic mask다. |
+| `fractional` | 저장된 raw `uint8` sample | frame마다 하나의 `ReferencedSegmentNumber` | threshold mask는 `mask_for_segment(..., fractional_threshold=...)`를 사용하고, raw probability/occupancy 값이 필요하면 `MaximumFractionalValue`로 직접 scaling한다. |
+| `labelmap` | 저장된 label value, `uint8` 또는 native-endian `uint16` | 한 frame에 여러 segment number가 들어갈 수 있음 | `present_segment_numbers()`와 `mask_for_segment()`를 사용한다. LABELMAP frame에서는 `referenced_segment_number`를 사용하지 않는다. |
+
+가장 안전한 공통 패턴은 다음과 같다.
+
+```python
+for frame in seg.frames:
+    for segment_number in frame.present_segment_numbers():
+        mask = frame.mask_for_segment(segment_number)
+        # frame.image_position_patient / geometry mapping과 함께 mask를 사용한다.
+```
+
+저장 pixel 표현이 필요하면 `to_array()`를 사용한다. storage type과 무관한 semantic
+`uint8` 0/1 mask가 필요하면 `mask_for_segment()`를 사용한다. LABELMAP에서
+`frames_for_segment()`와 `validate_label_values()`는 처음 호출할 때 모든 frame을
+scan할 수 있다. BINARY/FRACTIONAL에서는 open 시점에 만든 metadata index를 사용한다.
+
 ## BINARY SEG mask decode
 
 BINARY SEG는 DICOM 안에 native 1-bit pixel로 저장된다. DicomSDL은 이를 unpack해서

@@ -193,6 +193,32 @@ Source image references are provenance metadata. They tell you which images were
 used to create the SEG, but they are not the only possible display target. For
 overlay, compare `FrameOfReferenceUID` first.
 
+## Choose APIs by SegmentationType
+
+`seg.segmentation_type` tells you the stored representation. For code that works
+across BINARY, FRACTIONAL, and LABELMAP SEG, keep this split in mind:
+
+| SegmentationType | `to_array()` / `decode_frame()` | Segment membership | Recommended approach |
+| --- | --- | --- | --- |
+| `binary` | `uint8` mask values `0` or `1` | One `ReferencedSegmentNumber` per frame | Use `frames_for_segment()` for segment-wise iteration. `to_array()` is already a semantic mask for that frame. |
+| `fractional` | Raw `uint8` stored samples | One `ReferencedSegmentNumber` per frame | Use `mask_for_segment(..., fractional_threshold=...)` for thresholded masks, or scale raw samples by `MaximumFractionalValue` yourself. |
+| `labelmap` | Stored label values, `uint8` or native-endian `uint16` | A frame may contain multiple segment numbers | Use `present_segment_numbers()` and `mask_for_segment()`. Do not use `referenced_segment_number` for LABELMAP frames. |
+
+The safest general pattern is:
+
+```python
+for frame in seg.frames:
+    for segment_number in frame.present_segment_numbers():
+        mask = frame.mask_for_segment(segment_number)
+        # Use mask with frame.image_position_patient / geometry mapping.
+```
+
+Use `to_array()` when you need the stored pixel representation. Use
+`mask_for_segment()` when you need a semantic `uint8` 0/1 mask independent of
+storage type. For LABELMAP, `frames_for_segment()` and `validate_label_values()`
+may scan all frames on first use; for BINARY and FRACTIONAL they use the
+metadata index built at open time.
+
 ## Decode a BINARY SEG Mask
 
 For BINARY SEG, DICOM stores native 1-bit pixels. DicomSDL returns an unpacked

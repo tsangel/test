@@ -167,6 +167,27 @@ for ref in frame.source_images:
 
 Source image reference は、SEG がどの image から作られたかを示す由来 metadata です。ただし、overlay 先が必ずその image でなければならないという意味ではありません。Overlay ではまず `FrameOfReferenceUID` を比較します。
 
+## SegmentationType ごとの API の選び方
+
+`seg.segmentation_type` は PixelData の保存表現を示します。BINARY、FRACTIONAL、LABELMAP SEG を同じ code で扱う場合は、次の違いを基準にしてください。
+
+| SegmentationType | `to_array()` / `decode_frame()` | segment membership | 推奨 approach |
+| --- | --- | --- | --- |
+| `binary` | `uint8` mask value `0` または `1` | frame ごとに 1 つの `ReferencedSegmentNumber` | segment 単位の iteration には `frames_for_segment()` を使います。`to_array()` の結果はその frame の semantic mask です。 |
+| `fractional` | 保存された raw `uint8` sample | frame ごとに 1 つの `ReferencedSegmentNumber` | threshold mask には `mask_for_segment(..., fractional_threshold=...)` を使い、raw probability/occupancy value が必要な場合は `MaximumFractionalValue` で scaling します。 |
+| `labelmap` | 保存された label value、`uint8` または native-endian `uint16` | 1 frame に複数の segment number が入ることがあります | `present_segment_numbers()` と `mask_for_segment()` を使います。LABELMAP frame では `referenced_segment_number` を使わないでください。 |
+
+最も安全な共通 pattern は次の形です。
+
+```python
+for frame in seg.frames:
+    for segment_number in frame.present_segment_numbers():
+        mask = frame.mask_for_segment(segment_number)
+        # frame.image_position_patient / geometry mapping と一緒に mask を使います。
+```
+
+保存 pixel 表現が必要な場合は `to_array()` を使います。storage type に依存しない semantic `uint8` 0/1 mask が必要な場合は `mask_for_segment()` を使います。LABELMAP では `frames_for_segment()` と `validate_label_values()` が初回呼び出し時に全 frame を scan することがあります。BINARY/FRACTIONAL では open 時点に作成した metadata index を使います。
+
 ## BINARY SEG mask を decode する
 
 BINARY SEG は native 1-bit pixel として DICOM に保存されます。DicomSDL はこれを unpack し、値が `0` または `1` の `uint8` mask を返します。

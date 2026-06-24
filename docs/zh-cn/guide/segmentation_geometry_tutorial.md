@@ -167,6 +167,27 @@ for ref in frame.source_images:
 
 Source image reference 是来源元数据。它说明 SEG 是由哪些 image 生成的，但并不表示 overlay target 必须是这些 image。做 overlay 时，应先比较 `FrameOfReferenceUID`。
 
+## 按 SegmentationType 选择 API
+
+`seg.segmentation_type` 表示 PixelData 的存储形式。如果一段代码要同时处理 BINARY、FRACTIONAL 和 LABELMAP SEG，请按下面的差异选择 API。
+
+| SegmentationType | `to_array()` / `decode_frame()` | segment membership | 推荐方式 |
+| --- | --- | --- | --- |
+| `binary` | `uint8` mask value `0` 或 `1` | 每个 frame 有一个 `ReferencedSegmentNumber` | 按 segment 遍历时使用 `frames_for_segment()`。`to_array()` 的结果已经是该 frame 的 semantic mask。 |
+| `fractional` | 存储的 raw `uint8` sample | 每个 frame 有一个 `ReferencedSegmentNumber` | threshold mask 使用 `mask_for_segment(..., fractional_threshold=...)`；如果需要 raw probability/occupancy value，则用 `MaximumFractionalValue` 自行 scaling。 |
+| `labelmap` | 存储的 label value，`uint8` 或 native-endian `uint16` | 一个 frame 可以包含多个 segment number | 使用 `present_segment_numbers()` 和 `mask_for_segment()`。不要在 LABELMAP frame 中使用 `referenced_segment_number`。 |
+
+最稳妥的通用 pattern 如下：
+
+```python
+for frame in seg.frames:
+    for segment_number in frame.present_segment_numbers():
+        mask = frame.mask_for_segment(segment_number)
+        # 将 mask 与 frame.image_position_patient / geometry mapping 一起使用。
+```
+
+如果需要存储 pixel 表示，请使用 `to_array()`。如果需要与 storage type 无关的 semantic `uint8` 0/1 mask，请使用 `mask_for_segment()`。对于 LABELMAP，`frames_for_segment()` 和 `validate_label_values()` 第一次调用时可能扫描全部 frame；对于 BINARY/FRACTIONAL，它们使用打开文件时建立的 metadata index。
+
 ## 解码 BINARY SEG mask
 
 BINARY SEG 在 DICOM 中以 native 1-bit pixel 存储。DicomSDL 会 unpack，并返回值为 `0` 或 `1` 的 `uint8` mask。
