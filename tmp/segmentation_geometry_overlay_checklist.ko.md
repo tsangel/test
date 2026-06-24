@@ -1131,7 +1131,9 @@ SliceStackPlan plan_image_frame_stack(
 - [x] payload/metadata MVP 정책 구현: native uncompressed PixelData만 지원하고, Big Endian, compressed/encapsulated, unexpected PixelSequence, detached payload, missing PixelData, invalid length/padding은 decode/validate 시 명확한 error로 처리한다. `PixelPaddingValue`는 metadata validation에서 reject한다.
 - [x] Python binding/stub 반영: `present_segment_numbers()`는 tuple, labelmap `to_array()`는 `np.uint8`/`np.uint16`, `decode_frame()` bytes는 native typed bytes, `decode_frame_into()`는 unsigned dtype/endian을 검사한다.
 - [x] 집중 테스트 추가: synthetic 8-bit/16-bit LABELMAP, lazy unknown-label validation, SOP conflict/helper, `PALETTE COLOR`, `PixelPaddingValue`, `SegmentNumber=0`, metadata-only absent segment, dtype mismatch, Big Endian/compressed/missing/trailing/padded PixelData, detached/PixSeq C++ smoke를 커버한다.
-- [ ] 남은 후속: developer/reference 문서 승격, cache 재사용을 decode-count로 검증하는 계측 테스트, concurrent lazy scan stress, `plane_from_seg_frame()` LabelMap synthetic geometry 별도 테스트, C++ header partial-write/BINARY-FRACTIONAL-LABELMAP contract 주석 보강.
+- [x] 공개 계약 정리: public header, Python docstring, en/ko developer segmentation 문서에서 LABELMAP 지원 범위와 native typed sample bytes 계약을 반영했다.
+- [x] `plane_from_seg_frame()` LabelMap synthetic geometry smoke test를 추가했다.
+- [ ] 남은 후속: cache 재사용을 decode-count로 검증하는 계측 테스트, concurrent lazy scan stress, C++ header partial-write/BINARY-FRACTIONAL-LABELMAP contract 주석 보강.
 
 ### 범위 결정
 

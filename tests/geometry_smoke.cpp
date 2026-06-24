@@ -234,6 +234,23 @@ std::unique_ptr<dicom::DicomFile> make_seg_geometry_file() {
 	return file;
 }
 
+std::unique_ptr<dicom::DicomFile> make_labelmap_seg_geometry_file() {
+	auto file = make_seg_geometry_file();
+	set_text(*file, "SOPClassUID"_tag,
+	    "LabelMapSegmentationStorage"_uid.value());
+	set_text(*file, "MediaStorageSOPClassUID"_tag,
+	    "LabelMapSegmentationStorage"_uid.value());
+	set_text(*file, "SegmentationType"_tag, "LABELMAP");
+	set_int(*file, "SamplesPerPixel"_tag, 1);
+	set_int(*file, "BitsAllocated"_tag, 8);
+	set_int(*file, "BitsStored"_tag, 8);
+	set_int(*file, "HighBit"_tag, 7);
+	set_int(*file, "PixelRepresentation"_tag, 0);
+	set_text(*file, "PhotometricInterpretation"_tag, "MONOCHROME2");
+	set_text(*file, "SegmentsOverlap"_tag, "NO");
+	return file;
+}
+
 std::unique_ptr<dicom::DicomFile> make_enhanced_ct_stack_file() {
 	auto file = std::make_unique<dicom::DicomFile>();
 	set_int(*file, "Rows"_tag, 4);
@@ -688,6 +705,23 @@ int main() {
 		    out_of_range.status() !=
 		        dicom::geometry::GeometryBuildStatus::invalid_frame_index) {
 			fail("SEG out-of-range frame should return invalid_frame_index");
+		}
+	}
+	{
+		auto file = make_labelmap_seg_geometry_file();
+		auto seg = dicom::seg::from_dicomfile(std::move(file));
+		auto plane = dicom::geometry::plane_from_seg_frame(*seg, 1);
+		if (!plane.ok()) {
+			fail("LABELMAP SEG frame plane should parse from PerFrame/Shared FG");
+		}
+		expect_near(plane.value().origin().z, 20.0,
+		    "LABELMAP SEG frame position");
+		expect_near(plane.value().spacing_i(), 2.5,
+		    "LABELMAP SEG spacing_i");
+		expect_near(plane.value().spacing_j(), 1.5,
+		    "LABELMAP SEG spacing_j");
+		if (plane.value().columns() != 5 || plane.value().rows() != 4) {
+			fail("LABELMAP SEG Rows/Columns should map to j/i size");
 		}
 	}
 	{

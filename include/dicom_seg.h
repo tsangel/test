@@ -19,8 +19,8 @@
 namespace dicom::seg {
 
 /// DICOM Segmentation Type (0062,0001).
-/// The MVP accepts BINARY and FRACTIONAL SEG instances. LABELMAP is recognized
-/// as a named value but is intentionally left for post-MVP decoding support.
+/// The adapter accepts BINARY and FRACTIONAL Segmentation Storage instances and
+/// LABELMAP Label Map Segmentation Storage instances.
 enum class SegmentationType : std::uint8_t {
 	unknown,
 	binary,

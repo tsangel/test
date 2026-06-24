@@ -4,17 +4,17 @@ This page records the first DicomSDL contract for the high-level DICOM SEG adapt
 
 ## Supported Scope
 
-- SOP Class: Segmentation Storage (`1.2.840.10008.5.1.4.1.1.66.4`) only.
+- SOP Classes: Segmentation Storage (`1.2.840.10008.5.1.4.1.1.66.4`) for BINARY/FRACTIONAL and Label Map Segmentation Storage (`1.2.840.10008.5.1.4.1.1.66.7`) for LABELMAP.
 - BINARY SEG: native 1-bit multi-frame PixelData is supported. `decode_frame_into()` unpacks one stored frame into one byte per pixel, with values `0` or `1`.
 - FRACTIONAL SEG: native 8-bit PixelData is supported. Decoding returns raw `uint8` samples. Callers can convert to fractional values with `raw_value / MaximumFractionalValue`.
+- LABELMAP SEG: native uncompressed 8-bit or 16-bit stored label samples are supported through Label Map Segmentation Storage. Decoding preserves the stored label values; palette lookup and color rendering are left to viewer/UI code.
 - Metadata views: `SegmentSequence`, `PerFrameFunctionalGroupsSequence`, `SharedFunctionalGroupsSequence`, source-image references, and `FrameOfReferenceUID` are indexed frame by frame.
 
 ## Post-MVP
 
-- LABELMAP SEG and Label Map Segmentation Storage.
 - Volume reconstruction APIs that assemble frame masks into 3D arrays.
 - Affine or overlay helpers that map SEG frames onto display images.
-- Compressed or encapsulated BINARY SEG PixelData, including RLE or other encapsulated transfer syntaxes.
+- Compressed or encapsulated SEG PixelData, including RLE or other encapsulated transfer syntaxes.
 
 ## Required Metadata
 
@@ -23,8 +23,9 @@ The SEG adapter validates the metadata needed by this MVP by default:
 - `FrameOfReferenceUID` is required and is the primary key for deciding whether a SEG can be directly overlaid on another image. `SourceImageSequence` is provenance metadata and does not have to be the only possible display target.
 - `Rows`, `Columns`, `SegmentSequence`, and `PerFrameFunctionalGroupsSequence` are required.
 - `SharedFunctionalGroupsSequence` must contain exactly one item.
-- Each frame must resolve to one `ReferencedSegmentNumber`.
+- BINARY and FRACTIONAL frames must resolve to one `ReferencedSegmentNumber`.
 - FRACTIONAL SEG must contain `SegmentationFractionalType` and `MaximumFractionalValue`.
+- LABELMAP SEG must use Label Map Segmentation Storage with `SegmentationType=LABELMAP`, `BitsAllocated` of 8 or 16, unsigned single-sample pixels, and `PhotometricInterpretation` of `MONOCHROME2` or `PALETTE COLOR`. Stored label values are validated lazily during decode/presence queries or by calling `validate_label_values()`.
 
 When these conditions are not met, the adapter should fail loudly instead of returning a misleading mask.
 
@@ -46,6 +47,8 @@ fraction = raw.astype("float32") / seg.maximum_fractional_value
 ```
 
 The scaling step stays with the caller so probability and occupancy consumers can choose their output precision and memory layout.
+
+For LABELMAP SEG, `to_array()` preserves the stored sample dtype: `uint8` for 8-bit label maps and native-endian `uint16` for 16-bit label maps. `present_segment_numbers(frame)` reports non-background labels actually present in that frame, and `mask_for_segment(frame, segment_number)` returns a semantic `uint8` 0/1 mask for the requested segment. Unknown stored label values are not checked at file-open time; they are reported when the relevant frame is decoded/scanned or when `validate_label_values()` is called.
 
 ## API Pattern
 
@@ -76,7 +79,7 @@ There is no Python `dicom.seg.from_dicomfile(df)` helper. Python cannot move own
 
 ## Regression Tests
 
-The repository keeps synthetic BINARY and FRACTIONAL SEG tests in C++ and Python. A local real-sample regression can be enabled without committing private data:
+The repository keeps synthetic BINARY, FRACTIONAL, and LABELMAP SEG tests in C++ and Python. A local real-sample regression can be enabled without committing private data:
 
 ```powershell
 $env:DICOMSDL_SEG_SAMPLE_PATH = "C:\path\to\sample-seg.dcm"

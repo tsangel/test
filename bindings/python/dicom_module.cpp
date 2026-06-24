@@ -8142,12 +8142,12 @@ NB_MODULE(_dicomsdl, m) {
 		    [](const PySegmentFrame& self) {
 			    return py_seg_frame_array(self.owner->get(), self.frame_index);
 		    },
-		    "Decode this SEG frame as a uint8 NumPy array with shape (rows, columns).")
+		    "Decode this SEG frame as a NumPy array with shape (rows, columns).")
 		.def("decode_frame",
 		    [](const PySegmentFrame& self) {
 			    return py_seg_decode_frame_bytes(self.owner->get(), self.frame_index);
 		    },
-		    "Decode this SEG frame and return raw uint8 bytes.")
+		    "Decode this SEG frame and return validated native typed sample bytes.")
 		.def("decode_frame_into",
 		    [](const PySegmentFrame& self, nb::handle out) -> nb::object {
 			    py_seg_decode_frame_into(self.owner->get(), self.frame_index, out);
@@ -8322,14 +8322,14 @@ NB_MODULE(_dicomsdl, m) {
 			    return py_seg_frame_array(self.get(), frame_index);
 		    },
 		    nb::arg("frame") = 0,
-		    "Decode one SEG frame as a uint8 NumPy array with shape (rows, columns).")
+		    "Decode one SEG frame as a NumPy array with shape (rows, columns).")
 		.def("decode_frame",
 		    [](const PySegmentation& self, std::ptrdiff_t frame) {
 			    const auto frame_index = normalize_py_seg_frame_index(self.get(), frame);
 			    return py_seg_decode_frame_bytes(self.get(), frame_index);
 		    },
 		    nb::arg("frame") = 0,
-		    "Decode one SEG frame and return raw uint8 bytes.")
+		    "Decode one SEG frame and return validated native typed sample bytes.")
 		.def("decode_frame_into",
 		    [](const PySegmentation& self, std::ptrdiff_t frame, nb::handle out) -> nb::object {
 			    const auto frame_index = normalize_py_seg_frame_index(self.get(), frame);
