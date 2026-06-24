@@ -228,12 +228,24 @@ def test_geometry_slice_stack_analysis_and_plan_bindings() -> None:
     assert not duplicate.ok
     assert duplicate.status is g.SliceStackStatus.duplicate_slice_position
 
+    allowed_duplicate_plan = g.plan_slice_stack(
+        close_positions,
+        g.SliceStackOptions(allow_duplicate_positions=True),
+    )
+    assert not allowed_duplicate_plan.ok
+    assert allowed_duplicate_plan.status is g.SliceStackStatus.non_uniform_spacing
+    assert allowed_duplicate_plan.issues
+    assert allowed_duplicate_plan.issues[0].tag == dicom.Tag("ImagePositionPatient")
+
     tight = g.analyze_slice_stack(
         close_positions,
         g.SliceStackOptions(slice_position_tolerance_mm=1e-4),
     )
     assert tight.ok
     assert tight.uniform_spacing_k == pytest.approx(0.0005)
+
+    with pytest.raises(TypeError):
+        g.SliceStackOptions(None, 1e-4, 0.2, True)
 
 
 def test_geometry_enhanced_image_frame_stack_bindings() -> None:

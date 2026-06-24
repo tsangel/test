@@ -7256,6 +7256,7 @@ NB_MODULE(_dicomsdl, m) {
 			    new (self) geo::SliceStackOptions(options);
 		    },
 		    nb::arg("tolerance") = nb::none(),
+		    nb::kw_only(),
 		    nb::arg("slice_position_tolerance_mm") = 1e-3,
 		    nb::arg("origin_residual_tolerance_mm") = 1e-3,
 		    nb::arg("allow_duplicate_positions") = false)

@@ -1902,6 +1902,42 @@ SliceStackPlan plan_slice_stack(
 	}
 	if (!analysis.uniform_spacing_k()) {
 		plan.status_ = SliceStackStatus::non_uniform_spacing;
+		const auto& slices = analysis.slices();
+		const auto& gaps = analysis.gaps();
+		const auto slice_position_tolerance =
+		    std::max(0.0, options.slice_position_tolerance_mm);
+		std::size_t issue_sorted_index = slices.empty() ? 0 : slices.size() - 1;
+		std::string message = "slice stack does not have uniform spacing";
+		for (const auto& gap : gaps) {
+			if (gap.upper_sorted_index < slices.size()) {
+				issue_sorted_index = gap.upper_sorted_index;
+			}
+			if (gap.spacing_mm <= slice_position_tolerance) {
+				message =
+				    "duplicate slice position prevents uniform volume planning";
+				break;
+			}
+		}
+		if (!slices.empty()) {
+			const auto& slice = slices[issue_sorted_index];
+			plan.issues_.push_back(SliceStackIssue{
+			    plan.status_,
+			    slice.input_index,
+			    slice.source_index,
+			    slice.frame_index,
+			    "ImagePositionPatient"_tag,
+			    std::move(message),
+			});
+		} else {
+			plan.issues_.push_back(SliceStackIssue{
+			    plan.status_,
+			    0,
+			    0,
+			    0,
+			    "ImagePositionPatient"_tag,
+			    std::move(message),
+			});
+		}
 		return plan;
 	}
 

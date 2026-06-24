@@ -810,6 +810,17 @@ int main() {
 		if (!analysis.ok() || analysis.uniform_spacing_k()) {
 			fail("allowed duplicate positions should not become a uniform volume");
 		}
+		auto plan = dicom::geometry::plan_slice_stack(
+		    std::span<const dicom::geometry::SliceStackInput>(
+		        inputs.data(), inputs.size()),
+		    allow_duplicate_options);
+		if (plan.ok() || plan.volume_geometry() ||
+		    plan.status() != dicom::geometry::SliceStackStatus::non_uniform_spacing ||
+		    plan.issues().empty() ||
+		    plan.issues().front().tag != "ImagePositionPatient"_tag ||
+		    plan.issues().front().source_index != 1) {
+			fail("allowed duplicate positions should leave a plan diagnostic");
+		}
 	}
 
 	{
