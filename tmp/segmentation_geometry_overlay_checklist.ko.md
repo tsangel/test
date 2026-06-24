@@ -405,7 +405,7 @@
 - [x] DICOM slice stack 입력을 `SliceStackInput` 목록으로 변환하는 helper 추가
 - [x] `SliceStackIssue { status, source_index, frame_index, tag, message }`를 정의하고 analysis 결과에서 노출한다.
 - [x] `ImageFrameStackOptions`를 정의한다.
-- [ ] dimension metadata가 없는 경우의 geometry-only grouping fallback을 기본 off로 둔다.
+- [x] dimension metadata가 없는 경우의 geometry-only grouping fallback을 기본 off로 둔다.
 - [x] classic multi-instance image series는 `DataSet*` 목록에서 `SliceStackInput` 목록을 만드는 convenience adapter로 처리
 - [x] Enhanced multi-frame image는 명시적 `DicomFile + frame_index` 목록에서 `SliceStackInput` 목록을 만드는 convenience adapter로 처리
 - [x] Enhanced multi-frame image의 전체 frame convenience API는 먼저 `StackID`, `InStackPositionNumber` 기반 group을 만든다.
@@ -1059,8 +1059,8 @@ SliceStackPlan plan_image_frame_stack(
 - [x] Enhanced multi-frame에서 `StackID`가 둘 이상이면 `analyze_image_frame_stacks()`가 group을 분리하는지 검증
 - [x] `ImageFrameStackGroup`의 dimension 값이 `DimensionIndexDescriptor`와 함께 보존되어 echo/time/phase/position 축 의미를 구분할 수 있는지 검증
 - [ ] `DimensionIndexSequence`가 없고 geometry fallback option이 꺼져 있으면 `missing_dimension_module`로 실패하는지 검증
-- [ ] `ImageFrameStackOptions::allow_geometry_grouping_fallback=true`인 경우에만 geometry-only grouping fallback을 허용하는지 검증
-- [ ] tiled multi-frame image가 MVP에서 `unsupported_tiled_image`로 실패하는지 검증
+- [x] `ImageFrameStackOptions::allow_geometry_grouping_fallback=true`인 경우에만 geometry-only grouping fallback을 허용하는지 검증
+- [x] tiled multi-frame image가 MVP에서 `unsupported_tiled_image`로 실패하는지 검증
 - [x] FrameContent 누락은 `ImageFrameStackAnalysis::issues()`에 source frame과 tag를 포함해 기록되는지 검증
 - [x] dimension module/geometry parse failure는 `ImageFrameStackAnalysis::issues()`에 source frame과 tag를 포함해 기록되는지 검증
 - [x] Enhanced multi-frame에서 `StackID`가 둘 이상이면 `plan_image_frame_stack(file)`이 `multiple_frame_stacks`로 실패하는지 검증

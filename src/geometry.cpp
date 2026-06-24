@@ -2179,8 +2179,16 @@ ImageFrameStackAnalysis analyze_image_frame_stacks(
 				    "frame index is outside PerFrameFunctionalGroupsSequence");
 				continue;
 			}
-			const DataSet* frame_content =
-			    per_frame_item->sequence_item("FrameContentSequence"_tag, 0);
+			auto frame_content_result = resolve_sequence_item_if_present(
+			    *per_frame_item, "FrameContentSequence"_tag, 0);
+			if (!frame_content_result.ok()) {
+				add_issue(SliceStackStatus::geometry_parse_failure, frame_index,
+				    frame_content_result.tag(),
+				    std::string("malformed FrameContentSequence: ") +
+				        frame_content_result.message());
+				continue;
+			}
+			const DataSet* frame_content = frame_content_result.value();
 			if (!frame_content) {
 				add_issue(SliceStackStatus::missing_frame_content, frame_index,
 				    "FrameContentSequence"_tag,

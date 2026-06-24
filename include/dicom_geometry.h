@@ -505,8 +505,11 @@ public:
 	explicit FrameGeometryReader(const DataSet& dataset) noexcept;
 	explicit FrameGeometryReader(const DicomFile& file) noexcept;
 
-	/// Resolve one frame plane using the enhanced image order:
+	/// Resolve one regular overlay frame plane using the enhanced image order:
 	/// PerFrameFunctionalGroupsSequence -> SharedFunctionalGroupsSequence -> root dataset.
+	/// Frames whose VolumetricProperties resolve to SAMPLED or DISTORTED fail with
+	/// sampled_frame_geometry/distorted_frame_geometry; use image_frame_geometry()
+	/// when those non-regular frame semantics need to be inspected.
 	/// For many frames, construct one reader and reuse it instead of repeatedly
 	/// calling `plane_from_multiframe_image()`.
 	[[nodiscard]] GeometryBuildResult<ImagePlaneGeometry> plane(

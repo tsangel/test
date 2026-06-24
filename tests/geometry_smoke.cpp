@@ -1186,6 +1186,31 @@ int main() {
 
 	{
 		auto file = make_enhanced_ct_stack_file();
+		auto* frame_item =
+		    file->dataset().sequence_item("PerFrameFunctionalGroupsSequence"_tag, 1);
+		if (!frame_item) {
+			fail("test setup should have PerFrameFunctionalGroupsSequence item");
+		}
+		frame_item->remove_dataelement("FrameContentSequence"_tag);
+		auto& bad_frame_content =
+		    frame_item->add_dataelement("FrameContentSequence"_tag, dicom::VR::LO);
+		if (!bad_frame_content.from_string_view("bad")) {
+			fail("failed to create malformed FrameContentSequence");
+		}
+		auto stacks = dicom::geometry::analyze_image_frame_stacks(*file);
+		if (stacks.ok() ||
+		    stacks.status() !=
+		        dicom::geometry::SliceStackStatus::geometry_parse_failure ||
+		    stacks.issues().empty() || stacks.issues()[0].frame_index != 1 ||
+		    stacks.issues()[0].tag != "FrameContentSequence"_tag ||
+		    stacks.issues()[0].message.find("malformed FrameContentSequence") ==
+		        std::string::npos) {
+			fail("malformed FrameContentSequence should be reported distinctly");
+		}
+	}
+
+	{
+		auto file = make_enhanced_ct_stack_file();
 		set_text(*file,
 		    "PerFrameFunctionalGroupsSequence.1.CTImageFrameTypeSequence.0."
 		    "VolumetricProperties",
