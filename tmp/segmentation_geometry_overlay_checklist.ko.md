@@ -199,7 +199,7 @@
 ### NM Image Storage 별도 경로
 
 - [x] NM Image Storage는 `VolumetricProperties` / Enhanced Functional Groups 기반 판정 대상이 아니다.
-- [x] NM frame organization은 `Frame Increment Pointer (0028,0009)`가 참조하는 indexing vector들로 해석한다. MVP에서는 `Slice Vector (0054,0080)`만 지원한다.
+- [x] NM frame organization은 `Frame Increment Pointer (0028,0009)`가 참조하는 indexing vector들로 해석한다. MVP에서는 `Frame Increment Pointer`가 정확히 `Slice Vector (0054,0080)` 하나만 가리키는 경우만 지원한다.
 - [ ] 주요 NM vector tags:
   - `Energy Window Vector (0054,0010)`
   - `Detector Vector (0054,0020)`
@@ -375,7 +375,7 @@
 - [x] 많은 frame을 순회하는 API 문서/주석에서는 convenience factory보다 `FrameGeometryReader` 재사용을 권장한다.
 - [x] MR `MR Image Frame Type Sequence (0018,9226)`, CT `CT Image Frame Type Sequence (0018,9329)`, PET `PET Frame Type Sequence (0018,9751)` lookup을 먼저 구현하고, 다른 SOP Class는 table 확장 전까지 명시적으로 unsupported 처리한다.
 - [x] NM Image Storage는 `FrameGeometryReader::volumetric_properties()` lookup table에서 제외하고, 호출되면 `unsupported_frame_geometry`로 실패한다.
-- [x] NM 지원은 `Frame Increment Pointer (0028,0009)`와 NM indexing vectors를 해석하는 별도 adapter로 문서화한다. MVP는 reconstructed TOMO `SliceVector` 경로만 포함한다.
+- [x] NM 지원은 `Frame Increment Pointer (0028,0009)`와 NM indexing vectors를 해석하는 별도 adapter로 문서화한다. MVP는 reconstructed TOMO `SliceVector` 단독 경로만 포함한다.
 - [x] root `VolumetricProperties=MIXED`는 frame-level value를 찾지 못한 경우 실패로 처리한다.
 - [x] `frame_geometry_from_multiframe_image()`는 resolved `VolumetricProperties` source path를 diagnostic message 또는 issue에 남긴다.
 - [x] SEG frame의 strict parser는 `PerFrameFunctionalGroupsSequence` / `SharedFunctionalGroupsSequence`에서만 plane geometry를 생성한다.
@@ -811,6 +811,8 @@ enum class SliceStackStatus {
     empty,
     missing_geometry,
     missing_frame_content,
+    missing_dimension_module,
+    unsupported_tiled_image,
     multiple_frame_stacks,
     geometry_parse_failure,
     missing_frame_of_reference,

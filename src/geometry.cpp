@@ -273,7 +273,8 @@ volumetric_properties_from_code_string(ResolvedCodeString resolved) {
 		    GeometryBuildStatus::invalid_value, tag, "invalid value count",
 		    root_path(tag));
 	}
-	return GeometryBuildResult<std::vector<double>>::success(std::move(*values));
+	return GeometryBuildResult<std::vector<double>>::success(
+	    std::move(*values), root_path(tag));
 }
 
 [[nodiscard]] GeometryBuildResult<int> read_positive_int(
@@ -290,7 +291,7 @@ volumetric_properties_from_code_string(ResolvedCodeString resolved) {
 		    GeometryBuildStatus::invalid_size, tag, "value must be positive",
 		    root_path(tag));
 	}
-	return GeometryBuildResult<int>::success(*value);
+	return GeometryBuildResult<int>::success(*value, root_path(tag));
 }
 
 [[nodiscard]] GeometryBuildResult<double> read_positive_double(
@@ -409,25 +410,25 @@ volumetric_properties_from_code_string(ResolvedCodeString resolved) {
 		return 3;
 	case SliceStackStatus::unsupported_tiled_image:
 		return 4;
-	case SliceStackStatus::geometry_parse_failure:
-		return 5;
-	case SliceStackStatus::missing_frame_of_reference:
-		return 6;
-	case SliceStackStatus::mixed_frame_of_reference:
-		return 7;
-	case SliceStackStatus::inconsistent_rows_columns:
-		return 8;
-	case SliceStackStatus::inconsistent_orientation:
-		return 9;
-	case SliceStackStatus::inconsistent_pixel_spacing:
-		return 10;
-	case SliceStackStatus::inconsistent_slice_origin:
-		return 11;
-	case SliceStackStatus::duplicate_slice_position:
-		return 12;
-	case SliceStackStatus::non_uniform_spacing:
-		return 13;
 	case SliceStackStatus::multiple_frame_stacks:
+		return 5;
+	case SliceStackStatus::geometry_parse_failure:
+		return 6;
+	case SliceStackStatus::missing_frame_of_reference:
+		return 7;
+	case SliceStackStatus::mixed_frame_of_reference:
+		return 8;
+	case SliceStackStatus::inconsistent_rows_columns:
+		return 9;
+	case SliceStackStatus::inconsistent_orientation:
+		return 10;
+	case SliceStackStatus::inconsistent_pixel_spacing:
+		return 11;
+	case SliceStackStatus::inconsistent_slice_origin:
+		return 12;
+	case SliceStackStatus::duplicate_slice_position:
+		return 13;
+	case SliceStackStatus::non_uniform_spacing:
 		return 14;
 	}
 	return 100;
@@ -551,29 +552,35 @@ read_dimension_index_descriptors(const DataSet& root) {
 	if (!element.vr().is_sequence()) {
 		return GeometryBuildResult<std::vector<DimensionIndexDescriptor>>::failure(
 		    GeometryBuildStatus::invalid_value, tag,
-		    "DimensionIndexSequence is not a sequence");
+		    "DimensionIndexSequence is not a sequence", root_path(tag));
 	}
 	const auto* sequence = element.as_sequence();
 	if (!sequence) {
 		return GeometryBuildResult<std::vector<DimensionIndexDescriptor>>::failure(
 		    GeometryBuildStatus::invalid_value, tag,
-		    "invalid DimensionIndexSequence");
+		    "invalid DimensionIndexSequence", root_path(tag));
 	}
 
 	std::vector<DimensionIndexDescriptor> descriptors;
 	descriptors.reserve(static_cast<std::size_t>(std::max(0, sequence->size())));
+	std::uint32_t item_index = 0;
 	for (const auto& item : *sequence) {
 		if (!item) {
+			ElementPath source;
+			source.item(tag, item_index).element("DimensionIndexPointer"_tag);
 			return GeometryBuildResult<std::vector<DimensionIndexDescriptor>>::failure(
 			    GeometryBuildStatus::invalid_value, tag,
-			    "DimensionIndexSequence contains a null item");
+			    "DimensionIndexSequence contains a null item", std::move(source));
 		}
+		ElementPath pointer_source;
+		pointer_source.item(tag, item_index).element("DimensionIndexPointer"_tag);
 		const auto pointer =
 		    item->get_dataelement(root_path("DimensionIndexPointer"_tag)).to_tag();
 		if (!pointer || !*pointer) {
 			return GeometryBuildResult<std::vector<DimensionIndexDescriptor>>::failure(
 			    GeometryBuildStatus::invalid_value, "DimensionIndexPointer"_tag,
-			    "missing or invalid DimensionIndexPointer");
+			    "missing or invalid DimensionIndexPointer",
+			    std::move(pointer_source));
 		}
 		DimensionIndexDescriptor descriptor;
 		descriptor.dimension_index_pointer = *pointer;
@@ -593,14 +600,16 @@ read_dimension_index_descriptors(const DataSet& root) {
 			descriptor.private_creator = std::string(*value);
 		}
 		descriptors.push_back(std::move(descriptor));
+		++item_index;
 	}
 	return GeometryBuildResult<std::vector<DimensionIndexDescriptor>>::success(
-	    std::move(descriptors));
+	    std::move(descriptors), root_path(tag));
 }
 
 [[nodiscard]] GeometryBuildResult<std::vector<DimensionIndexValue>>
 read_non_spatial_dimension_values(const DataSet& frame_content,
-    const std::vector<DimensionIndexDescriptor>& descriptors) {
+    const std::vector<DimensionIndexDescriptor>& descriptors,
+    ElementPath source) {
 	if (descriptors.empty()) {
 		return GeometryBuildResult<std::vector<DimensionIndexValue>>::success({});
 	}
@@ -609,13 +618,14 @@ read_non_spatial_dimension_values(const DataSet& frame_content,
 	if (element.is_missing()) {
 		return GeometryBuildResult<std::vector<DimensionIndexValue>>::failure(
 		    GeometryBuildStatus::missing_required_tag, tag,
-		    "missing DimensionIndexValues");
+		    "missing DimensionIndexValues", std::move(source));
 	}
 	auto values = element.to_longlong_vector();
 	if (!values || values->size() != descriptors.size()) {
 		return GeometryBuildResult<std::vector<DimensionIndexValue>>::failure(
 		    GeometryBuildStatus::invalid_value, tag,
-		    "DimensionIndexValues count does not match DimensionIndexSequence");
+		    "DimensionIndexValues count does not match DimensionIndexSequence",
+		    std::move(source));
 	}
 
 	std::vector<DimensionIndexValue> dimension_values;
@@ -631,7 +641,7 @@ read_non_spatial_dimension_values(const DataSet& frame_content,
 		});
 	}
 	return GeometryBuildResult<std::vector<DimensionIndexValue>>::success(
-	    std::move(dimension_values));
+	    std::move(dimension_values), std::move(source));
 }
 
 void add_slice_stack_store_issue(SliceStackInputStore& store,
@@ -792,12 +802,11 @@ void add_slice_stack_store_issue(SliceStackInputStore& store,
 		    frame_increment_pointers.source());
 		return store;
 	}
-	if (std::find(frame_increment_pointers.value().begin(),
-	        frame_increment_pointers.value().end(),
-	        "SliceVector"_tag) == frame_increment_pointers.value().end()) {
-		add_root_issue(SliceStackStatus::missing_frame_content,
+	if (frame_increment_pointers.value().size() != 1 ||
+	    frame_increment_pointers.value().front() != "SliceVector"_tag) {
+		add_root_issue(SliceStackStatus::geometry_parse_failure,
 		    "FrameIncrementPointer"_tag,
-		    "FrameIncrementPointer does not reference SliceVector",
+		    "NM MVP requires FrameIncrementPointer to reference only SliceVector",
 		    frame_increment_pointers.source());
 		return store;
 	}
@@ -1001,7 +1010,8 @@ try_read_double_vector_from_functional_group(const DataSet* functional_group_ite
 		    GeometryBuildStatus::invalid_value, leaf_tag, "invalid value count",
 		    leaf_source);
 	}
-	return GeometryBuildResult<std::vector<double>>::success(std::move(*values));
+	return GeometryBuildResult<std::vector<double>>::success(
+	    std::move(*values), leaf_source);
 }
 
 [[nodiscard]] GeometryBuildResult<std::vector<double>> resolve_frame_double_vector(
@@ -2129,6 +2139,8 @@ SliceStackAnalysis analyze_slice_stack(
 		const double residual_j = dot(residual, reference_direction_j);
 		const double residual_mm =
 		    std::sqrt(residual_i * residual_i + residual_j * residual_j);
+		analysis.max_in_plane_residual_mm_ =
+		    std::max(analysis.max_in_plane_residual_mm_, residual_mm);
 		if (residual_mm > origin_residual_tolerance) {
 			add_issue(SliceStackStatus::inconsistent_slice_origin, input,
 			    input_index, "ImagePositionPatient"_tag,
@@ -2141,6 +2153,7 @@ SliceStackAnalysis analyze_slice_stack(
 		    input.frame_index,
 		    plane,
 		    position,
+		    residual_mm,
 		});
 	}
 
@@ -2379,6 +2392,7 @@ SliceStackPlan plan_slice_stack(
 		    slice.frame_index,
 		    sorted_index,
 		    slice.position_along_normal_mm,
+		    slice.in_plane_residual_mm,
 		});
 	}
 	return plan;
@@ -2547,6 +2561,7 @@ ImageFrameStackAnalysis analyze_image_frame_stacks(
 		    0,
 		    *tiled_tag,
 		    "tiled multi-frame images are not supported by slice stack planning",
+		    root_path(*tiled_tag),
 		});
 		return stack_analysis;
 	}
@@ -2560,6 +2575,7 @@ ImageFrameStackAnalysis analyze_image_frame_stacks(
 		    0,
 		    "NumberOfFrames"_tag,
 		    "NumberOfFrames or PerFrameFunctionalGroupsSequence is missing",
+		    root_path("NumberOfFrames"_tag),
 		});
 		return stack_analysis;
 	}
@@ -2574,6 +2590,7 @@ ImageFrameStackAnalysis analyze_image_frame_stacks(
 		    0,
 		    "PerFrameFunctionalGroupsSequence"_tag,
 		    per_frame_sequence.message(),
+		    per_frame_sequence.source(),
 		});
 		return stack_analysis;
 	}
@@ -2588,6 +2605,7 @@ ImageFrameStackAnalysis analyze_image_frame_stacks(
 		    0,
 		    dimension_descriptors.tag(),
 		    dimension_descriptors.message(),
+		    dimension_descriptors.source(),
 		});
 		return stack_analysis;
 	}
@@ -2604,6 +2622,7 @@ ImageFrameStackAnalysis analyze_image_frame_stacks(
 		    0,
 		    "DimensionIndexSequence"_tag,
 		    "DimensionIndexSequence is required for enhanced frame grouping",
+		    root_path("DimensionIndexSequence"_tag),
 		});
 		return stack_analysis;
 	}
@@ -2616,6 +2635,7 @@ ImageFrameStackAnalysis analyze_image_frame_stacks(
 		    0,
 		    "PerFrameFunctionalGroupsSequence"_tag,
 		    "PerFrameFunctionalGroupsSequence is missing",
+		    root_path("PerFrameFunctionalGroupsSequence"_tag),
 		});
 		return stack_analysis;
 	}
@@ -2659,12 +2679,17 @@ ImageFrameStackAnalysis analyze_image_frame_stacks(
 		buckets.push_back(std::move(bucket));
 	} else {
 		for (std::size_t frame_index = 0; frame_index < *frame_count; ++frame_index) {
+			const auto frame_item_index = static_cast<std::uint32_t>(frame_index);
+			const auto frame_content_source = functional_group_macro_path(
+			    "PerFrameFunctionalGroupsSequence"_tag, frame_item_index,
+			    "FrameContentSequence"_tag);
 			const DataSet* per_frame_item =
 			    per_frame_sequence.value()->get_dataset(frame_index);
 			if (!per_frame_item) {
 				add_issue(SliceStackStatus::missing_frame_content, frame_index,
 				    "PerFrameFunctionalGroupsSequence"_tag,
-				    "frame index is outside PerFrameFunctionalGroupsSequence");
+				    "frame index is outside PerFrameFunctionalGroupsSequence",
+				    root_path("PerFrameFunctionalGroupsSequence"_tag));
 				continue;
 			}
 			auto frame_content_result = resolve_sequence_item_if_present(
@@ -2674,21 +2699,25 @@ ImageFrameStackAnalysis analyze_image_frame_stacks(
 				    frame_content_result.tag(),
 				    std::string("malformed FrameContentSequence: ") +
 				        frame_content_result.message(),
-				    frame_content_result.source());
+				    frame_content_source);
 				continue;
 			}
 			const DataSet* frame_content = frame_content_result.value();
 			if (!frame_content) {
 				add_issue(SliceStackStatus::missing_frame_content, frame_index,
 				    "FrameContentSequence"_tag,
-				    "missing FrameContentSequence item");
+				    "missing FrameContentSequence item",
+				    frame_content_source);
 				continue;
 			}
 
 			auto stack_id = root_string_view(*frame_content, "StackID"_tag);
 			if (!stack_id || stack_id->empty()) {
 				add_issue(SliceStackStatus::missing_frame_content, frame_index,
-				    "StackID"_tag, "missing StackID");
+				    "StackID"_tag, "missing StackID",
+				    functional_group_leaf_path(
+				        "PerFrameFunctionalGroupsSequence"_tag, frame_item_index,
+				        "FrameContentSequence"_tag, "StackID"_tag));
 				continue;
 			}
 			const auto& position_element =
@@ -2697,14 +2726,22 @@ ImageFrameStackAnalysis analyze_image_frame_stacks(
 			if (!in_stack_position || *in_stack_position <= 0) {
 				add_issue(SliceStackStatus::missing_frame_content, frame_index,
 				    "InStackPositionNumber"_tag,
-				    "missing or invalid InStackPositionNumber");
+				    "missing or invalid InStackPositionNumber",
+				    functional_group_leaf_path(
+				        "PerFrameFunctionalGroupsSequence"_tag, frame_item_index,
+				        "FrameContentSequence"_tag,
+				        "InStackPositionNumber"_tag));
 				continue;
 			}
 			auto dimension_values = read_non_spatial_dimension_values(
-			    *frame_content, dimension_descriptors.value());
+			    *frame_content, dimension_descriptors.value(),
+			    functional_group_leaf_path(
+			        "PerFrameFunctionalGroupsSequence"_tag, frame_item_index,
+			        "FrameContentSequence"_tag, "DimensionIndexValues"_tag));
 			if (!dimension_values.ok()) {
 				add_issue(SliceStackStatus::geometry_parse_failure, frame_index,
-				    dimension_values.tag(), dimension_values.message());
+				    dimension_values.tag(), dimension_values.message(),
+				    dimension_values.source());
 				continue;
 			}
 
@@ -2734,6 +2771,7 @@ ImageFrameStackAnalysis analyze_image_frame_stacks(
 			    0,
 			    "FrameContentSequence"_tag,
 			    "no frame stack groups were found",
+			    root_path("FrameContentSequence"_tag),
 			});
 		}
 		return stack_analysis;
@@ -2781,6 +2819,21 @@ ImageFrameStackAnalysis analyze_image_frame_stacks(
 SliceStackAnalysis analyze_image_frame_stack(
     const DicomFile& file, ImageFrameStackOptions options) {
 	auto stacks = analyze_image_frame_stacks(file, options);
+	if (stacks.groups().size() != 1 && !stacks.groups().empty()) {
+		SliceStackAnalysis analysis;
+		analysis.status_ = SliceStackStatus::multiple_frame_stacks;
+		analysis.issues_ = stacks.issues();
+		analysis.issues_.push_back(SliceStackIssue{
+		    SliceStackStatus::multiple_frame_stacks,
+		    0,
+		    0,
+		    0,
+		    "StackID"_tag,
+		    "image contains multiple frame stacks",
+		    root_path("StackID"_tag),
+		});
+		return analysis;
+	}
 	if (!stacks.ok()) {
 		SliceStackAnalysis analysis;
 		analysis.status_ = stacks.status();
@@ -2804,6 +2857,7 @@ SliceStackAnalysis analyze_image_frame_stack(
 		    0,
 		    "StackID"_tag,
 		    "image contains multiple frame stacks",
+		    root_path("StackID"_tag),
 		});
 		return analysis;
 	}
@@ -2814,6 +2868,20 @@ SliceStackPlan plan_image_frame_stack(
     const DicomFile& file, ImageFrameStackOptions options) {
 	auto stacks = analyze_image_frame_stacks(file, options);
 	SliceStackPlan plan;
+	if (stacks.groups().size() != 1 && !stacks.groups().empty()) {
+		plan.status_ = SliceStackStatus::multiple_frame_stacks;
+		plan.issues_ = stacks.issues();
+		plan.issues_.push_back(SliceStackIssue{
+		    SliceStackStatus::multiple_frame_stacks,
+		    0,
+		    0,
+		    0,
+		    "StackID"_tag,
+		    "image contains multiple frame stacks",
+		    root_path("StackID"_tag),
+		});
+		return plan;
+	}
 	if (!stacks.ok()) {
 		plan.status_ = stacks.status();
 		plan.issues_ = stacks.issues();
@@ -2834,6 +2902,7 @@ SliceStackPlan plan_image_frame_stack(
 		    0,
 		    "StackID"_tag,
 		    "image contains multiple frame stacks",
+		    root_path("StackID"_tag),
 		});
 		return plan;
 	}

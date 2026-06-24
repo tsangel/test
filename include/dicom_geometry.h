@@ -345,6 +345,7 @@ struct SliceStackSlice {
 	std::size_t frame_index{0};
 	ImagePlaneGeometry plane;
 	double position_along_normal_mm{0.0};
+	double in_plane_residual_mm{0.0};
 };
 
 struct SliceStackGap {
@@ -367,6 +368,7 @@ struct SliceStackItem {
 	std::size_t frame_index{0};
 	std::size_t target_k{0};
 	double position_along_normal_mm{0.0};
+	double in_plane_residual_mm{0.0};
 };
 
 struct SliceStackIssue {
@@ -421,6 +423,9 @@ public:
 	[[nodiscard]] std::optional<double> uniform_spacing_k() const noexcept {
 		return uniform_spacing_k_;
 	}
+	[[nodiscard]] double max_in_plane_residual_mm() const noexcept {
+		return max_in_plane_residual_mm_;
+	}
 
 private:
 	friend SliceStackAnalysis analyze_slice_stack(
@@ -441,6 +446,7 @@ private:
 	std::vector<SliceStackRun> uniform_runs_;
 	std::vector<SliceStackIssue> issues_;
 	std::optional<double> uniform_spacing_k_{};
+	double max_in_plane_residual_mm_{0.0};
 };
 
 struct ImageFrameStackGroup {
@@ -620,8 +626,9 @@ volumetric_properties_from_multiframe_image(
     const DicomFile& file,
     ImageFrameStackOptions options = {});
 /// Analyze a Nuclear Medicine reconstructed TOMO stack using FrameIncrementPointer
-/// and SliceVector. Projection TOMO/GATED TOMO and other NM frame organizations are
-/// rejected because they are not regular reconstructed slice planes.
+/// with exactly one SliceVector. Projection TOMO/GATED TOMO and multi-vector NM
+/// frame organizations are rejected because they are not regular reconstructed
+/// slice planes in this MVP adapter.
 [[nodiscard]] SliceStackAnalysis analyze_nm_frame_stack(
     const DicomFile& file,
     SliceStackOptions options = {});

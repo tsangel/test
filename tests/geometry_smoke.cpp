@@ -517,7 +517,8 @@ int main() {
 		const auto result = dicom::geometry::plane_from_single_frame_image(*file);
 		if (result.ok() ||
 		    result.status() != dicom::geometry::GeometryBuildStatus::invalid_spacing ||
-		    result.tag() != "PixelSpacing"_tag) {
+		    result.tag() != "PixelSpacing"_tag ||
+		    result.source().leaf_tag() != "PixelSpacing"_tag) {
 			fail("invalid DICOM PixelSpacing should keep the source tag");
 		}
 	}
@@ -565,6 +566,24 @@ int main() {
 		if (plane.columns() != 5 || plane.rows() != 4) {
 			fail("multiframe Rows/Columns should map to j/i size");
 		}
+
+		const std::array<double, 2> bad_shared_spacing{2.0, -3.0};
+		set_doubles(file,
+		    "SharedFunctionalGroupsSequence.0.PixelMeasuresSequence.0.PixelSpacing",
+		    bad_shared_spacing);
+		auto bad_shared_spacing_result =
+		    dicom::geometry::plane_from_multiframe_image(file, 0);
+		if (bad_shared_spacing_result.ok() ||
+		    bad_shared_spacing_result.status() !=
+		        dicom::geometry::GeometryBuildStatus::invalid_spacing ||
+		    bad_shared_spacing_result.tag() != "PixelSpacing"_tag ||
+		    bad_shared_spacing_result.source().leaf_tag() != "PixelSpacing"_tag ||
+		    bad_shared_spacing_result.source().depth() == 0) {
+			fail("invalid shared PixelSpacing should keep functional group source path");
+		}
+		set_doubles(file,
+		    "SharedFunctionalGroupsSequence.0.PixelMeasuresSequence.0.PixelSpacing",
+		    shared_spacing);
 
 		dicom::geometry::FrameGeometryReader reader(file);
 		auto reader_result = reader.plane(0);
@@ -866,6 +885,23 @@ int main() {
 
 	{
 		auto file = make_nm_recon_tomo_stack_file();
+		const std::array<dicom::Tag, 2> frame_increment_pointers{{
+		    "SliceVector"_tag,
+		    "TimeSlotVector"_tag,
+		}};
+		set_tags(*file, "FrameIncrementPointer"_tag, frame_increment_pointers);
+		auto analysis = dicom::geometry::analyze_nm_frame_stack(*file);
+		if (analysis.ok() ||
+		    analysis.status() !=
+		        dicom::geometry::SliceStackStatus::geometry_parse_failure ||
+		    analysis.issues().empty() ||
+		    analysis.issues().front().tag != "FrameIncrementPointer"_tag) {
+			fail("NM adapter should reject multi-vector frame organization");
+		}
+	}
+
+	{
+		auto file = make_nm_recon_tomo_stack_file();
 		file->remove_dataelement("FrameIncrementPointer"_tag);
 		auto analysis = dicom::geometry::analyze_nm_frame_stack(*file);
 		if (analysis.ok() ||
@@ -1116,8 +1152,18 @@ int main() {
 		    std::span<const dicom::geometry::SliceStackInput>(
 		        inputs.data(), inputs.size()),
 		    relaxed_residual_options);
-		if (!analysis.ok() || !analysis.uniform_spacing_k()) {
+		if (!analysis.ok() || !analysis.uniform_spacing_k() ||
+		    analysis.max_in_plane_residual_mm() < 0.099 ||
+		    analysis.slices()[1].in_plane_residual_mm < 0.099) {
 			fail("origin_residual_tolerance_mm should control in-plane residual");
+		}
+		auto plan = dicom::geometry::plan_slice_stack(
+		    std::span<const dicom::geometry::SliceStackInput>(
+		        inputs.data(), inputs.size()),
+		    relaxed_residual_options);
+		if (!plan.ok() || plan.placements().size() != 2 ||
+		    plan.placements()[1].in_plane_residual_mm < 0.099) {
+			fail("slice stack plan should preserve in-plane residual diagnostics");
 		}
 	}
 
@@ -1390,6 +1436,22 @@ int main() {
 		        dicom::geometry::SliceStackStatus::multiple_frame_stacks) {
 			fail("whole-file enhanced plan should reject temporal stacks");
 		}
+
+		set_doubles(*file,
+		    "SharedFunctionalGroupsSequence.0.PixelMeasuresSequence.0.PixelSpacing",
+		    std::array<double, 2>{2.0, -3.0});
+		auto analysis = dicom::geometry::analyze_image_frame_stack(*file);
+		if (analysis.ok() ||
+		    analysis.status() !=
+		        dicom::geometry::SliceStackStatus::multiple_frame_stacks) {
+			fail("whole-file enhanced analysis should report multiple stacks first");
+		}
+		plan = dicom::geometry::plan_image_frame_stack(*file);
+		if (plan.ok() ||
+		    plan.status() !=
+		        dicom::geometry::SliceStackStatus::multiple_frame_stacks) {
+			fail("whole-file enhanced plan should report multiple stacks first");
+		}
 	}
 
 	{
@@ -1405,7 +1467,10 @@ int main() {
 		        dicom::geometry::SliceStackStatus::geometry_parse_failure ||
 		    stacks.issues().empty() ||
 		    stacks.issues().front().tag != "DimensionIndexValues"_tag ||
-		    stacks.issues().front().frame_index != 0) {
+		    stacks.issues().front().frame_index != 0 ||
+		    stacks.issues().front().source.leaf_tag() !=
+		        "DimensionIndexValues"_tag ||
+		    stacks.issues().front().source.depth() == 0) {
 			fail("extra DimensionIndexValues should be rejected");
 		}
 	}
@@ -1438,8 +1503,36 @@ int main() {
 		        dicom::geometry::SliceStackStatus::geometry_parse_failure ||
 		    stacks.issues().empty() ||
 		    stacks.issues()[0].tag != "DimensionIndexValues"_tag ||
-		    stacks.issues()[0].frame_index != 0) {
+		    stacks.issues()[0].frame_index != 0 ||
+		    stacks.issues()[0].source.leaf_tag() !=
+		        "DimensionIndexValues"_tag ||
+		    stacks.issues()[0].source.depth() == 0) {
 			fail("missing DimensionIndexValues should be reported by frame");
+		}
+	}
+
+	{
+		auto file = make_enhanced_ct_stack_file();
+		auto* frame_item =
+		    file->dataset().sequence_item("PerFrameFunctionalGroupsSequence"_tag, 1);
+		if (!frame_item) {
+			fail("test setup should have PerFrameFunctionalGroupsSequence item");
+		}
+		auto* frame_content =
+		    frame_item->sequence_item("FrameContentSequence"_tag, 0);
+		if (!frame_content) {
+			fail("test setup should have FrameContentSequence item");
+		}
+		frame_content->remove_dataelement("StackID"_tag);
+		auto stacks = dicom::geometry::analyze_image_frame_stacks(*file);
+		if (stacks.ok() ||
+		    stacks.status() !=
+		        dicom::geometry::SliceStackStatus::missing_frame_content ||
+		    stacks.issues().empty() ||
+		    stacks.issues()[0].tag != "StackID"_tag ||
+		    stacks.issues()[0].source.leaf_tag() != "StackID"_tag ||
+		    stacks.issues()[0].source.depth() == 0) {
+			fail("missing StackID should preserve source path");
 		}
 	}
 
@@ -1455,7 +1548,10 @@ int main() {
 		if (stacks.ok() ||
 		    stacks.status() !=
 		        dicom::geometry::SliceStackStatus::missing_frame_content ||
-		    stacks.issues().empty() || stacks.issues()[0].frame_index != 1) {
+		    stacks.issues().empty() || stacks.issues()[0].frame_index != 1 ||
+		    stacks.issues()[0].source.leaf_tag() !=
+		        "FrameContentSequence"_tag ||
+		    stacks.issues()[0].source.depth() == 0) {
 			fail("missing FrameContentSequence should be reported by frame");
 		}
 	}
@@ -1479,6 +1575,9 @@ int main() {
 		        dicom::geometry::SliceStackStatus::geometry_parse_failure ||
 		    stacks.issues().empty() || stacks.issues()[0].frame_index != 1 ||
 		    stacks.issues()[0].tag != "FrameContentSequence"_tag ||
+		    stacks.issues()[0].source.leaf_tag() !=
+		        "FrameContentSequence"_tag ||
+		    stacks.issues()[0].source.depth() == 0 ||
 		    stacks.issues()[0].message.find("malformed FrameContentSequence") ==
 		        std::string::npos) {
 			fail("malformed FrameContentSequence should be reported distinctly");

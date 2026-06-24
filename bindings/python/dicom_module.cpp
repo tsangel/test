@@ -7314,7 +7314,9 @@ NB_MODULE(_dicomsdl, m) {
 		.def_rw("frame_index", &geo::SliceStackSlice::frame_index)
 		.def_rw("plane", &geo::SliceStackSlice::plane)
 		.def_rw("position_along_normal_mm",
-		    &geo::SliceStackSlice::position_along_normal_mm);
+		    &geo::SliceStackSlice::position_along_normal_mm)
+		.def_rw("in_plane_residual_mm",
+		    &geo::SliceStackSlice::in_plane_residual_mm);
 
 	nb::class_<geo::SliceStackGap>(
 	    geometry, "SliceStackGap", "Spacing measurement between two sorted slices.")
@@ -7335,7 +7337,9 @@ NB_MODULE(_dicomsdl, m) {
 		.def_rw("frame_index", &geo::SliceStackItem::frame_index)
 		.def_rw("target_k", &geo::SliceStackItem::target_k)
 		.def_rw("position_along_normal_mm",
-		    &geo::SliceStackItem::position_along_normal_mm);
+		    &geo::SliceStackItem::position_along_normal_mm)
+		.def_rw("in_plane_residual_mm",
+		    &geo::SliceStackItem::in_plane_residual_mm);
 
 	nb::class_<geo::SliceStackIssue>(
 	    geometry, "SliceStackIssue", "Structured slice-stack diagnostic.")
@@ -7405,7 +7409,9 @@ NB_MODULE(_dicomsdl, m) {
 			        self.issues().begin(), self.issues().end());
 		    })
 		.def_prop_ro("uniform_spacing_k",
-		    &geo::SliceStackAnalysis::uniform_spacing_k);
+		    &geo::SliceStackAnalysis::uniform_spacing_k)
+		.def_prop_ro("max_in_plane_residual_mm",
+		    &geo::SliceStackAnalysis::max_in_plane_residual_mm);
 
 	nb::class_<geo::ImageFrameStackGroup>(
 	    geometry, "ImageFrameStackGroup",

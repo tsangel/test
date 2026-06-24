@@ -214,6 +214,8 @@ def test_geometry_slice_stack_analysis_and_plan_bindings() -> None:
     assert analysis.frame_of_reference_uid == "1.2.3"
     assert analysis.uniform_spacing_k == pytest.approx(10.0)
     assert [s.source_index for s in analysis.slices] == [0, 1, 2]
+    assert analysis.max_in_plane_residual_mm == pytest.approx(0.0)
+    assert [s.in_plane_residual_mm for s in analysis.slices] == pytest.approx([0.0, 0.0, 0.0])
     assert [gap.spacing_mm for gap in analysis.gaps] == pytest.approx([10.0, 10.0])
     assert len(analysis.uniform_runs) == 1
     assert analysis.uniform_runs[0].begin_sorted_index == 0
@@ -225,6 +227,9 @@ def test_geometry_slice_stack_analysis_and_plan_bindings() -> None:
     assert plan.volume_geometry is not None
     assert plan.volume_geometry.slices == 3
     assert plan.volume_geometry.spacing_k == pytest.approx(10.0)
+    assert [item.in_plane_residual_mm for item in plan.placements] == pytest.approx(
+        [0.0, 0.0, 0.0]
+    )
     assert [(item.source_index, item.target_k) for item in plan.placements] == [
         (0, 0),
         (1, 1),
@@ -381,3 +386,14 @@ def test_geometry_nm_reconstructed_tomo_stack_bindings() -> None:
     assert not rejected.ok
     assert rejected.status is g.SliceStackStatus.geometry_parse_failure
     assert rejected.issues[0].tag == dicom.Tag("ImageType")
+
+    multi_vector = _make_nm_recon_tomo_stack()
+    _set(
+        multi_vector,
+        "FrameIncrementPointer",
+        [dicom.Tag("SliceVector"), dicom.Tag("TimeSlotVector")],
+    )
+    rejected = g.analyze_nm_frame_stack(multi_vector)
+    assert not rejected.ok
+    assert rejected.status is g.SliceStackStatus.geometry_parse_failure
+    assert rejected.issues[0].tag == dicom.Tag("FrameIncrementPointer")

@@ -143,10 +143,11 @@ stack or when explicit frame indices are supplied.
 For Nuclear Medicine Image Storage, use `analyze_nm_frame_stack()` and
 `plan_nm_frame_stack()` instead of the generic enhanced helpers. The MVP NM
 adapter is intentionally narrow: `ImageType` value 3 must be `RECON TOMO` or
-`RECON GATED TOMO`, `FrameIncrementPointer` must reference `SliceVector`, and
+`RECON GATED TOMO`, `FrameIncrementPointer` must contain exactly one value,
+`SliceVector`, and
 `SliceVector` is expanded into per-frame planes using the root image plane
 normal plus `SpacingBetweenSlices` or, when absent, `SliceThickness`. Projection
-`TOMO` / `GATED TOMO` acquisitions and NM organizations based on other vectors
+`TOMO` / `GATED TOMO` acquisitions and NM organizations based on additional vectors
 are rejected rather than treated as regular reconstructed slice stacks.
 
 ## Limits

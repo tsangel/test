@@ -1687,6 +1687,7 @@ class _SliceStackSlice:
     frame_index: int
     plane: _ImagePlaneGeometry
     position_along_normal_mm: float
+    in_plane_residual_mm: float
 
 
 class _SliceStackGap:
@@ -1706,6 +1707,7 @@ class _SliceStackItem:
     frame_index: int
     target_k: int
     position_along_normal_mm: float
+    in_plane_residual_mm: float
 
 
 class _SliceStackIssue:
@@ -1756,6 +1758,8 @@ class _SliceStackAnalysis:
     def issues(self) -> list[_SliceStackIssue]: ...
     @property
     def uniform_spacing_k(self) -> float | None: ...
+    @property
+    def max_in_plane_residual_mm(self) -> float: ...
 
 
 class _ImageFrameStackGroup:
