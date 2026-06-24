@@ -1456,6 +1456,23 @@ class _OverlayCompatibility(enum.Enum):
     requires_resampling = ...
 
 
+class _SliceStackStatus(enum.Enum):
+    ok = ...
+    empty = ...
+    missing_geometry = ...
+    missing_frame_content = ...
+    multiple_frame_stacks = ...
+    geometry_parse_failure = ...
+    missing_frame_of_reference = ...
+    mixed_frame_of_reference = ...
+    inconsistent_rows_columns = ...
+    inconsistent_orientation = ...
+    inconsistent_pixel_spacing = ...
+    inconsistent_slice_origin = ...
+    duplicate_slice_position = ...
+    non_uniform_spacing = ...
+
+
 class _Vec3d:
     def __init__(self, x: float = ..., y: float = ..., z: float = ..., /) -> None: ...
     x: float
@@ -1621,6 +1638,128 @@ class _ImageFrameGeometry:
     kind: _ImageFrameGeometryKind
 
 
+class _SliceStackOptions:
+    def __init__(self, tolerance: _GeometryTolerance | None = ..., /) -> None: ...
+    tolerance: _GeometryTolerance
+
+
+class _ImageFrameStackOptions:
+    def __init__(self, slice_stack: _SliceStackOptions | None = ..., /) -> None: ...
+    slice_stack: _SliceStackOptions
+
+
+class _SliceStackInput:
+    def __init__(
+        self,
+        plane: _ImagePlaneGeometry,
+        frame_of_reference_uid: str,
+        source_index: int = ...,
+        frame_index: int = ...,
+        /,
+    ) -> None: ...
+    source_index: int
+    frame_index: int
+    plane: _ImagePlaneGeometry
+    frame_of_reference_uid: str
+
+
+class _SliceStackSlice:
+    input_index: int
+    source_index: int
+    frame_index: int
+    plane: _ImagePlaneGeometry
+    position_along_normal_mm: float
+
+
+class _SliceStackGap:
+    lower_sorted_index: int
+    upper_sorted_index: int
+    spacing_mm: float
+
+
+class _SliceStackItem:
+    source_index: int
+    frame_index: int
+    target_k: int
+    position_along_normal_mm: float
+
+
+class _SliceStackIssue:
+    status: _SliceStackStatus
+    input_index: int
+    source_index: int
+    frame_index: int
+    tag: Tag
+    message: str
+
+
+class _DimensionIndexDescriptor:
+    dimension_index_pointer: Tag
+    functional_group_pointer: Tag
+    dimension_organization_uid: str
+    label: str
+    private_creator: str
+
+
+class _DimensionIndexValue:
+    descriptor: _DimensionIndexDescriptor
+    value: int
+
+
+class _ImageFrameStackKey:
+    stack_id: str
+    dimension_values: list[_DimensionIndexValue]
+
+
+class _SliceStackAnalysis:
+    @property
+    def status(self) -> _SliceStackStatus: ...
+    @property
+    def ok(self) -> bool: ...
+    @property
+    def frame_of_reference_uid(self) -> str: ...
+    @property
+    def slices(self) -> list[_SliceStackSlice]: ...
+    @property
+    def gaps(self) -> list[_SliceStackGap]: ...
+    @property
+    def issues(self) -> list[_SliceStackIssue]: ...
+    @property
+    def uniform_spacing_k(self) -> float | None: ...
+
+
+class _ImageFrameStackGroup:
+    key: _ImageFrameStackKey
+    frame_indices: list[int]
+    analysis: _SliceStackAnalysis
+
+
+class _SliceStackPlan:
+    @property
+    def status(self) -> _SliceStackStatus: ...
+    @property
+    def ok(self) -> bool: ...
+    @property
+    def frame_of_reference_uid(self) -> str: ...
+    @property
+    def volume_geometry(self) -> _ImageVolumeGeometry | None: ...
+    @property
+    def placements(self) -> list[_SliceStackItem]: ...
+    @property
+    def issues(self) -> list[_SliceStackIssue]: ...
+
+
+class _ImageFrameStackAnalysis:
+    @property
+    def status(self) -> _SliceStackStatus: ...
+    @property
+    def ok(self) -> bool: ...
+    @property
+    def groups(self) -> list[_ImageFrameStackGroup]: ...
+    @property
+    def issues(self) -> list[_SliceStackIssue]: ...
+
+
 class _OverlayCheckOptions:
     def __init__(
         self,
@@ -1697,6 +1836,7 @@ class _GeometryModule:
     VolumetricPropertiesValue: type[_VolumetricPropertiesValue]
     ImageFrameGeometryKind: type[_ImageFrameGeometryKind]
     OverlayCompatibility: type[_OverlayCompatibility]
+    SliceStackStatus: type[_SliceStackStatus]
     Vec3d: type[_Vec3d]
     Point3d: type[_Point3d]
     ImagePoint2D: type[_ImagePoint2D]
@@ -1712,6 +1852,20 @@ class _GeometryModule:
     ImageVolumeGeometry: type[_ImageVolumeGeometry]
     VolumetricPropertiesInfo: type[_VolumetricPropertiesInfo]
     ImageFrameGeometry: type[_ImageFrameGeometry]
+    SliceStackOptions: type[_SliceStackOptions]
+    ImageFrameStackOptions: type[_ImageFrameStackOptions]
+    SliceStackInput: type[_SliceStackInput]
+    SliceStackSlice: type[_SliceStackSlice]
+    SliceStackGap: type[_SliceStackGap]
+    SliceStackItem: type[_SliceStackItem]
+    SliceStackIssue: type[_SliceStackIssue]
+    DimensionIndexDescriptor: type[_DimensionIndexDescriptor]
+    DimensionIndexValue: type[_DimensionIndexValue]
+    ImageFrameStackKey: type[_ImageFrameStackKey]
+    SliceStackAnalysis: type[_SliceStackAnalysis]
+    ImageFrameStackGroup: type[_ImageFrameStackGroup]
+    SliceStackPlan: type[_SliceStackPlan]
+    ImageFrameStackAnalysis: type[_ImageFrameStackAnalysis]
     OverlayCheckOptions: type[_OverlayCheckOptions]
     IndexRange1D: type[_IndexRange1D]
     OverlayCheck: type[_OverlayCheck]
@@ -1761,6 +1915,38 @@ class _GeometryModule:
         self, segmentation: _Segmentation, frame_index: int, /
     ) -> _ImagePlaneGeometry: ...
     def frame_of_reference_from_segmentation(self, segmentation: _Segmentation, /) -> str: ...
+    def analyze_slice_stack(
+        self,
+        sources: Sequence[_SliceStackInput] | Sequence[DicomFile | DataSet],
+        options: _SliceStackOptions | None = ...,
+        /,
+    ) -> _SliceStackAnalysis: ...
+    def plan_slice_stack(
+        self,
+        sources: Sequence[_SliceStackInput] | Sequence[DicomFile | DataSet],
+        options: _SliceStackOptions | None = ...,
+        /,
+    ) -> _SliceStackPlan: ...
+    def analyze_image_frame_stack(
+        self,
+        file: DicomFile,
+        frame_indices: Sequence[int] | None = ...,
+        options: _ImageFrameStackOptions | None = ...,
+        /,
+    ) -> _SliceStackAnalysis: ...
+    def plan_image_frame_stack(
+        self,
+        file: DicomFile,
+        frame_indices: Sequence[int] | None = ...,
+        options: _ImageFrameStackOptions | None = ...,
+        /,
+    ) -> _SliceStackPlan: ...
+    def analyze_image_frame_stacks(
+        self,
+        file: DicomFile,
+        options: _ImageFrameStackOptions | None = ...,
+        /,
+    ) -> _ImageFrameStackAnalysis: ...
     def check_overlay_compatibility(
         self,
         source_frame_of_reference_uid: str,

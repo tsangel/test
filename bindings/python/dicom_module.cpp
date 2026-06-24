@@ -4062,6 +4062,26 @@ struct PySourceImageRefListIterator {
 	std::size_t ordinal{0};
 };
 
+struct PySliceStackInput {
+	PySliceStackInput(geo::ImagePlaneGeometry plane_value,
+	    std::string frame_of_reference_uid_value, std::size_t source_index_value,
+	    std::size_t frame_index_value)
+	    : source_index(source_index_value),
+	      frame_index(frame_index_value),
+	      plane(std::move(plane_value)),
+	      frame_of_reference_uid(std::move(frame_of_reference_uid_value)) {}
+
+	std::size_t source_index{0};
+	std::size_t frame_index{0};
+	geo::ImagePlaneGeometry plane;
+	std::string frame_of_reference_uid;
+};
+
+struct PySliceStackInputStore {
+	std::vector<geo::SliceStackInput> inputs;
+	std::vector<std::string> frame_of_reference_uids;
+};
+
 [[nodiscard]] std::size_t normalize_py_index(
     std::ptrdiff_t index, std::size_t size, const char* label) {
 	auto normalized = index;
@@ -4073,6 +4093,101 @@ struct PySourceImageRefListIterator {
 		throw nb::index_error((std::string(label) + " index out of range").c_str());
 	}
 	return static_cast<std::size_t>(normalized);
+}
+
+[[nodiscard]] nb::object py_sequence_item(
+    nb::handle sequence, Py_ssize_t index, const char* label) {
+	PyObject* item = PySequence_GetItem(sequence.ptr(), index);
+	if (item == nullptr) {
+		std::string message(label);
+		message += " sequence item access failed";
+		PyErr_Clear();
+		throw nb::type_error(message.c_str());
+	}
+	return nb::steal<nb::object>(item);
+}
+
+[[nodiscard]] Py_ssize_t require_py_sequence_size(
+    nb::handle value, const char* label) {
+	if (!is_non_string_sequence_like_py(value)) {
+		std::string message(label);
+		message += " must be a non-string sequence";
+		throw nb::type_error(message.c_str());
+	}
+	const Py_ssize_t size = PySequence_Size(value.ptr());
+	if (size < 0) {
+		throw nb::python_error();
+	}
+	return size;
+}
+
+[[nodiscard]] std::vector<std::size_t> py_size_t_vector_from_sequence(
+    nb::handle value, const char* label) {
+	const auto size = require_py_sequence_size(value, label);
+	std::vector<std::size_t> out;
+	out.reserve(static_cast<std::size_t>(size));
+	for (Py_ssize_t i = 0; i < size; ++i) {
+		out.push_back(nb::cast<std::size_t>(py_sequence_item(value, i, label)));
+	}
+	return out;
+}
+
+[[nodiscard]] bool py_sequence_looks_like_slice_stack_inputs(
+    nb::handle value, const char* label) {
+	const auto size = require_py_sequence_size(value, label);
+	if (size == 0) {
+		return true;
+	}
+	return nb::isinstance<PySliceStackInput>(
+	    py_sequence_item(value, 0, label));
+}
+
+[[nodiscard]] PySliceStackInputStore py_slice_stack_inputs_from_sequence(
+    nb::handle value, const char* label) {
+	const auto size = require_py_sequence_size(value, label);
+	PySliceStackInputStore store;
+	store.inputs.reserve(static_cast<std::size_t>(size));
+	store.frame_of_reference_uids.reserve(static_cast<std::size_t>(size));
+	for (Py_ssize_t i = 0; i < size; ++i) {
+		nb::object item = py_sequence_item(value, i, label);
+		if (!nb::isinstance<PySliceStackInput>(item)) {
+			std::string message(label);
+			message += " must contain geometry.SliceStackInput objects";
+			throw nb::type_error(message.c_str());
+		}
+		const auto& input = nb::cast<const PySliceStackInput&>(item);
+		store.frame_of_reference_uids.push_back(input.frame_of_reference_uid);
+		store.inputs.push_back(geo::SliceStackInput{
+		    input.source_index,
+		    input.frame_index,
+		    input.plane,
+		    store.frame_of_reference_uids.back(),
+		});
+	}
+	return store;
+}
+
+[[nodiscard]] std::vector<const DataSet*> py_dataset_ptrs_from_sequence(
+    nb::handle value, const char* label) {
+	const auto size = require_py_sequence_size(value, label);
+	std::vector<const DataSet*> datasets;
+	datasets.reserve(static_cast<std::size_t>(size));
+	for (Py_ssize_t i = 0; i < size; ++i) {
+		nb::object item = py_sequence_item(value, i, label);
+		if (nb::isinstance<DicomFile>(item)) {
+			const auto& file = nb::cast<const DicomFile&>(item);
+			datasets.push_back(&file.dataset());
+			continue;
+		}
+		if (nb::isinstance<DataSet>(item)) {
+			datasets.push_back(&nb::cast<const DataSet&>(item));
+			continue;
+		}
+		std::string message(label);
+		message += " must contain DicomFile/DataSet objects or SliceStackInput objects";
+		throw nb::type_error(message.c_str());
+	}
+	return datasets;
 }
 
 [[nodiscard]] std::size_t normalize_py_seg_frame_index(
@@ -6829,6 +6944,29 @@ NB_MODULE(_dicomsdl, m) {
 		.value("different_extent", geo::OverlayCompatibility::different_extent)
 		.value("requires_resampling", geo::OverlayCompatibility::requires_resampling);
 
+	nb::enum_<geo::SliceStackStatus>(
+	    geometry, "SliceStackStatus", "Status for slice-stack analysis and planning.")
+		.value("ok", geo::SliceStackStatus::ok)
+		.value("empty", geo::SliceStackStatus::empty)
+		.value("missing_geometry", geo::SliceStackStatus::missing_geometry)
+		.value("missing_frame_content", geo::SliceStackStatus::missing_frame_content)
+		.value("multiple_frame_stacks", geo::SliceStackStatus::multiple_frame_stacks)
+		.value("geometry_parse_failure", geo::SliceStackStatus::geometry_parse_failure)
+		.value("missing_frame_of_reference",
+		    geo::SliceStackStatus::missing_frame_of_reference)
+		.value("mixed_frame_of_reference", geo::SliceStackStatus::mixed_frame_of_reference)
+		.value("inconsistent_rows_columns",
+		    geo::SliceStackStatus::inconsistent_rows_columns)
+		.value("inconsistent_orientation",
+		    geo::SliceStackStatus::inconsistent_orientation)
+		.value("inconsistent_pixel_spacing",
+		    geo::SliceStackStatus::inconsistent_pixel_spacing)
+		.value("inconsistent_slice_origin",
+		    geo::SliceStackStatus::inconsistent_slice_origin)
+		.value("duplicate_slice_position",
+		    geo::SliceStackStatus::duplicate_slice_position)
+		.value("non_uniform_spacing", geo::SliceStackStatus::non_uniform_spacing);
+
 	nb::class_<geo::Vec3d>(geometry, "Vec3d", "3D direction/vector in patient space.")
 		.def("__init__",
 		    [](geo::Vec3d* self, double x, double y, double z) {
@@ -7096,6 +7234,180 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::rv_policy::reference_internal)
 		.def_ro("kind", &geo::ImageFrameGeometry::kind);
 
+	nb::class_<geo::SliceStackOptions>(
+	    geometry, "SliceStackOptions", "Options for slice stack analysis/planning.")
+		.def("__init__",
+		    [](geo::SliceStackOptions* self,
+		        std::optional<geo::GeometryTolerance> tolerance) {
+			    geo::SliceStackOptions options;
+			    if (tolerance) {
+				    options.tolerance = *tolerance;
+			    }
+			    new (self) geo::SliceStackOptions(options);
+		    },
+		    nb::arg("tolerance") = nb::none())
+		.def_rw("tolerance", &geo::SliceStackOptions::tolerance);
+
+	nb::class_<geo::ImageFrameStackOptions>(
+	    geometry, "ImageFrameStackOptions",
+	    "Options for enhanced multi-frame stack analysis/planning.")
+		.def("__init__",
+		    [](geo::ImageFrameStackOptions* self,
+		        std::optional<geo::SliceStackOptions> slice_stack) {
+			    geo::ImageFrameStackOptions options;
+			    if (slice_stack) {
+				    options.slice_stack = *slice_stack;
+			    }
+			    new (self) geo::ImageFrameStackOptions(options);
+		    },
+		    nb::arg("slice_stack") = nb::none())
+		.def_rw("slice_stack", &geo::ImageFrameStackOptions::slice_stack);
+
+	nb::class_<PySliceStackInput>(
+	    geometry, "SliceStackInput",
+	    "Owning Python input record for slice-stack analysis.")
+		.def("__init__",
+		    [](PySliceStackInput* self, geo::ImagePlaneGeometry plane,
+		        std::string frame_of_reference_uid, std::size_t source_index,
+		        std::size_t frame_index) {
+			    new (self) PySliceStackInput(std::move(plane),
+			        std::move(frame_of_reference_uid), source_index, frame_index);
+		    },
+		    nb::arg("plane"), nb::arg("frame_of_reference_uid"),
+		    nb::arg("source_index") = static_cast<std::size_t>(0),
+		    nb::arg("frame_index") = static_cast<std::size_t>(0))
+		.def_rw("source_index", &PySliceStackInput::source_index)
+		.def_rw("frame_index", &PySliceStackInput::frame_index)
+		.def_rw("plane", &PySliceStackInput::plane)
+		.def_rw("frame_of_reference_uid", &PySliceStackInput::frame_of_reference_uid);
+
+	nb::class_<geo::SliceStackSlice>(
+	    geometry, "SliceStackSlice", "One sorted slice produced by slice-stack analysis.")
+		.def_rw("input_index", &geo::SliceStackSlice::input_index)
+		.def_rw("source_index", &geo::SliceStackSlice::source_index)
+		.def_rw("frame_index", &geo::SliceStackSlice::frame_index)
+		.def_rw("plane", &geo::SliceStackSlice::plane)
+		.def_rw("position_along_normal_mm",
+		    &geo::SliceStackSlice::position_along_normal_mm);
+
+	nb::class_<geo::SliceStackGap>(
+	    geometry, "SliceStackGap", "Spacing measurement between two sorted slices.")
+		.def_rw("lower_sorted_index", &geo::SliceStackGap::lower_sorted_index)
+		.def_rw("upper_sorted_index", &geo::SliceStackGap::upper_sorted_index)
+		.def_rw("spacing_mm", &geo::SliceStackGap::spacing_mm);
+
+	nb::class_<geo::SliceStackItem>(
+	    geometry, "SliceStackItem", "Placement record for one decoded source slice.")
+		.def_rw("source_index", &geo::SliceStackItem::source_index)
+		.def_rw("frame_index", &geo::SliceStackItem::frame_index)
+		.def_rw("target_k", &geo::SliceStackItem::target_k)
+		.def_rw("position_along_normal_mm",
+		    &geo::SliceStackItem::position_along_normal_mm);
+
+	nb::class_<geo::SliceStackIssue>(
+	    geometry, "SliceStackIssue", "Structured slice-stack diagnostic.")
+		.def_rw("status", &geo::SliceStackIssue::status)
+		.def_rw("input_index", &geo::SliceStackIssue::input_index)
+		.def_rw("source_index", &geo::SliceStackIssue::source_index)
+		.def_rw("frame_index", &geo::SliceStackIssue::frame_index)
+		.def_rw("tag", &geo::SliceStackIssue::tag)
+		.def_rw("message", &geo::SliceStackIssue::message);
+
+	nb::class_<geo::DimensionIndexDescriptor>(
+	    geometry, "DimensionIndexDescriptor",
+	    "Self-describing DICOM multi-frame dimension index descriptor.")
+		.def_rw("dimension_index_pointer",
+		    &geo::DimensionIndexDescriptor::dimension_index_pointer)
+		.def_rw("functional_group_pointer",
+		    &geo::DimensionIndexDescriptor::functional_group_pointer)
+		.def_rw("dimension_organization_uid",
+		    &geo::DimensionIndexDescriptor::dimension_organization_uid)
+		.def_rw("label", &geo::DimensionIndexDescriptor::label)
+		.def_rw("private_creator", &geo::DimensionIndexDescriptor::private_creator);
+
+	nb::class_<geo::DimensionIndexValue>(
+	    geometry, "DimensionIndexValue",
+	    "One non-spatial DICOM dimension index value used for frame grouping.")
+		.def_rw("descriptor", &geo::DimensionIndexValue::descriptor)
+		.def_rw("value", &geo::DimensionIndexValue::value);
+
+	nb::class_<geo::ImageFrameStackKey>(
+	    geometry, "ImageFrameStackKey",
+	    "Grouping key for one enhanced multi-frame image stack.")
+		.def_rw("stack_id", &geo::ImageFrameStackKey::stack_id)
+		.def_rw("dimension_values", &geo::ImageFrameStackKey::dimension_values);
+
+	nb::class_<geo::SliceStackAnalysis>(
+	    geometry, "SliceStackAnalysis", "Result of slice-stack geometry analysis.")
+		.def_prop_ro("status", &geo::SliceStackAnalysis::status)
+		.def_prop_ro("ok", &geo::SliceStackAnalysis::ok)
+		.def_prop_ro("frame_of_reference_uid",
+		    &geo::SliceStackAnalysis::frame_of_reference_uid)
+		.def_prop_ro("slices",
+		    [](const geo::SliceStackAnalysis& self) {
+			    return std::vector<geo::SliceStackSlice>(
+			        self.slices().begin(), self.slices().end());
+		    })
+		.def_prop_ro("gaps",
+		    [](const geo::SliceStackAnalysis& self) {
+			    return std::vector<geo::SliceStackGap>(
+			        self.gaps().begin(), self.gaps().end());
+		    })
+		.def_prop_ro("issues",
+		    [](const geo::SliceStackAnalysis& self) {
+			    return std::vector<geo::SliceStackIssue>(
+			        self.issues().begin(), self.issues().end());
+		    })
+		.def_prop_ro("uniform_spacing_k",
+		    &geo::SliceStackAnalysis::uniform_spacing_k);
+
+	nb::class_<geo::ImageFrameStackGroup>(
+	    geometry, "ImageFrameStackGroup",
+	    "One frame group from enhanced multi-frame stack analysis.")
+		.def_rw("key", &geo::ImageFrameStackGroup::key)
+		.def_rw("frame_indices", &geo::ImageFrameStackGroup::frame_indices)
+		.def_rw("analysis", &geo::ImageFrameStackGroup::analysis);
+
+	nb::class_<geo::SliceStackPlan>(
+	    geometry, "SliceStackPlan", "Uniform volume placement plan for a slice stack.")
+		.def_prop_ro("status", &geo::SliceStackPlan::status)
+		.def_prop_ro("ok", &geo::SliceStackPlan::ok)
+		.def_prop_ro("frame_of_reference_uid",
+		    &geo::SliceStackPlan::frame_of_reference_uid)
+		.def_prop_ro("volume_geometry",
+		    [](const geo::SliceStackPlan& self) -> nb::object {
+			    if (!self.volume_geometry()) {
+				    return nb::none();
+			    }
+			    return nb::cast(*self.volume_geometry());
+		    })
+		.def_prop_ro("placements",
+		    [](const geo::SliceStackPlan& self) {
+			    return std::vector<geo::SliceStackItem>(
+			        self.placements().begin(), self.placements().end());
+		    })
+		.def_prop_ro("issues",
+		    [](const geo::SliceStackPlan& self) {
+			    return std::vector<geo::SliceStackIssue>(
+			        self.issues().begin(), self.issues().end());
+		    });
+
+	nb::class_<geo::ImageFrameStackAnalysis>(
+	    geometry, "ImageFrameStackAnalysis",
+	    "Grouping and slice analysis for an enhanced multi-frame image.")
+		.def_prop_ro("status", &geo::ImageFrameStackAnalysis::status)
+		.def_prop_ro("ok", &geo::ImageFrameStackAnalysis::ok)
+		.def_prop_ro("groups",
+		    [](const geo::ImageFrameStackAnalysis& self) {
+			    return std::vector<geo::ImageFrameStackGroup>(
+			        self.groups().begin(), self.groups().end());
+		    })
+		.def_prop_ro("issues",
+		    [](const geo::ImageFrameStackAnalysis& self) {
+			    return std::vector<geo::SliceStackIssue>(
+			        self.issues().begin(), self.issues().end());
+		    });
+
 	nb::class_<geo::OverlayCheckOptions>(
 	    geometry, "OverlayCheckOptions", "Options for overlay compatibility checks.")
 		.def("__init__",
@@ -7307,6 +7619,83 @@ NB_MODULE(_dicomsdl, m) {
 		        "frame_of_reference_from_dataset");
 	    },
 	    nb::arg("source"));
+
+	geometry.def("analyze_slice_stack",
+	    [](nb::handle sources, std::optional<geo::SliceStackOptions> options) {
+		    const auto opts = options.value_or(geo::SliceStackOptions{});
+		    if (py_sequence_looks_like_slice_stack_inputs(sources, "sources")) {
+			    auto store = py_slice_stack_inputs_from_sequence(sources, "sources");
+			    return geo::analyze_slice_stack(
+			        std::span<const geo::SliceStackInput>(
+			            store.inputs.data(), store.inputs.size()),
+			        opts);
+		    }
+		    auto datasets = py_dataset_ptrs_from_sequence(sources, "sources");
+		    return geo::analyze_slice_stack(
+		        std::span<const DataSet* const>(datasets.data(), datasets.size()),
+		        opts);
+	    },
+	    nb::arg("sources"), nb::arg("options") = nb::none(),
+	    "Analyze a classic DataSet/DicomFile list or a SliceStackInput list.");
+
+	geometry.def("plan_slice_stack",
+	    [](nb::handle sources, std::optional<geo::SliceStackOptions> options) {
+		    const auto opts = options.value_or(geo::SliceStackOptions{});
+		    if (py_sequence_looks_like_slice_stack_inputs(sources, "sources")) {
+			    auto store = py_slice_stack_inputs_from_sequence(sources, "sources");
+			    return geo::plan_slice_stack(
+			        std::span<const geo::SliceStackInput>(
+			            store.inputs.data(), store.inputs.size()),
+			        opts);
+		    }
+		    auto datasets = py_dataset_ptrs_from_sequence(sources, "sources");
+		    return geo::plan_slice_stack(
+		        std::span<const DataSet* const>(datasets.data(), datasets.size()),
+		        opts);
+	    },
+	    nb::arg("sources"), nb::arg("options") = nb::none(),
+	    "Create a uniform volume placement plan from DataSet/DicomFile or SliceStackInput sources.");
+
+	geometry.def("analyze_image_frame_stack",
+	    [](const DicomFile& file, nb::handle frame_indices,
+	        std::optional<geo::ImageFrameStackOptions> options) {
+		    const auto opts = options.value_or(geo::ImageFrameStackOptions{});
+		    if (!frame_indices || frame_indices.is_none()) {
+			    return geo::analyze_image_frame_stack(file, opts);
+		    }
+		    auto indices = py_size_t_vector_from_sequence(frame_indices, "frame_indices");
+		    return geo::analyze_image_frame_stack(file,
+		        std::span<const std::size_t>(indices.data(), indices.size()),
+		        opts);
+	    },
+	    nb::arg("file"), nb::arg("frame_indices") = nb::none(),
+	    nb::arg("options") = nb::none(),
+	    "Analyze one enhanced multi-frame image stack. When frame_indices is omitted, the file must contain one stack.");
+
+	geometry.def("plan_image_frame_stack",
+	    [](const DicomFile& file, nb::handle frame_indices,
+	        std::optional<geo::ImageFrameStackOptions> options) {
+		    const auto opts = options.value_or(geo::ImageFrameStackOptions{});
+		    if (!frame_indices || frame_indices.is_none()) {
+			    return geo::plan_image_frame_stack(file, opts);
+		    }
+		    auto indices = py_size_t_vector_from_sequence(frame_indices, "frame_indices");
+		    return geo::plan_image_frame_stack(file,
+		        std::span<const std::size_t>(indices.data(), indices.size()),
+		        opts);
+	    },
+	    nb::arg("file"), nb::arg("frame_indices") = nb::none(),
+	    nb::arg("options") = nb::none(),
+	    "Create a uniform volume placement plan for an enhanced multi-frame image stack.");
+
+	geometry.def("analyze_image_frame_stacks",
+	    [](const DicomFile& file,
+	        std::optional<geo::ImageFrameStackOptions> options) {
+		    return geo::analyze_image_frame_stacks(
+		        file, options.value_or(geo::ImageFrameStackOptions{}));
+	    },
+	    nb::arg("file"), nb::arg("options") = nb::none(),
+	    "Group and analyze all enhanced multi-frame image stacks in a DicomFile.");
 
 	geometry.def("check_overlay_compatibility",
 	    [](const std::string& source_frame_of_reference_uid,
