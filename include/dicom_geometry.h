@@ -115,17 +115,20 @@ enum class GeometryBuildStatus {
 template <typename T>
 class GeometryBuildResult {
 public:
-	static GeometryBuildResult success(T value) {
+	static GeometryBuildResult success(T value, ElementPath source = {}) {
 		return GeometryBuildResult(
-		    GeometryBuildStatus::ok, std::move(value), Tag{}, std::string{});
+		    GeometryBuildStatus::ok, std::move(value), Tag{}, std::string{},
+		    std::move(source));
 	}
 
 	static GeometryBuildResult failure(
-	    GeometryBuildStatus status, Tag tag = Tag{}, std::string message = {}) {
+	    GeometryBuildStatus status, Tag tag = Tag{}, std::string message = {},
+	    ElementPath source = {}) {
 		if (status == GeometryBuildStatus::ok) {
 			status = GeometryBuildStatus::invalid_value;
 		}
-		return GeometryBuildResult(status, std::nullopt, tag, std::move(message));
+		return GeometryBuildResult(
+		    status, std::nullopt, tag, std::move(message), std::move(source));
 	}
 
 	[[nodiscard]] bool ok() const noexcept {
@@ -134,6 +137,7 @@ public:
 	[[nodiscard]] GeometryBuildStatus status() const noexcept { return status_; }
 	[[nodiscard]] Tag tag() const noexcept { return tag_; }
 	[[nodiscard]] const std::string& message() const noexcept { return message_; }
+	[[nodiscard]] const ElementPath& source() const noexcept { return source_; }
 	[[nodiscard]] const T& value() const& { return *value_; }
 	[[nodiscard]] T& value() & { return *value_; }
 	[[nodiscard]] T&& value() && { return std::move(*value_); }
@@ -143,14 +147,15 @@ public:
 
 private:
 	GeometryBuildResult(GeometryBuildStatus status, std::optional<T> value, Tag tag,
-	    std::string message)
+	    std::string message, ElementPath source)
 	    : status_(status), value_(std::move(value)), tag_(tag),
-	      message_(std::move(message)) {}
+	      message_(std::move(message)), source_(std::move(source)) {}
 
 	GeometryBuildStatus status_{GeometryBuildStatus::invalid_value};
 	std::optional<T> value_{};
 	Tag tag_{};
 	std::string message_{};
+	ElementPath source_{};
 };
 
 struct ImagePlaneGeometryParams {
@@ -348,6 +353,12 @@ struct SliceStackGap {
 	double spacing_mm{0.0};
 };
 
+struct SliceStackRun {
+	std::size_t begin_sorted_index{0};
+	std::size_t end_sorted_index{0};
+	double spacing_mm{0.0};
+};
+
 /// Placement record for a decoded source slice. Use `source_index` and
 /// `frame_index` to find/decode the input frame, then place it at `target_k`
 /// in the output volume buffer.
@@ -365,6 +376,7 @@ struct SliceStackIssue {
 	std::size_t frame_index{0};
 	Tag tag{};
 	std::string message;
+	ElementPath source{};
 };
 
 struct DimensionIndexDescriptor {
@@ -400,6 +412,9 @@ public:
 	[[nodiscard]] const std::vector<SliceStackGap>& gaps() const noexcept {
 		return gaps_;
 	}
+	[[nodiscard]] const std::vector<SliceStackRun>& uniform_runs() const noexcept {
+		return uniform_runs_;
+	}
 	[[nodiscard]] const std::vector<SliceStackIssue>& issues() const noexcept {
 		return issues_;
 	}
@@ -421,6 +436,7 @@ private:
 	std::string frame_of_reference_uid_;
 	std::vector<SliceStackSlice> slices_;
 	std::vector<SliceStackGap> gaps_;
+	std::vector<SliceStackRun> uniform_runs_;
 	std::vector<SliceStackIssue> issues_;
 	std::optional<double> uniform_spacing_k_{};
 };

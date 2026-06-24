@@ -3,13 +3,50 @@
 #include <dicom_seg.h>
 
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
 #include <memory>
+#include <new>
 #include <span>
 #include <string>
 #include <string_view>
+
+namespace {
+std::atomic<bool> g_count_allocations{false};
+std::atomic<std::size_t> g_allocation_count{0};
+} // namespace
+
+void* operator new(std::size_t size) {
+	if (g_count_allocations.load(std::memory_order_relaxed)) {
+		g_allocation_count.fetch_add(1, std::memory_order_relaxed);
+	}
+	if (void* ptr = std::malloc(size == 0 ? 1 : size)) {
+		return ptr;
+	}
+	throw std::bad_alloc();
+}
+
+void* operator new[](std::size_t size) {
+	return ::operator new(size);
+}
+
+void operator delete(void* ptr) noexcept {
+	std::free(ptr);
+}
+
+void operator delete[](void* ptr) noexcept {
+	::operator delete(ptr);
+}
+
+void operator delete(void* ptr, std::size_t) noexcept {
+	::operator delete(ptr);
+}
+
+void operator delete[](void* ptr, std::size_t) noexcept {
+	::operator delete[](ptr);
+}
 
 namespace {
 using namespace dicom::literals;
@@ -23,6 +60,17 @@ void expect_near(double actual, double expected, std::string_view label,
     double tolerance = 1e-9) {
 	if (std::abs(actual - expected) > tolerance) {
 		fail(std::string(label) + " mismatch");
+	}
+}
+
+template <typename Fn>
+void expect_no_allocations(Fn&& fn, std::string_view label) {
+	g_allocation_count.store(0, std::memory_order_relaxed);
+	g_count_allocations.store(true, std::memory_order_relaxed);
+	fn();
+	g_count_allocations.store(false, std::memory_order_relaxed);
+	if (g_allocation_count.load(std::memory_order_relaxed) != 0) {
+		fail(std::string(label) + " allocated memory");
 	}
 }
 
@@ -402,7 +450,9 @@ int main() {
 		if (result.ok() ||
 		    result.status() !=
 		        dicom::geometry::GeometryBuildStatus::missing_required_tag ||
-		    result.tag() != "ImagePositionPatient"_tag) {
+		    result.tag() != "ImagePositionPatient"_tag ||
+		    result.source().leaf_tag() != "ImagePositionPatient"_tag ||
+		    result.source().depth() != 0) {
 			fail("missing geometry tag should be reported without throwing");
 		}
 	}
@@ -736,6 +786,13 @@ int main() {
 		    "slice stack uniform spacing");
 		expect_near(analysis.gaps()[0].spacing_mm, 10.0,
 		    "slice stack first gap");
+		if (analysis.uniform_runs().size() != 1 ||
+		    analysis.uniform_runs()[0].begin_sorted_index != 0 ||
+		    analysis.uniform_runs()[0].end_sorted_index != 3) {
+			fail("uniform slice stack should expose one full uniform run");
+		}
+		expect_near(analysis.uniform_runs()[0].spacing_mm, 10.0,
+		    "slice stack uniform run spacing");
 		if (analysis.frame_of_reference_uid() != "1.2.3") {
 			fail("slice stack analysis should own FrameOfReferenceUID");
 		}
@@ -852,6 +909,48 @@ int main() {
 	}
 
 	{
+		const auto z00 =
+		    make_test_plane({2.5, 1.5}, {256, 128}, {0.0, 0.0, 0.0});
+		const auto z10 =
+		    make_test_plane({2.5, 1.5}, {256, 128}, {0.0, 0.0, 10.0});
+		const auto z20 =
+		    make_test_plane({2.5, 1.5}, {256, 128}, {0.0, 0.0, 20.0});
+		const auto z50 =
+		    make_test_plane({2.5, 1.5}, {256, 128}, {0.0, 0.0, 50.0});
+		const auto z70 =
+		    make_test_plane({2.5, 1.5}, {256, 128}, {0.0, 0.0, 70.0});
+		const auto z90 =
+		    make_test_plane({2.5, 1.5}, {256, 128}, {0.0, 0.0, 90.0});
+		const std::array<dicom::geometry::SliceStackInput, 6> inputs{{
+		    {0, 0, z00, "1.2.3"},
+		    {1, 0, z10, "1.2.3"},
+		    {2, 0, z20, "1.2.3"},
+		    {3, 0, z50, "1.2.3"},
+		    {4, 0, z70, "1.2.3"},
+		    {5, 0, z90, "1.2.3"},
+		}};
+		auto analysis = dicom::geometry::analyze_slice_stack(
+		    std::span<const dicom::geometry::SliceStackInput>(
+		        inputs.data(), inputs.size()));
+		if (analysis.ok() ||
+		    analysis.status() !=
+		        dicom::geometry::SliceStackStatus::non_uniform_spacing ||
+		    analysis.uniform_runs().size() != 2) {
+			fail("non-uniform stack should expose uniform runs");
+		}
+		if (analysis.uniform_runs()[0].begin_sorted_index != 0 ||
+		    analysis.uniform_runs()[0].end_sorted_index != 3 ||
+		    analysis.uniform_runs()[1].begin_sorted_index != 3 ||
+		    analysis.uniform_runs()[1].end_sorted_index != 6) {
+			fail("uniform runs should describe sorted half-open ranges");
+		}
+		expect_near(analysis.uniform_runs()[0].spacing_mm, 10.0,
+		    "first uniform run spacing");
+		expect_near(analysis.uniform_runs()[1].spacing_mm, 20.0,
+		    "second uniform run spacing");
+	}
+
+	{
 		const auto z10 = make_test_plane({2.5, 1.5}, {256, 128}, {0.0, 0.0, 10.0});
 		const auto z25 = make_test_plane({2.5, 1.5}, {256, 128}, {0.0, 0.0, 25.0});
 		const auto z30 = make_test_plane({2.5, 1.5}, {256, 128}, {0.0, 0.0, 30.0});
@@ -959,7 +1058,9 @@ int main() {
 		if (analysis.ok() ||
 		    analysis.status() != dicom::geometry::SliceStackStatus::missing_geometry ||
 		    analysis.issues().empty() ||
-		    analysis.issues().back().source_index != 1) {
+		    analysis.issues().back().source_index != 1 ||
+		    analysis.issues().back().source.leaf_tag() !=
+		        "ImagePositionPatient"_tag) {
 			fail("classic DataSet stack should report missing geometry by source index");
 		}
 		auto plan = dicom::geometry::plan_slice_stack(
@@ -1306,7 +1407,11 @@ int main() {
 		auto plane = dicom::geometry::plane_from_multiframe_image(*file, 0);
 		if (plane.ok() ||
 		    plane.status() != dicom::geometry::GeometryBuildStatus::invalid_value ||
-		    plane.tag() != "PixelMeasuresSequence"_tag) {
+		    plane.tag() != "PixelMeasuresSequence"_tag ||
+		    plane.source().depth() != 1 ||
+		    plane.source().parents()[0].sequence_tag !=
+		        "SharedFunctionalGroupsSequence"_tag ||
+		    plane.source().leaf_tag() != "PixelMeasuresSequence"_tag) {
 			fail("malformed shared macro sequence should not fall back to root");
 		}
 	}
@@ -1596,6 +1701,41 @@ int main() {
 		expect_near(source_index.i, 2.0, "volume-volume source.i");
 		expect_near(source_index.j, 3.0, "volume-volume source.j");
 		expect_near(source_index.k, 4.0, "volume-volume source.k");
+	}
+
+	{
+		const auto plane = make_test_plane();
+		const auto volume = make_test_volume();
+		const auto plane_transform =
+		    dicom::geometry::make_plane_to_volume_transform(plane, volume);
+		const auto volume_transform =
+		    dicom::geometry::make_volume_to_volume_transform(volume, volume);
+		double sink = 0.0;
+		expect_no_allocations(
+		    [&]() {
+			    for (int index = 0; index < 1000; ++index) {
+				    const auto check = dicom::geometry::check_overlay_compatibility(
+				        "1.2.3", plane, "1.2.3", volume);
+				    sink += check.can_transform ? 1.0 : 0.0;
+				    const auto point = plane_transform.target_index_from_source_index(
+				        {static_cast<double>(index % 7),
+				            static_cast<double>(index % 11)});
+				    sink += point.i + point.j + point.k;
+				    const auto volume_point =
+				        volume_transform.target_index_from_source_index(
+				            {1.0, 2.0, 3.0});
+				    sink += volume_point.i;
+				    const auto path = dicom::ElementPath{}
+				        .item("PerFrameFunctionalGroupsSequence"_tag, 0)
+				        .item("PixelMeasuresSequence"_tag, 0)
+				        .element("PixelSpacing"_tag);
+				    sink += path.ok() ? static_cast<double>(path.depth()) : 0.0;
+			    }
+		    },
+		    "overlay/transform/ElementPath hot path");
+		if (sink <= 0.0) {
+			fail("no-allocation hot path test should execute work");
+		}
 	}
 
 	return 0;

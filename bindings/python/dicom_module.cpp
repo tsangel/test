@@ -7322,6 +7322,13 @@ NB_MODULE(_dicomsdl, m) {
 		.def_rw("upper_sorted_index", &geo::SliceStackGap::upper_sorted_index)
 		.def_rw("spacing_mm", &geo::SliceStackGap::spacing_mm);
 
+	nb::class_<geo::SliceStackRun>(
+	    geometry, "SliceStackRun",
+	    "Contiguous sorted slice range with uniform spacing.")
+		.def_rw("begin_sorted_index", &geo::SliceStackRun::begin_sorted_index)
+		.def_rw("end_sorted_index", &geo::SliceStackRun::end_sorted_index)
+		.def_rw("spacing_mm", &geo::SliceStackRun::spacing_mm);
+
 	nb::class_<geo::SliceStackItem>(
 	    geometry, "SliceStackItem", "Placement record for one decoded source slice.")
 		.def_rw("source_index", &geo::SliceStackItem::source_index)
@@ -7337,7 +7344,15 @@ NB_MODULE(_dicomsdl, m) {
 		.def_rw("source_index", &geo::SliceStackIssue::source_index)
 		.def_rw("frame_index", &geo::SliceStackIssue::frame_index)
 		.def_rw("tag", &geo::SliceStackIssue::tag)
-		.def_rw("message", &geo::SliceStackIssue::message);
+		.def_rw("message", &geo::SliceStackIssue::message)
+		.def_prop_ro("source_depth",
+		    [](const geo::SliceStackIssue& self) {
+			    return self.source.depth();
+		    })
+		.def_prop_ro("source_leaf_tag",
+		    [](const geo::SliceStackIssue& self) {
+			    return self.source.leaf_tag();
+		    });
 
 	nb::class_<geo::DimensionIndexDescriptor>(
 	    geometry, "DimensionIndexDescriptor",
@@ -7378,6 +7393,11 @@ NB_MODULE(_dicomsdl, m) {
 		    [](const geo::SliceStackAnalysis& self) {
 			    return std::vector<geo::SliceStackGap>(
 			        self.gaps().begin(), self.gaps().end());
+		    })
+		.def_prop_ro("uniform_runs",
+		    [](const geo::SliceStackAnalysis& self) {
+			    return std::vector<geo::SliceStackRun>(
+			        self.uniform_runs().begin(), self.uniform_runs().end());
 		    })
 		.def_prop_ro("issues",
 		    [](const geo::SliceStackAnalysis& self) {

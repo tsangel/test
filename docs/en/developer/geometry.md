@@ -42,7 +42,7 @@ patient/world space. Its inverse returns `(i, j, signed_normal_distance_mm, 1)`.
 auto file = dicom::read_file(path);
 auto plane = dicom::geometry::plane_from_single_frame_image(*file);
 if (!plane.ok()) {
-    // Inspect plane.status(), plane.tag(), plane.message().
+    // Inspect plane.status(), plane.tag(), plane.message(), plane.source().
 }
 
 auto world = plane.value().world_from_index({12.0, 8.0});
@@ -108,7 +108,9 @@ resampling.
 
 `analyze_slice_stack()` accepts either a list of `SliceStackInput` records or a
 classic list of `DataSet`/`DicomFile` objects. It reports sorted slices, spacing
-gaps, uniform spacing, and structured issues.
+gaps, uniform spacing, uniform runs, and structured issues. For non-uniform
+stacks, `uniform_runs` identifies half-open sorted-slice ranges of at least
+three slices that still share one spacing.
 
 `plan_slice_stack()` succeeds only for a uniform rectilinear stack. When it
 succeeds, `volume_geometry` describes the output grid and `placements` tells the

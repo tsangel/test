@@ -133,7 +133,7 @@
 
 ### Core Lookup 의존성
 
-- [ ] `ElementPath` / `DataSet` nested lookup 설계는 `tmp/element_path_dataset_lookup_checklist.ko.md`를 따른다.
+- [x] `ElementPath` / `DataSet` nested lookup 설계는 `tmp/element_path_dataset_lookup_checklist.ko.md`를 따른다.
 - [x] geometry module은 element path 타입을 정의하지 않고 core `dicom::ElementPath`를 사용한다.
 - [x] geometry module의 DICOM metadata access는 dotted string path가 아니라 `dicom::ElementPath`를 기본으로 한다.
 - [x] geometry module은 nested lookup helper를 직접 노출하지 않고 `FrameGeometryReader` 내부에서 사용한다.
@@ -262,14 +262,14 @@
 
 ### 성능 계약
 
-- [ ] `ElementPath` / `DataSet` nested lookup 자체의 성능 계약은 `tmp/element_path_dataset_lookup_checklist.ko.md`를 따른다.
-- [ ] geometry factory의 DICOM metadata lookup은 string parsing 없는 `ElementPath` 경로를 사용한다.
+- [x] `ElementPath` / `DataSet` nested lookup 자체의 성능 계약은 `tmp/element_path_dataset_lookup_checklist.ko.md`를 따른다.
+- [x] geometry factory의 DICOM metadata lookup은 string parsing 없는 `ElementPath` 경로를 사용한다.
 - [x] 단일 frame 또는 드문 metadata 조회는 `DataSet::get_dataelement(ElementPath...)` / `DicomFile::get_dataelement(ElementPath...)`를 그대로 사용한다.
 - [x] 반복 frame metadata 접근은 `FrameGeometryReader`를 생성해서 재사용한다.
 - [x] `FrameGeometryReader`는 생성 시 root dataset, `PerFrameFunctionalGroupsSequence`, `SharedFunctionalGroupsSequence`, SOP Class별 Frame Type Sequence tag 같은 반복 lookup 정보를 캐시한다.
 - [x] `FrameGeometryReader`의 frame별 접근은 가능한 한 `sequence_item(frame_index)`와 소수의 tag lookup으로 끝나게 한다.
 - [x] `FrameGeometryReader` hot path는 `ElementPath`의 의미를 유지하되 매 frame마다 root부터 full path traversal을 반복하지 않는다. 부모 item `DataSet*`를 캐시하거나 지역 변수로 잡은 뒤 leaf tag lookup을 수행한다.
-- [ ] 실패 diagnostic에는 hot path에서 사용한 parent/leaf lookup을 다시 `ElementPath` source로 재구성해 기록한다.
+- [x] 실패 diagnostic에는 hot path에서 사용한 parent/leaf lookup을 다시 `ElementPath` source로 재구성해 기록한다.
 - [x] convenience factory(`plane_from_multiframe_image`, `frame_geometry_from_multiframe_image`)는 사용 편의용이며, 많은 frame을 순회하는 코드는 `FrameGeometryReader`를 직접 재사용하도록 문서화한다.
 - [x] `check_overlay_compatibility()`는 dataset traversal, sequence lookup, heap allocation을 하지 않는다.
 - [x] `check_overlay_compatibility()`는 matrix inverse, direction normalization, normal 계산을 하지 않는다.
@@ -278,7 +278,7 @@
 - [x] `SliceStackAnalysis`처럼 dataset보다 오래 살 수 있는 객체는 `FrameOfReferenceUID`를 `std::string`으로 소유한다.
 - [x] `SliceStackPlan`처럼 dataset보다 오래 살 수 있는 객체는 `FrameOfReferenceUID`를 `std::string`으로 소유한다.
 - [x] `check_overlay_compatibility()`는 UID equality, dot product, spacing/origin 차이 비교만 수행하는 O(1) 함수로 유지한다.
-- [ ] transform 객체 생성 시 source/target matrix, inverse matrix, composite matrix를 모두 계산해두고 point 변환은 matrix multiply만 수행한다.
+- [x] transform 객체 생성 시 source/target matrix, inverse matrix, composite matrix를 모두 계산해두고 point 변환은 matrix multiply만 수행한다.
 - [ ] 반복 overlay/resampling loop에서는 `DataSet` lookup이나 `check_overlay_compatibility()`를 호출하지 않고 이미 만든 geometry와 typed transform 객체만 재사용한다.
 
 ### Slice Stack Planning
@@ -289,7 +289,7 @@
 - [x] `SliceStackInput::frame_of_reference_uid`는 호출 중에만 유효한 `std::string_view`여도 되고, `SliceStackAnalysis`는 UID를 `std::string`으로 복사해 소유한다.
 - [x] `SliceStackSlice`: 정렬된 slice의 source index, frame index, plane geometry, normal projection 위치를 갖는다.
 - [x] `SliceStackGap`: 인접 sorted slice 사이의 physical gap 정보를 갖는다.
-- [ ] `SliceStackRun`: 같은 spacing으로 볼 수 있는 연속 slice 구간 정보를 갖는다.
+- [x] `SliceStackRun`: 같은 spacing으로 볼 수 있는 3개 이상 연속 slice 구간 정보를 갖는다.
 - [x] `SliceStackAnalysis`: sorted slices와 gaps를 제공한다.
 - [x] `SliceStackItem`: `source_index`, `frame_index`, `target_k`, `position_along_normal_mm`를 갖는다.
 - [x] `SliceStackPlan`
@@ -325,13 +325,13 @@
 - [x] `SliceStackAnalysis`는 partial diagnostic result를 가질 수 있다.
 - [x] plan은 `ok()==false`이면 `volume_geometry()`를 비운다.
 - [x] classic DataSet stack adapter의 metadata 오류와 missing geometry는 throw하지 않고 `SliceStackIssue`로 반환한다.
-- [ ] unsupported 구조, missing sequence/item은 throw하지 않는다. unexpected allocation failure나 programmer error는 일반 C++ 예외 정책을 따른다.
+- [x] unsupported 구조, missing sequence/item은 throw하지 않는다. unexpected allocation failure나 programmer error는 일반 C++ 예외 정책을 따른다.
 
 ## 구현 체크리스트
 
-- [ ] core `ElementPath` / `DataSet` nested lookup API는 `tmp/element_path_dataset_lookup_checklist.ko.md`에 따라 별도 구현한다.
+- [x] core `ElementPath` / `DataSet` nested lookup API는 `tmp/element_path_dataset_lookup_checklist.ko.md`에 따라 별도 구현한다.
 - [x] geometry module은 core `ElementPath`를 include/use만 하고 재정의하지 않는다.
-- [ ] geometry module의 DICOM path helper는 `dicom::ElementPath`를 반환하거나 `dicom::ElementPathView`로 즉시 lookup 가능한 형태를 반환한다.
+- [x] geometry module의 DICOM path helper는 `dicom::ElementPath`를 반환하거나 `dicom::ElementPathView`로 즉시 lookup 가능한 형태를 반환한다.
 - [x] geometry parser에서 dotted string path lookup을 사용한 부분이 있으면 `ElementPath` helper로 치환한다.
 - [x] `dicom_geometry.h` 추가
 - [x] `Vec3d`, `Point3d`, `ImagePoint2D/3D`, `ImageSize2D/3D` 정의
@@ -355,9 +355,9 @@
 - [x] `make_image_plane_geometry(...)` validated factory 구현
 - [x] `make_image_volume_geometry(...)` validated factory 구현
 - [x] DICOM `ImagePositionPatient`, `ImageOrientationPatient`, `PixelSpacing` 파싱 helper 추가
-- [ ] `ImagePositionPatient` lookup은 `PlanePositionSequence[0] -> ImagePositionPatient`를 `ElementPath`로 표현한다.
-- [ ] `ImageOrientationPatient` lookup은 `PlaneOrientationSequence[0] -> ImageOrientationPatient`를 `ElementPath`로 표현한다.
-- [ ] `PixelSpacing`, `SliceThickness` lookup은 `PixelMeasuresSequence[0] -> PixelSpacing/SliceThickness`를 `ElementPath`로 표현한다.
+- [x] `ImagePositionPatient` lookup은 `PlanePositionSequence[0] -> ImagePositionPatient`를 `ElementPath`로 표현한다.
+- [x] `ImageOrientationPatient` lookup은 `PlaneOrientationSequence[0] -> ImageOrientationPatient`를 `ElementPath`로 표현한다.
+- [x] `PixelSpacing`, `SliceThickness` lookup은 `PixelMeasuresSequence[0] -> PixelSpacing/SliceThickness`를 `ElementPath`로 표현한다.
 - [x] `ImageOrientationPatient`의 첫 triplet은 `direction_i`, 두 번째 triplet은 `direction_j`로 매핑한다는 계약을 코드 주석과 테스트에 남긴다.
   - 첫 triplet은 DICOM row direction cosine이지만 DicomSDL의 `i=column` index direction이다.
   - 두 번째 triplet은 DICOM column direction cosine이지만 DicomSDL의 `j=row` index direction이다.
@@ -371,7 +371,7 @@
 - [x] `FrameGeometryReader` 생성 시 root dataset, per-frame/shared functional groups, SOP Class별 Frame Type Sequence tag 등 반복 lookup 정보를 캐시한다.
 - [x] `FrameGeometryReader`의 frame별 lookup은 cached sequence pointer에서 `sequence_item(frame_index)`와 필요한 tag lookup만 수행하도록 구현한다.
 - [x] `FrameGeometryReader::volumetric_properties(frame_index)`의 source는 실제 resolve에 사용한 `ElementPath`로 채운다.
-- [ ] `FrameGeometryReader::plane(frame_index)`의 missing tag failure는 가능하면 missing tag와 `ElementPath` source를 diagnostic message/issue에 남긴다.
+- [x] `FrameGeometryReader::plane(frame_index)`의 missing tag failure는 가능하면 missing tag와 `ElementPath` source를 diagnostic message/issue에 남긴다.
 - [x] 많은 frame을 순회하는 API 문서/주석에서는 convenience factory보다 `FrameGeometryReader` 재사용을 권장한다.
 - [x] MR `MR Image Frame Type Sequence (0018,9226)`, CT `CT Image Frame Type Sequence (0018,9329)`, PET `PET Frame Type Sequence (0018,9751)` lookup을 먼저 구현하고, 다른 SOP Class는 table 확장 전까지 명시적으로 unsupported 처리한다.
 - [x] NM Image Storage는 `FrameGeometryReader::volumetric_properties()` lookup table에서 제외하고, 호출되면 `unsupported_frame_geometry`로 실패한다.
@@ -420,7 +420,7 @@
 - [x] slice normal 방향 projection으로 slice position을 정렬하는 helper 추가
 - [x] slice origin의 in-plane residual을 계산해 `SliceStackAnalysis` issue로 기록한다.
 - [x] non-uniform stack에서도 sorted slices와 gaps를 반환하는 `SliceStackAnalysis` 추가
-- [ ] non-uniform stack에서도 uniform runs를 반환하는 `SliceStackAnalysis` 확장
+- [x] non-uniform stack에서도 uniform runs를 반환하는 `SliceStackAnalysis` 확장
 - [x] uniform spacing일 때만 `ImageVolumeGeometry`를 갖는 `SliceStackPlan` 추가
 - [x] uniform spacing이어도 in-plane residual이 tolerance를 넘으면 `ImageVolumeGeometry`를 만들지 않는다.
 - [x] non-uniform stack에서는 `plan_slice_stack()`이 기본값으로 `non_uniform_spacing`을 반환하고 `volume_geometry()`는 비어 있게 한다.
@@ -997,11 +997,11 @@ SliceStackPlan plan_image_frame_stack(
 - [x] `make_image_volume_geometry()`가 invalid spacing, invalid size, non-orthogonal direction을 거부하는지 검증
 - [ ] public raw constructor 없이 validated factory로 테스트 geometry를 만들 수 있는지 검증
 - [ ] core lookup test는 `tmp/element_path_dataset_lookup_checklist.ko.md`의 Test Plan에서 관리한다.
-- [ ] geometry code review: DICOM metadata lookup 구현이 dotted string path가 아니라 `ElementPath` helper를 사용하는지 확인
-- [ ] geometry code review: `VolumetricPropertiesInfo::source`와 missing geometry diagnostic이 `ElementPath` source를 보존하는지 확인
+- [x] geometry code review: DICOM metadata lookup 구현이 dotted string path가 아니라 `ElementPath` helper를 사용하는지 확인
+- [x] geometry code review: `VolumetricPropertiesInfo::source`와 missing geometry diagnostic이 `ElementPath` source를 보존하는지 확인
 - [ ] geometry perf/code review: 많은 frame을 순회할 때 convenience factory 대신 `FrameGeometryReader`를 재사용하는 경로를 제공하는지 확인
 - [ ] geometry perf/code review: `FrameGeometryReader` frame별 lookup이 root dataset에서 매번 full path traversal을 반복하지 않는지 확인
-- [ ] geometry code review: `ElementPath` debug string 변환이 core lookup / `FrameGeometryReader` 경로에서 호출되지 않는지 확인
+- [x] geometry code review: `ElementPath` debug string 변환이 core lookup / `FrameGeometryReader` 경로에서 호출되지 않는지 확인
 - [x] `Matrix4x4d`가 row-major storage, column-vector left multiply convention을 따르는지 검증
 - [x] matrix composition이 `target_index_h = target_world_to_index * source_index_to_world * source_index_h` 순서인지 검증
 - [x] `contains_index()`가 sample-centered valid range `[-0.5, size - 0.5)` 기준으로 동작하는지 검증
@@ -1048,10 +1048,10 @@ SliceStackPlan plan_image_frame_stack(
 - [x] plane-volume / volume-volume check가 `overlaps_extent`, `source_inside_target_extent`, `target_k_range`를 채우는지 검증
 - [x] volume-plane check가 `overlaps_extent`, `source_inside_target_extent`를 채우는지 검증
 - [x] plane의 `contains_world()`가 in-plane bounds뿐 아니라 normal distance tolerance도 적용하는지 검증
-- [ ] `check_overlay_compatibility()`가 repeated call에서 allocation을 만들지 않는지 검증
+- [x] `check_overlay_compatibility()`가 repeated call에서 allocation을 만들지 않는지 검증
 - [ ] `check_overlay_compatibility()`가 dataset access 없이 이미 생성된 geometry 값만 읽는지 code review checklist에 포함
 - [x] typed transform 객체가 생성 후 per-point 변환에서 matrix multiply만 수행하는지 검증
-- [ ] typed transform 객체의 repeated point transform이 allocation을 만들지 않는지 검증
+- [x] typed transform 객체의 repeated point transform이 allocation을 만들지 않는지 검증
 - [x] plane-to-plane, plane-to-volume, volume-to-plane, volume-to-volume transform overload가 같은 matrix composition 규칙을 쓰는지 검증
 - [x] plane-to-plane은 `ImagePoint2D -> ImagePoint2D`, plane-to-volume은 `ImagePoint2D -> ImagePoint3D`, volume-to-plane은 `ImagePoint3D -> ImagePoint2D`, volume-to-volume은 `ImagePoint3D -> ImagePoint3D` 타입으로 컴파일 타임에 구분되는지 검증
 - [x] volume-to-plane projection helper가 `PlaneProjection2D`로 2D index와 signed normal distance를 함께 반환하는지 검증
@@ -1071,12 +1071,12 @@ SliceStackPlan plan_image_frame_stack(
 - [x] reversed input에서도 `SliceStackPlan`은 chosen normal position 오름차순, positive `spacing_k`, `target_k == 0` slice origin 규칙을 유지하는지 검증
 - [x] 입력 slice 순서가 섞여 있어도 `placements()`가 normal 방향 position 기준으로 정렬되는지 검증
 - [x] `SliceStackItem`을 이용해 `source_frame_for_k[item.target_k] = {item.source_index, item.frame_index}` mapping을 만들 수 있는지 검증
-- [ ] `SliceStackAnalysis::issues()` / `SliceStackPlan::issues()`가 inconsistent orientation, mixed FoR, duplicate slice position의 원인 source/frame index를 제공하는지 검증
+- [x] `SliceStackAnalysis::issues()` / `SliceStackPlan::issues()`가 inconsistent orientation, mixed FoR, duplicate slice position의 원인 source/frame index를 제공하는지 검증
 - [x] normal projection spacing은 uniform이지만 slice origin에 in-plane drift가 있으면 `inconsistent_slice_origin` 또는 `non_rectilinear_stack`으로 실패하는지 검증
 - [x] `SliceStackOptions::slice_position_tolerance_mm`가 duplicate slice position 판정에 적용되는지 검증
 - [x] `SliceStackOptions::origin_residual_tolerance_mm`가 in-plane residual 판정에 적용되는지 검증
 - [x] non-uniform slice stack에서 `analyze_slice_stack()`이 sorted slices와 gaps를 반환하는지 검증
-- [ ] non-uniform slice stack에서 `analyze_slice_stack()`이 uniform runs를 반환하는지 검증
+- [x] non-uniform slice stack에서 `analyze_slice_stack()`이 uniform runs를 반환하는지 검증
 - [x] non-uniform slice stack에서 `plan_slice_stack()`은 `non_uniform_spacing`을 반환하고 `volume_geometry()`는 비어 있으며, caller가 analysis를 이용해 policy를 정할 수 있는지 검증
 - [x] 서로 다른 `FrameOfReferenceUID`가 섞이면 `mixed_frame_of_reference`
 - [ ] rows/columns가 다르면 `inconsistent_rows_columns`

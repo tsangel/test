@@ -58,6 +58,25 @@ struct ResolvedCodeString {
 	return ElementPath{}.element(tag);
 }
 
+[[nodiscard]] ElementPath functional_group_macro_path(
+    Tag functional_group_sequence_tag, std::uint32_t item_index,
+    Tag macro_sequence_tag) noexcept {
+	ElementPath source;
+	source.item(functional_group_sequence_tag, item_index)
+	    .element(macro_sequence_tag);
+	return source;
+}
+
+[[nodiscard]] ElementPath functional_group_leaf_path(
+    Tag functional_group_sequence_tag, std::uint32_t item_index,
+    Tag macro_sequence_tag, Tag leaf_tag) noexcept {
+	ElementPath source;
+	source.item(functional_group_sequence_tag, item_index)
+	    .item(macro_sequence_tag, 0)
+	    .element(leaf_tag);
+	return source;
+}
+
 [[nodiscard]] std::string_view trim_ascii_spaces(std::string_view value) noexcept {
 	while (!value.empty() && (value.front() == ' ' || value.front() == '\0')) {
 		value.remove_prefix(1);
@@ -90,19 +109,19 @@ struct ResolvedCodeString {
 	if (!element.vr().is_sequence()) {
 		return GeometryBuildResult<const DataSet*>::failure(
 		    GeometryBuildStatus::invalid_value, sequence_tag,
-		    "element is not a sequence");
+		    "element is not a sequence", root_path(sequence_tag));
 	}
 	const auto* sequence = element.as_sequence();
 	if (!sequence) {
 		return GeometryBuildResult<const DataSet*>::failure(
 		    GeometryBuildStatus::invalid_value, sequence_tag,
-		    "invalid sequence value");
+		    "invalid sequence value", root_path(sequence_tag));
 	}
 	const DataSet* item = sequence->get_dataset(item_index);
 	if (!item) {
 		return GeometryBuildResult<const DataSet*>::failure(
 		    GeometryBuildStatus::invalid_value, sequence_tag,
-		    "sequence item is missing");
+		    "sequence item is missing", root_path(sequence_tag));
 	}
 	return GeometryBuildResult<const DataSet*>::success(item);
 }
@@ -167,7 +186,9 @@ try_read_code_string_from_functional_group(const DataSet* functional_group_item,
 	auto value = element.to_string_view();
 	if (!value) {
 		return GeometryBuildResult<ResolvedCodeString>::failure(
-		    GeometryBuildStatus::invalid_value, leaf_tag, "invalid code string");
+		    GeometryBuildStatus::invalid_value, leaf_tag, "invalid code string",
+		    functional_group_leaf_path(functional_group_sequence_tag,
+		        functional_group_item_index, macro_sequence_tag, leaf_tag));
 	}
 	ElementPath source;
 	source.item(functional_group_sequence_tag, functional_group_item_index)
@@ -187,7 +208,8 @@ try_read_root_code_string(const DataSet& root, Tag leaf_tag) {
 	auto value = element.to_string_view();
 	if (!value) {
 		return GeometryBuildResult<ResolvedCodeString>::failure(
-		    GeometryBuildStatus::invalid_value, leaf_tag, "invalid code string");
+		    GeometryBuildStatus::invalid_value, leaf_tag, "invalid code string",
+		    source);
 	}
 	return GeometryBuildResult<ResolvedCodeString>::success(
 	    ResolvedCodeString{std::string(trim_ascii_spaces(*value)), source});
@@ -215,12 +237,13 @@ volumetric_properties_from_code_string(ResolvedCodeString resolved) {
 		return GeometryBuildResult<VolumetricPropertiesInfo>::failure(
 		    GeometryBuildStatus::mixed_volumetric_properties,
 		    "VolumetricProperties"_tag,
-		    "VolumetricProperties is MIXED without a frame-level value");
+		    "VolumetricProperties is MIXED without a frame-level value",
+		    std::move(resolved.source));
 	}
 	return GeometryBuildResult<VolumetricPropertiesInfo>::failure(
 	    GeometryBuildStatus::unknown_volumetric_properties,
 	    "VolumetricProperties"_tag,
-	    "unknown VolumetricProperties value");
+	    "unknown VolumetricProperties value", std::move(resolved.source));
 }
 
 [[nodiscard]] ImageFrameGeometryKind kind_from_volumetric_properties(
@@ -241,12 +264,14 @@ volumetric_properties_from_code_string(ResolvedCodeString resolved) {
 	const auto& element = dataset.get_dataelement(root_path(tag));
 	if (element.is_missing()) {
 		return GeometryBuildResult<std::vector<double>>::failure(
-		    GeometryBuildStatus::missing_required_tag, tag, "missing required tag");
+		    GeometryBuildStatus::missing_required_tag, tag, "missing required tag",
+		    root_path(tag));
 	}
 	auto values = element.to_double_vector();
 	if (!values || values->size() != expected_count) {
 		return GeometryBuildResult<std::vector<double>>::failure(
-		    GeometryBuildStatus::invalid_value, tag, "invalid value count");
+		    GeometryBuildStatus::invalid_value, tag, "invalid value count",
+		    root_path(tag));
 	}
 	return GeometryBuildResult<std::vector<double>>::success(std::move(*values));
 }
@@ -256,12 +281,14 @@ volumetric_properties_from_code_string(ResolvedCodeString resolved) {
 	const auto& element = dataset.get_dataelement(root_path(tag));
 	if (element.is_missing()) {
 		return GeometryBuildResult<int>::failure(
-		    GeometryBuildStatus::missing_required_tag, tag, "missing required tag");
+		    GeometryBuildStatus::missing_required_tag, tag, "missing required tag",
+		    root_path(tag));
 	}
 	auto value = element.to_int();
 	if (!value || *value <= 0) {
 		return GeometryBuildResult<int>::failure(
-		    GeometryBuildStatus::invalid_size, tag, "value must be positive");
+		    GeometryBuildStatus::invalid_size, tag, "value must be positive",
+		    root_path(tag));
 	}
 	return GeometryBuildResult<int>::success(*value);
 }
@@ -512,7 +539,8 @@ read_non_spatial_dimension_values(const DataSet& frame_content,
 
 void add_slice_stack_store_issue(SliceStackInputStore& store,
     SliceStackStatus status, std::size_t input_index, std::size_t source_index,
-    std::size_t frame_index, Tag tag, std::string message) {
+    std::size_t frame_index, Tag tag, std::string message,
+    ElementPath source = {}) {
 	store.issues.push_back(SliceStackIssue{
 	    status,
 	    input_index,
@@ -520,6 +548,7 @@ void add_slice_stack_store_issue(SliceStackInputStore& store,
 	    frame_index,
 	    tag,
 	    std::move(message),
+	    std::move(source),
 	});
 	if (slice_stack_status_priority(status) <
 	    slice_stack_status_priority(store.status)) {
@@ -544,7 +573,7 @@ void add_slice_stack_store_issue(SliceStackInputStore& store,
 		if (!plane.ok()) {
 			add_slice_stack_store_issue(store,
 			    slice_stack_status_from_geometry_build(plane.status()), index,
-			    index, 0, plane.tag(), plane.message());
+			    index, 0, plane.tag(), plane.message(), plane.source());
 			continue;
 		}
 
@@ -589,7 +618,7 @@ void add_slice_stack_store_issue(SliceStackInputStore& store,
 			add_slice_stack_store_issue(store,
 			    slice_stack_status_from_geometry_build(frame_geometry.status()),
 			    input_index, 0, frame_index, frame_geometry.tag(),
-			    frame_geometry.message());
+			    frame_geometry.message(), frame_geometry.source());
 			continue;
 		}
 		if (frame_geometry.value().kind != ImageFrameGeometryKind::regular_plane) {
@@ -629,24 +658,29 @@ void add_slice_stack_store_issue(SliceStackInputStore& store,
 }
 
 [[nodiscard]] GeometryBuildResult<ImagePlaneGeometry> forward_plane_failure(
-    GeometryBuildStatus status, Tag tag, std::string_view message) {
+    GeometryBuildStatus status, Tag tag, std::string_view message,
+    ElementPath source = {}) {
 	return GeometryBuildResult<ImagePlaneGeometry>::failure(
-	    status, tag, std::string(message));
+	    status, tag, std::string(message), std::move(source));
 }
 
 [[nodiscard]] GeometryBuildResult<ImagePlaneGeometry> forward_vector_failure(
     const GeometryBuildResult<std::vector<double>>& result) {
-	return forward_plane_failure(result.status(), result.tag(), result.message());
+	return forward_plane_failure(
+	    result.status(), result.tag(), result.message(), result.source());
 }
 
 [[nodiscard]] GeometryBuildResult<ImagePlaneGeometry> forward_int_failure(
     const GeometryBuildResult<int>& result) {
-	return forward_plane_failure(result.status(), result.tag(), result.message());
+	return forward_plane_failure(
+	    result.status(), result.tag(), result.message(), result.source());
 }
 
 [[nodiscard]] GeometryBuildResult<ImagePlaneGeometry> plane_from_dicom_values(
     std::size_t rows, std::size_t columns, const std::vector<double>& position,
-    const std::vector<double>& orientation, const std::vector<double>& spacing) {
+    const std::vector<double>& orientation, const std::vector<double>& spacing,
+    ElementPath position_source = {}, ElementPath orientation_source = {},
+    ElementPath spacing_source = {}, ElementPath size_source = {}) {
 	ImagePlaneGeometryParams params;
 	params.origin = Point3d{position[0], position[1], position[2]};
 	// DICOM calls orientation[0..2] the row direction cosine. With DicomSDL's
@@ -665,45 +699,64 @@ void add_slice_stack_store_issue(SliceStackInputStore& store,
 	auto result = make_image_plane_geometry(params);
 	if (!result.ok()) {
 		Tag failure_tag{};
+		ElementPath failure_source;
 		switch (result.status()) {
 		case GeometryBuildStatus::invalid_spacing:
 			failure_tag = "PixelSpacing"_tag;
+			failure_source = std::move(spacing_source);
 			break;
 		case GeometryBuildStatus::invalid_orientation:
 			failure_tag = "ImageOrientationPatient"_tag;
+			failure_source = std::move(orientation_source);
 			break;
 		case GeometryBuildStatus::invalid_size:
 			failure_tag = "Rows"_tag;
+			failure_source = std::move(size_source);
 			break;
 		default:
 			break;
 		}
 		return GeometryBuildResult<ImagePlaneGeometry>::failure(
-		    result.status(), failure_tag, result.message());
+		    result.status(), failure_tag, result.message(),
+		    std::move(failure_source));
 	}
 	return result;
 }
 
 [[nodiscard]] std::optional<GeometryBuildResult<std::vector<double>>>
 try_read_double_vector_from_functional_group(const DataSet* functional_group_item,
+    Tag functional_group_sequence_tag, std::uint32_t functional_group_item_index,
     Tag macro_sequence_tag, Tag leaf_tag, std::size_t expected_count) {
 	if (!functional_group_item) {
 		return std::nullopt;
 	}
-	auto macro_item_result =
-	    try_resolve_functional_group_macro_item(
-	        functional_group_item, macro_sequence_tag);
-	if (!macro_item_result) {
+	const auto macro_source = functional_group_macro_path(
+	    functional_group_sequence_tag, functional_group_item_index,
+	    macro_sequence_tag);
+	const auto leaf_source = functional_group_leaf_path(
+	    functional_group_sequence_tag, functional_group_item_index,
+	    macro_sequence_tag, leaf_tag);
+	const auto& macro_element =
+	    functional_group_item->get_dataelement(root_path(macro_sequence_tag));
+	if (macro_element.is_missing()) {
 		return std::nullopt;
 	}
-	if (!macro_item_result->ok()) {
+	if (!macro_element.vr().is_sequence()) {
 		return GeometryBuildResult<std::vector<double>>::failure(
-		    macro_item_result->status(), macro_item_result->tag(),
-		    macro_item_result->message());
+		    GeometryBuildStatus::invalid_value, macro_sequence_tag,
+		    "element is not a sequence", macro_source);
 	}
-	const DataSet* macro_item = macro_item_result->value();
+	const auto* macro_sequence = macro_element.as_sequence();
+	if (!macro_sequence) {
+		return GeometryBuildResult<std::vector<double>>::failure(
+		    GeometryBuildStatus::invalid_value, macro_sequence_tag,
+		    "invalid sequence value", macro_source);
+	}
+	const DataSet* macro_item = macro_sequence->get_dataset(0);
 	if (!macro_item) {
-		return std::nullopt;
+		return GeometryBuildResult<std::vector<double>>::failure(
+		    GeometryBuildStatus::invalid_value, macro_sequence_tag,
+		    "sequence item is missing", macro_source);
 	}
 	const auto& element = macro_item->get_dataelement(root_path(leaf_tag));
 	if (element.is_missing()) {
@@ -712,23 +765,25 @@ try_read_double_vector_from_functional_group(const DataSet* functional_group_ite
 	auto values = element.to_double_vector();
 	if (!values || values->size() != expected_count) {
 		return GeometryBuildResult<std::vector<double>>::failure(
-		    GeometryBuildStatus::invalid_value, leaf_tag, "invalid value count");
+		    GeometryBuildStatus::invalid_value, leaf_tag, "invalid value count",
+		    leaf_source);
 	}
 	return GeometryBuildResult<std::vector<double>>::success(std::move(*values));
 }
 
 [[nodiscard]] GeometryBuildResult<std::vector<double>> resolve_frame_double_vector(
     const DataSet& root, const DataSet* per_frame_functional_group_item,
+    std::uint32_t per_frame_item_index,
     const DataSet* shared_functional_group_item, Tag macro_sequence_tag,
     Tag leaf_tag, Tag root_tag, std::size_t expected_count) {
 	if (auto result = try_read_double_vector_from_functional_group(
-	        per_frame_functional_group_item, macro_sequence_tag, leaf_tag,
-	        expected_count)) {
+	        per_frame_functional_group_item, "PerFrameFunctionalGroupsSequence"_tag,
+	        per_frame_item_index, macro_sequence_tag, leaf_tag, expected_count)) {
 		return std::move(*result);
 	}
 	if (auto result = try_read_double_vector_from_functional_group(
-	        shared_functional_group_item, macro_sequence_tag, leaf_tag,
-	        expected_count)) {
+	        shared_functional_group_item, "SharedFunctionalGroupsSequence"_tag, 0,
+	        macro_sequence_tag, leaf_tag, expected_count)) {
 		return std::move(*result);
 	}
 	return read_double_vector(root, root_tag, expected_count);
@@ -737,20 +792,23 @@ try_read_double_vector_from_functional_group(const DataSet* functional_group_ite
 [[nodiscard]] GeometryBuildResult<std::vector<double>>
 resolve_strict_frame_double_vector(
     const DataSet* per_frame_functional_group_item,
+    std::uint32_t per_frame_item_index,
     const DataSet* shared_functional_group_item, Tag macro_sequence_tag,
     Tag leaf_tag, std::size_t expected_count) {
 	if (auto result = try_read_double_vector_from_functional_group(
-	        per_frame_functional_group_item, macro_sequence_tag, leaf_tag,
-	        expected_count)) {
+	        per_frame_functional_group_item, "PerFrameFunctionalGroupsSequence"_tag,
+	        per_frame_item_index, macro_sequence_tag, leaf_tag, expected_count)) {
 		return std::move(*result);
 	}
 	if (auto result = try_read_double_vector_from_functional_group(
-	        shared_functional_group_item, macro_sequence_tag, leaf_tag,
-	        expected_count)) {
+	        shared_functional_group_item, "SharedFunctionalGroupsSequence"_tag, 0,
+	        macro_sequence_tag, leaf_tag, expected_count)) {
 		return std::move(*result);
 	}
 	return GeometryBuildResult<std::vector<double>>::failure(
-	    GeometryBuildStatus::missing_required_tag, leaf_tag, "missing required tag");
+	    GeometryBuildStatus::missing_required_tag, leaf_tag, "missing required tag",
+	    functional_group_leaf_path("PerFrameFunctionalGroupsSequence"_tag,
+	        per_frame_item_index, macro_sequence_tag, leaf_tag));
 }
 
 [[nodiscard]] GeometryBuildResult<const Sequence*> resolve_per_frame_sequence(
@@ -762,12 +820,14 @@ resolve_strict_frame_double_vector(
 	}
 	if (!element.vr().is_sequence()) {
 		return GeometryBuildResult<const Sequence*>::failure(
-		    GeometryBuildStatus::invalid_value, tag);
+		    GeometryBuildStatus::invalid_value, tag,
+		    "element is not a sequence", root_path(tag));
 	}
 	const auto* sequence = element.as_sequence();
 	if (!sequence) {
 		return GeometryBuildResult<const Sequence*>::failure(
-		    GeometryBuildStatus::invalid_value, tag);
+		    GeometryBuildStatus::invalid_value, tag,
+		    "invalid sequence value", root_path(tag));
 	}
 	return GeometryBuildResult<const Sequence*>::success(sequence);
 }
@@ -782,7 +842,8 @@ resolve_strict_frame_double_vector(
 	if (!item) {
 		return GeometryBuildResult<const DataSet*>::failure(
 		    GeometryBuildStatus::invalid_frame_index, tag,
-		    "frame index is outside PerFrameFunctionalGroupsSequence");
+		    "frame index is outside PerFrameFunctionalGroupsSequence",
+		    root_path(tag));
 	}
 	return GeometryBuildResult<const DataSet*>::success(item);
 }
@@ -837,17 +898,19 @@ resolve_strict_frame_double_vector(
 		}
 		return GeometryBuildResult<int>::failure(
 		    GeometryBuildStatus::invalid_frame_index, tag,
-		    "frame index is outside root dataset frame metadata");
+		    "frame index is outside root dataset frame metadata",
+		    root_path(tag));
 	}
 	auto value = element.to_int();
 	if (!value || *value <= 0) {
 		return GeometryBuildResult<int>::failure(
-		    GeometryBuildStatus::invalid_value, tag, "invalid NumberOfFrames");
+		    GeometryBuildStatus::invalid_value, tag, "invalid NumberOfFrames",
+		    root_path(tag));
 	}
 	if (frame_index >= static_cast<std::size_t>(*value)) {
 		return GeometryBuildResult<int>::failure(
 		    GeometryBuildStatus::invalid_frame_index, tag,
-		    "frame index is outside NumberOfFrames");
+		    "frame index is outside NumberOfFrames", root_path(tag));
 	}
 	return GeometryBuildResult<int>::success(*value);
 }
@@ -1306,7 +1369,9 @@ GeometryBuildResult<ImagePlaneGeometry> plane_from_single_frame_image(
 	}
 
 	return plane_from_dicom_values(rows.value(), columns.value(),
-	    image_position.value(), image_orientation.value(), pixel_spacing.value());
+	    image_position.value(), image_orientation.value(), pixel_spacing.value(),
+	    image_position.source(), image_orientation.source(),
+	    pixel_spacing.source(), rows.source());
 }
 
 GeometryBuildResult<ImagePlaneGeometry> plane_from_single_frame_image(
@@ -1350,6 +1415,14 @@ GeometryBuildResult<ImagePlaneGeometry> FrameGeometryReader::raw_plane(
 		return GeometryBuildResult<ImagePlaneGeometry>::failure(
 		    GeometryBuildStatus::invalid_value, Tag{}, "missing root dataset");
 	}
+	if (frame_index >
+	    static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max())) {
+		return GeometryBuildResult<ImagePlaneGeometry>::failure(
+		    GeometryBuildStatus::invalid_frame_index,
+		    "PerFrameFunctionalGroupsSequence"_tag,
+		    "frame index is too large for ElementPath diagnostics",
+		    root_path("PerFrameFunctionalGroupsSequence"_tag));
+	}
 	const auto rows = read_positive_int(*root_, "Rows"_tag);
 	if (!rows.ok()) {
 		return forward_int_failure(rows);
@@ -1361,12 +1434,14 @@ GeometryBuildResult<ImagePlaneGeometry> FrameGeometryReader::raw_plane(
 	if (per_frame_functional_groups_status_ != GeometryBuildStatus::ok) {
 		return GeometryBuildResult<ImagePlaneGeometry>::failure(
 		    per_frame_functional_groups_status_, per_frame_functional_groups_tag_,
-		    "invalid PerFrameFunctionalGroupsSequence");
+		    "invalid PerFrameFunctionalGroupsSequence",
+		    root_path(per_frame_functional_groups_tag_));
 	}
 	if (shared_functional_groups_status_ != GeometryBuildStatus::ok) {
 		return GeometryBuildResult<ImagePlaneGeometry>::failure(
 		    shared_functional_groups_status_, shared_functional_groups_tag_,
-		    "invalid SharedFunctionalGroupsSequence");
+		    "invalid SharedFunctionalGroupsSequence",
+		    root_path(shared_functional_groups_tag_));
 	}
 	if (!per_frame_functional_groups_sequence_) {
 		const auto frame_index_result =
@@ -1379,30 +1454,34 @@ GeometryBuildResult<ImagePlaneGeometry> FrameGeometryReader::raw_plane(
 	    resolve_per_frame_item(per_frame_functional_groups_sequence_, frame_index);
 	if (!per_frame.ok()) {
 		return GeometryBuildResult<ImagePlaneGeometry>::failure(
-		    per_frame.status(), per_frame.tag(), per_frame.message());
+		    per_frame.status(), per_frame.tag(), per_frame.message(),
+		    per_frame.source());
 	}
+	const auto frame_item_index = static_cast<std::uint32_t>(frame_index);
 	const DataSet* per_frame_item = per_frame.value();
 	const auto image_position = resolve_frame_double_vector(*root_, per_frame_item,
-	    shared_functional_groups_item_, "PlanePositionSequence"_tag,
+	    frame_item_index, shared_functional_groups_item_, "PlanePositionSequence"_tag,
 	    "ImagePositionPatient"_tag, "ImagePositionPatient"_tag, 3);
 	if (!image_position.ok()) {
 		return forward_vector_failure(image_position);
 	}
 	const auto image_orientation = resolve_frame_double_vector(*root_, per_frame_item,
-	    shared_functional_groups_item_, "PlaneOrientationSequence"_tag,
+	    frame_item_index, shared_functional_groups_item_, "PlaneOrientationSequence"_tag,
 	    "ImageOrientationPatient"_tag, "ImageOrientationPatient"_tag, 6);
 	if (!image_orientation.ok()) {
 		return forward_vector_failure(image_orientation);
 	}
 	const auto pixel_spacing = resolve_frame_double_vector(*root_, per_frame_item,
-	    shared_functional_groups_item_, "PixelMeasuresSequence"_tag,
+	    frame_item_index, shared_functional_groups_item_, "PixelMeasuresSequence"_tag,
 	    "PixelSpacing"_tag, "PixelSpacing"_tag, 2);
 	if (!pixel_spacing.ok()) {
 		return forward_vector_failure(pixel_spacing);
 	}
 
 	return plane_from_dicom_values(rows.value(), columns.value(),
-	    image_position.value(), image_orientation.value(), pixel_spacing.value());
+	    image_position.value(), image_orientation.value(), pixel_spacing.value(),
+	    image_position.source(), image_orientation.source(),
+	    pixel_spacing.source(), rows.source());
 }
 
 GeometryBuildResult<ImagePlaneGeometry> FrameGeometryReader::plane(
@@ -1410,19 +1489,22 @@ GeometryBuildResult<ImagePlaneGeometry> FrameGeometryReader::plane(
 	auto frame_geometry = image_frame_geometry(frame_index);
 	if (!frame_geometry.ok()) {
 		return GeometryBuildResult<ImagePlaneGeometry>::failure(
-		    frame_geometry.status(), frame_geometry.tag(), frame_geometry.message());
+		    frame_geometry.status(), frame_geometry.tag(), frame_geometry.message(),
+		    frame_geometry.source());
 	}
 	if (frame_geometry.value().kind == ImageFrameGeometryKind::sampled_projection) {
 		return GeometryBuildResult<ImagePlaneGeometry>::failure(
 		    GeometryBuildStatus::sampled_frame_geometry,
 		    "VolumetricProperties"_tag,
-		    "SAMPLED frame is not a regular overlay plane");
+		    "SAMPLED frame is not a regular overlay plane",
+		    frame_geometry.source());
 	}
 	if (frame_geometry.value().kind == ImageFrameGeometryKind::distorted) {
 		return GeometryBuildResult<ImagePlaneGeometry>::failure(
 		    GeometryBuildStatus::distorted_frame_geometry,
 		    "VolumetricProperties"_tag,
-		    "DISTORTED frame is not a regular overlay plane");
+		    "DISTORTED frame is not a regular overlay plane",
+		    frame_geometry.source());
 	}
 	auto frame = std::move(frame_geometry).value();
 	return GeometryBuildResult<ImagePlaneGeometry>::success(std::move(frame.plane));
@@ -1433,20 +1515,23 @@ GeometryBuildResult<ImageFrameGeometry> FrameGeometryReader::image_frame_geometr
 	auto plane_result = raw_plane(frame_index);
 	if (!plane_result.ok()) {
 		return GeometryBuildResult<ImageFrameGeometry>::failure(
-		    plane_result.status(), plane_result.tag(), plane_result.message());
+		    plane_result.status(), plane_result.tag(), plane_result.message(),
+		    plane_result.source());
 	}
 	auto volumetric_properties_result = volumetric_properties(frame_index);
 	if (!volumetric_properties_result.ok()) {
 		return GeometryBuildResult<ImageFrameGeometry>::failure(
 		    volumetric_properties_result.status(), volumetric_properties_result.tag(),
-		    volumetric_properties_result.message());
+		    volumetric_properties_result.message(),
+		    volumetric_properties_result.source());
 	}
 
 	ImageFrameGeometry frame_geometry{
 	    std::move(plane_result).value(),
 	    kind_from_volumetric_properties(volumetric_properties_result.value().value)};
+	const auto source = volumetric_properties_result.value().source;
 	return GeometryBuildResult<ImageFrameGeometry>::success(
-	    std::move(frame_geometry));
+	    std::move(frame_geometry), source);
 }
 
 GeometryBuildResult<VolumetricPropertiesInfo>
@@ -1470,17 +1555,20 @@ FrameGeometryReader::volumetric_properties(std::size_t frame_index) const {
 		return GeometryBuildResult<VolumetricPropertiesInfo>::failure(
 		    GeometryBuildStatus::invalid_frame_index,
 		    "PerFrameFunctionalGroupsSequence"_tag,
-		    "frame index is too large for ElementPath diagnostics");
+		    "frame index is too large for ElementPath diagnostics",
+		    root_path("PerFrameFunctionalGroupsSequence"_tag));
 	}
 	if (per_frame_functional_groups_status_ != GeometryBuildStatus::ok) {
 		return GeometryBuildResult<VolumetricPropertiesInfo>::failure(
 		    per_frame_functional_groups_status_, per_frame_functional_groups_tag_,
-		    "invalid PerFrameFunctionalGroupsSequence");
+		    "invalid PerFrameFunctionalGroupsSequence",
+		    root_path(per_frame_functional_groups_tag_));
 	}
 	if (shared_functional_groups_status_ != GeometryBuildStatus::ok) {
 		return GeometryBuildResult<VolumetricPropertiesInfo>::failure(
 		    shared_functional_groups_status_, shared_functional_groups_tag_,
-		    "invalid SharedFunctionalGroupsSequence");
+		    "invalid SharedFunctionalGroupsSequence",
+		    root_path(shared_functional_groups_tag_));
 	}
 	if (!per_frame_functional_groups_sequence_) {
 		const auto frame_index_result =
@@ -1488,7 +1576,7 @@ FrameGeometryReader::volumetric_properties(std::size_t frame_index) const {
 		if (!frame_index_result.ok()) {
 			return GeometryBuildResult<VolumetricPropertiesInfo>::failure(
 			    frame_index_result.status(), frame_index_result.tag(),
-			    frame_index_result.message());
+			    frame_index_result.message(), frame_index_result.source());
 		}
 	}
 
@@ -1497,7 +1585,8 @@ FrameGeometryReader::volumetric_properties(std::size_t frame_index) const {
 	    resolve_per_frame_item(per_frame_functional_groups_sequence_, frame_index);
 	if (!per_frame.ok()) {
 		return GeometryBuildResult<VolumetricPropertiesInfo>::failure(
-		    per_frame.status(), per_frame.tag(), per_frame.message());
+		    per_frame.status(), per_frame.tag(), per_frame.message(),
+		    per_frame.source());
 	}
 
 	if (frame_type_sequence_tag_) {
@@ -1507,7 +1596,8 @@ FrameGeometryReader::volumetric_properties(std::size_t frame_index) const {
 		        "VolumetricProperties"_tag)) {
 			if (!result->ok()) {
 				return GeometryBuildResult<VolumetricPropertiesInfo>::failure(
-				    result->status(), result->tag(), result->message());
+				    result->status(), result->tag(), result->message(),
+				    result->source());
 			}
 			return volumetric_properties_from_code_string(std::move(*result).value());
 		}
@@ -1517,7 +1607,8 @@ FrameGeometryReader::volumetric_properties(std::size_t frame_index) const {
 		        frame_type_sequence_tag_, "VolumetricProperties"_tag)) {
 			if (!result->ok()) {
 				return GeometryBuildResult<VolumetricPropertiesInfo>::failure(
-				    result->status(), result->tag(), result->message());
+				    result->status(), result->tag(), result->message(),
+				    result->source());
 			}
 			return volumetric_properties_from_code_string(std::move(*result).value());
 		}
@@ -1531,14 +1622,15 @@ FrameGeometryReader::volumetric_properties(std::size_t frame_index) const {
 	        try_read_root_code_string(*root_, "VolumetricProperties"_tag)) {
 		if (!result->ok()) {
 			return GeometryBuildResult<VolumetricPropertiesInfo>::failure(
-			    result->status(), result->tag(), result->message());
+			    result->status(), result->tag(), result->message(),
+			    result->source());
 		}
 		return volumetric_properties_from_code_string(std::move(*result).value());
 	}
 	return GeometryBuildResult<VolumetricPropertiesInfo>::failure(
 	    GeometryBuildStatus::missing_volumetric_properties,
 	    "VolumetricProperties"_tag,
-	    "missing VolumetricProperties");
+	    "missing VolumetricProperties", root_path("VolumetricProperties"_tag));
 }
 
 GeometryBuildResult<std::string> FrameGeometryReader::frame_of_reference() const {
@@ -1554,19 +1646,19 @@ GeometryBuildResult<ImagePlaneGeometry> plane_from_multiframe_image(
 	auto result = FrameGeometryReader(dataset).image_frame_geometry(frame_index);
 	if (!result.ok()) {
 		return GeometryBuildResult<ImagePlaneGeometry>::failure(
-		    result.status(), result.tag(), result.message());
+		    result.status(), result.tag(), result.message(), result.source());
 	}
 	if (result.value().kind == ImageFrameGeometryKind::sampled_projection) {
 		return GeometryBuildResult<ImagePlaneGeometry>::failure(
 		    GeometryBuildStatus::sampled_frame_geometry,
 		    "VolumetricProperties"_tag,
-		    "SAMPLED frame is not a regular overlay plane");
+		    "SAMPLED frame is not a regular overlay plane", result.source());
 	}
 	if (result.value().kind == ImageFrameGeometryKind::distorted) {
 		return GeometryBuildResult<ImagePlaneGeometry>::failure(
 		    GeometryBuildStatus::distorted_frame_geometry,
 		    "VolumetricProperties"_tag,
-		    "DISTORTED frame is not a regular overlay plane");
+		    "DISTORTED frame is not a regular overlay plane", result.source());
 	}
 	auto frame_geometry = std::move(result).value();
 	return GeometryBuildResult<ImagePlaneGeometry>::success(
@@ -1613,6 +1705,15 @@ GeometryBuildResult<ImagePlaneGeometry> plane_from_seg_frame(
 		    GeometryBuildStatus::invalid_size, "Rows"_tag,
 		    "SEG Rows/Columns must be positive");
 	}
+	if (frame_index >
+	    static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max())) {
+		return GeometryBuildResult<ImagePlaneGeometry>::failure(
+		    GeometryBuildStatus::invalid_frame_index,
+		    "PerFrameFunctionalGroupsSequence"_tag,
+		    "frame index is too large for ElementPath diagnostics",
+		    root_path("PerFrameFunctionalGroupsSequence"_tag));
+	}
+	const auto frame_item_index = static_cast<std::uint32_t>(frame_index);
 
 	const auto* per_frame_item =
 	    segmentation.try_per_frame_functional_groups_item(frame_index);
@@ -1631,26 +1732,28 @@ GeometryBuildResult<ImagePlaneGeometry> plane_from_seg_frame(
 	}
 
 	const auto image_position = resolve_strict_frame_double_vector(
-	    per_frame_item, shared_item, "PlanePositionSequence"_tag,
+	    per_frame_item, frame_item_index, shared_item, "PlanePositionSequence"_tag,
 	    "ImagePositionPatient"_tag, 3);
 	if (!image_position.ok()) {
 		return forward_vector_failure(image_position);
 	}
 	const auto image_orientation = resolve_strict_frame_double_vector(
-	    per_frame_item, shared_item, "PlaneOrientationSequence"_tag,
+	    per_frame_item, frame_item_index, shared_item, "PlaneOrientationSequence"_tag,
 	    "ImageOrientationPatient"_tag, 6);
 	if (!image_orientation.ok()) {
 		return forward_vector_failure(image_orientation);
 	}
 	const auto pixel_spacing = resolve_strict_frame_double_vector(
-	    per_frame_item, shared_item, "PixelMeasuresSequence"_tag,
+	    per_frame_item, frame_item_index, shared_item, "PixelMeasuresSequence"_tag,
 	    "PixelSpacing"_tag, 2);
 	if (!pixel_spacing.ok()) {
 		return forward_vector_failure(pixel_spacing);
 	}
 
 	return plane_from_dicom_values(segmentation.rows(), segmentation.columns(),
-	    image_position.value(), image_orientation.value(), pixel_spacing.value());
+	    image_position.value(), image_orientation.value(), pixel_spacing.value(),
+	    image_position.source(), image_orientation.source(),
+	    pixel_spacing.source(), root_path("Rows"_tag));
 }
 
 GeometryBuildResult<std::string> frame_of_reference_from_dataset(
@@ -1660,13 +1763,13 @@ GeometryBuildResult<std::string> frame_of_reference_from_dataset(
 	if (element.is_missing()) {
 		return GeometryBuildResult<std::string>::failure(
 		    GeometryBuildStatus::missing_required_tag, tag,
-		    make_tag_message("missing required tag", tag));
+		    make_tag_message("missing required tag", tag), root_path(tag));
 	}
 	auto value = element.to_uid_string();
 	if (!value || value->empty()) {
 		return GeometryBuildResult<std::string>::failure(
 		    GeometryBuildStatus::invalid_value, tag,
-		    make_tag_message("invalid UID value", tag));
+		    make_tag_message("invalid UID value", tag), root_path(tag));
 	}
 	return GeometryBuildResult<std::string>::success(std::move(*value));
 }
@@ -1724,7 +1827,7 @@ SliceStackAnalysis analyze_slice_stack(
 
 	auto add_issue = [&](SliceStackStatus status, const SliceStackInput& input,
 	                     std::size_t input_index, Tag tag,
-	                     std::string message) {
+	                     std::string message, ElementPath source = {}) {
 		analysis.issues_.push_back(SliceStackIssue{
 		    status,
 		    input_index,
@@ -1732,6 +1835,7 @@ SliceStackAnalysis analyze_slice_stack(
 		    input.frame_index,
 		    tag,
 		    std::move(message),
+		    std::move(source),
 		});
 		if (slice_stack_status_priority(status) <
 		    slice_stack_status_priority(analysis.status_)) {
@@ -1831,6 +1935,47 @@ SliceStackAnalysis analyze_slice_stack(
 				    "duplicate slice position");
 			}
 		}
+	}
+
+	if (!analysis.gaps_.empty()) {
+		bool run_active = false;
+		std::size_t run_begin = 0;
+		std::size_t run_end = 0;
+		double run_spacing = 0.0;
+		auto flush_run = [&]() {
+			if (run_active && run_end > run_begin + 2) {
+				analysis.uniform_runs_.push_back(SliceStackRun{
+				    run_begin,
+				    run_end,
+				    run_spacing,
+				});
+			}
+			run_active = false;
+		};
+		for (const auto& gap : analysis.gaps_) {
+			if (gap.spacing_mm <= slice_position_tolerance) {
+				flush_run();
+				continue;
+			}
+			if (!run_active) {
+				run_active = true;
+				run_begin = gap.lower_sorted_index;
+				run_end = gap.upper_sorted_index + 1;
+				run_spacing = gap.spacing_mm;
+				continue;
+			}
+			if (gap.lower_sorted_index + 1 == run_end &&
+			    std::abs(gap.spacing_mm - run_spacing) <= spacing_tolerance) {
+				run_end = gap.upper_sorted_index + 1;
+				continue;
+			}
+			flush_run();
+			run_active = true;
+			run_begin = gap.lower_sorted_index;
+			run_end = gap.upper_sorted_index + 1;
+			run_spacing = gap.spacing_mm;
+		}
+		flush_run();
 	}
 
 	if (!analysis.gaps_.empty()) {
@@ -2192,7 +2337,8 @@ ImageFrameStackAnalysis analyze_image_frame_stacks(
 	bucket_indices.reserve(1);
 
 	auto add_issue = [&](SliceStackStatus status, std::size_t frame_index,
-	                     Tag tag, std::string message) {
+	                     Tag tag, std::string message,
+	                     ElementPath source = {}) {
 		stack_analysis.issues_.push_back(SliceStackIssue{
 		    status,
 		    frame_index,
@@ -2200,6 +2346,7 @@ ImageFrameStackAnalysis analyze_image_frame_stacks(
 		    frame_index,
 		    tag,
 		    std::move(message),
+		    std::move(source),
 		});
 		if (slice_stack_status_priority(status) <
 		    slice_stack_status_priority(stack_analysis.status_)) {
@@ -2235,7 +2382,8 @@ ImageFrameStackAnalysis analyze_image_frame_stacks(
 				add_issue(SliceStackStatus::geometry_parse_failure, frame_index,
 				    frame_content_result.tag(),
 				    std::string("malformed FrameContentSequence: ") +
-				        frame_content_result.message());
+				        frame_content_result.message(),
+				    frame_content_result.source());
 				continue;
 			}
 			const DataSet* frame_content = frame_content_result.value();

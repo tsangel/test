@@ -198,6 +198,10 @@ def test_geometry_slice_stack_analysis_and_plan_bindings() -> None:
     assert analysis.uniform_spacing_k == pytest.approx(10.0)
     assert [s.source_index for s in analysis.slices] == [0, 1, 2]
     assert [gap.spacing_mm for gap in analysis.gaps] == pytest.approx([10.0, 10.0])
+    assert len(analysis.uniform_runs) == 1
+    assert analysis.uniform_runs[0].begin_sorted_index == 0
+    assert analysis.uniform_runs[0].end_sorted_index == 3
+    assert analysis.uniform_runs[0].spacing_mm == pytest.approx(10.0)
 
     plan = g.plan_slice_stack(inputs)
     assert plan.ok
@@ -243,6 +247,26 @@ def test_geometry_slice_stack_analysis_and_plan_bindings() -> None:
     )
     assert tight.ok
     assert tight.uniform_spacing_k == pytest.approx(0.0005)
+
+    non_uniform = g.analyze_slice_stack(
+        [
+            g.SliceStackInput(_plane(0.0), "1.2.3"),
+            g.SliceStackInput(_plane(10.0), "1.2.3"),
+            g.SliceStackInput(_plane(20.0), "1.2.3"),
+            g.SliceStackInput(_plane(50.0), "1.2.3"),
+            g.SliceStackInput(_plane(70.0), "1.2.3"),
+            g.SliceStackInput(_plane(90.0), "1.2.3"),
+        ]
+    )
+    assert not non_uniform.ok
+    assert non_uniform.status is g.SliceStackStatus.non_uniform_spacing
+    assert [
+        (run.begin_sorted_index, run.end_sorted_index)
+        for run in non_uniform.uniform_runs
+    ] == [(0, 3), (3, 6)]
+    assert [run.spacing_mm for run in non_uniform.uniform_runs] == pytest.approx(
+        [10.0, 20.0]
+    )
 
     with pytest.raises(TypeError):
         g.SliceStackOptions(None, 1e-4, 0.2, True)

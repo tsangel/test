@@ -1695,6 +1695,12 @@ class _SliceStackGap:
     spacing_mm: float
 
 
+class _SliceStackRun:
+    begin_sorted_index: int
+    end_sorted_index: int
+    spacing_mm: float
+
+
 class _SliceStackItem:
     source_index: int
     frame_index: int
@@ -1709,6 +1715,10 @@ class _SliceStackIssue:
     frame_index: int
     tag: Tag
     message: str
+    @property
+    def source_depth(self) -> int: ...
+    @property
+    def source_leaf_tag(self) -> Tag: ...
 
 
 class _DimensionIndexDescriptor:
@@ -1740,6 +1750,8 @@ class _SliceStackAnalysis:
     def slices(self) -> list[_SliceStackSlice]: ...
     @property
     def gaps(self) -> list[_SliceStackGap]: ...
+    @property
+    def uniform_runs(self) -> list[_SliceStackRun]: ...
     @property
     def issues(self) -> list[_SliceStackIssue]: ...
     @property
@@ -1875,6 +1887,7 @@ class _GeometryModule:
     SliceStackInput: type[_SliceStackInput]
     SliceStackSlice: type[_SliceStackSlice]
     SliceStackGap: type[_SliceStackGap]
+    SliceStackRun: type[_SliceStackRun]
     SliceStackItem: type[_SliceStackItem]
     SliceStackIssue: type[_SliceStackIssue]
     DimensionIndexDescriptor: type[_DimensionIndexDescriptor]

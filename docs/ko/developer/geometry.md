@@ -45,7 +45,7 @@ signed_normal_distance_mm, 1)`을 반환한다.
 auto file = dicom::read_file(path);
 auto plane = dicom::geometry::plane_from_single_frame_image(*file);
 if (!plane.ok()) {
-    // plane.status(), plane.tag(), plane.message()를 확인한다.
+    // plane.status(), plane.tag(), plane.message(), plane.source()를 확인한다.
 }
 
 auto world = plane.value().world_from_index({12.0, 8.0});
@@ -112,7 +112,9 @@ interpolation 또는 resampling이 필요한 상태다. grid는 같고 extent만
 
 `analyze_slice_stack()`은 `SliceStackInput` 목록 또는 classic
 `DataSet`/`DicomFile` 목록을 받는다. 결과에는 정렬된 slice, spacing gap,
-uniform spacing, structured issue가 들어 있다.
+uniform spacing, uniform run, structured issue가 들어 있다. Non-uniform
+stack에서도 `uniform_runs`를 보면 같은 spacing으로 3개 이상 이어지는 half-open
+sorted slice 구간을 확인할 수 있다.
 
 `plan_slice_stack()`은 uniform rectilinear stack에서만 성공한다. 성공하면
 `volume_geometry`는 output grid를 설명하고, `placements`는 어떤 입력 frame을
