@@ -1,11 +1,11 @@
-# DICOM Segmentation (SEG)와 Geometry
+# DICOM Segmentation(SEG)과 Geometry
 
-DICOM Segmentation (SEG) metadata를 확인하고, SEG frame을 decode하고,
+DICOM Segmentation(SEG) 메타데이터를 확인하고, SEG frame을 decode하고,
 image-plane geometry를 만들고, slice stack을 계획하거나 mask와 image를 안전하게
 overlay할 수 있는지 확인할 때 이 API를 사용한다.
 
-DICOM 파일에서 이 객체들은 `Modality (0008,0060) = SEG`를 사용한다. 더 정확한
-storage 식별자는 SOP Class다. BINARY/FRACTIONAL SEG는 Segmentation Storage를,
+DICOM 파일에서 이 객체들은 `Modality (0008,0060) = SEG`를 사용한다. 정확한
+저장 형식 식별자는 SOP Class다. BINARY/FRACTIONAL SEG는 Segmentation Storage를,
 LABELMAP SEG는 Label Map Segmentation Storage를 사용한다.
 
 아래 예제는 Python을 기준으로 하며, 일반적인 `dicom.read_file()` 흐름에서
@@ -21,7 +21,7 @@ pip install "dicomsdl[numpy]"
 출력값은 입력 파일에 따라 달라진다. 아래 SEG 출력은 하나의 binary FDG/FBB brain
 SEG sample에서 확인한 값을 일부만 발췌한 것이다.
 
-## DICOM Segmentation (SEG) 파일 열기
+## DICOM Segmentation(SEG) 파일 열기
 
 DICOM Segmentation Storage와 Label Map Segmentation Storage는
 `dicom.seg.read_file()`로 연다. 반환값은 일반 `DicomFile`이 아니라
@@ -66,10 +66,10 @@ Python SEG 입력 경로는 `read_file()`과 `read_bytes()`다. Python에는
 dataset을 복사하고 다시 파싱해야 하기 때문이다.
 
 DicomSDL은 BINARY/FRACTIONAL SEG를 Segmentation Storage 경로로, LABELMAP SEG를
-Label Map Segmentation Storage 경로로 지원한다. SEG adapter는 open 시점에 모든
-PixelData를 scan하지 않고 metadata만 index한다. LABELMAP stored label value는
-frame decode/presence scan 시점이나 명시적인 `validate_label_values()` 호출 시점에
-검증된다.
+Label Map Segmentation Storage 경로로 지원한다. SEG 어댑터는 파일을 열 때 전체
+PixelData element를 스캔하지 않고 메타데이터만 인덱싱한다. LABELMAP에 저장된 label
+value는 frame을 decode하거나 presence scan을 할 때, 또는 명시적인
+`validate_label_values()` 호출 시점에 검증된다.
 
 ## Segment 목록 보기
 
@@ -200,9 +200,9 @@ LABELMAP SEG를 같이 다루는 코드는 다음 차이를 기준으로 잡는 
 
 | SegmentationType | `to_array()` / `decode_frame()` | segment membership | 권장 접근 |
 | --- | --- | --- | --- |
-| `binary` | `uint8` mask 값 `0` 또는 `1` | frame마다 하나의 `ReferencedSegmentNumber` | segment 단위 순회는 `frames_for_segment()`를 사용한다. `to_array()` 결과가 이미 그 frame의 semantic mask다. |
+| `binary` | `uint8` mask 값 `0` 또는 `1` | frame마다 하나의 `ReferencedSegmentNumber` | segment 단위 순회는 `frames_for_segment()`를 사용한다. `to_array()` 결과가 이미 그 frame의 segment mask다. |
 | `fractional` | 저장된 raw `uint8` sample | frame마다 하나의 `ReferencedSegmentNumber` | threshold mask는 `mask_for_segment(..., fractional_threshold=...)`를 사용하고, raw probability/occupancy 값이 필요하면 `MaximumFractionalValue`로 직접 scaling한다. |
-| `labelmap` | 저장된 label value, `uint8` 또는 native-endian `uint16` | 한 frame에 여러 segment number가 들어갈 수 있음 | `present_segment_numbers()`와 `mask_for_segment()`를 사용한다. LABELMAP frame에서는 `referenced_segment_number`를 사용하지 않는다. |
+| `labelmap` | 저장된 label value, `uint8` 또는 native-endian `uint16` | 한 frame에 여러 segment number가 들어갈 수 있음 | `present_segment_numbers()`와 `mask_for_segment()`를 사용한다. LABELMAP frame에서는 `referenced_segment_number`를 쓰지 않는다. |
 
 가장 안전한 공통 패턴은 다음과 같다.
 
@@ -213,10 +213,10 @@ for frame in seg.frames:
         # frame.image_position_patient / geometry mapping과 함께 mask를 사용한다.
 ```
 
-저장 pixel 표현이 필요하면 `to_array()`를 사용한다. storage type과 무관한 semantic
-`uint8` 0/1 mask가 필요하면 `mask_for_segment()`를 사용한다. LABELMAP에서
+저장된 pixel 표현이 필요하면 `to_array()`를 사용한다. 저장 방식과 무관한
+`uint8` 0/1 segment mask가 필요하면 `mask_for_segment()`를 사용한다. LABELMAP에서
 `frames_for_segment()`와 `validate_label_values()`는 처음 호출할 때 모든 frame을
-scan할 수 있다. BINARY/FRACTIONAL에서는 open 시점에 만든 metadata index를 사용한다.
+스캔할 수 있다. BINARY/FRACTIONAL에서는 파일을 열 때 만든 메타데이터 index를 사용한다.
 
 ## BINARY SEG mask decode
 
@@ -321,12 +321,12 @@ if seg.segmentation_type is dicom.seg.SegmentationType.labelmap:
 ```
 
 Palette lookup, color mapping, opacity, legend rendering은 viewer/UI layer의
-책임이다. DicomSDL은 stored label sample과 metadata를 반환하며 palette image를
+책임이다. DicomSDL은 저장된 label sample과 metadata를 반환하며 palette image를
 렌더링하지 않는다.
 
-특정 segment에 대한 semantic mask가 필요하면 `mask_for_segment()`를 사용한다. 이
+특정 segment에 대한 `uint8` 0/1 mask가 필요하면 `mask_for_segment()`를 사용한다. 이
 API는 BINARY, FRACTIONAL, LABELMAP SEG에서 공통으로 동작한다. FRACTIONAL SEG에서는
-threshold가 normalized `[0, 1]` 단위로 적용된다.
+threshold가 정규화된 `[0, 1]` 단위로 적용된다.
 
 ```python
 segment_number = 24
@@ -340,10 +340,10 @@ print(mask.shape, mask.dtype, mask.min(), mask.max())
 (512, 512) uint8 0 1
 ```
 
-`present_segment_numbers(frame)`는 요청한 LABELMAP frame만 scan하고 결과를 cache한다.
+`present_segment_numbers(frame)`는 요청한 LABELMAP frame만 스캔하고 결과를 캐시한다.
 `frames_for_segment(segment_number)`와 `validate_label_values()`는 처음 호출할 때
-모든 LABELMAP frame을 scan할 수 있으므로, 큰 multi-frame SEG에서는 명시적인
-validation/indexing 작업으로 취급하는 편이 좋다.
+모든 LABELMAP frame을 스캔할 수 있으므로, 큰 multi-frame SEG에서는 명시적인
+검증/인덱싱 작업으로 취급하는 편이 좋다.
 
 ## DICOM plane tag를 geometry로 바꾸기
 

@@ -5,7 +5,7 @@ decode SEG frames, build image-plane geometry, plan slice stacks, or check
 whether masks and images can be overlaid safely.
 
 In DICOM files, these objects use `Modality (0008,0060) = SEG`. The SOP Class
-is the more precise storage identifier: Segmentation Storage for BINARY and
+is the precise storage identifier: Segmentation Storage for BINARY and
 FRACTIONAL SEG, and Label Map Segmentation Storage for LABELMAP SEG.
 
 The examples below use Python and build on the ordinary `dicom.read_file()`
@@ -67,8 +67,8 @@ reparse the existing `DicomFile`.
 
 DicomSDL supports BINARY and FRACTIONAL SEG through Segmentation Storage, and
 LABELMAP SEG through Label Map Segmentation Storage. The adapter opens SEG
-metadata without scanning all PixelData up front; LABELMAP stored label values
-are validated when frames are decoded or scanned, or when
+metadata without scanning the entire PixelData element up front; LABELMAP stored
+label values are validated when frames are decoded or scanned, or when
 `validate_label_values()` is called explicitly.
 
 ## Inspect Segments

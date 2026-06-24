@@ -2,7 +2,7 @@
 
 当你需要查看 DICOM Segmentation (SEG) 元数据、解码 SEG frame、构建 image-plane geometry、规划 slice stack，或检查 mask 与 image 是否可以安全叠加时，可以使用这些 API。
 
-在 DICOM 文件中，这类对象使用 `Modality (0008,0060) = SEG`。更精确的 storage 标识符是 SOP Class：BINARY/FRACTIONAL SEG 使用 Segmentation Storage，LABELMAP SEG 使用 Label Map Segmentation Storage。
+在 DICOM 文件中，这类对象使用 `Modality (0008,0060) = SEG`。更准确的存储标识符是 SOP Class：BINARY/FRACTIONAL SEG 使用 Segmentation Storage，LABELMAP SEG 使用 Label Map Segmentation Storage。
 
 下面的示例使用 Python，并接在普通的 `dicom.read_file()` 工作流之后。Geometry layer 不负责构建 viewer、分配最终输出 volume、选择 dominant grid，也不会 resample mask。
 
@@ -54,7 +54,7 @@ seg = dicom.seg.read_bytes(data, copy=False)
 
 Python 中的 SEG 输入入口是 `read_file()` 和 `read_bytes()`。没有 `dicom.seg.from_dicomfile(df)`，因为从已有 Python `DicomFile` 生成 SEG 对象需要复制大数据集并重新解析。
 
-DicomSDL 通过 Segmentation Storage 支持 BINARY/FRACTIONAL SEG，通过 Label Map Segmentation Storage 支持 LABELMAP SEG。SEG adapter 在打开文件时只索引 metadata，不会预先扫描全部 PixelData。LABELMAP stored label value 会在 frame decode/presence scan 时验证，也可以通过显式调用 `validate_label_values()` 验证。
+DicomSDL 通过 Segmentation Storage 支持 BINARY/FRACTIONAL SEG，通过 Label Map Segmentation Storage 支持 LABELMAP SEG。SEG 适配器在打开文件时只索引元数据，不会预先扫描整个 PixelData 元素。LABELMAP 中存储的 label value 会在解码 frame 或执行 presence scan 时验证，也可以通过显式调用 `validate_label_values()` 验证。
 
 ## 查看 Segment
 
@@ -171,13 +171,13 @@ Source image reference 是来源元数据。它说明 SEG 是由哪些 image 生
 
 `seg.segmentation_type` 表示 PixelData 的存储形式。如果一段代码要同时处理 BINARY、FRACTIONAL 和 LABELMAP SEG，请按下面的差异选择 API。
 
-| SegmentationType | `to_array()` / `decode_frame()` | segment membership | 推荐方式 |
+| SegmentationType | `to_array()` / `decode_frame()` | segment 归属 | 推荐方式 |
 | --- | --- | --- | --- |
-| `binary` | `uint8` mask value `0` 或 `1` | 每个 frame 有一个 `ReferencedSegmentNumber` | 按 segment 遍历时使用 `frames_for_segment()`。`to_array()` 的结果已经是该 frame 的 semantic mask。 |
+| `binary` | `uint8` mask 值 `0` 或 `1` | 每个 frame 有一个 `ReferencedSegmentNumber` | 按 segment 遍历时使用 `frames_for_segment()`。`to_array()` 的结果已经是该 frame 的语义 mask。 |
 | `fractional` | 存储的 raw `uint8` sample | 每个 frame 有一个 `ReferencedSegmentNumber` | threshold mask 使用 `mask_for_segment(..., fractional_threshold=...)`；如果需要 raw probability/occupancy value，则用 `MaximumFractionalValue` 自行 scaling。 |
 | `labelmap` | 存储的 label value，`uint8` 或 native-endian `uint16` | 一个 frame 可以包含多个 segment number | 使用 `present_segment_numbers()` 和 `mask_for_segment()`。不要在 LABELMAP frame 中使用 `referenced_segment_number`。 |
 
-最稳妥的通用 pattern 如下：
+最稳妥的通用模式如下：
 
 ```python
 for frame in seg.frames:
@@ -186,7 +186,7 @@ for frame in seg.frames:
         # 将 mask 与 frame.image_position_patient / geometry mapping 一起使用。
 ```
 
-如果需要存储 pixel 表示，请使用 `to_array()`。如果需要与 storage type 无关的 semantic `uint8` 0/1 mask，请使用 `mask_for_segment()`。对于 LABELMAP，`frames_for_segment()` 和 `validate_label_values()` 第一次调用时可能扫描全部 frame；对于 BINARY/FRACTIONAL，它们使用打开文件时建立的 metadata index。
+如果需要存储的 pixel 表示，请使用 `to_array()`。如果需要与存储类型无关的 `uint8` 0/1 segment mask，请使用 `mask_for_segment()`。对于 LABELMAP，`frames_for_segment()` 和 `validate_label_values()` 第一次调用时可能扫描全部 frame；对于 BINARY/FRACTIONAL，它们使用打开文件时建立的元数据索引。
 
 ## 解码 BINARY SEG mask
 
@@ -267,7 +267,7 @@ if seg.segmentation_type is dicom.seg.SegmentationType.fractional:
 
 ## 解码 LABELMAP SEG frame
 
-LABELMAP SEG 会把 label value 直接存储在 PixelData 中。Label value `0` 表示 background，非零值对应 `SegmentSequence` 中的 segment number。DicomSDL 会保留存储表示：8-bit label map 解码为 `uint8`，16-bit label map 解码为 native-endian `uint16`。
+LABELMAP SEG 会把 label value 直接存储在 PixelData 中。Label value `0` 表示 background（背景），非零值对应 `SegmentSequence` 中的 segment number。DicomSDL 会保留原始存储表示：8-bit label map 解码为 `uint8`，16-bit label map 解码为 native-endian `uint16`。
 
 ```python
 if seg.segmentation_type is dicom.seg.SegmentationType.labelmap:
@@ -283,9 +283,9 @@ if seg.segmentation_type is dicom.seg.SegmentationType.labelmap:
 (1, 24, 300)
 ```
 
-Palette lookup、color mapping、opacity 和 legend rendering 是 viewer/UI layer 的职责。DicomSDL 返回 stored label sample 和 metadata，不渲染 palette image。
+Palette lookup、color mapping、opacity 和 legend rendering 是 viewer/UI layer 的职责。DicomSDL 返回存储的 label sample 和元数据，不渲染 palette image。
 
-如果需要某个 segment 的 semantic mask，请使用 `mask_for_segment()`。这个 API 在 BINARY、FRACTIONAL 和 LABELMAP SEG 中通用。对于 FRACTIONAL SEG，threshold 使用 normalized `[0, 1]` 单位。
+如果需要某个 segment 的语义 mask，请使用 `mask_for_segment()`。这个 API 在 BINARY、FRACTIONAL 和 LABELMAP SEG 中通用。对于 FRACTIONAL SEG，threshold 使用归一化的 `[0, 1]` 单位。
 
 ```python
 segment_number = 24
@@ -299,7 +299,7 @@ print(mask.shape, mask.dtype, mask.min(), mask.max())
 (512, 512) uint8 0 1
 ```
 
-`present_segment_numbers(frame)` 只扫描请求的 LABELMAP frame，并缓存结果。`frames_for_segment(segment_number)` 和 `validate_label_values()` 第一次调用时可能扫描全部 LABELMAP frame；在大型 multi-frame SEG 中，应把它们视为显式 validation/indexing 操作。
+`present_segment_numbers(frame)` 只扫描请求的 LABELMAP frame，并缓存结果。`frames_for_segment(segment_number)` 和 `validate_label_values()` 第一次调用时可能扫描所有 LABELMAP frame；在大型 multi-frame SEG 中，应把它们视为显式验证/索引操作。
 
 ## 将 DICOM plane tag 转为 geometry
 
