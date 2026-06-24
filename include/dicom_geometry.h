@@ -301,6 +301,7 @@ enum class SliceStackStatus {
 	empty,
 	missing_geometry,
 	missing_frame_content,
+	missing_dimension_module,
 	multiple_frame_stacks,
 	geometry_parse_failure,
 	missing_frame_of_reference,
@@ -319,6 +320,7 @@ struct SliceStackOptions {
 
 struct ImageFrameStackOptions {
 	SliceStackOptions slice_stack{};
+	bool allow_geometry_grouping_fallback{false};
 };
 
 struct SliceStackInput {

@@ -4,11 +4,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <iterator>
 #include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace dicom::geometry {
@@ -235,26 +237,28 @@ volumetric_properties_from_code_string(ResolvedCodeString resolved) {
 		return 1;
 	case SliceStackStatus::missing_frame_content:
 		return 2;
-	case SliceStackStatus::geometry_parse_failure:
+	case SliceStackStatus::missing_dimension_module:
 		return 3;
-	case SliceStackStatus::missing_frame_of_reference:
+	case SliceStackStatus::geometry_parse_failure:
 		return 4;
-	case SliceStackStatus::mixed_frame_of_reference:
+	case SliceStackStatus::missing_frame_of_reference:
 		return 5;
-	case SliceStackStatus::inconsistent_rows_columns:
+	case SliceStackStatus::mixed_frame_of_reference:
 		return 6;
-	case SliceStackStatus::inconsistent_orientation:
+	case SliceStackStatus::inconsistent_rows_columns:
 		return 7;
-	case SliceStackStatus::inconsistent_pixel_spacing:
+	case SliceStackStatus::inconsistent_orientation:
 		return 8;
-	case SliceStackStatus::inconsistent_slice_origin:
+	case SliceStackStatus::inconsistent_pixel_spacing:
 		return 9;
-	case SliceStackStatus::duplicate_slice_position:
+	case SliceStackStatus::inconsistent_slice_origin:
 		return 10;
-	case SliceStackStatus::non_uniform_spacing:
+	case SliceStackStatus::duplicate_slice_position:
 		return 11;
-	case SliceStackStatus::multiple_frame_stacks:
+	case SliceStackStatus::non_uniform_spacing:
 		return 12;
+	case SliceStackStatus::multiple_frame_stacks:
+		return 13;
 	}
 	return 100;
 }
@@ -321,6 +325,41 @@ struct FrameStackBucket {
 	return a.stack_id == b.stack_id &&
 	       same_dimension_values(a.dimension_values, b.dimension_values);
 }
+
+void hash_combine(std::size_t& seed, std::size_t value) noexcept {
+	seed ^= value + 0x9e3779b97f4a7c15ull + (seed << 6) + (seed >> 2);
+}
+
+struct ImageFrameStackKeyHash {
+	[[nodiscard]] std::size_t operator()(const ImageFrameStackKey& key) const noexcept {
+		std::size_t seed = std::hash<std::string>{}(key.stack_id);
+		for (const auto& value : key.dimension_values) {
+			hash_combine(seed,
+			    std::hash<std::int64_t>{}(value.value));
+			hash_combine(seed,
+			    std::hash<std::uint32_t>{}(
+			        value.descriptor.dimension_index_pointer.value()));
+			hash_combine(seed,
+			    std::hash<std::uint32_t>{}(
+			        value.descriptor.functional_group_pointer.value()));
+			hash_combine(seed,
+			    std::hash<std::string>{}(
+			        value.descriptor.dimension_organization_uid));
+			hash_combine(seed,
+			    std::hash<std::string>{}(value.descriptor.label));
+			hash_combine(seed,
+			    std::hash<std::string>{}(value.descriptor.private_creator));
+		}
+		return seed;
+	}
+};
+
+struct ImageFrameStackKeyEqual {
+	[[nodiscard]] bool operator()(const ImageFrameStackKey& a,
+	    const ImageFrameStackKey& b) const noexcept {
+		return same_stack_key(a, b);
+	}
+};
 
 [[nodiscard]] bool is_spatial_dimension(
     const DimensionIndexDescriptor& descriptor) noexcept {
@@ -524,6 +563,23 @@ void add_slice_stack_store_issue(SliceStackInputStore& store,
 	return store;
 }
 
+[[nodiscard]] std::vector<SliceStackInput> make_slice_stack_inputs_from_analysis(
+    const SliceStackAnalysis& analysis) {
+	std::vector<SliceStackInput> inputs;
+	inputs.reserve(analysis.slices().size());
+	const auto frame_of_reference_uid =
+	    std::string_view(analysis.frame_of_reference_uid());
+	for (const auto& slice : analysis.slices()) {
+		inputs.push_back(SliceStackInput{
+		    slice.source_index,
+		    slice.frame_index,
+		    slice.plane,
+		    frame_of_reference_uid,
+		});
+	}
+	return inputs;
+}
+
 [[nodiscard]] GeometryBuildResult<ImagePlaneGeometry> forward_plane_failure(
     GeometryBuildStatus status, Tag tag, std::string_view message) {
 	return GeometryBuildResult<ImagePlaneGeometry>::failure(
@@ -696,6 +752,31 @@ resolve_strict_frame_double_vector(
 		return fallback;
 	}
 	return std::nullopt;
+}
+
+[[nodiscard]] GeometryBuildResult<int> validate_root_only_frame_index(
+    const DataSet& root, std::size_t frame_index) {
+	const auto tag = "NumberOfFrames"_tag;
+	const auto& element = root.get_dataelement(root_path(tag));
+	if (element.is_missing()) {
+		if (frame_index == 0) {
+			return GeometryBuildResult<int>::success(1);
+		}
+		return GeometryBuildResult<int>::failure(
+		    GeometryBuildStatus::invalid_frame_index, tag,
+		    "frame index is outside root dataset frame metadata");
+	}
+	auto value = element.to_int();
+	if (!value || *value <= 0) {
+		return GeometryBuildResult<int>::failure(
+		    GeometryBuildStatus::invalid_value, tag, "invalid NumberOfFrames");
+	}
+	if (frame_index >= static_cast<std::size_t>(*value)) {
+		return GeometryBuildResult<int>::failure(
+		    GeometryBuildStatus::invalid_frame_index, tag,
+		    "frame index is outside NumberOfFrames");
+	}
+	return GeometryBuildResult<int>::success(*value);
 }
 
 [[nodiscard]] Matrix4x4d make_plane_index_to_world(
@@ -1203,6 +1284,13 @@ GeometryBuildResult<ImagePlaneGeometry> FrameGeometryReader::plane(
 		    per_frame_functional_groups_status_, per_frame_functional_groups_tag_,
 		    "invalid PerFrameFunctionalGroupsSequence");
 	}
+	if (!per_frame_functional_groups_sequence_) {
+		const auto frame_index_result =
+		    validate_root_only_frame_index(*root_, frame_index);
+		if (!frame_index_result.ok()) {
+			return forward_int_failure(frame_index_result);
+		}
+	}
 	const auto per_frame =
 	    resolve_per_frame_item(per_frame_functional_groups_sequence_, frame_index);
 	if (!per_frame.ok()) {
@@ -1281,6 +1369,15 @@ FrameGeometryReader::volumetric_properties(std::size_t frame_index) const {
 		return GeometryBuildResult<VolumetricPropertiesInfo>::failure(
 		    per_frame_functional_groups_status_, per_frame_functional_groups_tag_,
 		    "invalid PerFrameFunctionalGroupsSequence");
+	}
+	if (!per_frame_functional_groups_sequence_) {
+		const auto frame_index_result =
+		    validate_root_only_frame_index(*root_, frame_index);
+		if (!frame_index_result.ok()) {
+			return GeometryBuildResult<VolumetricPropertiesInfo>::failure(
+			    frame_index_result.status(), frame_index_result.tag(),
+			    frame_index_result.message());
+		}
 	}
 
 	const auto frame_item_index = static_cast<std::uint32_t>(frame_index);
@@ -1886,9 +1983,26 @@ ImageFrameStackAnalysis analyze_image_frame_stacks(
 		});
 		return stack_analysis;
 	}
+	if (dimension_descriptors.value().empty() &&
+	    !options.allow_geometry_grouping_fallback) {
+		stack_analysis.status_ = SliceStackStatus::missing_dimension_module;
+		stack_analysis.issues_.push_back(SliceStackIssue{
+		    SliceStackStatus::missing_dimension_module,
+		    0,
+		    0,
+		    0,
+		    "DimensionIndexSequence"_tag,
+		    "DimensionIndexSequence is required for enhanced frame grouping",
+		});
+		return stack_analysis;
+	}
 
 	std::vector<FrameStackBucket> buckets;
 	buckets.reserve(1);
+	std::unordered_map<ImageFrameStackKey, std::size_t, ImageFrameStackKeyHash,
+	    ImageFrameStackKeyEqual>
+	    bucket_indices;
+	bucket_indices.reserve(1);
 
 	auto add_issue = [&](SliceStackStatus status, std::size_t frame_index,
 	                     Tag tag, std::string message) {
@@ -1951,15 +2065,12 @@ ImageFrameStackAnalysis analyze_image_frame_stacks(
 		key.stack_id = std::string(*stack_id);
 		key.dimension_values = std::move(dimension_values).value();
 
-		auto bucket = std::find_if(buckets.begin(), buckets.end(),
-		    [&](const FrameStackBucket& candidate) {
-			    return same_stack_key(candidate.key, key);
-		    });
-		if (bucket == buckets.end()) {
+		auto [bucket_position, inserted] =
+		    bucket_indices.emplace(key, buckets.size());
+		if (inserted) {
 			buckets.push_back(FrameStackBucket{std::move(key), {}});
-			bucket = std::prev(buckets.end());
 		}
-		bucket->members.push_back(FrameStackMember{
+		buckets[bucket_position->second].members.push_back(FrameStackMember{
 		    frame_index,
 		    *in_stack_position,
 		});
@@ -2079,11 +2190,11 @@ SliceStackPlan plan_image_frame_stack(
 		return plan;
 	}
 
-	const auto& frame_indices = stacks.groups().front().frame_indices;
-	return plan_image_frame_stack(
-	    file,
-	    std::span<const std::size_t>(frame_indices.data(), frame_indices.size()),
-	    options);
+	const auto inputs =
+	    make_slice_stack_inputs_from_analysis(stacks.groups().front().analysis);
+	return plan_slice_stack(
+	    std::span<const SliceStackInput>(inputs.data(), inputs.size()),
+	    options.slice_stack);
 }
 
 struct Bounds2D {
@@ -2248,6 +2359,15 @@ void include(Bounds3D& bounds, ImagePoint3D point) noexcept {
 	return true;
 }
 
+[[nodiscard]] OverlayCheck finalize_overlay_check(
+    OverlayCheck check, OverlayCheckOptions options) noexcept {
+	if (options.require_same_grid && !check.same_grid) {
+		check.can_transform = false;
+		check.can_direct_overlay = false;
+	}
+	return check;
+}
+
 OverlayCheck check_overlay_compatibility(
     std::string_view source_frame_of_reference_uid,
     const ImagePlaneGeometry& source,
@@ -2261,7 +2381,12 @@ OverlayCheck check_overlay_compatibility(
 	}
 
 	const double normal_dot = dot(source.normal(), target.normal());
-	check.max_orientation_error = 1.0 - std::abs(normal_dot);
+	const double axis_i_dot = dot(source.direction_i(), target.direction_i());
+	const double axis_j_dot = dot(source.direction_j(), target.direction_j());
+	const double normal_error = 1.0 - std::abs(normal_dot);
+	const double axis_error = std::max(
+	    1.0 - std::abs(axis_i_dot), 1.0 - std::abs(axis_j_dot));
+	check.max_orientation_error = std::max(normal_error, axis_error);
 	const double tolerance_i =
 	    positive_tolerance(options.frame_position_tolerance_mm) /
 	    target.spacing_i();
@@ -2277,26 +2402,26 @@ OverlayCheck check_overlay_compatibility(
 	check.source_inside_target_extent =
 	    bounds_inside(target_bounds, target.size(), tolerance_i, tolerance_j);
 
-	if (check.max_orientation_error > options.orientation_tolerance) {
+	if (normal_error > options.orientation_tolerance) {
 		check.status = OverlayCompatibility::non_parallel_planes;
 		check.requires_resampling = true;
-		return check;
+		return finalize_overlay_check(check, options);
 	}
-	if (normal_dot < 0.0) {
+	if (normal_dot < 0.0 || axis_i_dot < 0.0 || axis_j_dot < 0.0) {
 		check.status = OverlayCompatibility::opposite_orientation;
 		check.requires_resampling = true;
-		return check;
+		return finalize_overlay_check(check, options);
 	}
 
 	check.max_normal_distance_mm =
 	    std::abs(dot(target.origin() - source.origin(), source.normal()));
 	if (check.max_normal_distance_mm > options.normal_distance_tolerance_mm) {
 		check.status = OverlayCompatibility::out_of_plane;
-		return check;
+		return finalize_overlay_check(check, options);
 	}
 	if (!check.overlaps_extent) {
 		check.status = OverlayCompatibility::different_extent;
-		return check;
+		return finalize_overlay_check(check, options);
 	}
 
 	const auto source_spacing = source.spacing();
@@ -2317,25 +2442,34 @@ OverlayCheck check_overlay_compatibility(
 	check.max_position_error_mm = std::max(in_plane_i_mm, in_plane_j_mm);
 	const bool same_origin =
 	    check.max_position_error_mm <= options.frame_position_tolerance_mm;
-	check.same_grid = check.same_spacing && check.same_extent && same_origin;
+	const bool same_positive_orientation =
+	    normal_dot >= 0.0 && axis_i_dot >= 0.0 && axis_j_dot >= 0.0 &&
+	    check.max_orientation_error <= options.orientation_tolerance;
+	check.same_grid = same_positive_orientation && check.same_spacing &&
+	                  check.same_extent && same_origin;
 	check.can_direct_overlay = check.same_grid;
 
 	if (check.can_direct_overlay) {
 		check.status = OverlayCompatibility::compatible;
-		return check;
+		return finalize_overlay_check(check, options);
 	}
 	if (!check.same_spacing) {
 		check.status = OverlayCompatibility::different_spacing;
 		check.requires_resampling = true;
-		return check;
+		return finalize_overlay_check(check, options);
 	}
 	if (!check.same_extent) {
 		check.status = OverlayCompatibility::different_extent;
-		return check;
+		return finalize_overlay_check(check, options);
+	}
+	if (axis_error > options.orientation_tolerance) {
+		check.status = OverlayCompatibility::requires_resampling;
+		check.requires_resampling = true;
+		return finalize_overlay_check(check, options);
 	}
 	check.status = OverlayCompatibility::requires_resampling;
 	check.requires_resampling = true;
-	return check;
+	return finalize_overlay_check(check, options);
 }
 
 OverlayCheck check_overlay_compatibility(
@@ -2412,38 +2546,38 @@ OverlayCheck check_overlay_compatibility(
 	if (normal_error > options.orientation_tolerance) {
 		check.status = OverlayCompatibility::non_parallel_planes;
 		check.requires_resampling = true;
-		return check;
+		return finalize_overlay_check(check, options);
 	}
 	if (normal_dot < 0.0 || axis_i_dot < 0.0 || axis_j_dot < 0.0) {
 		check.status = OverlayCompatibility::opposite_orientation;
 		check.requires_resampling = true;
-		return check;
+		return finalize_overlay_check(check, options);
 	}
 	if (!check.overlaps_extent) {
 		check.status = OverlayCompatibility::different_extent;
-		return check;
+		return finalize_overlay_check(check, options);
 	}
 	if (!check.same_spacing) {
 		check.status = OverlayCompatibility::different_spacing;
 		check.requires_resampling = true;
-		return check;
+		return finalize_overlay_check(check, options);
 	}
 	if (!check.same_extent) {
 		check.status = OverlayCompatibility::different_extent;
-		return check;
+		return finalize_overlay_check(check, options);
 	}
 	if (axis_error > options.orientation_tolerance) {
 		check.status = OverlayCompatibility::requires_resampling;
 		check.requires_resampling = true;
-		return check;
+		return finalize_overlay_check(check, options);
 	}
 	if (check.can_direct_overlay) {
 		check.status = OverlayCompatibility::compatible;
-		return check;
+		return finalize_overlay_check(check, options);
 	}
 	check.status = OverlayCompatibility::requires_resampling;
 	check.requires_resampling = true;
-	return check;
+	return finalize_overlay_check(check, options);
 }
 
 OverlayCheck check_overlay_compatibility(
@@ -2529,38 +2663,38 @@ OverlayCheck check_overlay_compatibility(
 	if (normal_error > options.orientation_tolerance) {
 		check.status = OverlayCompatibility::non_parallel_planes;
 		check.requires_resampling = true;
-		return check;
+		return finalize_overlay_check(check, options);
 	}
 	if (normal_dot < 0.0 || axis_i_dot < 0.0 || axis_j_dot < 0.0) {
 		check.status = OverlayCompatibility::opposite_orientation;
 		check.requires_resampling = true;
-		return check;
+		return finalize_overlay_check(check, options);
 	}
 	if (!check.overlaps_extent) {
 		check.status = OverlayCompatibility::different_extent;
-		return check;
+		return finalize_overlay_check(check, options);
 	}
 	if (!check.same_spacing) {
 		check.status = OverlayCompatibility::different_spacing;
 		check.requires_resampling = true;
-		return check;
+		return finalize_overlay_check(check, options);
 	}
 	if (!check.same_extent) {
 		check.status = OverlayCompatibility::different_extent;
-		return check;
+		return finalize_overlay_check(check, options);
 	}
 	if (axis_error > options.orientation_tolerance) {
 		check.status = OverlayCompatibility::requires_resampling;
 		check.requires_resampling = true;
-		return check;
+		return finalize_overlay_check(check, options);
 	}
 	if (check.can_direct_overlay) {
 		check.status = OverlayCompatibility::compatible;
-		return check;
+		return finalize_overlay_check(check, options);
 	}
 	check.status = OverlayCompatibility::requires_resampling;
 	check.requires_resampling = true;
-	return check;
+	return finalize_overlay_check(check, options);
 }
 
 OverlayCheck check_overlay_compatibility(
@@ -2639,33 +2773,33 @@ OverlayCheck check_overlay_compatibility(
 	if (check.max_orientation_error > options.orientation_tolerance) {
 		check.status = OverlayCompatibility::non_parallel_planes;
 		check.requires_resampling = true;
-		return check;
+		return finalize_overlay_check(check, options);
 	}
 	if (axis_i_dot < 0.0 || axis_j_dot < 0.0 || axis_k_dot < 0.0) {
 		check.status = OverlayCompatibility::opposite_orientation;
 		check.requires_resampling = true;
-		return check;
+		return finalize_overlay_check(check, options);
 	}
 	if (!check.overlaps_extent) {
 		check.status = OverlayCompatibility::different_extent;
-		return check;
+		return finalize_overlay_check(check, options);
 	}
 	if (!check.same_spacing) {
 		check.status = OverlayCompatibility::different_spacing;
 		check.requires_resampling = true;
-		return check;
+		return finalize_overlay_check(check, options);
 	}
 	if (!check.same_extent) {
 		check.status = OverlayCompatibility::different_extent;
-		return check;
+		return finalize_overlay_check(check, options);
 	}
 	if (check.can_direct_overlay) {
 		check.status = OverlayCompatibility::compatible;
-		return check;
+		return finalize_overlay_check(check, options);
 	}
 	check.status = OverlayCompatibility::requires_resampling;
 	check.requires_resampling = true;
-	return check;
+	return finalize_overlay_check(check, options);
 }
 
 } // namespace dicom::geometry

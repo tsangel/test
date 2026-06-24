@@ -197,6 +197,15 @@ std::unique_ptr<dicom::DicomFile> make_enhanced_ct_stack_file() {
 	    "SharedFunctionalGroupsSequence.0.CTImageFrameTypeSequence.0."
 	    "VolumetricProperties",
 	    "VOLUME");
+	set_tag(*file,
+	    "DimensionIndexSequence.0.DimensionIndexPointer",
+	    "InStackPositionNumber"_tag);
+	set_tag(*file,
+	    "DimensionIndexSequence.0.FunctionalGroupPointer",
+	    "FrameContentSequence"_tag);
+	set_text(*file,
+	    "DimensionIndexSequence.0.DimensionDescriptionLabel",
+	    "Stack position");
 	for (int frame_index = 0; frame_index < 3; ++frame_index) {
 		const auto base = std::string("PerFrameFunctionalGroupsSequence.") +
 		    std::to_string(frame_index) + ".";
@@ -211,6 +220,12 @@ std::unique_ptr<dicom::DicomFile> make_enhanced_ct_stack_file() {
 		set_int(*file,
 		    base + "FrameContentSequence.0.InStackPositionNumber",
 		    frame_index + 1);
+		const std::array<long, 1> dimension_values{{
+		    static_cast<long>(frame_index + 1),
+		}};
+		set_longs(*file,
+		    base + "FrameContentSequence.0.DimensionIndexValues",
+		    dimension_values);
 	}
 	return file;
 }
@@ -472,12 +487,33 @@ int main() {
 		set_doubles(file, "ImageOrientationPatient"_tag, orientation);
 		set_doubles(file, "PixelSpacing"_tag, spacing);
 
-		auto result = dicom::geometry::plane_from_multiframe_image(file, 99);
+		auto result = dicom::geometry::plane_from_multiframe_image(file, 0);
 		if (!result.ok()) {
-			fail("legacy multiframe root fallback should parse without PerFrame FG");
+			fail("legacy root fallback should parse frame zero without PerFrame FG");
 		}
 		expect_near(result.value().origin().z, 3.0, "legacy root fallback position");
 		expect_near(result.value().spacing_i(), 5.0, "legacy root fallback spacing_i");
+
+		result = dicom::geometry::plane_from_multiframe_image(file, 1);
+		if (result.ok() ||
+		    result.status() !=
+		        dicom::geometry::GeometryBuildStatus::invalid_frame_index ||
+		    result.tag() != "NumberOfFrames"_tag) {
+			fail("root fallback without NumberOfFrames should only allow frame zero");
+		}
+
+		set_int(file, "NumberOfFrames"_tag, 2);
+		result = dicom::geometry::plane_from_multiframe_image(file, 1);
+		if (!result.ok()) {
+			fail("root fallback should allow frame index inside NumberOfFrames");
+		}
+		result = dicom::geometry::plane_from_multiframe_image(file, 2);
+		if (result.ok() ||
+		    result.status() !=
+		        dicom::geometry::GeometryBuildStatus::invalid_frame_index ||
+		    result.tag() != "NumberOfFrames"_tag) {
+			fail("root fallback should reject frame index outside NumberOfFrames");
+		}
 	}
 	{
 		dicom::DicomFile file;
@@ -911,6 +947,26 @@ int main() {
 
 	{
 		auto file = make_enhanced_ct_stack_file();
+		file->dataset().remove_dataelement("DimensionIndexSequence"_tag);
+		auto stacks = dicom::geometry::analyze_image_frame_stacks(*file);
+		if (stacks.ok() ||
+		    stacks.status() !=
+		        dicom::geometry::SliceStackStatus::missing_dimension_module ||
+		    stacks.issues().empty() ||
+		    stacks.issues().front().tag != "DimensionIndexSequence"_tag) {
+			fail("enhanced whole-file grouping should require DimensionIndexSequence");
+		}
+		dicom::geometry::ImageFrameStackOptions options;
+		options.allow_geometry_grouping_fallback = true;
+		stacks = dicom::geometry::analyze_image_frame_stacks(*file, options);
+		if (!stacks.ok() || stacks.groups().size() != 1 ||
+		    !stacks.groups()[0].analysis.ok()) {
+			fail("explicit geometry grouping fallback should allow missing DimensionIndexSequence");
+		}
+	}
+
+	{
+		auto file = make_enhanced_ct_stack_file();
 		auto stacks = dicom::geometry::analyze_image_frame_stacks(*file);
 		if (!stacks.ok() || stacks.groups().size() != 1 ||
 		    stacks.groups()[0].key.stack_id != "STACK_A" ||
@@ -1046,6 +1102,20 @@ int main() {
 		set_tag(*file,
 		    "DimensionIndexSequence.0.FunctionalGroupPointer",
 		    "FrameContentSequence"_tag);
+		for (int frame_index = 0; frame_index < 3; ++frame_index) {
+			auto* frame_content = file->dataset().sequence_item(
+			    "PerFrameFunctionalGroupsSequence"_tag,
+			    static_cast<std::uint32_t>(frame_index));
+			if (!frame_content) {
+				fail("test setup should have PerFrameFunctionalGroupsSequence item");
+			}
+			frame_content = frame_content->sequence_item(
+			    "FrameContentSequence"_tag, 0);
+			if (!frame_content) {
+				fail("test setup should have FrameContentSequence item");
+			}
+			frame_content->remove_dataelement("DimensionIndexValues"_tag);
+		}
 		auto stacks = dicom::geometry::analyze_image_frame_stacks(*file);
 		if (stacks.ok() ||
 		    stacks.status() !=
@@ -1116,6 +1186,25 @@ int main() {
 		if (!check.ok() || !check.requires_resampling ||
 		    check.status != dicom::geometry::OverlayCompatibility::different_spacing) {
 			fail("different spacing should require resampling");
+		}
+		dicom::geometry::OverlayCheckOptions strict_options;
+		strict_options.require_same_grid = true;
+		check = dicom::geometry::check_overlay_compatibility(
+		    "1.2.3", source, "1.2.3", resampled_target, strict_options);
+		if (check.ok() || check.can_transform || check.can_direct_overlay ||
+		    !check.requires_resampling ||
+		    check.status != dicom::geometry::OverlayCompatibility::different_spacing) {
+			fail("require_same_grid should reject spacing resampling as ok");
+		}
+
+		const auto rotated_target = make_test_plane({2.5, 1.5}, {256, 128},
+		    {10.0, 20.0, 30.0}, {0.0, 1.0, 0.0}, {-1.0, 0.0, 0.0});
+		check = dicom::geometry::check_overlay_compatibility(
+		    "1.2.3", source, "1.2.3", rotated_target);
+		if (!check.ok() || check.can_direct_overlay ||
+		    !check.requires_resampling ||
+		    check.status != dicom::geometry::OverlayCompatibility::requires_resampling) {
+			fail("rotated in-plane axes should require resampling");
 		}
 
 		dicom::geometry::ImagePlaneGeometryParams opposite_params;

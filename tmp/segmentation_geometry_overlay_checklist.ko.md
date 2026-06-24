@@ -57,9 +57,11 @@
   - analysis 객체는 partial diagnostic result를 가질 수 있지만, plan 객체는 `ok()`가 아니면 `volume_geometry()`를 비운다.
 - [x] OverlayCheck boolean 의미를 truth table로 고정한다.
   - `can_transform`: 같은 `FrameOfReferenceUID`이고 geometry가 유효해 좌표 변환을 정의할 수 있다.
+    - 단, `OverlayCheckOptions::require_same_grid == true`이면 직접 overlay 가능한 같은 grid일 때만 true로 둔다.
   - `can_direct_overlay`: resampling 없이 같은 index grid에 직접 overlay/copy할 수 있다.
   - `requires_resampling`: 물리 extent가 겹치지만 직접 overlay는 불가능하다.
   - `overlaps_extent`: source와 target의 physical extent가 tolerance 안에서 교차한다.
+  - plane-plane direct overlay는 normal뿐 아니라 `direction_i`/`direction_j` 축까지 같은 방향이어야 한다. in-plane 90도 회전은 `requires_resampling`, 축 반전은 `opposite_orientation`으로 처리한다.
 - [x] Matrix convention은 row-major storage + column vector left multiply로 고정한다.
   - 저장은 `m[row][column]`.
   - 계산은 `world_h = index_to_world * index_h`.

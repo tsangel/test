@@ -32,7 +32,7 @@ def _volume():
     )
 
 
-def _make_enhanced_ct_stack() -> dicom.DicomFile:
+def _make_enhanced_ct_stack(with_dimension_index: bool = True) -> dicom.DicomFile:
     df = dicom.DicomFile()
     _set(df, "Rows", 4)
     _set(df, "Columns", 5)
@@ -56,11 +56,25 @@ def _make_enhanced_ct_stack() -> dicom.DicomFile:
         "VolumetricProperties",
         "VOLUME",
     )
+    if with_dimension_index:
+        _set(
+            df,
+            "DimensionIndexSequence.0.DimensionIndexPointer",
+            dicom.Tag("InStackPositionNumber"),
+        )
+        _set(
+            df,
+            "DimensionIndexSequence.0.FunctionalGroupPointer",
+            dicom.Tag("FrameContentSequence"),
+        )
+        _set(df, "DimensionIndexSequence.0.DimensionDescriptionLabel", "Stack position")
     for frame_index, z in enumerate((10.0, 20.0, 30.0)):
         base = f"PerFrameFunctionalGroupsSequence.{frame_index}."
         _set(df, base + "PlanePositionSequence.0.ImagePositionPatient", [0.0, 0.0, z])
         _set(df, base + "FrameContentSequence.0.StackID", "STACK_A")
         _set(df, base + "FrameContentSequence.0.InStackPositionNumber", frame_index + 1)
+        if with_dimension_index:
+            _set(df, base + "FrameContentSequence.0.DimensionIndexValues", [frame_index + 1])
     return df
 
 
@@ -106,6 +120,38 @@ def test_geometry_overlay_and_transform_bindings() -> None:
     reverse = transform.source_index_from_target_index(mapped)
     assert reverse.i == pytest.approx(7.0)
     assert reverse.j == pytest.approx(11.0)
+
+    plane = _plane(30.0)
+    rotated = g.make_image_plane_geometry(
+        g.Point3d(10.0, 20.0, 30.0),
+        g.Vec3d(0.0, 1.0, 0.0),
+        g.Vec3d(-1.0, 0.0, 0.0),
+        g.ImageSpacing2D(2.5, 1.5),
+        g.ImageSize2D(256, 128),
+    )
+    rotated_check = g.check_overlay_compatibility("1.2.3", plane, "1.2.3", rotated)
+    assert rotated_check.ok
+    assert not rotated_check.can_direct_overlay
+    assert rotated_check.requires_resampling
+    assert rotated_check.status is g.OverlayCompatibility.requires_resampling
+
+    strict_check = g.check_overlay_compatibility(
+        "1.2.3",
+        plane,
+        "1.2.3",
+        g.make_image_plane_geometry(
+            g.Point3d(10.0, 20.0, 30.0),
+            g.Vec3d(1.0, 0.0, 0.0),
+            g.Vec3d(0.0, 1.0, 0.0),
+            g.ImageSpacing2D(3.0, 1.5),
+            g.ImageSize2D(256, 128),
+        ),
+        g.OverlayCheckOptions(require_same_grid=True),
+    )
+    assert not strict_check.ok
+    assert not strict_check.can_transform
+    assert strict_check.requires_resampling
+    assert strict_check.status is g.OverlayCompatibility.different_spacing
 
 
 def test_geometry_factories_raise_value_error_on_invalid_input() -> None:
@@ -196,3 +242,14 @@ def test_geometry_enhanced_image_frame_stack_bindings() -> None:
         (1, 1),
         (2, 2),
     ]
+
+    missing_dimension = _make_enhanced_ct_stack(with_dimension_index=False)
+    missing = g.analyze_image_frame_stacks(missing_dimension)
+    assert not missing.ok
+    assert missing.status is g.SliceStackStatus.missing_dimension_module
+    fallback = g.analyze_image_frame_stacks(
+        missing_dimension,
+        g.ImageFrameStackOptions(allow_geometry_grouping_fallback=True),
+    )
+    assert fallback.ok
+    assert len(fallback.groups) == 1

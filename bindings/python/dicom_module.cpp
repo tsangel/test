@@ -6950,6 +6950,8 @@ NB_MODULE(_dicomsdl, m) {
 		.value("empty", geo::SliceStackStatus::empty)
 		.value("missing_geometry", geo::SliceStackStatus::missing_geometry)
 		.value("missing_frame_content", geo::SliceStackStatus::missing_frame_content)
+		.value("missing_dimension_module",
+		    geo::SliceStackStatus::missing_dimension_module)
 		.value("multiple_frame_stacks", geo::SliceStackStatus::multiple_frame_stacks)
 		.value("geometry_parse_failure", geo::SliceStackStatus::geometry_parse_failure)
 		.value("missing_frame_of_reference",
@@ -7253,15 +7255,21 @@ NB_MODULE(_dicomsdl, m) {
 	    "Options for enhanced multi-frame stack analysis/planning.")
 		.def("__init__",
 		    [](geo::ImageFrameStackOptions* self,
-		        std::optional<geo::SliceStackOptions> slice_stack) {
+		        std::optional<geo::SliceStackOptions> slice_stack,
+		        bool allow_geometry_grouping_fallback) {
 			    geo::ImageFrameStackOptions options;
 			    if (slice_stack) {
 				    options.slice_stack = *slice_stack;
 			    }
+			    options.allow_geometry_grouping_fallback =
+			        allow_geometry_grouping_fallback;
 			    new (self) geo::ImageFrameStackOptions(options);
 		    },
-		    nb::arg("slice_stack") = nb::none())
-		.def_rw("slice_stack", &geo::ImageFrameStackOptions::slice_stack);
+		    nb::arg("slice_stack") = nb::none(),
+		    nb::arg("allow_geometry_grouping_fallback") = false)
+		.def_rw("slice_stack", &geo::ImageFrameStackOptions::slice_stack)
+		.def_rw("allow_geometry_grouping_fallback",
+		    &geo::ImageFrameStackOptions::allow_geometry_grouping_fallback);
 
 	nb::class_<PySliceStackInput>(
 	    geometry, "SliceStackInput",
