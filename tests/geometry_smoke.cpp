@@ -872,6 +872,22 @@ int main() {
 
 	{
 		auto file = make_nm_recon_tomo_stack_file();
+		file->remove_dataelement("NumberOfFrames"_tag);
+		set_text(*file,
+		    "PerFrameFunctionalGroupsSequence.0.FrameContentSequence.0.StackID",
+		    "NM_FALLBACK_SHOULD_NOT_BE_USED");
+		auto analysis = dicom::geometry::analyze_nm_frame_stack(*file);
+		if (analysis.ok() ||
+		    analysis.status() !=
+		        dicom::geometry::SliceStackStatus::missing_frame_content ||
+		    analysis.issues().empty() ||
+		    analysis.issues().front().tag != "NumberOfFrames"_tag) {
+			fail("NM adapter should require root NumberOfFrames");
+		}
+	}
+
+	{
+		auto file = make_nm_recon_tomo_stack_file();
 		set_text(*file, "ImageType"_tag, "ORIGINAL\\PRIMARY\\TOMO");
 		auto analysis = dicom::geometry::analyze_nm_frame_stack(*file);
 		if (analysis.ok() ||

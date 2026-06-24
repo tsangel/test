@@ -380,6 +380,18 @@ def test_geometry_nm_reconstructed_tomo_stack_bindings() -> None:
         (0, 2),
     ]
 
+    missing_frame_count = _make_nm_recon_tomo_stack()
+    missing_frame_count.remove_dataelement("NumberOfFrames")
+    _set(
+        missing_frame_count,
+        "PerFrameFunctionalGroupsSequence.0.FrameContentSequence.0.StackID",
+        "NM_FALLBACK_SHOULD_NOT_BE_USED",
+    )
+    rejected = g.analyze_nm_frame_stack(missing_frame_count)
+    assert not rejected.ok
+    assert rejected.status is g.SliceStackStatus.missing_frame_content
+    assert rejected.issues[0].tag == dicom.Tag("NumberOfFrames")
+
     projection = _make_nm_recon_tomo_stack()
     _set(projection, "ImageType", "ORIGINAL\\PRIMARY\\TOMO")
     rejected = g.analyze_nm_frame_stack(projection)

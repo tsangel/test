@@ -320,7 +320,7 @@
 - [x] `GeometryBuildResult<T>`는 단일 operation의 대표 실패만 담고 issue list를 갖지 않는다.
 - [x] `SliceStackAnalysis`는 `issues()`를 제공한다.
 - [x] `SliceStackAnalysis::status()`는 fatal issue 중 가장 높은 우선순위 issue를 대표하고, 우선순위가 같으면 입력 source/frame 순서를 따른다.
-- [x] `SliceStackAnalysis` fatal priority는 다음 순서를 기본으로 한다: `empty` -> `missing_geometry` -> `geometry_parse_failure` -> `missing_frame_of_reference` -> `mixed_frame_of_reference` -> `inconsistent_rows_columns` -> `inconsistent_orientation` -> `inconsistent_pixel_spacing` -> `inconsistent_slice_origin` -> `duplicate_slice_position` -> `non_uniform_spacing`.
+- [x] `SliceStackAnalysis` fatal priority는 다음 순서를 기본으로 한다: `empty` -> `missing_geometry` -> `missing_frame_content` -> `missing_dimension_module` -> `unsupported_tiled_image` -> `multiple_frame_stacks` -> `geometry_parse_failure` -> `missing_frame_of_reference` -> `mixed_frame_of_reference` -> `inconsistent_rows_columns` -> `inconsistent_orientation` -> `inconsistent_pixel_spacing` -> `inconsistent_slice_origin` -> `duplicate_slice_position` -> `non_uniform_spacing`.
 - [x] `SliceStackAnalysis::issues()`는 가능한 모든 fatal/warning 원인을 source/frame/tag/message와 함께 보존한다.
 - [x] `SliceStackAnalysis`는 partial diagnostic result를 가질 수 있다.
 - [x] plan은 `ok()==false`이면 `volume_geometry()`를 비운다.

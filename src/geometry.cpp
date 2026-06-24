@@ -768,14 +768,15 @@ void add_slice_stack_store_issue(SliceStackInputStore& store,
 		return store;
 	}
 
-	const auto frame_count = number_of_frames(root);
-	if (!frame_count || *frame_count == 0) {
+	const auto frame_count = read_positive_int(root, "NumberOfFrames"_tag);
+	if (!frame_count.ok()) {
 		add_root_issue(SliceStackStatus::missing_frame_content,
-		    "NumberOfFrames"_tag,
+		    frame_count.tag(),
 		    "NumberOfFrames is required for NM frame stack analysis",
-		    root_path("NumberOfFrames"_tag));
+		    frame_count.source());
 		return store;
 	}
+	const auto frame_count_value = static_cast<std::size_t>(frame_count.value());
 
 	const auto image_type_value3 = read_image_type_value3(root);
 	if (!image_type_value3.ok()) {
@@ -811,7 +812,8 @@ void add_slice_stack_store_issue(SliceStackInputStore& store,
 		return store;
 	}
 
-	auto slice_vector = read_int_vector(root, "SliceVector"_tag, *frame_count);
+	auto slice_vector =
+	    read_int_vector(root, "SliceVector"_tag, frame_count_value);
 	if (!slice_vector.ok()) {
 		add_root_issue(SliceStackStatus::missing_frame_content,
 		    slice_vector.tag(), slice_vector.message(), slice_vector.source());
@@ -850,8 +852,9 @@ void add_slice_stack_store_issue(SliceStackInputStore& store,
 
 	const auto& reference_plane = base_plane.value();
 	const int reference_slice = slice_vector.value().front();
-	store.inputs.reserve(*frame_count);
-	for (std::size_t frame_index = 0; frame_index < *frame_count; ++frame_index) {
+	store.inputs.reserve(frame_count_value);
+	for (std::size_t frame_index = 0; frame_index < frame_count_value;
+	     ++frame_index) {
 		const double slice_offset_mm =
 		    static_cast<double>(slice_vector.value()[frame_index] -
 		                        reference_slice) *
@@ -2846,21 +2849,6 @@ SliceStackAnalysis analyze_image_frame_stack(
 		analysis.issues_ = stacks.issues();
 		return analysis;
 	}
-	if (stacks.groups().size() != 1) {
-		SliceStackAnalysis analysis;
-		analysis.status_ = SliceStackStatus::multiple_frame_stacks;
-		analysis.issues_ = stacks.issues();
-		analysis.issues_.push_back(SliceStackIssue{
-		    SliceStackStatus::multiple_frame_stacks,
-		    0,
-		    0,
-		    0,
-		    "StackID"_tag,
-		    "image contains multiple frame stacks",
-		    root_path("StackID"_tag),
-		});
-		return analysis;
-	}
 	return stacks.groups().front().analysis;
 }
 
@@ -2890,20 +2878,6 @@ SliceStackPlan plan_image_frame_stack(
 	if (stacks.groups().empty()) {
 		plan.status_ = SliceStackStatus::empty;
 		plan.issues_ = stacks.issues();
-		return plan;
-	}
-	if (stacks.groups().size() != 1) {
-		plan.status_ = SliceStackStatus::multiple_frame_stacks;
-		plan.issues_ = stacks.issues();
-		plan.issues_.push_back(SliceStackIssue{
-		    SliceStackStatus::multiple_frame_stacks,
-		    0,
-		    0,
-		    0,
-		    "StackID"_tag,
-		    "image contains multiple frame stacks",
-		    root_path("StackID"_tag),
-		});
 		return plan;
 	}
 
