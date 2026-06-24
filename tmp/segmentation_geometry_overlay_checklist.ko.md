@@ -61,7 +61,8 @@
   - `can_transform`: 같은 `FrameOfReferenceUID`이고 geometry가 유효해 좌표 변환을 정의할 수 있다.
     - 단, `OverlayCheckOptions::require_same_grid == true`이면 직접 overlay 가능한 같은 grid일 때만 true로 둔다.
   - `can_direct_overlay`: resampling 없이 같은 index grid에 직접 overlay/copy할 수 있다.
-  - `requires_resampling`: 물리 extent가 겹치지만 직접 overlay는 불가능하다.
+  - `requires_resampling`: 물리 extent가 겹치고 spacing/orientation/grid mapping 때문에 interpolation 또는 resampling이 필요하다.
+  - 같은 grid에서 extent만 다른 경우는 `different_extent`로 보고하고, caller가 crop/pad/clip 정책으로 처리한다.
   - `overlaps_extent`: source와 target의 physical extent가 tolerance 안에서 교차한다.
   - plane-plane direct overlay는 normal뿐 아니라 `direction_i`/`direction_j` 축까지 같은 방향이어야 한다. in-plane 90도 회전은 `requires_resampling`, 축 반전은 `opposite_orientation`으로 처리한다.
 - [x] Matrix convention은 row-major storage + column vector left multiply로 고정한다.
@@ -158,7 +159,8 @@
 - [x] `plane_from_seg_frame(const seg::Segmentation&, std::size_t)`: SEG frame용.
 - [x] `frame_of_reference_from_dataset(const DataSet&)`
 - [x] `frame_of_reference_from_segmentation(const seg::Segmentation&)`
-- [x] 위 convenience factory들은 내부적으로 `FrameGeometryReader`를 사용해 구현한다.
+- [x] multi-frame convenience factory들은 내부적으로 `FrameGeometryReader`를 사용해 구현한다.
+  - single-frame factory는 root dataset parser를 사용하고, SEG frame factory는 SEG strict parser를 사용한다.
 - [x] 반복 호출이 예상되는 코드는 convenience factory 대신 `FrameGeometryReader`를 직접 생성해 재사용한다.
 - [x] 일반 image frame의 geometry resolution 순서는 DicomSDL의 기존 pixel transform metadata와 맞춘다: `PerFrameFunctionalGroupsSequence -> SharedFunctionalGroupsSequence -> root dataset`.
 - [x] 위 resolution 순서는 내부적으로 `ElementPath`로 표현한다. 예: `PerFrameFunctionalGroupsSequence[frame] -> PlanePositionSequence[0] -> ImagePositionPatient`.
@@ -187,7 +189,7 @@
 - [x] root 값이 `MIXED`이면 frame-level 값 없이는 reliable하지 않으므로 `mixed_volumetric_properties`로 실패한다.
 - [x] `VOLUME`이면 `ImageFrameGeometryKind::regular_plane`, `SAMPLED`이면 `sampled_projection`, `DISTORTED`이면 `distorted`로 판정한다.
 - [x] `MIXED`, missing, unknown value는 `ImageFrameGeometryKind`로 조용히 변환하지 않고 `GeometryBuildStatus`로 반환한다.
-- [x] `VolumeBasedCalculationTechnique`나 `FrameType` flavor(`MAX_IP` 등)는 보조 진단으로만 사용하고, kind 판정의 primary source는 `VolumetricProperties`로 둔다.
+- [ ] `VolumeBasedCalculationTechnique`나 `FrameType` flavor(`MAX_IP` 등)는 후속 보조 진단으로만 사용하고, kind 판정의 primary source는 `VolumetricProperties`로 둔다.
 - [x] SOP Class별 Frame Type Functional Group lookup table을 내부 helper로 두고, 지원하지 않는 SOP Class에서 frame-level value를 찾아야 하면 `unsupported_frame_geometry`로 실패한다.
 - [x] `VolumetricPropertiesInfo::source`는 예를 들어 `PerFrameFunctionalGroupsSequence[frame] -> PETFrameTypeSequence[0] -> VolumetricProperties`를 `ElementPath`로 보존한다.
 - [x] NM Image Storage는 Enhanced Functional Group 기반 Frame Type Sequence가 아니므로 이 lookup table에 넣지 않는다.
@@ -245,14 +247,15 @@
 | 같은 FoR, 동일 plane/grid/extent | `compatible` | true | true | false | true |
 | 같은 FoR, 물리 extent가 겹치지만 grid가 다름 | `requires_resampling` 또는 세부 상태 | true | false | true | true |
 | 같은 FoR, spacing만 다름 | `different_spacing` | true | false | true | extent 기준 |
-| 같은 FoR, extent만 다름 | `different_extent` | true | false | 필요 시 true | extent 기준 |
+| 같은 FoR, extent만 다름 | `different_extent` | true | false | false | extent 기준 |
 | 같은 FoR, 평면 normal 위치가 tolerance 밖 | `out_of_plane` | true | false | false | false |
 | 같은 FoR, 방향이 반대 | `opposite_orientation` | true | false | true | extent 기준 |
 | 같은 FoR, plane이 volume 밖 | `out_of_plane` 또는 `different_extent` | true | false | false | false |
 | 같은 FoR, volume끼리 extent가 겹치지 않음 | `different_extent` | true | false | false | false |
 
 - [ ] `ok()`는 `can_transform`과 같은 의미로 둔다. 직접 overlay 여부는 반드시 `can_direct_overlay`를 확인한다.
-- [ ] `requires_resampling=true`는 물리적으로 겹치는 영역이 있고 직접 overlay가 불가능한 경우에만 사용한다.
+- [ ] `requires_resampling=true`는 물리적으로 겹치는 영역이 있고 spacing/orientation/grid mapping 때문에 interpolation 또는 resampling이 필요한 경우에만 사용한다.
+  - extent만 다른 경우는 crop/pad/clip 정책이며 `requires_resampling=false`로 둔다.
 - [ ] extent 관련 overload는 가능한 경우 `target_k_range`를 채운다. extent가 겹치지 않으면 `target_k_range`는 비어 있다.
 - [ ] 대표 `status` 우선순위는 다음 순서로 고정한다: `missing_frame_of_reference` -> `different_frame_of_reference` -> `non_parallel_planes` -> `opposite_orientation` -> `out_of_plane` -> `different_spacing` -> `different_extent` -> `requires_resampling` -> `compatible`.
 - [ ] 대표 `status`는 진단용이며, 실제 caller 정책은 `can_transform`, `can_direct_overlay`, `requires_resampling`, `overlaps_extent`를 함께 확인한다.
@@ -821,9 +824,8 @@ enum class SliceStackStatus {
 };
 
 struct SliceStackOptions {
-    double position_tolerance_mm = 1e-3;
-    double orientation_tolerance = 1e-4;
-    double spacing_tolerance_mm = 1e-3;
+    GeometryTolerance tolerance;
+    double slice_position_tolerance_mm = 1e-3;
     double origin_residual_tolerance_mm = 1e-3;
     bool allow_duplicate_positions = false;
 };
@@ -831,7 +833,7 @@ struct SliceStackOptions {
 struct ImageFrameStackOptions {
     SliceStackOptions slice_stack;
     bool allow_geometry_grouping_fallback = false;
-    bool reject_tiled_images = true;
+    // TILED_FULL/TILED_SPARSE는 MVP에서 항상 unsupported_tiled_image로 거절한다.
 };
 
 struct SliceStackIssue {
@@ -1071,8 +1073,8 @@ SliceStackPlan plan_image_frame_stack(
 - [x] `SliceStackItem`을 이용해 `source_frame_for_k[item.target_k] = {item.source_index, item.frame_index}` mapping을 만들 수 있는지 검증
 - [ ] `SliceStackAnalysis::issues()` / `SliceStackPlan::issues()`가 inconsistent orientation, mixed FoR, duplicate slice position의 원인 source/frame index를 제공하는지 검증
 - [x] normal projection spacing은 uniform이지만 slice origin에 in-plane drift가 있으면 `inconsistent_slice_origin` 또는 `non_rectilinear_stack`으로 실패하는지 검증
-- [ ] `SliceStackOptions::position_tolerance_mm`가 duplicate slice position 판정에 적용되는지 검증
-- [ ] `SliceStackOptions::origin_residual_tolerance_mm`가 in-plane residual 판정에 적용되는지 검증
+- [x] `SliceStackOptions::slice_position_tolerance_mm`가 duplicate slice position 판정에 적용되는지 검증
+- [x] `SliceStackOptions::origin_residual_tolerance_mm`가 in-plane residual 판정에 적용되는지 검증
 - [x] non-uniform slice stack에서 `analyze_slice_stack()`이 sorted slices와 gaps를 반환하는지 검증
 - [ ] non-uniform slice stack에서 `analyze_slice_stack()`이 uniform runs를 반환하는지 검증
 - [x] non-uniform slice stack에서 `plan_slice_stack()`은 `non_uniform_spacing`을 반환하고 `volume_geometry()`는 비어 있으며, caller가 analysis를 이용해 policy를 정할 수 있는지 검증

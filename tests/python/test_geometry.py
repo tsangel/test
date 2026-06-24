@@ -139,6 +139,19 @@ def test_geometry_overlay_and_transform_bindings() -> None:
     assert rotated_check.requires_resampling
     assert rotated_check.status is g.OverlayCompatibility.requires_resampling
 
+    smaller_extent = g.make_image_plane_geometry(
+        g.Point3d(10.0, 20.0, 30.0),
+        g.Vec3d(1.0, 0.0, 0.0),
+        g.Vec3d(0.0, 1.0, 0.0),
+        g.ImageSpacing2D(2.5, 1.5),
+        g.ImageSize2D(128, 64),
+    )
+    extent_check = g.check_overlay_compatibility("1.2.3", plane, "1.2.3", smaller_extent)
+    assert extent_check.ok
+    assert extent_check.overlaps_extent
+    assert not extent_check.requires_resampling
+    assert extent_check.status is g.OverlayCompatibility.different_extent
+
     strict_check = g.check_overlay_compatibility(
         "1.2.3",
         plane,
@@ -206,6 +219,21 @@ def test_geometry_slice_stack_analysis_and_plan_bindings() -> None:
     assert not mixed.ok
     assert mixed.status is g.SliceStackStatus.mixed_frame_of_reference
     assert mixed.issues
+
+    close_positions = [
+        g.SliceStackInput(_plane(0.0), "1.2.3"),
+        g.SliceStackInput(_plane(0.0005), "1.2.3"),
+    ]
+    duplicate = g.analyze_slice_stack(close_positions)
+    assert not duplicate.ok
+    assert duplicate.status is g.SliceStackStatus.duplicate_slice_position
+
+    tight = g.analyze_slice_stack(
+        close_positions,
+        g.SliceStackOptions(slice_position_tolerance_mm=1e-4),
+    )
+    assert tight.ok
+    assert tight.uniform_spacing_k == pytest.approx(0.0005)
 
 
 def test_geometry_enhanced_image_frame_stack_bindings() -> None:

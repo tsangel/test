@@ -99,8 +99,10 @@ elif check.can_transform and check.requires_resampling:
 `can_transform` 通常表示两个 object 位于可用的同一 frame of reference 中。
 但当 `OverlayCheckOptions.require_same_grid` 为 true 时，只有可 direct overlay
 的同一 grid 才会为 true。`can_direct_overlay` 表示 grid 足够一致，可以直接按
-index copy。`requires_resampling` 表示 physical extent 有重叠但不能 direct
-overlay，这不是错误，而是 caller 需要选择 policy 的状态。
+index copy。`requires_resampling` 不是错误；它表示 physical extent 有重叠，
+并且 spacing/orientation/grid mapping 需要 interpolation 或 resampling。若 grid
+相同而只有 extent 不同，则报告为 `different_extent`，caller 可以用 crop/pad/clip
+处理，不需要 resampling。
 
 ## Slice Stack Planning
 
@@ -111,6 +113,12 @@ spacing 和 structured issues。
 `plan_slice_stack()` 只在 uniform rectilinear stack 上成功。成功时，
 `volume_geometry` 描述 output grid，`placements` 告诉 caller 哪个 input frame 应放到
 target `k`。
+
+`SliceStackOptions` 中的一般 geometry tolerance 保存在 `tolerance` 中，但
+duplicate slice position 使用 `slice_position_tolerance_mm`，in-plane origin
+drift 使用 `origin_residual_tolerance_mm`。duplicate position 默认失败；
+`allow_duplicate_positions` 只允许 analysis 继续，不会把 zero-gap stack 变成
+uniform volume plan。
 
 ```python
 inputs = [

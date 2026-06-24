@@ -7242,15 +7242,30 @@ NB_MODULE(_dicomsdl, m) {
 	    geometry, "SliceStackOptions", "Options for slice stack analysis/planning.")
 		.def("__init__",
 		    [](geo::SliceStackOptions* self,
-		        std::optional<geo::GeometryTolerance> tolerance) {
+		        std::optional<geo::GeometryTolerance> tolerance,
+		        double slice_position_tolerance_mm,
+		        double origin_residual_tolerance_mm,
+		        bool allow_duplicate_positions) {
 			    geo::SliceStackOptions options;
 			    if (tolerance) {
 				    options.tolerance = *tolerance;
 			    }
+			    options.slice_position_tolerance_mm = slice_position_tolerance_mm;
+			    options.origin_residual_tolerance_mm = origin_residual_tolerance_mm;
+			    options.allow_duplicate_positions = allow_duplicate_positions;
 			    new (self) geo::SliceStackOptions(options);
 		    },
-		    nb::arg("tolerance") = nb::none())
-		.def_rw("tolerance", &geo::SliceStackOptions::tolerance);
+		    nb::arg("tolerance") = nb::none(),
+		    nb::arg("slice_position_tolerance_mm") = 1e-3,
+		    nb::arg("origin_residual_tolerance_mm") = 1e-3,
+		    nb::arg("allow_duplicate_positions") = false)
+		.def_rw("tolerance", &geo::SliceStackOptions::tolerance)
+		.def_rw("slice_position_tolerance_mm",
+		    &geo::SliceStackOptions::slice_position_tolerance_mm)
+		.def_rw("origin_residual_tolerance_mm",
+		    &geo::SliceStackOptions::origin_residual_tolerance_mm)
+		.def_rw("allow_duplicate_positions",
+		    &geo::SliceStackOptions::allow_duplicate_positions);
 
 	nb::class_<geo::ImageFrameStackOptions>(
 	    geometry, "ImageFrameStackOptions",

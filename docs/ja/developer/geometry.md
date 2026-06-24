@@ -102,8 +102,9 @@ elif check.can_transform and check.requires_resampling:
 あることを表す。ただし `OverlayCheckOptions.require_same_grid` が true の場合は、
 direct overlay 可能な同一 grid のときだけ true になる。`can_direct_overlay` は
 index copy できる程度に grid が一致することを表す。`requires_resampling` は
-physical extent が重なるが direct overlay できない状態であり、error ではなく
-caller policy の分岐点である。
+error ではなく、physical extent が重なり、spacing/orientation/grid mapping のため
+interpolation または resampling が必要な状態である。grid が同じで extent だけが
+異なる場合は `different_extent` として報告され、caller は crop/pad/clip で処理できる。
 
 ## Slice Stack Planning
 
@@ -114,6 +115,12 @@ uniform spacing、structured issue が入る。
 `plan_slice_stack()` は uniform rectilinear stack の場合だけ成功する。成功時、
 `volume_geometry` は output grid を表し、`placements` はどの input frame を
 target `k` に置くかを表す。
+
+`SliceStackOptions` では一般的な geometry tolerance は `tolerance` に置くが、
+duplicate slice position の判定には `slice_position_tolerance_mm`、in-plane
+origin drift の判定には `origin_residual_tolerance_mm` を使う。duplicate
+position は既定では失敗であり、`allow_duplicate_positions` は analysis の継続を
+許すだけで、zero-gap stack を uniform volume plan にはしない。
 
 ```python
 inputs = [

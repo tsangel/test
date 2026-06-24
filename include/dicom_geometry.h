@@ -317,6 +317,9 @@ enum class SliceStackStatus {
 
 struct SliceStackOptions {
 	GeometryTolerance tolerance{};
+	double slice_position_tolerance_mm{1e-3};
+	double origin_residual_tolerance_mm{1e-3};
+	bool allow_duplicate_positions{false};
 };
 
 struct ImageFrameStackOptions {

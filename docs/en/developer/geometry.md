@@ -99,7 +99,10 @@ elif check.can_transform and check.requires_resampling:
 When `OverlayCheckOptions.require_same_grid` is true, it is only true for direct
 same-grid overlays. `can_direct_overlay` means the grids line up closely enough
 for direct index copy. A true `requires_resampling` is not an error; it means
-the physical extents overlap but direct overlay is not available.
+the physical extents overlap and spacing/orientation/grid mapping requires
+interpolation or resampling. A pure extent difference with the same grid is
+reported as `different_extent`; callers can crop, pad, or clip without
+resampling.
 
 ## Slice Stack Planning
 
@@ -110,6 +113,12 @@ gaps, uniform spacing, and structured issues.
 `plan_slice_stack()` succeeds only for a uniform rectilinear stack. When it
 succeeds, `volume_geometry` describes the output grid and `placements` tells the
 caller which decoded input frame belongs at each target `k`.
+
+`SliceStackOptions` keeps general geometry tolerances in `tolerance`, but uses
+`slice_position_tolerance_mm` for duplicate slice-position detection and
+`origin_residual_tolerance_mm` for in-plane origin drift. Duplicate positions
+are rejected by default; `allow_duplicate_positions` permits analysis to
+continue but does not turn a zero-gap stack into a uniform volume plan.
 
 ```python
 inputs = [

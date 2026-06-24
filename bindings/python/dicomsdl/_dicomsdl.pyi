@@ -1641,8 +1641,18 @@ class _ImageFrameGeometry:
 
 
 class _SliceStackOptions:
-    def __init__(self, tolerance: _GeometryTolerance | None = ..., /) -> None: ...
+    def __init__(
+        self,
+        tolerance: _GeometryTolerance | None = ...,
+        *,
+        slice_position_tolerance_mm: float = ...,
+        origin_residual_tolerance_mm: float = ...,
+        allow_duplicate_positions: bool = ...,
+    ) -> None: ...
     tolerance: _GeometryTolerance
+    slice_position_tolerance_mm: float
+    origin_residual_tolerance_mm: float
+    allow_duplicate_positions: bool
 
 
 class _ImageFrameStackOptions:

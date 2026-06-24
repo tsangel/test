@@ -800,6 +800,44 @@ int main() {
 		        dicom::geometry::SliceStackStatus::duplicate_slice_position) {
 			fail("duplicate slice position should be reported before non-uniform gap");
 		}
+
+		dicom::geometry::SliceStackOptions allow_duplicate_options;
+		allow_duplicate_options.allow_duplicate_positions = true;
+		analysis = dicom::geometry::analyze_slice_stack(
+		    std::span<const dicom::geometry::SliceStackInput>(
+		        inputs.data(), inputs.size()),
+		    allow_duplicate_options);
+		if (!analysis.ok() || analysis.uniform_spacing_k()) {
+			fail("allowed duplicate positions should not become a uniform volume");
+		}
+	}
+
+	{
+		const auto z10 = make_test_plane({2.5, 1.5}, {256, 128}, {0.0, 0.0, 10.0});
+		const auto close_z10 =
+		    make_test_plane({2.5, 1.5}, {256, 128}, {0.0, 0.0, 10.0005});
+		const std::array<dicom::geometry::SliceStackInput, 2> inputs{{
+		    {0, 0, z10, "1.2.3"},
+		    {1, 0, close_z10, "1.2.3"},
+		}};
+		auto analysis = dicom::geometry::analyze_slice_stack(
+		    std::span<const dicom::geometry::SliceStackInput>(
+		        inputs.data(), inputs.size()));
+		if (analysis.ok() ||
+		    analysis.status() !=
+		        dicom::geometry::SliceStackStatus::duplicate_slice_position) {
+			fail("default slice position tolerance should detect close duplicates");
+		}
+
+		dicom::geometry::SliceStackOptions tight_position_options;
+		tight_position_options.slice_position_tolerance_mm = 1e-4;
+		analysis = dicom::geometry::analyze_slice_stack(
+		    std::span<const dicom::geometry::SliceStackInput>(
+		        inputs.data(), inputs.size()),
+		    tight_position_options);
+		if (!analysis.ok() || !analysis.uniform_spacing_k()) {
+			fail("slice_position_tolerance_mm should control duplicate detection");
+		}
 	}
 
 	{
@@ -844,6 +882,16 @@ int main() {
 		    analysis.status() !=
 		        dicom::geometry::SliceStackStatus::inconsistent_slice_origin) {
 			fail("slice stack should reject in-plane origin residual");
+		}
+
+		dicom::geometry::SliceStackOptions relaxed_residual_options;
+		relaxed_residual_options.origin_residual_tolerance_mm = 0.2;
+		analysis = dicom::geometry::analyze_slice_stack(
+		    std::span<const dicom::geometry::SliceStackInput>(
+		        inputs.data(), inputs.size()),
+		    relaxed_residual_options);
+		if (!analysis.ok() || !analysis.uniform_spacing_k()) {
+			fail("origin_residual_tolerance_mm should control in-plane residual");
 		}
 	}
 
@@ -1277,6 +1325,16 @@ int main() {
 		if (!check.ok() || !check.can_direct_overlay ||
 		    check.status != dicom::geometry::OverlayCompatibility::compatible) {
 			fail("identical planes should be directly compatible");
+		}
+
+		const auto smaller_extent =
+		    make_test_plane({2.5, 1.5}, {128, 64}, {10.0, 20.0, 30.0});
+		check = dicom::geometry::check_overlay_compatibility(
+		    "1.2.3", source, "1.2.3", smaller_extent);
+		if (!check.ok() || !check.overlaps_extent ||
+		    check.requires_resampling ||
+		    check.status != dicom::geometry::OverlayCompatibility::different_extent) {
+			fail("extent-only plane mismatch should not require resampling");
 		}
 
 		check = dicom::geometry::check_overlay_compatibility(

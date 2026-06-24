@@ -1709,8 +1709,10 @@ SliceStackAnalysis analyze_slice_stack(
 	    std::max(0.0, options.tolerance.orientation_tolerance);
 	const auto spacing_tolerance =
 	    std::max(0.0, options.tolerance.spacing_tolerance_mm);
-	const auto position_tolerance =
-	    std::max(0.0, options.tolerance.position_tolerance_mm);
+	const auto slice_position_tolerance =
+	    std::max(0.0, options.slice_position_tolerance_mm);
+	const auto origin_residual_tolerance =
+	    std::max(0.0, options.origin_residual_tolerance_mm);
 	const auto& reference_input = inputs.front();
 	const auto& reference_plane = reference_input.plane;
 	const auto reference_size = reference_plane.size();
@@ -1790,7 +1792,7 @@ SliceStackAnalysis analyze_slice_stack(
 		const double residual_j = dot(residual, reference_direction_j);
 		const double residual_mm =
 		    std::sqrt(residual_i * residual_i + residual_j * residual_j);
-		if (residual_mm > position_tolerance) {
+		if (residual_mm > origin_residual_tolerance) {
 			add_issue(SliceStackStatus::inconsistent_slice_origin, input,
 			    input_index, "ImagePositionPatient"_tag,
 			    "slice origin has in-plane residual");
@@ -1821,19 +1823,30 @@ SliceStackAnalysis analyze_slice_stack(
 		    sorted_index,
 		    spacing,
 		});
-		if (spacing <= position_tolerance) {
+		if (spacing <= slice_position_tolerance) {
 			const auto& input = inputs[upper.input_index];
-			add_issue(SliceStackStatus::duplicate_slice_position, input,
-			    upper.input_index, "ImagePositionPatient"_tag,
-			    "duplicate slice position");
+			if (!options.allow_duplicate_positions) {
+				add_issue(SliceStackStatus::duplicate_slice_position, input,
+				    upper.input_index, "ImagePositionPatient"_tag,
+				    "duplicate slice position");
+			}
 		}
 	}
 
 	if (!analysis.gaps_.empty()) {
-		const double reference_gap = analysis.gaps_.front().spacing_mm;
+		std::optional<double> reference_gap;
+		bool has_duplicate_gap = false;
 		bool uniform = true;
 		for (const auto& gap : analysis.gaps_) {
-			if (std::abs(gap.spacing_mm - reference_gap) > spacing_tolerance) {
+			if (gap.spacing_mm <= slice_position_tolerance) {
+				has_duplicate_gap = true;
+				continue;
+			}
+			if (!reference_gap) {
+				reference_gap = gap.spacing_mm;
+				continue;
+			}
+			if (std::abs(gap.spacing_mm - *reference_gap) > spacing_tolerance) {
 				uniform = false;
 				const auto& upper = analysis.slices_[gap.upper_sorted_index];
 				const auto& input = inputs[upper.input_index];
@@ -1842,8 +1855,9 @@ SliceStackAnalysis analyze_slice_stack(
 				    "slice spacing is not uniform");
 			}
 		}
-		if (uniform && analysis.status_ == SliceStackStatus::ok) {
-			analysis.uniform_spacing_k_ = reference_gap;
+		if (uniform && !has_duplicate_gap && reference_gap &&
+		    analysis.status_ == SliceStackStatus::ok) {
+			analysis.uniform_spacing_k_ = *reference_gap;
 		}
 	}
 
