@@ -60,7 +60,9 @@ auto frame0 = reader.plane(0);
 ```
 
 少数の access では convenience function を使い、多数の frame を読む場合は
-`FrameGeometryReader` を再利用する。
+`FrameGeometryReader` を再利用する。`plane()` は regular slice plane のみを
+返し、`SAMPLED`/`DISTORTED` frame geometry は拒否する。frame kind を調べる
+caller は `image_frame_geometry()` を使う。
 
 ## Python Usage
 
@@ -96,9 +98,12 @@ elif check.can_transform and check.requires_resampling:
     pass
 ```
 
-`can_transform` は 2 つの object が利用可能な同じ frame of reference にあることを
-表す。`can_direct_overlay` は index copy できる程度に grid が一致することを表す。
-`requires_resampling` は error ではなく caller policy の分岐点である。
+`can_transform` は通常、2 つの object が利用可能な同じ frame of reference に
+あることを表す。ただし `OverlayCheckOptions.require_same_grid` が true の場合は、
+direct overlay 可能な同一 grid のときだけ true になる。`can_direct_overlay` は
+index copy できる程度に grid が一致することを表す。`requires_resampling` は
+physical extent が重なるが direct overlay できない状態であり、error ではなく
+caller policy の分岐点である。
 
 ## Slice Stack Planning
 

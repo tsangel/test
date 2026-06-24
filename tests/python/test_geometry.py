@@ -32,7 +32,10 @@ def _volume():
     )
 
 
-def _make_enhanced_ct_stack(with_dimension_index: bool = True) -> dicom.DicomFile:
+def _make_enhanced_ct_stack(
+    with_dimension_index: bool = True,
+    with_frame_content: bool = True,
+) -> dicom.DicomFile:
     df = dicom.DicomFile()
     _set(df, "Rows", 4)
     _set(df, "Columns", 5)
@@ -71,9 +74,10 @@ def _make_enhanced_ct_stack(with_dimension_index: bool = True) -> dicom.DicomFil
     for frame_index, z in enumerate((10.0, 20.0, 30.0)):
         base = f"PerFrameFunctionalGroupsSequence.{frame_index}."
         _set(df, base + "PlanePositionSequence.0.ImagePositionPatient", [0.0, 0.0, z])
-        _set(df, base + "FrameContentSequence.0.StackID", "STACK_A")
-        _set(df, base + "FrameContentSequence.0.InStackPositionNumber", frame_index + 1)
-        if with_dimension_index:
+        if with_frame_content:
+            _set(df, base + "FrameContentSequence.0.StackID", "STACK_A")
+            _set(df, base + "FrameContentSequence.0.InStackPositionNumber", frame_index + 1)
+        if with_dimension_index and with_frame_content:
             _set(df, base + "FrameContentSequence.0.DimensionIndexValues", [frame_index + 1])
     return df
 
@@ -247,9 +251,19 @@ def test_geometry_enhanced_image_frame_stack_bindings() -> None:
     missing = g.analyze_image_frame_stacks(missing_dimension)
     assert not missing.ok
     assert missing.status is g.SliceStackStatus.missing_dimension_module
+    missing_dimension = _make_enhanced_ct_stack(
+        with_dimension_index=False,
+        with_frame_content=False,
+    )
     fallback = g.analyze_image_frame_stacks(
         missing_dimension,
         g.ImageFrameStackOptions(allow_geometry_grouping_fallback=True),
     )
     assert fallback.ok
     assert len(fallback.groups) == 1
+
+    tiled = _make_enhanced_ct_stack()
+    _set(tiled, "DimensionOrganizationType", "TILED_FULL")
+    tiled_analysis = g.analyze_image_frame_stacks(tiled)
+    assert not tiled_analysis.ok
+    assert tiled_analysis.status is g.SliceStackStatus.unsupported_tiled_image

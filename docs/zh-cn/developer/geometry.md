@@ -58,7 +58,9 @@ auto frame0 = reader.plane(0);
 ```
 
 偶发访问可以使用 convenience function；遍历大量 frame 时应复用
-`FrameGeometryReader`。
+`FrameGeometryReader`。`plane()` 只返回 regular slice plane，并拒绝
+`SAMPLED`/`DISTORTED` frame geometry；需要检查 frame kind 的 caller 应使用
+`image_frame_geometry()`。
 
 ## Python Usage
 
@@ -94,9 +96,11 @@ elif check.can_transform and check.requires_resampling:
     pass
 ```
 
-`can_transform` 表示两个 object 位于可用的同一 frame of reference 中。
-`can_direct_overlay` 表示 grid 足够一致，可以直接按 index copy。
-`requires_resampling` 不是错误，而是 caller 需要选择 policy 的状态。
+`can_transform` 通常表示两个 object 位于可用的同一 frame of reference 中。
+但当 `OverlayCheckOptions.require_same_grid` 为 true 时，只有可 direct overlay
+的同一 grid 才会为 true。`can_direct_overlay` 表示 grid 足够一致，可以直接按
+index copy。`requires_resampling` 表示 physical extent 有重叠但不能 direct
+overlay，这不是错误，而是 caller 需要选择 policy 的状态。
 
 ## Slice Stack Planning
 

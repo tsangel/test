@@ -302,6 +302,7 @@ enum class SliceStackStatus {
 	missing_geometry,
 	missing_frame_content,
 	missing_dimension_module,
+	unsupported_tiled_image,
 	multiple_frame_stacks,
 	geometry_parse_failure,
 	missing_frame_of_reference,
@@ -523,11 +524,16 @@ public:
 	[[nodiscard]] GeometryBuildResult<std::string> frame_of_reference() const;
 
 private:
+	[[nodiscard]] GeometryBuildResult<ImagePlaneGeometry> raw_plane(
+	    std::size_t frame_index) const;
+
 	const DataSet* root_{nullptr};
 	const Sequence* per_frame_functional_groups_sequence_{nullptr};
 	GeometryBuildStatus per_frame_functional_groups_status_{GeometryBuildStatus::ok};
 	Tag per_frame_functional_groups_tag_{};
 	const DataSet* shared_functional_groups_item_{nullptr};
+	GeometryBuildStatus shared_functional_groups_status_{GeometryBuildStatus::ok};
+	Tag shared_functional_groups_tag_{};
 	Tag frame_type_sequence_tag_{};
 	bool has_sop_class_uid_{false};
 	bool unsupported_sop_class_{false};

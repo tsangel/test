@@ -6952,6 +6952,8 @@ NB_MODULE(_dicomsdl, m) {
 		.value("missing_frame_content", geo::SliceStackStatus::missing_frame_content)
 		.value("missing_dimension_module",
 		    geo::SliceStackStatus::missing_dimension_module)
+		.value("unsupported_tiled_image",
+		    geo::SliceStackStatus::unsupported_tiled_image)
 		.value("multiple_frame_stacks", geo::SliceStackStatus::multiple_frame_stacks)
 		.value("geometry_parse_failure", geo::SliceStackStatus::geometry_parse_failure)
 		.value("missing_frame_of_reference",

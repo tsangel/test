@@ -57,7 +57,9 @@ auto frame0 = reader.plane(0);
 ```
 
 Use the convenience functions for occasional access, and reuse
-`FrameGeometryReader` when reading many frames.
+`FrameGeometryReader` when reading many frames. `plane()` returns only regular
+slice planes and rejects `SAMPLED`/`DISTORTED` frame geometry; use
+`image_frame_geometry()` when the caller needs to inspect those frame kinds.
 
 ## Python Usage
 
@@ -93,9 +95,11 @@ elif check.can_transform and check.requires_resampling:
     pass
 ```
 
-`can_transform` means the two objects share a usable frame of reference.
-`can_direct_overlay` means the grids line up closely enough for direct index
-copy. A true `requires_resampling` is not an error; it is a caller policy point.
+`can_transform` normally means the two objects share a usable frame of reference.
+When `OverlayCheckOptions.require_same_grid` is true, it is only true for direct
+same-grid overlays. `can_direct_overlay` means the grids line up closely enough
+for direct index copy. A true `requires_resampling` is not an error; it means
+the physical extents overlap but direct overlay is not available.
 
 ## Slice Stack Planning
 

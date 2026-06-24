@@ -81,6 +81,42 @@ struct ResolvedCodeString {
 	return trim_ascii_spaces(*value);
 }
 
+[[nodiscard]] GeometryBuildResult<const DataSet*> resolve_sequence_item_if_present(
+    const DataSet& dataset, Tag sequence_tag, std::uint32_t item_index) {
+	const auto& element = dataset.get_dataelement(root_path(sequence_tag));
+	if (element.is_missing()) {
+		return GeometryBuildResult<const DataSet*>::success(nullptr);
+	}
+	if (!element.vr().is_sequence()) {
+		return GeometryBuildResult<const DataSet*>::failure(
+		    GeometryBuildStatus::invalid_value, sequence_tag,
+		    "element is not a sequence");
+	}
+	const auto* sequence = element.as_sequence();
+	if (!sequence) {
+		return GeometryBuildResult<const DataSet*>::failure(
+		    GeometryBuildStatus::invalid_value, sequence_tag,
+		    "invalid sequence value");
+	}
+	const DataSet* item = sequence->get_dataset(item_index);
+	if (!item) {
+		return GeometryBuildResult<const DataSet*>::failure(
+		    GeometryBuildStatus::invalid_value, sequence_tag,
+		    "sequence item is missing");
+	}
+	return GeometryBuildResult<const DataSet*>::success(item);
+}
+
+[[nodiscard]] std::optional<GeometryBuildResult<const DataSet*>>
+try_resolve_functional_group_macro_item(
+    const DataSet* functional_group_item, Tag macro_sequence_tag) {
+	if (!functional_group_item) {
+		return std::nullopt;
+	}
+	return resolve_sequence_item_if_present(
+	    *functional_group_item, macro_sequence_tag, 0);
+}
+
 [[nodiscard]] Tag frame_type_sequence_tag_for_sop_class(
     std::string_view sop_class_uid) noexcept {
 	if (sop_class_uid == "EnhancedMRImageStorage"_uid.value() ||
@@ -109,8 +145,18 @@ try_read_code_string_from_functional_group(const DataSet* functional_group_item,
 	if (!functional_group_item) {
 		return std::nullopt;
 	}
-	const DataSet* macro_item =
-	    functional_group_item->sequence_item(macro_sequence_tag, 0);
+	auto macro_item_result =
+	    try_resolve_functional_group_macro_item(
+	        functional_group_item, macro_sequence_tag);
+	if (!macro_item_result) {
+		return std::nullopt;
+	}
+	if (!macro_item_result->ok()) {
+		return GeometryBuildResult<ResolvedCodeString>::failure(
+		    macro_item_result->status(), macro_item_result->tag(),
+		    macro_item_result->message());
+	}
+	const DataSet* macro_item = macro_item_result->value();
 	if (!macro_item) {
 		return std::nullopt;
 	}
@@ -239,26 +285,28 @@ volumetric_properties_from_code_string(ResolvedCodeString resolved) {
 		return 2;
 	case SliceStackStatus::missing_dimension_module:
 		return 3;
-	case SliceStackStatus::geometry_parse_failure:
+	case SliceStackStatus::unsupported_tiled_image:
 		return 4;
-	case SliceStackStatus::missing_frame_of_reference:
+	case SliceStackStatus::geometry_parse_failure:
 		return 5;
-	case SliceStackStatus::mixed_frame_of_reference:
+	case SliceStackStatus::missing_frame_of_reference:
 		return 6;
-	case SliceStackStatus::inconsistent_rows_columns:
+	case SliceStackStatus::mixed_frame_of_reference:
 		return 7;
-	case SliceStackStatus::inconsistent_orientation:
+	case SliceStackStatus::inconsistent_rows_columns:
 		return 8;
-	case SliceStackStatus::inconsistent_pixel_spacing:
+	case SliceStackStatus::inconsistent_orientation:
 		return 9;
-	case SliceStackStatus::inconsistent_slice_origin:
+	case SliceStackStatus::inconsistent_pixel_spacing:
 		return 10;
-	case SliceStackStatus::duplicate_slice_position:
+	case SliceStackStatus::inconsistent_slice_origin:
 		return 11;
-	case SliceStackStatus::non_uniform_spacing:
+	case SliceStackStatus::duplicate_slice_position:
 		return 12;
-	case SliceStackStatus::multiple_frame_stacks:
+	case SliceStackStatus::non_uniform_spacing:
 		return 13;
+	case SliceStackStatus::multiple_frame_stacks:
+		return 14;
 	}
 	return 100;
 }
@@ -440,7 +488,7 @@ read_non_spatial_dimension_values(const DataSet& frame_content,
 		    "missing DimensionIndexValues");
 	}
 	auto values = element.to_longlong_vector();
-	if (!values || values->size() < descriptors.size()) {
+	if (!values || values->size() != descriptors.size()) {
 		return GeometryBuildResult<std::vector<DimensionIndexValue>>::failure(
 		    GeometryBuildStatus::invalid_value, tag,
 		    "DimensionIndexValues count does not match DimensionIndexSequence");
@@ -642,8 +690,18 @@ try_read_double_vector_from_functional_group(const DataSet* functional_group_ite
 	if (!functional_group_item) {
 		return std::nullopt;
 	}
-	const DataSet* macro_item =
-	    functional_group_item->sequence_item(macro_sequence_tag, 0);
+	auto macro_item_result =
+	    try_resolve_functional_group_macro_item(
+	        functional_group_item, macro_sequence_tag);
+	if (!macro_item_result) {
+		return std::nullopt;
+	}
+	if (!macro_item_result->ok()) {
+		return GeometryBuildResult<std::vector<double>>::failure(
+		    macro_item_result->status(), macro_item_result->tag(),
+		    macro_item_result->message());
+	}
+	const DataSet* macro_item = macro_item_result->value();
 	if (!macro_item) {
 		return std::nullopt;
 	}
@@ -750,6 +808,21 @@ resolve_strict_frame_double_vector(
 	const auto fallback = per_frame_sequence_size(root);
 	if (fallback > 0) {
 		return fallback;
+	}
+	return std::nullopt;
+}
+
+[[nodiscard]] std::optional<Tag> tiled_multiframe_tag(const DataSet& root) {
+	if (auto value = root_string_view(root, "DimensionOrganizationType"_tag)) {
+		if (*value == "TILED_FULL" || *value == "TILED_SPARSE") {
+			return "DimensionOrganizationType"_tag;
+		}
+	}
+	for (const Tag tag : {"TotalPixelMatrixRows"_tag, "TotalPixelMatrixColumns"_tag,
+	         "TotalPixelMatrixOriginSequence"_tag, "TotalPixelMatrixFocalPlanes"_tag}) {
+		if (!root.get_dataelement(root_path(tag)).is_missing()) {
+			return tag;
+		}
 	}
 	return std::nullopt;
 }
@@ -1242,15 +1315,21 @@ GeometryBuildResult<ImagePlaneGeometry> plane_from_single_frame_image(
 }
 
 FrameGeometryReader::FrameGeometryReader(const DataSet& dataset) noexcept
-    : root_(&dataset),
-      shared_functional_groups_item_(
-          dataset.sequence_item("SharedFunctionalGroupsSequence"_tag, 0)) {
+    : root_(&dataset) {
 	const auto per_frame_sequence = resolve_per_frame_sequence(dataset);
 	if (per_frame_sequence.ok()) {
 		per_frame_functional_groups_sequence_ = per_frame_sequence.value();
 	} else {
 		per_frame_functional_groups_status_ = per_frame_sequence.status();
 		per_frame_functional_groups_tag_ = per_frame_sequence.tag();
+	}
+	const auto shared_item =
+	    resolve_sequence_item_if_present(dataset, "SharedFunctionalGroupsSequence"_tag, 0);
+	if (shared_item.ok()) {
+		shared_functional_groups_item_ = shared_item.value();
+	} else {
+		shared_functional_groups_status_ = shared_item.status();
+		shared_functional_groups_tag_ = shared_item.tag();
 	}
 	if (auto sop_class_uid = root_string_view(dataset, "SOPClassUID"_tag)) {
 		has_sop_class_uid_ = true;
@@ -1265,7 +1344,7 @@ FrameGeometryReader::FrameGeometryReader(const DataSet& dataset) noexcept
 FrameGeometryReader::FrameGeometryReader(const DicomFile& file) noexcept
     : FrameGeometryReader(file.dataset()) {}
 
-GeometryBuildResult<ImagePlaneGeometry> FrameGeometryReader::plane(
+GeometryBuildResult<ImagePlaneGeometry> FrameGeometryReader::raw_plane(
     std::size_t frame_index) const {
 	if (!root_) {
 		return GeometryBuildResult<ImagePlaneGeometry>::failure(
@@ -1283,6 +1362,11 @@ GeometryBuildResult<ImagePlaneGeometry> FrameGeometryReader::plane(
 		return GeometryBuildResult<ImagePlaneGeometry>::failure(
 		    per_frame_functional_groups_status_, per_frame_functional_groups_tag_,
 		    "invalid PerFrameFunctionalGroupsSequence");
+	}
+	if (shared_functional_groups_status_ != GeometryBuildStatus::ok) {
+		return GeometryBuildResult<ImagePlaneGeometry>::failure(
+		    shared_functional_groups_status_, shared_functional_groups_tag_,
+		    "invalid SharedFunctionalGroupsSequence");
 	}
 	if (!per_frame_functional_groups_sequence_) {
 		const auto frame_index_result =
@@ -1321,9 +1405,32 @@ GeometryBuildResult<ImagePlaneGeometry> FrameGeometryReader::plane(
 	    image_position.value(), image_orientation.value(), pixel_spacing.value());
 }
 
+GeometryBuildResult<ImagePlaneGeometry> FrameGeometryReader::plane(
+    std::size_t frame_index) const {
+	auto frame_geometry = image_frame_geometry(frame_index);
+	if (!frame_geometry.ok()) {
+		return GeometryBuildResult<ImagePlaneGeometry>::failure(
+		    frame_geometry.status(), frame_geometry.tag(), frame_geometry.message());
+	}
+	if (frame_geometry.value().kind == ImageFrameGeometryKind::sampled_projection) {
+		return GeometryBuildResult<ImagePlaneGeometry>::failure(
+		    GeometryBuildStatus::sampled_frame_geometry,
+		    "VolumetricProperties"_tag,
+		    "SAMPLED frame is not a regular overlay plane");
+	}
+	if (frame_geometry.value().kind == ImageFrameGeometryKind::distorted) {
+		return GeometryBuildResult<ImagePlaneGeometry>::failure(
+		    GeometryBuildStatus::distorted_frame_geometry,
+		    "VolumetricProperties"_tag,
+		    "DISTORTED frame is not a regular overlay plane");
+	}
+	auto frame = std::move(frame_geometry).value();
+	return GeometryBuildResult<ImagePlaneGeometry>::success(std::move(frame.plane));
+}
+
 GeometryBuildResult<ImageFrameGeometry> FrameGeometryReader::image_frame_geometry(
     std::size_t frame_index) const {
-	auto plane_result = plane(frame_index);
+	auto plane_result = raw_plane(frame_index);
 	if (!plane_result.ok()) {
 		return GeometryBuildResult<ImageFrameGeometry>::failure(
 		    plane_result.status(), plane_result.tag(), plane_result.message());
@@ -1369,6 +1476,11 @@ FrameGeometryReader::volumetric_properties(std::size_t frame_index) const {
 		return GeometryBuildResult<VolumetricPropertiesInfo>::failure(
 		    per_frame_functional_groups_status_, per_frame_functional_groups_tag_,
 		    "invalid PerFrameFunctionalGroupsSequence");
+	}
+	if (shared_functional_groups_status_ != GeometryBuildStatus::ok) {
+		return GeometryBuildResult<VolumetricPropertiesInfo>::failure(
+		    shared_functional_groups_status_, shared_functional_groups_tag_,
+		    "invalid SharedFunctionalGroupsSequence");
 	}
 	if (!per_frame_functional_groups_sequence_) {
 		const auto frame_index_result =
@@ -1940,6 +2052,18 @@ ImageFrameStackAnalysis analyze_image_frame_stacks(
 	ImageFrameStackAnalysis stack_analysis;
 	stack_analysis.status_ = SliceStackStatus::ok;
 	const auto& root = file.dataset();
+	if (auto tiled_tag = tiled_multiframe_tag(root)) {
+		stack_analysis.status_ = SliceStackStatus::unsupported_tiled_image;
+		stack_analysis.issues_.push_back(SliceStackIssue{
+		    SliceStackStatus::unsupported_tiled_image,
+		    0,
+		    0,
+		    0,
+		    *tiled_tag,
+		    "tiled multi-frame images are not supported by slice stack planning",
+		});
+		return stack_analysis;
+	}
 	auto frame_count = number_of_frames(root);
 	if (!frame_count || *frame_count == 0) {
 		stack_analysis.status_ = SliceStackStatus::empty;
@@ -1955,7 +2079,7 @@ ImageFrameStackAnalysis analyze_image_frame_stacks(
 	}
 
 	auto per_frame_sequence = resolve_per_frame_sequence(root);
-	if (!per_frame_sequence.ok() || !per_frame_sequence.value()) {
+	if (!per_frame_sequence.ok()) {
 		stack_analysis.status_ = SliceStackStatus::missing_frame_content;
 		stack_analysis.issues_.push_back(SliceStackIssue{
 		    SliceStackStatus::missing_frame_content,
@@ -1963,9 +2087,7 @@ ImageFrameStackAnalysis analyze_image_frame_stacks(
 		    0,
 		    0,
 		    "PerFrameFunctionalGroupsSequence"_tag,
-		    per_frame_sequence.ok()
-		        ? "PerFrameFunctionalGroupsSequence is missing"
-		        : per_frame_sequence.message(),
+		    per_frame_sequence.message(),
 		});
 		return stack_analysis;
 	}
@@ -1983,8 +2105,11 @@ ImageFrameStackAnalysis analyze_image_frame_stacks(
 		});
 		return stack_analysis;
 	}
+	const bool geometry_grouping_fallback =
+	    dimension_descriptors.value().empty() &&
+	    options.allow_geometry_grouping_fallback;
 	if (dimension_descriptors.value().empty() &&
-	    !options.allow_geometry_grouping_fallback) {
+	    !geometry_grouping_fallback) {
 		stack_analysis.status_ = SliceStackStatus::missing_dimension_module;
 		stack_analysis.issues_.push_back(SliceStackIssue{
 		    SliceStackStatus::missing_dimension_module,
@@ -1993,6 +2118,18 @@ ImageFrameStackAnalysis analyze_image_frame_stacks(
 		    0,
 		    "DimensionIndexSequence"_tag,
 		    "DimensionIndexSequence is required for enhanced frame grouping",
+		});
+		return stack_analysis;
+	}
+	if (!per_frame_sequence.value() && !geometry_grouping_fallback) {
+		stack_analysis.status_ = SliceStackStatus::missing_frame_content;
+		stack_analysis.issues_.push_back(SliceStackIssue{
+		    SliceStackStatus::missing_frame_content,
+		    0,
+		    0,
+		    0,
+		    "PerFrameFunctionalGroupsSequence"_tag,
+		    "PerFrameFunctionalGroupsSequence is missing",
 		});
 		return stack_analysis;
 	}
@@ -2020,60 +2157,74 @@ ImageFrameStackAnalysis analyze_image_frame_stacks(
 		}
 	};
 
-	for (std::size_t frame_index = 0; frame_index < *frame_count; ++frame_index) {
-		const DataSet* per_frame_item =
-		    per_frame_sequence.value()->get_dataset(frame_index);
-		if (!per_frame_item) {
-			add_issue(SliceStackStatus::missing_frame_content, frame_index,
-			    "PerFrameFunctionalGroupsSequence"_tag,
-			    "frame index is outside PerFrameFunctionalGroupsSequence");
-			continue;
-		}
-		const DataSet* frame_content =
-		    per_frame_item->sequence_item("FrameContentSequence"_tag, 0);
-		if (!frame_content) {
-			add_issue(SliceStackStatus::missing_frame_content, frame_index,
-			    "FrameContentSequence"_tag,
-			    "missing FrameContentSequence item");
-			continue;
-		}
-
-		auto stack_id = root_string_view(*frame_content, "StackID"_tag);
-		if (!stack_id || stack_id->empty()) {
-			add_issue(SliceStackStatus::missing_frame_content, frame_index,
-			    "StackID"_tag, "missing StackID");
-			continue;
-		}
-		const auto& position_element =
-		    frame_content->get_dataelement(root_path("InStackPositionNumber"_tag));
-		auto in_stack_position = position_element.to_int();
-		if (!in_stack_position || *in_stack_position <= 0) {
-			add_issue(SliceStackStatus::missing_frame_content, frame_index,
-			    "InStackPositionNumber"_tag,
-			    "missing or invalid InStackPositionNumber");
-			continue;
-		}
-		auto dimension_values = read_non_spatial_dimension_values(
-		    *frame_content, dimension_descriptors.value());
-		if (!dimension_values.ok()) {
-			add_issue(SliceStackStatus::geometry_parse_failure, frame_index,
-			    dimension_values.tag(), dimension_values.message());
-			continue;
-		}
-
+	if (geometry_grouping_fallback) {
 		ImageFrameStackKey key;
-		key.stack_id = std::string(*stack_id);
-		key.dimension_values = std::move(dimension_values).value();
-
-		auto [bucket_position, inserted] =
-		    bucket_indices.emplace(key, buckets.size());
-		if (inserted) {
-			buckets.push_back(FrameStackBucket{std::move(key), {}});
+		key.stack_id = "geometry";
+		FrameStackBucket bucket{std::move(key), {}};
+		bucket.members.reserve(*frame_count);
+		for (std::size_t frame_index = 0; frame_index < *frame_count; ++frame_index) {
+			bucket.members.push_back(FrameStackMember{
+			    frame_index,
+			    static_cast<int>(frame_index + 1),
+			});
 		}
-		buckets[bucket_position->second].members.push_back(FrameStackMember{
-		    frame_index,
-		    *in_stack_position,
-		});
+		buckets.push_back(std::move(bucket));
+	} else {
+		for (std::size_t frame_index = 0; frame_index < *frame_count; ++frame_index) {
+			const DataSet* per_frame_item =
+			    per_frame_sequence.value()->get_dataset(frame_index);
+			if (!per_frame_item) {
+				add_issue(SliceStackStatus::missing_frame_content, frame_index,
+				    "PerFrameFunctionalGroupsSequence"_tag,
+				    "frame index is outside PerFrameFunctionalGroupsSequence");
+				continue;
+			}
+			const DataSet* frame_content =
+			    per_frame_item->sequence_item("FrameContentSequence"_tag, 0);
+			if (!frame_content) {
+				add_issue(SliceStackStatus::missing_frame_content, frame_index,
+				    "FrameContentSequence"_tag,
+				    "missing FrameContentSequence item");
+				continue;
+			}
+
+			auto stack_id = root_string_view(*frame_content, "StackID"_tag);
+			if (!stack_id || stack_id->empty()) {
+				add_issue(SliceStackStatus::missing_frame_content, frame_index,
+				    "StackID"_tag, "missing StackID");
+				continue;
+			}
+			const auto& position_element =
+			    frame_content->get_dataelement(root_path("InStackPositionNumber"_tag));
+			auto in_stack_position = position_element.to_int();
+			if (!in_stack_position || *in_stack_position <= 0) {
+				add_issue(SliceStackStatus::missing_frame_content, frame_index,
+				    "InStackPositionNumber"_tag,
+				    "missing or invalid InStackPositionNumber");
+				continue;
+			}
+			auto dimension_values = read_non_spatial_dimension_values(
+			    *frame_content, dimension_descriptors.value());
+			if (!dimension_values.ok()) {
+				add_issue(SliceStackStatus::geometry_parse_failure, frame_index,
+				    dimension_values.tag(), dimension_values.message());
+				continue;
+			}
+
+			ImageFrameStackKey key;
+			key.stack_id = std::string(*stack_id);
+			key.dimension_values = std::move(dimension_values).value();
+
+			auto [bucket_position, inserted] =
+			    bucket_indices.emplace(key, buckets.size());
+			if (inserted) {
+				buckets.push_back(FrameStackBucket{std::move(key), {}});
+			}
+			buckets[bucket_position->second].members.push_back(FrameStackMember{
+			    frame_index,
+			    *in_stack_position,
+			});
+		}
 	}
 
 	if (buckets.empty()) {
@@ -2404,12 +2555,12 @@ OverlayCheck check_overlay_compatibility(
 
 	if (normal_error > options.orientation_tolerance) {
 		check.status = OverlayCompatibility::non_parallel_planes;
-		check.requires_resampling = true;
+		check.requires_resampling = check.overlaps_extent;
 		return finalize_overlay_check(check, options);
 	}
 	if (normal_dot < 0.0 || axis_i_dot < 0.0 || axis_j_dot < 0.0) {
 		check.status = OverlayCompatibility::opposite_orientation;
-		check.requires_resampling = true;
+		check.requires_resampling = check.overlaps_extent;
 		return finalize_overlay_check(check, options);
 	}
 
@@ -2417,6 +2568,8 @@ OverlayCheck check_overlay_compatibility(
 	    std::abs(dot(target.origin() - source.origin(), source.normal()));
 	if (check.max_normal_distance_mm > options.normal_distance_tolerance_mm) {
 		check.status = OverlayCompatibility::out_of_plane;
+		check.overlaps_extent = false;
+		check.source_inside_target_extent = false;
 		return finalize_overlay_check(check, options);
 	}
 	if (!check.overlaps_extent) {
@@ -2545,12 +2698,12 @@ OverlayCheck check_overlay_compatibility(
 
 	if (normal_error > options.orientation_tolerance) {
 		check.status = OverlayCompatibility::non_parallel_planes;
-		check.requires_resampling = true;
+		check.requires_resampling = check.overlaps_extent;
 		return finalize_overlay_check(check, options);
 	}
 	if (normal_dot < 0.0 || axis_i_dot < 0.0 || axis_j_dot < 0.0) {
 		check.status = OverlayCompatibility::opposite_orientation;
-		check.requires_resampling = true;
+		check.requires_resampling = check.overlaps_extent;
 		return finalize_overlay_check(check, options);
 	}
 	if (!check.overlaps_extent) {
@@ -2662,12 +2815,12 @@ OverlayCheck check_overlay_compatibility(
 
 	if (normal_error > options.orientation_tolerance) {
 		check.status = OverlayCompatibility::non_parallel_planes;
-		check.requires_resampling = true;
+		check.requires_resampling = check.overlaps_extent;
 		return finalize_overlay_check(check, options);
 	}
 	if (normal_dot < 0.0 || axis_i_dot < 0.0 || axis_j_dot < 0.0) {
 		check.status = OverlayCompatibility::opposite_orientation;
-		check.requires_resampling = true;
+		check.requires_resampling = check.overlaps_extent;
 		return finalize_overlay_check(check, options);
 	}
 	if (!check.overlaps_extent) {
@@ -2772,12 +2925,12 @@ OverlayCheck check_overlay_compatibility(
 
 	if (check.max_orientation_error > options.orientation_tolerance) {
 		check.status = OverlayCompatibility::non_parallel_planes;
-		check.requires_resampling = true;
+		check.requires_resampling = check.overlaps_extent;
 		return finalize_overlay_check(check, options);
 	}
 	if (axis_i_dot < 0.0 || axis_j_dot < 0.0 || axis_k_dot < 0.0) {
 		check.status = OverlayCompatibility::opposite_orientation;
-		check.requires_resampling = true;
+		check.requires_resampling = check.overlaps_extent;
 		return finalize_overlay_check(check, options);
 	}
 	if (!check.overlaps_extent) {

@@ -49,6 +49,8 @@
   - `InStackPositionNumber`, plane position, image position처럼 slice 위치를 나타내는 spatial dimension은 grouping key의 non-spatial values에서 제외한다.
   - echo/time/phase/volume 같은 non-spatial dimension value는 descriptor와 함께 grouping key에 포함한다.
   - `DimensionIndexSequence`가 없으면 기본값으로 `missing_dimension_module`이며, geometry-only grouping fallback은 `ImageFrameStackOptions::allow_geometry_grouping_fallback = true`일 때만 허용한다.
+  - geometry-only grouping fallback은 `FrameContentSequence`, `StackID`, `InStackPositionNumber`를 요구하지 않고 frame geometry 분석으로 단일 후보 stack을 검증한다.
+  - `DimensionIndexValues` 개수는 `DimensionIndexSequence` descriptor 개수와 정확히 같아야 하며, 부족하거나 초과하면 malformed metadata로 실패한다.
   - tiled multi-frame image는 MVP에서 `unsupported_tiled_image`로 실패한다.
 - [x] Result/status/issue 정책은 no-throw, priority fatal status, full issue list로 고정한다.
   - metadata 누락/형식 오류/unsupported 구조는 exception이 아니라 status/issue로 반환한다.
@@ -361,6 +363,7 @@
 - [x] 일반 multi-frame/enhanced image frame에서 `PerFrameFunctionalGroupsSequence` / `SharedFunctionalGroupsSequence` / root dataset fallback으로 plane geometry를 만드는 parser 추가
 - [x] sampled/distorted semantics가 필요한 caller를 위해 `ImageFrameGeometry { plane, kind }`를 반환하는 metadata-preserving factory를 별도로 둔다.
 - [x] 일반 image frame geometry parser는 `VolumetricProperties=SAMPLED` / `DISTORTED`를 일반 slice plane으로 처리하지 않는다.
+- [x] `FrameGeometryReader::plane(frame_index)`도 regular plane만 반환하고, sampled/distorted frame은 `sampled_frame_geometry` / `distorted_frame_geometry`로 실패한다.
 - [x] `FrameGeometryReader::volumetric_properties(frame_index)` 추가: SOP Class별 Frame Type Sequence를 `PerFrame -> Shared -> root` 순서로 non-throwing resolve한다.
 - [x] `FrameGeometryReader` 생성 시 root dataset, per-frame/shared functional groups, SOP Class별 Frame Type Sequence tag 등 반복 lookup 정보를 캐시한다.
 - [x] `FrameGeometryReader`의 frame별 lookup은 cached sequence pointer에서 `sequence_item(frame_index)`와 필요한 tag lookup만 수행하도록 구현한다.

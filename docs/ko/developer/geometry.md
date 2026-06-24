@@ -60,7 +60,9 @@ auto frame0 = reader.plane(0);
 ```
 
 드문 접근은 convenience function을 쓰고, 많은 frame을 반복해서 읽는
-코드는 `FrameGeometryReader`를 재사용한다.
+코드는 `FrameGeometryReader`를 재사용한다. `plane()`은 regular slice
+plane만 반환하며 `SAMPLED`/`DISTORTED` frame geometry는 거부한다. 그런
+frame kind를 검사해야 하는 caller는 `image_frame_geometry()`를 사용한다.
 
 ## Python 사용
 
@@ -97,10 +99,12 @@ elif check.can_transform and check.requires_resampling:
     pass
 ```
 
-`can_transform`은 두 객체가 사용할 수 있는 같은 frame of reference에
-있다는 뜻이다. `can_direct_overlay`는 index copy가 가능할 만큼 grid가
-맞는다는 뜻이다. `requires_resampling`은 실패가 아니라 caller가 정책을
-정해야 하는 상태다.
+`can_transform`은 보통 두 객체가 사용할 수 있는 같은 frame of reference에
+있다는 뜻이다. 다만 `OverlayCheckOptions.require_same_grid`가 true이면
+직접 overlay 가능한 같은 grid일 때만 true가 된다. `can_direct_overlay`는
+index copy가 가능할 만큼 grid가 맞는다는 뜻이다. `requires_resampling`은
+실패가 아니라 물리 extent는 겹치지만 직접 overlay는 불가능해 caller가
+정책을 정해야 하는 상태다.
 
 ## Slice Stack Planning
 

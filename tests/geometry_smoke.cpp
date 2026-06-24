@@ -948,6 +948,15 @@ int main() {
 	{
 		auto file = make_enhanced_ct_stack_file();
 		file->dataset().remove_dataelement("DimensionIndexSequence"_tag);
+		for (int frame_index = 0; frame_index < 3; ++frame_index) {
+			auto* frame_item = file->dataset().sequence_item(
+			    "PerFrameFunctionalGroupsSequence"_tag,
+			    static_cast<std::uint32_t>(frame_index));
+			if (!frame_item) {
+				fail("test setup should have PerFrameFunctionalGroupsSequence item");
+			}
+			frame_item->remove_dataelement("FrameContentSequence"_tag);
+		}
 		auto stacks = dicom::geometry::analyze_image_frame_stacks(*file);
 		if (stacks.ok() ||
 		    stacks.status() !=
@@ -961,7 +970,20 @@ int main() {
 		stacks = dicom::geometry::analyze_image_frame_stacks(*file, options);
 		if (!stacks.ok() || stacks.groups().size() != 1 ||
 		    !stacks.groups()[0].analysis.ok()) {
-			fail("explicit geometry grouping fallback should allow missing DimensionIndexSequence");
+			fail("explicit geometry grouping fallback should use frame geometry only");
+		}
+	}
+
+	{
+		auto file = make_enhanced_ct_stack_file();
+		set_text(*file, "DimensionOrganizationType"_tag, "TILED_FULL");
+		auto stacks = dicom::geometry::analyze_image_frame_stacks(*file);
+		if (stacks.ok() ||
+		    stacks.status() !=
+		        dicom::geometry::SliceStackStatus::unsupported_tiled_image ||
+		    stacks.issues().empty() ||
+		    stacks.issues().front().tag != "DimensionOrganizationType"_tag) {
+			fail("tiled multi-frame images should be rejected explicitly");
 		}
 	}
 
@@ -1096,6 +1118,24 @@ int main() {
 
 	{
 		auto file = make_enhanced_ct_stack_file();
+		const std::array<long, 2> too_many_values{{1, 99}};
+		set_longs(*file,
+		    "PerFrameFunctionalGroupsSequence.0.FrameContentSequence.0."
+		    "DimensionIndexValues",
+		    too_many_values);
+		auto stacks = dicom::geometry::analyze_image_frame_stacks(*file);
+		if (stacks.ok() ||
+		    stacks.status() !=
+		        dicom::geometry::SliceStackStatus::geometry_parse_failure ||
+		    stacks.issues().empty() ||
+		    stacks.issues().front().tag != "DimensionIndexValues"_tag ||
+		    stacks.issues().front().frame_index != 0) {
+			fail("extra DimensionIndexValues should be rejected");
+		}
+	}
+
+	{
+		auto file = make_enhanced_ct_stack_file();
 		set_tag(*file,
 		    "DimensionIndexSequence.0.DimensionIndexPointer",
 		    "TemporalPositionIndex"_tag);
@@ -1141,6 +1181,49 @@ int main() {
 		        dicom::geometry::SliceStackStatus::missing_frame_content ||
 		    stacks.issues().empty() || stacks.issues()[0].frame_index != 1) {
 			fail("missing FrameContentSequence should be reported by frame");
+		}
+	}
+
+	{
+		auto file = make_enhanced_ct_stack_file();
+		set_text(*file,
+		    "PerFrameFunctionalGroupsSequence.1.CTImageFrameTypeSequence.0."
+		    "VolumetricProperties",
+		    "SAMPLED");
+		dicom::geometry::FrameGeometryReader reader(*file);
+		auto plane = reader.plane(1);
+		if (plane.ok() ||
+		    plane.status() !=
+		        dicom::geometry::GeometryBuildStatus::sampled_frame_geometry) {
+			fail("FrameGeometryReader::plane should reject sampled frames");
+		}
+		auto frame_geometry = reader.image_frame_geometry(1);
+		if (!frame_geometry.ok() ||
+		    frame_geometry.value().kind !=
+		        dicom::geometry::ImageFrameGeometryKind::sampled_projection) {
+			fail("image_frame_geometry should preserve sampled frame kind");
+		}
+	}
+
+	{
+		auto file = make_enhanced_ct_stack_file();
+		auto* shared_item =
+		    file->dataset().sequence_item("SharedFunctionalGroupsSequence"_tag, 0);
+		if (!shared_item) {
+			fail("test setup should have SharedFunctionalGroupsSequence item");
+		}
+		shared_item->remove_dataelement("PixelMeasuresSequence"_tag);
+		auto& bad_pixel_measures =
+		    shared_item->add_dataelement("PixelMeasuresSequence"_tag, dicom::VR::LO);
+		if (!bad_pixel_measures.from_string_view("bad")) {
+			fail("failed to create malformed PixelMeasuresSequence");
+		}
+		set_doubles(*file, "PixelSpacing"_tag, std::array<double, 2>{2.0, 3.0});
+		auto plane = dicom::geometry::plane_from_multiframe_image(*file, 0);
+		if (plane.ok() ||
+		    plane.status() != dicom::geometry::GeometryBuildStatus::invalid_value ||
+		    plane.tag() != "PixelMeasuresSequence"_tag) {
+			fail("malformed shared macro sequence should not fall back to root");
 		}
 	}
 
@@ -1256,6 +1339,15 @@ int main() {
 		if (!check.ok() || check.overlaps_extent || check.target_k_range ||
 		    check.status != dicom::geometry::OverlayCompatibility::different_extent) {
 			fail("plane-volume check should report no extent overlap");
+		}
+
+		const auto out_of_plane =
+		    make_test_plane({2.5, 1.5}, {256, 128}, {10.0, 20.0, 34.0});
+		check = dicom::geometry::check_overlay_compatibility(
+		    "1.2.3", plane, "1.2.3", out_of_plane);
+		if (!check.ok() || check.overlaps_extent || check.requires_resampling ||
+		    check.status != dicom::geometry::OverlayCompatibility::out_of_plane) {
+			fail("plane-plane out-of-plane should not report extent overlap");
 		}
 
 		const auto resampled =
