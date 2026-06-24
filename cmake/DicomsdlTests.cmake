@@ -36,6 +36,9 @@ if(BUILD_TESTING)
         tests/segmentation_mvp_smoke.cpp
     )
     target_link_libraries(dicomsdl_segmentation_mvp_smoke PRIVATE dicomsdl)
+    target_compile_definitions(dicomsdl_segmentation_mvp_smoke PRIVATE
+        DICOMSDL_SEGMENTATION_TEST_HOOKS=1
+    )
     add_test(NAME segmentation_mvp_smoke COMMAND dicomsdl_segmentation_mvp_smoke)
     set_tests_properties(segmentation_mvp_smoke PROPERTIES LABELS "dicomsdl")
 

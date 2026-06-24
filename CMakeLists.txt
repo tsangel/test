@@ -250,7 +250,7 @@ endif()
 target_compile_features(dicomsdl PUBLIC cxx_std_20)
 
 if(BUILD_TESTING)
-    target_compile_definitions(dicomsdl PUBLIC DICOMSDL_SEGMENTATION_TEST_HOOKS=1)
+    target_compile_definitions(dicomsdl PRIVATE DICOMSDL_SEGMENTATION_TEST_HOOKS=1)
 endif()
 
 include(DicomsdlPixelTargets)
