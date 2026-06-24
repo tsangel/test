@@ -82,6 +82,23 @@ def _make_enhanced_ct_stack(
     return df
 
 
+def _make_nm_recon_tomo_stack() -> dicom.DicomFile:
+    df = dicom.DicomFile()
+    _set(df, "Rows", 4)
+    _set(df, "Columns", 5)
+    _set(df, "NumberOfFrames", 3)
+    _set(df, "SOPClassUID", dicom.uid_from_keyword("NuclearMedicineImageStorage").value)
+    _set(df, "FrameOfReferenceUID", "1.2.826.0.1.3680043.10.543.88")
+    _set(df, "ImageType", "ORIGINAL\\PRIMARY\\RECON TOMO")
+    _set(df, "ImagePositionPatient", [0.0, 0.0, 100.0])
+    _set(df, "ImageOrientationPatient", [1.0, 0.0, 0.0, 0.0, 1.0, 0.0])
+    _set(df, "PixelSpacing", [2.0, 3.0])
+    _set(df, "SpacingBetweenSlices", 5.0)
+    _set(df, "FrameIncrementPointer", [dicom.Tag("SliceVector")])
+    _set(df, "SliceVector", [3, 1, 2])
+    return df
+
+
 def test_geometry_plane_roundtrip_and_matrix_contract() -> None:
     g = dicom.geometry
     plane = _plane()
@@ -331,3 +348,36 @@ def test_geometry_enhanced_image_frame_stack_bindings() -> None:
     tiled_analysis = g.analyze_image_frame_stacks(tiled)
     assert not tiled_analysis.ok
     assert tiled_analysis.status is g.SliceStackStatus.unsupported_tiled_image
+
+
+def test_geometry_nm_reconstructed_tomo_stack_bindings() -> None:
+    g = dicom.geometry
+    df = _make_nm_recon_tomo_stack()
+
+    analysis = g.analyze_nm_frame_stack(df)
+    assert analysis.ok
+    assert analysis.frame_of_reference_uid == "1.2.826.0.1.3680043.10.543.88"
+    assert analysis.uniform_spacing_k == pytest.approx(5.0)
+    assert [slice.frame_index for slice in analysis.slices] == [1, 2, 0]
+    assert [slice.plane.origin.z for slice in analysis.slices] == pytest.approx(
+        [90.0, 95.0, 100.0]
+    )
+
+    plan = g.plan_nm_frame_stack(df)
+    assert plan.ok
+    assert plan.volume_geometry is not None
+    assert plan.volume_geometry.slices == 3
+    assert plan.volume_geometry.origin.z == pytest.approx(90.0)
+    assert plan.volume_geometry.spacing_k == pytest.approx(5.0)
+    assert [(item.frame_index, item.target_k) for item in plan.placements] == [
+        (1, 0),
+        (2, 1),
+        (0, 2),
+    ]
+
+    projection = _make_nm_recon_tomo_stack()
+    _set(projection, "ImageType", "ORIGINAL\\PRIMARY\\TOMO")
+    rejected = g.analyze_nm_frame_stack(projection)
+    assert not rejected.ok
+    assert rejected.status is g.SliceStackStatus.geometry_parse_failure
+    assert rejected.issues[0].tag == dicom.Tag("ImageType")

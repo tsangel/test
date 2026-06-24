@@ -140,6 +140,15 @@ single-stack convenience functions `analyze_image_frame_stack()` and
 `plan_image_frame_stack()` succeed only when the file can be interpreted as one
 stack or when explicit frame indices are supplied.
 
+For Nuclear Medicine Image Storage, use `analyze_nm_frame_stack()` and
+`plan_nm_frame_stack()` instead of the generic enhanced helpers. The MVP NM
+adapter is intentionally narrow: `ImageType` value 3 must be `RECON TOMO` or
+`RECON GATED TOMO`, `FrameIncrementPointer` must reference `SliceVector`, and
+`SliceVector` is expanded into per-frame planes using the root image plane
+normal plus `SpacingBetweenSlices` or, when absent, `SliceThickness`. Projection
+`TOMO` / `GATED TOMO` acquisitions and NM organizations based on other vectors
+are rejected rather than treated as regular reconstructed slice stacks.
+
 ## Limits
 
 - Non-uniform and non-rectilinear stacks are reported, not forced into
@@ -147,4 +156,5 @@ stack or when explicit frame indices are supplied.
 - `VolumetricProperties=SAMPLED` and `DISTORTED` are preserved by
   `frame_geometry_from_multiframe_image()` but rejected by direct plane helpers.
 - NM Image Storage has NM-specific frame organization and is not treated as a
-  generic enhanced stack.
+  generic enhanced stack; only the reconstructed TOMO SliceVector adapter is
+  currently implemented.

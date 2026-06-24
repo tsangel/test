@@ -116,6 +116,16 @@ void set_tag(dicom::DicomFile& file, std::string_view key, dicom::Tag value) {
 	}
 }
 
+template <std::size_t N>
+void set_tags(dicom::DicomFile& file, dicom::Tag tag,
+    const std::array<dicom::Tag, N>& values) {
+	auto& element = file.add_dataelement(tag, dicom::VR::AT);
+	if (!element.from_tag_vector(
+	        std::span<const dicom::Tag>(values.data(), values.size()))) {
+		fail("failed to set " + tag.to_string());
+	}
+}
+
 void set_text(dicom::DicomFile& file, dicom::Tag tag, std::string_view value) {
 	if (!file.set_value(tag, value)) {
 		fail("failed to set " + tag.to_string());
@@ -278,6 +288,34 @@ std::unique_ptr<dicom::DicomFile> make_enhanced_ct_stack_file() {
 	return file;
 }
 
+std::unique_ptr<dicom::DicomFile> make_nm_recon_tomo_stack_file() {
+	auto file = std::make_unique<dicom::DicomFile>();
+	set_int(*file, "Rows"_tag, 4);
+	set_int(*file, "Columns"_tag, 5);
+	set_int(*file, "NumberOfFrames"_tag, 3);
+	set_text(*file, "SOPClassUID"_tag,
+	    "NuclearMedicineImageStorage"_uid.value());
+	set_text(*file, "FrameOfReferenceUID"_tag,
+	    "1.2.826.0.1.3680043.10.543.88");
+	set_text(*file, "ImageType"_tag, "ORIGINAL\\PRIMARY\\RECON TOMO");
+	const std::array<double, 3> position{0.0, 0.0, 100.0};
+	const std::array<double, 6> orientation{
+	    1.0, 0.0, 0.0, 0.0, 1.0, 0.0};
+	const std::array<double, 2> spacing{2.0, 3.0};
+	const std::array<double, 1> slice_spacing{5.0};
+	const std::array<dicom::Tag, 1> frame_increment_pointers{{
+	    "SliceVector"_tag,
+	}};
+	const std::array<long, 3> slice_vector{{3, 1, 2}};
+	set_doubles(*file, "ImagePositionPatient"_tag, position);
+	set_doubles(*file, "ImageOrientationPatient"_tag, orientation);
+	set_doubles(*file, "PixelSpacing"_tag, spacing);
+	set_doubles(*file, "SpacingBetweenSlices"_tag, slice_spacing);
+	set_tags(*file, "FrameIncrementPointer"_tag, frame_increment_pointers);
+	set_longs(*file, "SliceVector", slice_vector);
+	return file;
+}
+
 } // namespace
 
 int main() {
@@ -308,6 +346,22 @@ int main() {
 		    plane.contains_world(elevated, 1e-3)) {
 			fail("contains helpers should respect bounds and normal distance");
 		}
+	}
+
+	{
+		constexpr double s = 0.7071067811865476;
+		auto plane = make_test_plane({2.0, 3.0}, {16, 12}, {1.0, 2.0, 3.0},
+		    {s, s, 0.0}, {0.0, 0.0, 1.0});
+		const auto world = plane.world_from_index({2.0, 3.0});
+		expect_near(world.x, 1.0 + s * 4.0, "oblique world.x");
+		expect_near(world.y, 2.0 + s * 4.0, "oblique world.y");
+		expect_near(world.z, 12.0, "oblique world.z");
+		const auto index = plane.index_from_world(world);
+		expect_near(index.i, 2.0, "oblique index.i");
+		expect_near(index.j, 3.0, "oblique index.j");
+		expect_near(plane.normal().x, s, "oblique normal.x");
+		expect_near(plane.normal().y, -s, "oblique normal.y");
+		expect_near(plane.normal().z, 0.0, "oblique normal.z");
 	}
 
 	{
@@ -757,7 +811,69 @@ int main() {
 		if (result.ok() ||
 		    result.status() !=
 		        dicom::geometry::GeometryBuildStatus::unsupported_frame_geometry) {
-			fail("NM Image Storage should use a future NM-specific adapter");
+			fail("NM Image Storage should not use enhanced volumetric properties");
+		}
+	}
+
+	{
+		auto file = make_nm_recon_tomo_stack_file();
+		auto analysis = dicom::geometry::analyze_nm_frame_stack(*file);
+		if (!analysis.ok() || analysis.slices().size() != 3 ||
+		    !analysis.uniform_spacing_k() ||
+		    analysis.frame_of_reference_uid() !=
+		        "1.2.826.0.1.3680043.10.543.88") {
+			fail("NM reconstructed TOMO stack should analyze successfully");
+		}
+		expect_near(*analysis.uniform_spacing_k(), 5.0,
+		    "NM reconstructed spacing");
+		if (analysis.slices()[0].frame_index != 1 ||
+		    analysis.slices()[1].frame_index != 2 ||
+		    analysis.slices()[2].frame_index != 0) {
+			fail("NM SliceVector should sort frames by reconstructed slice position");
+		}
+		expect_near(analysis.slices()[0].plane.origin().z, 90.0,
+		    "NM first sorted origin");
+		expect_near(analysis.slices()[2].plane.origin().z, 100.0,
+		    "NM last sorted origin");
+
+		auto plan = dicom::geometry::plan_nm_frame_stack(*file);
+		if (!plan.ok() || !plan.volume_geometry() ||
+		    plan.placements().size() != 3 ||
+		    plan.placements()[0].frame_index != 1 ||
+		    plan.placements()[0].target_k != 0 ||
+		    plan.placements()[2].frame_index != 0 ||
+		    plan.placements()[2].target_k != 2) {
+			fail("NM reconstructed TOMO plan should map frames to sorted target_k");
+		}
+		expect_near(plan.volume_geometry()->origin().z, 90.0,
+		    "NM volume origin");
+		expect_near(plan.volume_geometry()->spacing_k(), 5.0,
+		    "NM volume spacing_k");
+	}
+
+	{
+		auto file = make_nm_recon_tomo_stack_file();
+		set_text(*file, "ImageType"_tag, "ORIGINAL\\PRIMARY\\TOMO");
+		auto analysis = dicom::geometry::analyze_nm_frame_stack(*file);
+		if (analysis.ok() ||
+		    analysis.status() !=
+		        dicom::geometry::SliceStackStatus::geometry_parse_failure ||
+		    analysis.issues().empty() ||
+		    analysis.issues().front().tag != "ImageType"_tag) {
+			fail("NM projection TOMO should not be treated as a reconstructed stack");
+		}
+	}
+
+	{
+		auto file = make_nm_recon_tomo_stack_file();
+		file->remove_dataelement("FrameIncrementPointer"_tag);
+		auto analysis = dicom::geometry::analyze_nm_frame_stack(*file);
+		if (analysis.ok() ||
+		    analysis.status() !=
+		        dicom::geometry::SliceStackStatus::missing_frame_content ||
+		    analysis.issues().empty() ||
+		    analysis.issues().front().tag != "FrameIncrementPointer"_tag) {
+			fail("NM adapter should require FrameIncrementPointer -> SliceVector");
 		}
 	}
 

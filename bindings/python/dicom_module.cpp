@@ -7743,6 +7743,24 @@ NB_MODULE(_dicomsdl, m) {
 	    nb::arg("file"), nb::arg("options") = nb::none(),
 	    "Group and analyze all enhanced multi-frame image stacks in a DicomFile.");
 
+	geometry.def("analyze_nm_frame_stack",
+	    [](const DicomFile& file,
+	        std::optional<geo::SliceStackOptions> options) {
+		    return geo::analyze_nm_frame_stack(
+		        file, options.value_or(geo::SliceStackOptions{}));
+	    },
+	    nb::arg("file"), nb::arg("options") = nb::none(),
+	    "Analyze a Nuclear Medicine reconstructed TOMO frame stack.");
+
+	geometry.def("plan_nm_frame_stack",
+	    [](const DicomFile& file,
+	        std::optional<geo::SliceStackOptions> options) {
+		    return geo::plan_nm_frame_stack(
+		        file, options.value_or(geo::SliceStackOptions{}));
+	    },
+	    nb::arg("file"), nb::arg("options") = nb::none(),
+	    "Create a uniform volume placement plan for a Nuclear Medicine reconstructed TOMO frame stack.");
+
 	geometry.def("check_overlay_compatibility",
 	    [](const std::string& source_frame_of_reference_uid,
 	        const geo::ImagePlaneGeometry& source,

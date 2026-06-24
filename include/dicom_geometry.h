@@ -431,6 +431,8 @@ private:
 	    const DicomFile&, std::span<const std::size_t>, ImageFrameStackOptions);
 	friend SliceStackAnalysis analyze_image_frame_stack(
 	    const DicomFile&, ImageFrameStackOptions);
+	friend SliceStackAnalysis analyze_nm_frame_stack(
+	    const DicomFile&, SliceStackOptions);
 
 	SliceStackStatus status_{SliceStackStatus::empty};
 	std::string frame_of_reference_uid_;
@@ -474,6 +476,8 @@ private:
 	    const DicomFile&, std::span<const std::size_t>, ImageFrameStackOptions);
 	friend SliceStackPlan plan_image_frame_stack(
 	    const DicomFile&, ImageFrameStackOptions);
+	friend SliceStackPlan plan_nm_frame_stack(
+	    const DicomFile&, SliceStackOptions);
 
 	SliceStackStatus status_{SliceStackStatus::empty};
 	std::string frame_of_reference_uid_;
@@ -615,6 +619,15 @@ volumetric_properties_from_multiframe_image(
 [[nodiscard]] SliceStackPlan plan_image_frame_stack(
     const DicomFile& file,
     ImageFrameStackOptions options = {});
+/// Analyze a Nuclear Medicine reconstructed TOMO stack using FrameIncrementPointer
+/// and SliceVector. Projection TOMO/GATED TOMO and other NM frame organizations are
+/// rejected because they are not regular reconstructed slice planes.
+[[nodiscard]] SliceStackAnalysis analyze_nm_frame_stack(
+    const DicomFile& file,
+    SliceStackOptions options = {});
+[[nodiscard]] SliceStackPlan plan_nm_frame_stack(
+    const DicomFile& file,
+    SliceStackOptions options = {});
 
 enum class OverlayCompatibility {
 	compatible,

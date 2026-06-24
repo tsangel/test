@@ -193,13 +193,13 @@
 - [x] SOP Class별 Frame Type Functional Group lookup table을 내부 helper로 두고, 지원하지 않는 SOP Class에서 frame-level value를 찾아야 하면 `unsupported_frame_geometry`로 실패한다.
 - [x] `VolumetricPropertiesInfo::source`는 예를 들어 `PerFrameFunctionalGroupsSequence[frame] -> PETFrameTypeSequence[0] -> VolumetricProperties`를 `ElementPath`로 보존한다.
 - [x] NM Image Storage는 Enhanced Functional Group 기반 Frame Type Sequence가 아니므로 이 lookup table에 넣지 않는다.
-- [ ] NM Image Storage는 `Frame Increment Pointer (0028,0009)`와 NM vector tags를 이용하는 별도 `analyze_nm_frame_stack()` 후보 API로 분리한다.
-- [ ] NM `Image Type (0008,0008)` Value 3 중 `RECON TOMO` / `RECON GATED TOMO`는 reconstructed slice 후보, `TOMO` / `GATED TOMO`는 projection acquisition 후보로 보되, MVP에서는 NM-specific path를 별도 후속 범위로 둔다.
+- [x] NM Image Storage는 `Frame Increment Pointer (0028,0009)`와 NM vector tags를 이용하는 별도 `analyze_nm_frame_stack()` / `plan_nm_frame_stack()` API로 분리한다.
+- [x] NM `Image Type (0008,0008)` Value 3 중 `RECON TOMO` / `RECON GATED TOMO`는 reconstructed slice 후보, `TOMO` / `GATED TOMO`는 projection acquisition 후보로 보고 regular stack에서 거부한다.
 
 ### NM Image Storage 별도 경로
 
 - [x] NM Image Storage는 `VolumetricProperties` / Enhanced Functional Groups 기반 판정 대상이 아니다.
-- [ ] NM frame organization은 `Frame Increment Pointer (0028,0009)`가 참조하는 indexing vector들로 해석한다.
+- [x] NM frame organization은 `Frame Increment Pointer (0028,0009)`가 참조하는 indexing vector들로 해석한다. MVP에서는 `Slice Vector (0054,0080)`만 지원한다.
 - [ ] 주요 NM vector tags:
   - `Energy Window Vector (0054,0010)`
   - `Detector Vector (0054,0020)`
@@ -210,10 +210,10 @@
   - `Slice Vector (0054,0080)`
   - `Angular View Vector (0054,0090)`
   - `Time Slice Vector (0054,0100)`
-- [ ] NM `Image Type (0008,0008)` Value 3는 `STATIC`, `DYNAMIC`, `GATED`, `WHOLE BODY`, `TOMO`, `GATED TOMO`, `RECON TOMO`, `RECON GATED TOMO`를 고려한다.
-- [ ] `RECON TOMO` / `RECON GATED TOMO`에서 `Slice Vector (0054,0080)`를 사용한 reconstructed slice stack 후보를 만들 수 있다.
-- [ ] `TOMO` / `GATED TOMO`는 projection acquisition 성격이 강하므로 일반 `ImagePlaneGeometryKind::regular_plane`로 취급하지 않는다.
-- [ ] NM adapter는 MVP geometry core 이후 별도 `analyze_nm_frame_stack()` / `plan_nm_frame_stack()` 후보로 둔다.
+- [x] NM `Image Type (0008,0008)` Value 3는 `RECON TOMO`, `RECON GATED TOMO`, `TOMO`, `GATED TOMO`를 우선 구분한다. 그 외 값은 현재 adapter에서 거부한다.
+- [x] `RECON TOMO` / `RECON GATED TOMO`에서 `Slice Vector (0054,0080)`를 사용한 reconstructed slice stack 후보를 만들 수 있다.
+- [x] `TOMO` / `GATED TOMO`는 projection acquisition 성격이 강하므로 일반 `ImagePlaneGeometryKind::regular_plane`로 취급하지 않는다.
+- [x] NM adapter는 `analyze_nm_frame_stack()` / `plan_nm_frame_stack()`으로 구현한다.
 
 ### Overlay Helper
 
@@ -375,7 +375,7 @@
 - [x] 많은 frame을 순회하는 API 문서/주석에서는 convenience factory보다 `FrameGeometryReader` 재사용을 권장한다.
 - [x] MR `MR Image Frame Type Sequence (0018,9226)`, CT `CT Image Frame Type Sequence (0018,9329)`, PET `PET Frame Type Sequence (0018,9751)` lookup을 먼저 구현하고, 다른 SOP Class는 table 확장 전까지 명시적으로 unsupported 처리한다.
 - [x] NM Image Storage는 `FrameGeometryReader::volumetric_properties()` lookup table에서 제외하고, 호출되면 `unsupported_frame_geometry`로 실패한다.
-- [ ] NM 지원은 `Frame Increment Pointer (0028,0009)`와 NM indexing vectors를 해석하는 별도 adapter 후보로 문서화한다.
+- [x] NM 지원은 `Frame Increment Pointer (0028,0009)`와 NM indexing vectors를 해석하는 별도 adapter로 문서화한다. MVP는 reconstructed TOMO `SliceVector` 경로만 포함한다.
 - [x] root `VolumetricProperties=MIXED`는 frame-level value를 찾지 못한 경우 실패로 처리한다.
 - [x] `frame_geometry_from_multiframe_image()`는 resolved `VolumetricProperties` source path를 diagnostic message 또는 issue에 남긴다.
 - [x] SEG frame의 strict parser는 `PerFrameFunctionalGroupsSequence` / `SharedFunctionalGroupsSequence`에서만 plane geometry를 생성한다.
@@ -1018,7 +1018,7 @@ SliceStackPlan plan_image_frame_stack(
 - [x] CT frame은 `CT Image Frame Type Sequence (0018,9329)`의 `VolumetricProperties`를 root보다 우선하는지 검증
 - [x] PET frame은 `PET Frame Type Sequence (0018,9751)`의 `VolumetricProperties`를 root보다 우선하는지 검증
 - [x] NM Image Storage를 `FrameGeometryReader::volumetric_properties()`에 넣으면 Enhanced Frame Type Sequence lookup을 시도하지 않고 `unsupported_frame_geometry`로 실패하는지 검증
-- [ ] NM `Frame Increment Pointer`와 `Slice Vector` 기반 reconstructed stack은 `VolumetricProperties` 경로가 아니라 NM-specific adapter 후보로 분리되는지 검증
+- [x] NM `Frame Increment Pointer`와 `Slice Vector` 기반 reconstructed stack은 `VolumetricProperties` 경로가 아니라 NM-specific adapter로 분리되는지 검증
 - [x] root `VolumetricProperties=MIXED`이고 frame-level value가 없으면 `mixed_volumetric_properties`로 실패하는지 검증
 - [x] `VolumetricProperties`가 missing이면 `missing_volumetric_properties`로 실패하는지 검증
 - [x] `VolumetricProperties`가 알 수 없는 값이면 `unknown_volumetric_properties`로 실패하는지 검증

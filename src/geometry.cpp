@@ -293,6 +293,101 @@ volumetric_properties_from_code_string(ResolvedCodeString resolved) {
 	return GeometryBuildResult<int>::success(*value);
 }
 
+[[nodiscard]] GeometryBuildResult<double> read_positive_double(
+    const DataSet& dataset, Tag tag) {
+	const auto& element = dataset.get_dataelement(root_path(tag));
+	if (element.is_missing()) {
+		return GeometryBuildResult<double>::failure(
+		    GeometryBuildStatus::missing_required_tag, tag, "missing required tag",
+		    root_path(tag));
+	}
+	auto value = element.to_double();
+	if (!value || !finite(*value) || *value <= 0.0) {
+		return GeometryBuildResult<double>::failure(
+		    GeometryBuildStatus::invalid_spacing, tag, "value must be positive",
+		    root_path(tag));
+	}
+	return GeometryBuildResult<double>::success(*value, root_path(tag));
+}
+
+[[nodiscard]] GeometryBuildResult<std::vector<int>> read_int_vector(
+    const DataSet& dataset, Tag tag, std::size_t expected_count) {
+	const auto& element = dataset.get_dataelement(root_path(tag));
+	if (element.is_missing()) {
+		return GeometryBuildResult<std::vector<int>>::failure(
+		    GeometryBuildStatus::missing_required_tag, tag, "missing required tag",
+		    root_path(tag));
+	}
+	auto values = element.to_int_vector();
+	if (!values || values->size() != expected_count) {
+		return GeometryBuildResult<std::vector<int>>::failure(
+		    GeometryBuildStatus::invalid_value, tag, "invalid value count",
+		    root_path(tag));
+	}
+	return GeometryBuildResult<std::vector<int>>::success(std::move(*values),
+	    root_path(tag));
+}
+
+[[nodiscard]] GeometryBuildResult<std::vector<Tag>> read_tag_vector(
+    const DataSet& dataset, Tag tag) {
+	const auto& element = dataset.get_dataelement(root_path(tag));
+	if (element.is_missing()) {
+		return GeometryBuildResult<std::vector<Tag>>::failure(
+		    GeometryBuildStatus::missing_required_tag, tag, "missing required tag",
+		    root_path(tag));
+	}
+	auto values = element.to_tag_vector();
+	if (!values || values->empty()) {
+		return GeometryBuildResult<std::vector<Tag>>::failure(
+		    GeometryBuildStatus::invalid_value, tag, "invalid tag vector",
+		    root_path(tag));
+	}
+	return GeometryBuildResult<std::vector<Tag>>::success(std::move(*values),
+	    root_path(tag));
+}
+
+[[nodiscard]] GeometryBuildResult<std::string> read_image_type_value3(
+    const DataSet& dataset) {
+	const auto tag = "ImageType"_tag;
+	const auto& element = dataset.get_dataelement(root_path(tag));
+	if (element.is_missing()) {
+		return GeometryBuildResult<std::string>::failure(
+		    GeometryBuildStatus::missing_required_tag, tag, "missing ImageType",
+		    root_path(tag));
+	}
+	auto values = element.to_string_views();
+	if (!values || values->size() < 3) {
+		return GeometryBuildResult<std::string>::failure(
+		    GeometryBuildStatus::invalid_value, tag,
+		    "ImageType must contain at least three values", root_path(tag));
+	}
+	return GeometryBuildResult<std::string>::success(
+	    std::string(trim_ascii_spaces((*values)[2])), root_path(tag));
+}
+
+[[nodiscard]] bool is_nm_reconstructed_tomo(std::string_view image_type_value3) noexcept {
+	return image_type_value3 == "RECON TOMO" ||
+	       image_type_value3 == "RECON GATED TOMO";
+}
+
+[[nodiscard]] bool is_nm_projection_tomo(std::string_view image_type_value3) noexcept {
+	return image_type_value3 == "TOMO" || image_type_value3 == "GATED TOMO";
+}
+
+[[nodiscard]] GeometryBuildResult<double> read_nm_slice_spacing(
+    const DataSet& dataset) {
+	const auto spacing_between_slices = read_positive_double(
+	    dataset, "SpacingBetweenSlices"_tag);
+	if (spacing_between_slices.ok()) {
+		return spacing_between_slices;
+	}
+	if (spacing_between_slices.status() !=
+	    GeometryBuildStatus::missing_required_tag) {
+		return spacing_between_slices;
+	}
+	return read_positive_double(dataset, "SliceThickness"_tag);
+}
+
 [[nodiscard]] std::string make_tag_message(std::string_view prefix, Tag tag) {
 	std::string message(prefix);
 	message += " ";
@@ -370,6 +465,8 @@ struct FrameStackBucket {
 	ImageFrameStackKey key;
 	std::vector<FrameStackMember> members;
 };
+
+[[nodiscard]] std::optional<std::size_t> number_of_frames(const DataSet& root);
 
 [[nodiscard]] bool same_descriptor(
     const DimensionIndexDescriptor& a,
@@ -634,6 +731,142 @@ void add_slice_stack_store_issue(SliceStackInputStore& store,
 		    0,
 		    frame_index,
 		    std::move(frame.plane),
+		    frame_of_reference_uid,
+		});
+	}
+	return store;
+}
+
+[[nodiscard]] SliceStackInputStore make_slice_stack_inputs_from_nm_frames(
+    const DicomFile& file, SliceStackOptions options) {
+	SliceStackInputStore store;
+	const auto& root = file.dataset();
+
+	auto add_root_issue = [&](SliceStackStatus status, Tag tag,
+	                          std::string message, ElementPath source = {}) {
+		add_slice_stack_store_issue(store, status, 0, 0, 0, tag,
+		    std::move(message), std::move(source));
+	};
+
+	const auto sop_class_uid = root_string_view(root, "SOPClassUID"_tag);
+	if (!sop_class_uid ||
+	    *sop_class_uid != "NuclearMedicineImageStorage"_uid.value()) {
+		add_root_issue(SliceStackStatus::geometry_parse_failure,
+		    "SOPClassUID"_tag,
+		    "SOP Class is not Nuclear Medicine Image Storage",
+		    root_path("SOPClassUID"_tag));
+		return store;
+	}
+
+	const auto frame_count = number_of_frames(root);
+	if (!frame_count || *frame_count == 0) {
+		add_root_issue(SliceStackStatus::missing_frame_content,
+		    "NumberOfFrames"_tag,
+		    "NumberOfFrames is required for NM frame stack analysis",
+		    root_path("NumberOfFrames"_tag));
+		return store;
+	}
+
+	const auto image_type_value3 = read_image_type_value3(root);
+	if (!image_type_value3.ok()) {
+		add_root_issue(SliceStackStatus::missing_frame_content,
+		    image_type_value3.tag(), image_type_value3.message(),
+		    image_type_value3.source());
+		return store;
+	}
+	if (!is_nm_reconstructed_tomo(image_type_value3.value())) {
+		const auto status = is_nm_projection_tomo(image_type_value3.value())
+		    ? SliceStackStatus::geometry_parse_failure
+		    : SliceStackStatus::missing_frame_content;
+		add_root_issue(status, "ImageType"_tag,
+		    "NM ImageType value 3 is not a reconstructed TOMO stack",
+		    image_type_value3.source());
+		return store;
+	}
+
+	const auto frame_increment_pointers =
+	    read_tag_vector(root, "FrameIncrementPointer"_tag);
+	if (!frame_increment_pointers.ok()) {
+		add_root_issue(SliceStackStatus::missing_frame_content,
+		    frame_increment_pointers.tag(), frame_increment_pointers.message(),
+		    frame_increment_pointers.source());
+		return store;
+	}
+	if (std::find(frame_increment_pointers.value().begin(),
+	        frame_increment_pointers.value().end(),
+	        "SliceVector"_tag) == frame_increment_pointers.value().end()) {
+		add_root_issue(SliceStackStatus::missing_frame_content,
+		    "FrameIncrementPointer"_tag,
+		    "FrameIncrementPointer does not reference SliceVector",
+		    frame_increment_pointers.source());
+		return store;
+	}
+
+	auto slice_vector = read_int_vector(root, "SliceVector"_tag, *frame_count);
+	if (!slice_vector.ok()) {
+		add_root_issue(SliceStackStatus::missing_frame_content,
+		    slice_vector.tag(), slice_vector.message(), slice_vector.source());
+		return store;
+	}
+	for (int value : slice_vector.value()) {
+		if (value <= 0) {
+			add_root_issue(SliceStackStatus::missing_frame_content,
+			    "SliceVector"_tag,
+			    "SliceVector values must be positive", slice_vector.source());
+			return store;
+		}
+	}
+
+	auto base_plane = plane_from_single_frame_image(root);
+	if (!base_plane.ok()) {
+		add_root_issue(slice_stack_status_from_geometry_build(base_plane.status()),
+		    base_plane.tag(), base_plane.message(), base_plane.source());
+		return store;
+	}
+
+	auto slice_spacing = read_nm_slice_spacing(root);
+	if (!slice_spacing.ok()) {
+		add_root_issue(slice_stack_status_from_geometry_build(slice_spacing.status()),
+		    slice_spacing.tag(), slice_spacing.message(), slice_spacing.source());
+		return store;
+	}
+
+	std::string_view frame_of_reference_uid;
+	auto frame_of_reference = frame_of_reference_from_dataset(root);
+	if (frame_of_reference.ok()) {
+		store.frame_of_reference_uids.push_back(
+		    std::move(frame_of_reference).value());
+		frame_of_reference_uid = store.frame_of_reference_uids.back();
+	}
+
+	const auto& reference_plane = base_plane.value();
+	const int reference_slice = slice_vector.value().front();
+	store.inputs.reserve(*frame_count);
+	for (std::size_t frame_index = 0; frame_index < *frame_count; ++frame_index) {
+		const double slice_offset_mm =
+		    static_cast<double>(slice_vector.value()[frame_index] -
+		                        reference_slice) *
+		    slice_spacing.value();
+		ImagePlaneGeometryParams params;
+		params.origin =
+		    reference_plane.origin() +
+		    reference_plane.normal() * slice_offset_mm;
+		params.direction_i = reference_plane.direction_i();
+		params.direction_j = reference_plane.direction_j();
+		params.spacing = reference_plane.spacing();
+		params.size = reference_plane.size();
+		auto plane = make_image_plane_geometry(params, options.tolerance);
+		if (!plane.ok()) {
+			add_slice_stack_store_issue(store,
+			    slice_stack_status_from_geometry_build(plane.status()),
+			    frame_index, 0, frame_index, plane.tag(), plane.message(),
+			    plane.source());
+			continue;
+		}
+		store.inputs.push_back(SliceStackInput{
+		    0,
+		    frame_index,
+		    std::move(plane).value(),
 		    frame_of_reference_uid,
 		});
 	}
@@ -2240,6 +2473,64 @@ SliceStackPlan plan_image_frame_stack(const DicomFile& file,
 	return plan_slice_stack(
 	    std::span<const SliceStackInput>(store.inputs.data(), store.inputs.size()),
 	    options.slice_stack);
+}
+
+SliceStackAnalysis analyze_nm_frame_stack(
+    const DicomFile& file, SliceStackOptions options) {
+	auto store = make_slice_stack_inputs_from_nm_frames(file, options);
+	if (store.inputs.empty()) {
+		if (store.issues.empty()) {
+			return analyze_slice_stack(std::span<const SliceStackInput>{}, options);
+		}
+		SliceStackAnalysis analysis;
+		analysis.status_ = store.status;
+		analysis.issues_ = std::move(store.issues);
+		return analysis;
+	}
+
+	auto analysis = analyze_slice_stack(
+	    std::span<const SliceStackInput>(store.inputs.data(), store.inputs.size()),
+	    options);
+	for (auto& issue : store.issues) {
+		if (slice_stack_status_priority(issue.status) <
+		    slice_stack_status_priority(analysis.status_)) {
+			analysis.status_ = issue.status;
+		}
+		analysis.issues_.push_back(std::move(issue));
+	}
+	return analysis;
+}
+
+SliceStackPlan plan_nm_frame_stack(
+    const DicomFile& file, SliceStackOptions options) {
+	auto store = make_slice_stack_inputs_from_nm_frames(file, options);
+	if (!store.issues.empty()) {
+		SliceStackPlan plan;
+		auto analysis = store.inputs.empty()
+		    ? SliceStackAnalysis{}
+		    : analyze_slice_stack(
+		          std::span<const SliceStackInput>(
+		              store.inputs.data(), store.inputs.size()),
+		          options);
+		plan.status_ = analysis.status();
+		plan.frame_of_reference_uid_ = analysis.frame_of_reference_uid();
+		plan.issues_ = analysis.issues();
+		for (auto& issue : store.issues) {
+			if (slice_stack_status_priority(issue.status) <
+			    slice_stack_status_priority(plan.status_)) {
+				plan.status_ = issue.status;
+			}
+			plan.issues_.push_back(std::move(issue));
+		}
+		if (store.inputs.empty()) {
+			plan.status_ = store.status;
+		}
+		return plan;
+	}
+
+	return plan_slice_stack(
+	    std::span<const SliceStackInput>(store.inputs.data(), store.inputs.size()),
+	    options);
 }
 
 ImageFrameStackAnalysis analyze_image_frame_stacks(

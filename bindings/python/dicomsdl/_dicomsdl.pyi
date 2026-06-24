@@ -1978,6 +1978,18 @@ class _GeometryModule:
         options: _ImageFrameStackOptions | None = ...,
         /,
     ) -> _ImageFrameStackAnalysis: ...
+    def analyze_nm_frame_stack(
+        self,
+        file: DicomFile,
+        options: _SliceStackOptions | None = ...,
+        /,
+    ) -> _SliceStackAnalysis: ...
+    def plan_nm_frame_stack(
+        self,
+        file: DicomFile,
+        options: _SliceStackOptions | None = ...,
+        /,
+    ) -> _SliceStackPlan: ...
     def check_overlay_compatibility(
         self,
         source_frame_of_reference_uid: str,
