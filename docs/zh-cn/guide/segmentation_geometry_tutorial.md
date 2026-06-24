@@ -1,6 +1,8 @@
-# SEG 与 Geometry
+# DICOM Segmentation (SEG) 与 Geometry
 
-当你需要查看 DICOM SEG 元数据、解码 SEG frame、构建 image-plane geometry、规划 slice stack，或检查 mask 与 image 是否可以安全叠加时，可以使用这些 API。
+当你需要查看 DICOM Segmentation (SEG) 元数据、解码 SEG frame、构建 image-plane geometry、规划 slice stack，或检查 mask 与 image 是否可以安全叠加时，可以使用这些 API。
+
+在 DICOM 文件中，这类对象使用 `Modality (0008,0060) = SEG`。更精确的 storage 标识符是 SOP Class：BINARY/FRACTIONAL SEG 使用 Segmentation Storage，LABELMAP SEG 使用 Label Map Segmentation Storage。
 
 下面的示例使用 Python，并接在普通的 `dicom.read_file()` 工作流之后。Geometry layer 不负责构建 viewer、分配最终输出 volume、选择 dominant grid，也不会 resample mask。
 
@@ -12,7 +14,7 @@ pip install "dicomsdl[numpy]"
 
 输出值会随输入文件而变化。下面的 SEG 输出摘自一个 binary FDG/FBB brain SEG sample。
 
-## 打开 DICOM SEG 文件
+## 打开 DICOM Segmentation (SEG) 文件
 
 DICOM Segmentation Storage 和 Label Map Segmentation Storage 都使用 `dicom.seg.read_file()` 打开。它返回的是 `Segmentation` 对象，而不是普通的 `DicomFile`。
 

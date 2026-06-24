@@ -1,8 +1,12 @@
-# SEG and Geometry
+# DICOM Segmentation (SEG) and Geometry
 
-Use these APIs when you need to inspect DICOM SEG metadata, decode SEG frames,
-build image-plane geometry, plan slice stacks, or check whether masks and images
-can be overlaid safely.
+Use these APIs when you need to inspect DICOM Segmentation (SEG) metadata,
+decode SEG frames, build image-plane geometry, plan slice stacks, or check
+whether masks and images can be overlaid safely.
+
+In DICOM files, these objects use `Modality (0008,0060) = SEG`. The SOP Class
+is the more precise storage identifier: Segmentation Storage for BINARY and
+FRACTIONAL SEG, and Label Map Segmentation Storage for LABELMAP SEG.
 
 The examples below use Python and build on the ordinary `dicom.read_file()`
 workflow. The geometry layer does not build viewers, allocate final output
@@ -17,7 +21,7 @@ pip install "dicomsdl[numpy]"
 Output values depend on the input file. The SEG excerpts below are adapted from
 one binary FDG/FBB brain SEG sample.
 
-## Open a DICOM SEG File
+## Open a DICOM Segmentation (SEG) File
 
 Open DICOM Segmentation Storage or Label Map Segmentation Storage with
 `dicom.seg.read_file()`. It returns a `Segmentation` object instead of a plain

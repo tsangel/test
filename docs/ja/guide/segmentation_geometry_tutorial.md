@@ -1,6 +1,8 @@
-# SEG と Geometry
+# DICOM Segmentation (SEG) と Geometry
 
-DICOM SEG の metadata 確認、SEG frame の decode、image-plane geometry の作成、slice stack の計画、mask と image を安全に重ね合わせられるかの確認に使う API です。
+DICOM Segmentation (SEG) の metadata 確認、SEG frame の decode、image-plane geometry の作成、slice stack の計画、mask と image を安全に重ね合わせられるかの確認に使う API です。
+
+DICOM file では、これらの object は `Modality (0008,0060) = SEG` を使います。より正確な storage 識別子は SOP Class です。BINARY/FRACTIONAL SEG は Segmentation Storage、LABELMAP SEG は Label Map Segmentation Storage を使います。
 
 以下の例は Python で、通常の `dicom.read_file()` ワークフローから始めます。Geometry layer は viewer を作成したり、最終的な出力 volume を確保したり、dominant grid を選んだり、mask を resample したりしません。
 
@@ -12,7 +14,7 @@ pip install "dicomsdl[numpy]"
 
 出力値は入力ファイルによって変わります。以下の SEG の出力例は、binary FDG/FBB brain SEG sample から一部を抜粋したものです。
 
-## DICOM SEG ファイルを開く
+## DICOM Segmentation (SEG) ファイルを開く
 
 DICOM Segmentation Storage と Label Map Segmentation Storage は `dicom.seg.read_file()` で開きます。戻り値は通常の `DicomFile` ではなく `Segmentation` オブジェクトです。
 
