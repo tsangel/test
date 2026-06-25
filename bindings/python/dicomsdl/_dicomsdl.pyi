@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import enum
 import os
-from typing import Any, Callable, Literal, Optional, Sequence, TypeAlias, overload
+from typing import Any, Callable, Iterator, Literal, Optional, Sequence, TypeAlias, overload
 
 DICOM_STANDARD_VERSION: str
 DICOMSDL_VERSION: str
@@ -25,6 +25,8 @@ __all__ = [
     "IMPLEMENTATION_CLASS_UID",
     "IMPLEMENTATION_VERSION_NAME",
     "PIXELDATA_PAYLOAD_PLACEHOLDER_MAGIC",
+    "geometry",
+    "seg",
     "log_info",
     "log_warn",
     "log_error",
@@ -1411,6 +1413,844 @@ class Uid:
     def is_valid(self) -> bool: ...
 
     def __bool__(self) -> bool: ...
+
+
+class _GeometryBuildStatus(enum.Enum):
+    ok = ...
+    missing_required_tag = ...
+    invalid_value = ...
+    invalid_size = ...
+    invalid_spacing = ...
+    invalid_orientation = ...
+    singular_matrix = ...
+    invalid_frame_index = ...
+    missing_volumetric_properties = ...
+    mixed_volumetric_properties = ...
+    unknown_volumetric_properties = ...
+    sampled_frame_geometry = ...
+    distorted_frame_geometry = ...
+    unsupported_frame_geometry = ...
+
+
+class _VolumetricPropertiesValue(enum.Enum):
+    volume = ...
+    sampled = ...
+    distorted = ...
+
+
+class _ImageFrameGeometryKind(enum.Enum):
+    regular_plane = ...
+    sampled_projection = ...
+    distorted = ...
+
+
+class _OverlayCompatibility(enum.Enum):
+    compatible = ...
+    missing_frame_of_reference = ...
+    different_frame_of_reference = ...
+    non_parallel_planes = ...
+    opposite_orientation = ...
+    out_of_plane = ...
+    different_spacing = ...
+    different_extent = ...
+    requires_resampling = ...
+
+
+class _SliceStackStatus(enum.Enum):
+    ok = ...
+    empty = ...
+    missing_geometry = ...
+    missing_frame_content = ...
+    missing_dimension_module = ...
+    unsupported_tiled_image = ...
+    multiple_frame_stacks = ...
+    geometry_parse_failure = ...
+    missing_frame_of_reference = ...
+    mixed_frame_of_reference = ...
+    inconsistent_rows_columns = ...
+    inconsistent_orientation = ...
+    inconsistent_pixel_spacing = ...
+    inconsistent_slice_origin = ...
+    duplicate_slice_position = ...
+    non_uniform_spacing = ...
+
+
+class _Vec3d:
+    def __init__(self, x: float = ..., y: float = ..., z: float = ..., /) -> None: ...
+    x: float
+    y: float
+    z: float
+
+
+class _Point3d:
+    def __init__(self, x: float = ..., y: float = ..., z: float = ..., /) -> None: ...
+    x: float
+    y: float
+    z: float
+
+
+class _ImagePoint2D:
+    def __init__(self, i: float = ..., j: float = ..., /) -> None: ...
+    i: float
+    j: float
+
+
+class _ImagePoint3D:
+    def __init__(self, i: float = ..., j: float = ..., k: float = ..., /) -> None: ...
+    i: float
+    j: float
+    k: float
+
+
+class _PlaneProjection2D:
+    index: _ImagePoint2D
+    signed_normal_distance_mm: float
+
+
+class _ImageSize2D:
+    def __init__(self, i: int = ..., j: int = ..., /) -> None: ...
+    i: int
+    j: int
+
+
+class _ImageSize3D:
+    def __init__(self, i: int = ..., j: int = ..., k: int = ..., /) -> None: ...
+    i: int
+    j: int
+    k: int
+
+
+class _ImageSpacing2D:
+    def __init__(self, i: float = ..., j: float = ..., /) -> None: ...
+    i: float
+    j: float
+
+
+class _ImageSpacing3D:
+    def __init__(self, i: float = ..., j: float = ..., k: float = ..., /) -> None: ...
+    i: float
+    j: float
+    k: float
+
+
+class _GeometryTolerance:
+    def __init__(
+        self,
+        orientation_tolerance: float = ...,
+        spacing_tolerance_mm: float = ...,
+        position_tolerance_mm: float = ...,
+        normal_distance_tolerance_mm: float = ...,
+        /,
+    ) -> None: ...
+    orientation_tolerance: float
+    spacing_tolerance_mm: float
+    position_tolerance_mm: float
+    normal_distance_tolerance_mm: float
+
+
+class _Matrix4x4d:
+    @staticmethod
+    def identity() -> _Matrix4x4d: ...
+    def at(self, row: int, column: int, /) -> float: ...
+    def to_tuple(self) -> tuple[float, ...]: ...
+
+
+class _ImagePlaneGeometry:
+    @property
+    def origin(self) -> _Point3d: ...
+    @property
+    def direction_i(self) -> _Vec3d: ...
+    @property
+    def direction_j(self) -> _Vec3d: ...
+    @property
+    def normal(self) -> _Vec3d: ...
+    @property
+    def spacing(self) -> _ImageSpacing2D: ...
+    @property
+    def spacing_i(self) -> float: ...
+    @property
+    def spacing_j(self) -> float: ...
+    @property
+    def size(self) -> _ImageSize2D: ...
+    @property
+    def columns(self) -> int: ...
+    @property
+    def rows(self) -> int: ...
+    @property
+    def index_to_world_matrix(self) -> _Matrix4x4d: ...
+    @property
+    def world_to_index_matrix(self) -> _Matrix4x4d: ...
+    def world_from_index(self, index: _ImagePoint2D, /) -> _Point3d: ...
+    def index_from_world(self, world: _Point3d, /) -> _ImagePoint2D: ...
+    def normal_distance_from_world(self, world: _Point3d, /) -> float: ...
+    def contains_index(self, index: _ImagePoint2D, /) -> bool: ...
+    def contains_world(
+        self, world: _Point3d, normal_distance_tolerance_mm: float = ..., /
+    ) -> bool: ...
+
+
+class _ImageVolumeGeometry:
+    @property
+    def origin(self) -> _Point3d: ...
+    @property
+    def direction_i(self) -> _Vec3d: ...
+    @property
+    def direction_j(self) -> _Vec3d: ...
+    @property
+    def direction_k(self) -> _Vec3d: ...
+    @property
+    def spacing(self) -> _ImageSpacing3D: ...
+    @property
+    def spacing_i(self) -> float: ...
+    @property
+    def spacing_j(self) -> float: ...
+    @property
+    def spacing_k(self) -> float: ...
+    @property
+    def size(self) -> _ImageSize3D: ...
+    @property
+    def columns(self) -> int: ...
+    @property
+    def rows(self) -> int: ...
+    @property
+    def slices(self) -> int: ...
+    @property
+    def index_to_world_matrix(self) -> _Matrix4x4d: ...
+    @property
+    def world_to_index_matrix(self) -> _Matrix4x4d: ...
+    def world_from_index(self, index: _ImagePoint3D, /) -> _Point3d: ...
+    def index_from_world(self, world: _Point3d, /) -> _ImagePoint3D: ...
+    def contains_index(self, index: _ImagePoint3D, /) -> bool: ...
+    def contains_world(
+        self, world: _Point3d, tolerance: _GeometryTolerance | None = ..., /
+    ) -> bool: ...
+
+
+class _VolumetricPropertiesInfo:
+    value: _VolumetricPropertiesValue
+    @property
+    def source_depth(self) -> int: ...
+    @property
+    def source_leaf_tag(self) -> Tag: ...
+
+
+class _ImageFrameGeometry:
+    @property
+    def plane(self) -> _ImagePlaneGeometry: ...
+    kind: _ImageFrameGeometryKind
+
+
+class _SliceStackOptions:
+    def __init__(
+        self,
+        tolerance: _GeometryTolerance | None = ...,
+        *,
+        slice_position_tolerance_mm: float = ...,
+        origin_residual_tolerance_mm: float = ...,
+        allow_duplicate_positions: bool = ...,
+    ) -> None: ...
+    tolerance: _GeometryTolerance
+    slice_position_tolerance_mm: float
+    origin_residual_tolerance_mm: float
+    allow_duplicate_positions: bool
+
+
+class _ImageFrameStackOptions:
+    def __init__(
+        self,
+        slice_stack: _SliceStackOptions | None = ...,
+        allow_geometry_grouping_fallback: bool = ...,
+        /,
+    ) -> None: ...
+    slice_stack: _SliceStackOptions
+    allow_geometry_grouping_fallback: bool
+
+
+class _SliceStackInput:
+    def __init__(
+        self,
+        plane: _ImagePlaneGeometry,
+        frame_of_reference_uid: str,
+        source_index: int = ...,
+        frame_index: int = ...,
+        /,
+    ) -> None: ...
+    source_index: int
+    frame_index: int
+    plane: _ImagePlaneGeometry
+    frame_of_reference_uid: str
+
+
+class _SliceStackSlice:
+    input_index: int
+    source_index: int
+    frame_index: int
+    plane: _ImagePlaneGeometry
+    position_along_normal_mm: float
+    in_plane_residual_mm: float
+
+
+class _SliceStackGap:
+    lower_sorted_index: int
+    upper_sorted_index: int
+    spacing_mm: float
+
+
+class _SliceStackRun:
+    begin_sorted_index: int
+    end_sorted_index: int
+    spacing_mm: float
+
+
+class _SliceStackItem:
+    source_index: int
+    frame_index: int
+    target_k: int
+    position_along_normal_mm: float
+    in_plane_residual_mm: float
+
+
+class _SliceStackIssue:
+    status: _SliceStackStatus
+    input_index: int
+    source_index: int
+    frame_index: int
+    tag: Tag
+    message: str
+    @property
+    def source_depth(self) -> int: ...
+    @property
+    def source_leaf_tag(self) -> Tag: ...
+
+
+class _DimensionIndexDescriptor:
+    dimension_index_pointer: Tag
+    functional_group_pointer: Tag
+    dimension_organization_uid: str
+    label: str
+    private_creator: str
+
+
+class _DimensionIndexValue:
+    descriptor: _DimensionIndexDescriptor
+    value: int
+
+
+class _ImageFrameStackKey:
+    stack_id: str
+    dimension_values: list[_DimensionIndexValue]
+
+
+class _SliceStackAnalysis:
+    @property
+    def status(self) -> _SliceStackStatus: ...
+    @property
+    def ok(self) -> bool: ...
+    @property
+    def frame_of_reference_uid(self) -> str: ...
+    @property
+    def slices(self) -> list[_SliceStackSlice]: ...
+    @property
+    def gaps(self) -> list[_SliceStackGap]: ...
+    @property
+    def uniform_runs(self) -> list[_SliceStackRun]: ...
+    @property
+    def issues(self) -> list[_SliceStackIssue]: ...
+    @property
+    def uniform_spacing_k(self) -> float | None: ...
+    @property
+    def max_in_plane_residual_mm(self) -> float: ...
+
+
+class _ImageFrameStackGroup:
+    key: _ImageFrameStackKey
+    frame_indices: list[int]
+    analysis: _SliceStackAnalysis
+
+
+class _SliceStackPlan:
+    @property
+    def status(self) -> _SliceStackStatus: ...
+    @property
+    def ok(self) -> bool: ...
+    @property
+    def frame_of_reference_uid(self) -> str: ...
+    @property
+    def volume_geometry(self) -> _ImageVolumeGeometry | None: ...
+    @property
+    def placements(self) -> list[_SliceStackItem]: ...
+    @property
+    def issues(self) -> list[_SliceStackIssue]: ...
+
+
+class _ImageFrameStackAnalysis:
+    @property
+    def status(self) -> _SliceStackStatus: ...
+    @property
+    def ok(self) -> bool: ...
+    @property
+    def groups(self) -> list[_ImageFrameStackGroup]: ...
+    @property
+    def issues(self) -> list[_SliceStackIssue]: ...
+
+
+class _OverlayCheckOptions:
+    def __init__(
+        self,
+        frame_position_tolerance_mm: float = ...,
+        normal_distance_tolerance_mm: float = ...,
+        orientation_tolerance: float = ...,
+        spacing_tolerance_mm: float = ...,
+        require_same_grid: bool = ...,
+        /,
+    ) -> None: ...
+    frame_position_tolerance_mm: float
+    normal_distance_tolerance_mm: float
+    orientation_tolerance: float
+    spacing_tolerance_mm: float
+    require_same_grid: bool
+
+
+class _IndexRange1D:
+    def __init__(self, begin: int = ..., end: int = ..., /) -> None: ...
+    begin: int
+    end: int
+    @property
+    def empty(self) -> bool: ...
+
+
+class _OverlayCheck:
+    status: _OverlayCompatibility
+    same_frame_of_reference: bool
+    can_transform: bool
+    can_direct_overlay: bool
+    same_grid: bool
+    same_spacing: bool
+    same_extent: bool
+    overlaps_extent: bool
+    source_inside_target_extent: bool
+    requires_resampling: bool
+    target_k_range: _IndexRange1D | None
+    max_position_error_mm: float
+    max_normal_distance_mm: float
+    max_orientation_error: float
+    max_spacing_error_mm: float
+    @property
+    def ok(self) -> bool: ...
+
+
+class _PlaneToPlaneTransform:
+    def target_index_from_source_index(self, source: _ImagePoint2D, /) -> _ImagePoint2D: ...
+    def source_index_from_target_index(self, target: _ImagePoint2D, /) -> _ImagePoint2D: ...
+
+
+class _PlaneToVolumeTransform:
+    def target_index_from_source_index(self, source: _ImagePoint2D, /) -> _ImagePoint3D: ...
+    def source_index_from_target_index(self, target: _ImagePoint3D, /) -> _ImagePoint2D: ...
+    def source_projection_from_target_index(
+        self, target: _ImagePoint3D, /
+    ) -> _PlaneProjection2D: ...
+
+
+class _VolumeToPlaneTransform:
+    def target_index_from_source_index(self, source: _ImagePoint3D, /) -> _ImagePoint2D: ...
+    def target_projection_from_source_index(
+        self, source: _ImagePoint3D, /
+    ) -> _PlaneProjection2D: ...
+    def source_index_from_target_index(self, target: _ImagePoint2D, /) -> _ImagePoint3D: ...
+
+
+class _VolumeToVolumeTransform:
+    def target_index_from_source_index(self, source: _ImagePoint3D, /) -> _ImagePoint3D: ...
+    def source_index_from_target_index(self, target: _ImagePoint3D, /) -> _ImagePoint3D: ...
+
+
+class _GeometryModule:
+    GeometryBuildStatus: type[_GeometryBuildStatus]
+    VolumetricPropertiesValue: type[_VolumetricPropertiesValue]
+    ImageFrameGeometryKind: type[_ImageFrameGeometryKind]
+    OverlayCompatibility: type[_OverlayCompatibility]
+    SliceStackStatus: type[_SliceStackStatus]
+    Vec3d: type[_Vec3d]
+    Point3d: type[_Point3d]
+    ImagePoint2D: type[_ImagePoint2D]
+    ImagePoint3D: type[_ImagePoint3D]
+    PlaneProjection2D: type[_PlaneProjection2D]
+    ImageSize2D: type[_ImageSize2D]
+    ImageSize3D: type[_ImageSize3D]
+    ImageSpacing2D: type[_ImageSpacing2D]
+    ImageSpacing3D: type[_ImageSpacing3D]
+    GeometryTolerance: type[_GeometryTolerance]
+    Matrix4x4d: type[_Matrix4x4d]
+    ImagePlaneGeometry: type[_ImagePlaneGeometry]
+    ImageVolumeGeometry: type[_ImageVolumeGeometry]
+    VolumetricPropertiesInfo: type[_VolumetricPropertiesInfo]
+    ImageFrameGeometry: type[_ImageFrameGeometry]
+    SliceStackOptions: type[_SliceStackOptions]
+    ImageFrameStackOptions: type[_ImageFrameStackOptions]
+    SliceStackInput: type[_SliceStackInput]
+    SliceStackSlice: type[_SliceStackSlice]
+    SliceStackGap: type[_SliceStackGap]
+    SliceStackRun: type[_SliceStackRun]
+    SliceStackItem: type[_SliceStackItem]
+    SliceStackIssue: type[_SliceStackIssue]
+    DimensionIndexDescriptor: type[_DimensionIndexDescriptor]
+    DimensionIndexValue: type[_DimensionIndexValue]
+    ImageFrameStackKey: type[_ImageFrameStackKey]
+    SliceStackAnalysis: type[_SliceStackAnalysis]
+    ImageFrameStackGroup: type[_ImageFrameStackGroup]
+    SliceStackPlan: type[_SliceStackPlan]
+    ImageFrameStackAnalysis: type[_ImageFrameStackAnalysis]
+    OverlayCheckOptions: type[_OverlayCheckOptions]
+    IndexRange1D: type[_IndexRange1D]
+    OverlayCheck: type[_OverlayCheck]
+    PlaneToPlaneTransform: type[_PlaneToPlaneTransform]
+    PlaneToVolumeTransform: type[_PlaneToVolumeTransform]
+    VolumeToPlaneTransform: type[_VolumeToPlaneTransform]
+    VolumeToVolumeTransform: type[_VolumeToVolumeTransform]
+    def dot(self, a: _Vec3d, b: _Vec3d, /) -> float: ...
+    def cross(self, a: _Vec3d, b: _Vec3d, /) -> _Vec3d: ...
+    def norm(self, v: _Vec3d, /) -> float: ...
+    def normalize(self, v: _Vec3d, /) -> _Vec3d: ...
+    def make_image_plane_geometry(
+        self,
+        origin: _Point3d,
+        direction_i: _Vec3d,
+        direction_j: _Vec3d,
+        spacing: _ImageSpacing2D,
+        size: _ImageSize2D,
+        tolerance: _GeometryTolerance | None = ...,
+        /,
+    ) -> _ImagePlaneGeometry: ...
+    def make_image_volume_geometry(
+        self,
+        origin: _Point3d,
+        direction_i: _Vec3d,
+        direction_j: _Vec3d,
+        direction_k: _Vec3d,
+        spacing: _ImageSpacing3D,
+        size: _ImageSize3D,
+        tolerance: _GeometryTolerance | None = ...,
+        /,
+    ) -> _ImageVolumeGeometry: ...
+    def plane_from_single_frame_image(
+        self, source: DicomFile | DataSet, /
+    ) -> _ImagePlaneGeometry: ...
+    def plane_from_multiframe_image(
+        self, source: DicomFile | DataSet, frame_index: int, /
+    ) -> _ImagePlaneGeometry: ...
+    def frame_geometry_from_multiframe_image(
+        self, source: DicomFile | DataSet, frame_index: int, /
+    ) -> _ImageFrameGeometry: ...
+    def volumetric_properties_from_multiframe_image(
+        self, source: DicomFile | DataSet, frame_index: int, /
+    ) -> _VolumetricPropertiesInfo: ...
+    def frame_of_reference_from_dataset(self, source: DicomFile | DataSet, /) -> str: ...
+    def plane_from_seg_frame(
+        self, segmentation: _Segmentation, frame_index: int, /
+    ) -> _ImagePlaneGeometry: ...
+    def frame_of_reference_from_segmentation(self, segmentation: _Segmentation, /) -> str: ...
+    def analyze_slice_stack(
+        self,
+        sources: Sequence[_SliceStackInput] | Sequence[DicomFile | DataSet],
+        options: _SliceStackOptions | None = ...,
+        /,
+    ) -> _SliceStackAnalysis: ...
+    def plan_slice_stack(
+        self,
+        sources: Sequence[_SliceStackInput] | Sequence[DicomFile | DataSet],
+        options: _SliceStackOptions | None = ...,
+        /,
+    ) -> _SliceStackPlan: ...
+    def analyze_image_frame_stack(
+        self,
+        file: DicomFile,
+        frame_indices: Sequence[int] | None = ...,
+        options: _ImageFrameStackOptions | None = ...,
+        /,
+    ) -> _SliceStackAnalysis: ...
+    def plan_image_frame_stack(
+        self,
+        file: DicomFile,
+        frame_indices: Sequence[int] | None = ...,
+        options: _ImageFrameStackOptions | None = ...,
+        /,
+    ) -> _SliceStackPlan: ...
+    def analyze_image_frame_stacks(
+        self,
+        file: DicomFile,
+        options: _ImageFrameStackOptions | None = ...,
+        /,
+    ) -> _ImageFrameStackAnalysis: ...
+    def analyze_nm_frame_stack(
+        self,
+        file: DicomFile,
+        options: _SliceStackOptions | None = ...,
+        /,
+    ) -> _SliceStackAnalysis: ...
+    def plan_nm_frame_stack(
+        self,
+        file: DicomFile,
+        options: _SliceStackOptions | None = ...,
+        /,
+    ) -> _SliceStackPlan: ...
+    def check_overlay_compatibility(
+        self,
+        source_frame_of_reference_uid: str,
+        source: _ImagePlaneGeometry | _ImageVolumeGeometry,
+        target_frame_of_reference_uid: str,
+        target: _ImagePlaneGeometry | _ImageVolumeGeometry,
+        options: _OverlayCheckOptions | None = ...,
+        /,
+    ) -> _OverlayCheck: ...
+    def make_plane_to_plane_transform(
+        self, source: _ImagePlaneGeometry, target: _ImagePlaneGeometry, /
+    ) -> _PlaneToPlaneTransform: ...
+    def make_plane_to_volume_transform(
+        self, source: _ImagePlaneGeometry, target: _ImageVolumeGeometry, /
+    ) -> _PlaneToVolumeTransform: ...
+    def make_volume_to_plane_transform(
+        self, source: _ImageVolumeGeometry, target: _ImagePlaneGeometry, /
+    ) -> _VolumeToPlaneTransform: ...
+    def make_volume_to_volume_transform(
+        self, source: _ImageVolumeGeometry, target: _ImageVolumeGeometry, /
+    ) -> _VolumeToVolumeTransform: ...
+
+
+geometry: _GeometryModule
+
+
+class _SegmentationType(enum.Enum):
+    unknown = ...
+    binary = ...
+    fractional = ...
+    labelmap = ...
+
+
+class _SegmentationFractionalType(enum.Enum):
+    none = ...
+    probability = ...
+    occupancy = ...
+    unknown = ...
+
+
+class _SegmentAlgorithmType(enum.Enum):
+    unknown = ...
+    automatic = ...
+    semiautomatic = ...
+    manual = ...
+
+
+class _SegCode:
+    @property
+    def value(self) -> str: ...
+    @property
+    def scheme_designator(self) -> str: ...
+    @property
+    def scheme_version(self) -> str: ...
+    @property
+    def meaning(self) -> str: ...
+
+
+class _SourceImageRef:
+    @property
+    def sop_class_uid(self) -> str: ...
+    @property
+    def sop_instance_uid(self) -> str: ...
+    @property
+    def referenced_frame_numbers(self) -> list[int]: ...
+    @property
+    def dataset(self) -> DataSet: ...
+
+
+class _SourceImageRefList:
+    def __len__(self) -> int: ...
+    def __bool__(self) -> bool: ...
+    def __iter__(self) -> Iterator[_SourceImageRef]: ...
+    def __getitem__(self, index: int, /) -> _SourceImageRef: ...
+
+
+class _Segment:
+    @property
+    def number(self) -> int: ...
+    @property
+    def label(self) -> str: ...
+    @property
+    def description(self) -> str: ...
+    @property
+    def algorithm_name(self) -> str: ...
+    @property
+    def algorithm_type(self) -> _SegmentAlgorithmType: ...
+    @property
+    def property_category(self) -> _SegCode | None: ...
+    @property
+    def property_type(self) -> _SegCode | None: ...
+    @property
+    def anatomic_region(self) -> _SegCode | None: ...
+    @property
+    def recommended_display_cielab(self) -> tuple[int, int, int] | None: ...
+    @property
+    def dataset(self) -> DataSet: ...
+
+
+class _SegmentList:
+    def __len__(self) -> int: ...
+    def __bool__(self) -> bool: ...
+    def __iter__(self) -> Iterator[_Segment]: ...
+    def __getitem__(self, index: int, /) -> _Segment: ...
+
+
+class _SegmentFrame:
+    @property
+    def index(self) -> int: ...
+    @property
+    def referenced_segment_number(self) -> int: ...
+    @property
+    def present_segment_numbers(self) -> tuple[int, ...]: ...
+    @property
+    def image_position_patient(self) -> tuple[float, float, float] | None: ...
+    @property
+    def image_orientation_patient(
+        self,
+    ) -> tuple[float, float, float, float, float, float] | None: ...
+    @property
+    def pixel_spacing(self) -> tuple[float, float] | None: ...
+    @property
+    def slice_thickness(self) -> float | None: ...
+    @property
+    def source_images(self) -> _SourceImageRefList: ...
+    @property
+    def per_frame_functional_groups_item(self) -> DataSet: ...
+    def to_array(self) -> Any: ...
+    def decode_frame(self) -> bytes: ...
+    def decode_frame_into(self, out: Any, /) -> Any: ...
+    def mask_for_segment(
+        self,
+        segment_number: int,
+        /,
+        *,
+        fractional_threshold: float = ...,
+        error_when_not_present_in_frame: bool = ...,
+    ) -> Any: ...
+    def mask_for_segment_into(
+        self,
+        segment_number: int,
+        out: Any,
+        /,
+        *,
+        fractional_threshold: float = ...,
+        error_when_not_present_in_frame: bool = ...,
+    ) -> Any: ...
+
+
+class _SegmentFrameList:
+    def __len__(self) -> int: ...
+    def __bool__(self) -> bool: ...
+    def __iter__(self) -> Iterator[_SegmentFrame]: ...
+    def __getitem__(self, index: int, /) -> _SegmentFrame: ...
+
+
+class _SegmentFrameIterator:
+    def __iter__(self) -> _SegmentFrameIterator: ...
+    def __next__(self) -> _SegmentFrame: ...
+
+
+class _Segmentation:
+    @property
+    def is_valid(self) -> bool: ...
+    @property
+    def segmentation_type(self) -> _SegmentationType: ...
+    @property
+    def fractional_type(self) -> _SegmentationFractionalType: ...
+    @property
+    def labelmap_bits_allocated(self) -> int | None: ...
+    @property
+    def maximum_fractional_value(self) -> int | None: ...
+    @property
+    def frame_of_reference_uid(self) -> str | None: ...
+    @property
+    def rows(self) -> int: ...
+    @property
+    def columns(self) -> int: ...
+    @property
+    def segment_count(self) -> int: ...
+    @property
+    def frame_count(self) -> int: ...
+    @property
+    def shared_functional_groups_item(self) -> DataSet: ...
+    @property
+    def segments(self) -> _SegmentList: ...
+    @property
+    def frames(self) -> _SegmentFrameList: ...
+    def segment_by_number(self, segment_number: int, /) -> _Segment | None: ...
+    def frames_for_segment(self, segment_number: int, /) -> _SegmentFrameList: ...
+    def segment_frame_count(self, segment_number: int, /) -> int: ...
+    def present_segment_numbers(self, frame: int = ...) -> tuple[int, ...]: ...
+    def to_array(self, frame: int = ...) -> Any: ...
+    def decode_frame(self, frame: int = ...) -> bytes: ...
+    def decode_frame_into(self, frame: int, out: Any, /) -> Any: ...
+    def mask_for_segment(
+        self,
+        frame: int,
+        segment_number: int,
+        /,
+        *,
+        fractional_threshold: float = ...,
+        error_when_not_present_in_frame: bool = ...,
+    ) -> Any: ...
+    def mask_for_segment_into(
+        self,
+        frame: int,
+        segment_number: int,
+        out: Any,
+        /,
+        *,
+        fractional_threshold: float = ...,
+        error_when_not_present_in_frame: bool = ...,
+    ) -> Any: ...
+    def validate_label_values(self) -> None: ...
+
+
+class _SegModule:
+    SegmentationType: type[_SegmentationType]
+    SegmentationFractionalType: type[_SegmentationFractionalType]
+    SegmentAlgorithmType: type[_SegmentAlgorithmType]
+    Code: type[_SegCode]
+    Segmentation: type[_Segmentation]
+    Segment: type[_Segment]
+    SegmentList: type[_SegmentList]
+    SegmentFrame: type[_SegmentFrame]
+    SegmentFrameList: type[_SegmentFrameList]
+    SegmentFrameIterator: type[_SegmentFrameIterator]
+    SourceImageRef: type[_SourceImageRef]
+    SourceImageRefList: type[_SourceImageRefList]
+    def is_segmentation_storage(self, source: DicomFile | DataSet, /) -> bool: ...
+    def is_labelmap_segmentation_storage(self, source: DicomFile | DataSet, /) -> bool: ...
+    def is_any_segmentation_storage(self, source: DicomFile | DataSet, /) -> bool: ...
+    def read_file(
+        self,
+        path: str | os.PathLike[str],
+        /,
+        *,
+        load_until: Tag | None = ...,
+        keep_on_error: bool | None = ...,
+        allow_partial_source: bool = ...,
+        validate_required_modules: bool = ...,
+    ) -> _Segmentation: ...
+    def read_bytes(
+        self,
+        data: bytes | bytearray | memoryview,
+        /,
+        *,
+        name: str = ...,
+        load_until: Tag | None = ...,
+        keep_on_error: bool | None = ...,
+        copy: bool = ...,
+        allow_partial_source: bool = ...,
+        validate_required_modules: bool = ...,
+    ) -> _Segmentation: ...
+
+seg: _SegModule
 
 
 @overload

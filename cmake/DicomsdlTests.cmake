@@ -32,6 +32,23 @@ if(BUILD_TESTING)
     add_test(NAME pixel_io_smoke COMMAND dicomsdl_pixel_io_smoke)
     set_tests_properties(pixel_io_smoke PROPERTIES LABELS "dicomsdl")
 
+    add_executable(dicomsdl_segmentation_mvp_smoke
+        tests/segmentation_mvp_smoke.cpp
+    )
+    target_link_libraries(dicomsdl_segmentation_mvp_smoke PRIVATE dicomsdl)
+    target_compile_definitions(dicomsdl_segmentation_mvp_smoke PRIVATE
+        DICOMSDL_SEGMENTATION_TEST_HOOKS=1
+    )
+    add_test(NAME segmentation_mvp_smoke COMMAND dicomsdl_segmentation_mvp_smoke)
+    set_tests_properties(segmentation_mvp_smoke PROPERTIES LABELS "dicomsdl")
+
+    add_executable(dicomsdl_geometry_smoke
+        tests/geometry_smoke.cpp
+    )
+    target_link_libraries(dicomsdl_geometry_smoke PRIVATE dicomsdl)
+    add_test(NAME geometry_smoke COMMAND dicomsdl_geometry_smoke)
+    set_tests_properties(geometry_smoke PROPERTIES LABELS "dicomsdl")
+
     add_executable(dicomsdl_split_pixel_payload_smoke
         tests/split_pixel_payload_smoke.cpp
     )
@@ -310,6 +327,8 @@ if(BUILD_TESTING)
         dicomsdl_dictionary_consistency
         dicomsdl_basic_smoke
         dicomsdl_pixel_io_smoke
+        dicomsdl_segmentation_mvp_smoke
+        dicomsdl_geometry_smoke
         dicomsdl_charset_smoke
         dicomsdl_charset_generated_tables_smoke
         dicomsdl_htj2k_backend_config_smoke
@@ -341,6 +360,8 @@ if(BUILD_TESTING)
             dicomsdl_dictionary_consistency
             dicomsdl_basic_smoke
             dicomsdl_pixel_io_smoke
+            dicomsdl_segmentation_mvp_smoke
+            dicomsdl_geometry_smoke
             dicomsdl_charset_smoke
             dicomsdl_charset_generated_tables_smoke
             dicomsdl_htj2k_backend_config_smoke

@@ -1594,6 +1594,14 @@ const DataElement& DicomFile::get_dataelement(std::string_view tag_path) const {
 	return root_dataset_.get_dataelement(tag_path);
 }
 
+DataElement& DicomFile::get_dataelement(ElementPathView path) {
+	return root_dataset_.get_dataelement(path);
+}
+
+const DataElement& DicomFile::get_dataelement(ElementPathView path) const {
+	return root_dataset_.get_dataelement(path);
+}
+
 void DicomFile::ensure_loaded(Tag tag) {
 	root_dataset_.ensure_loaded(tag);
 }

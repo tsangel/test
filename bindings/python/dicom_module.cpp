@@ -8,6 +8,7 @@
 #include <memory>
 #include <new>
 #include <optional>
+#include <span>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -28,6 +29,8 @@
 
 #include <dicom.h>
 #include <dicom_endian.h>
+#include <dicom_geometry.h>
+#include <dicom_seg.h>
 #include <diagnostics.h>
 #include <photometric_text_detail.hpp>
 #include "pixel/host/adapter/host_adapter.hpp"
@@ -46,6 +49,7 @@ using dicom::uid::WellKnown;
 using Uid = dicom::uid::WellKnown;
 using EncoderContext = dicom::pixel::EncoderContext;
 namespace diag = dicom::diag;
+namespace geo = dicom::geometry;
 
 namespace {
 
@@ -3580,6 +3584,85 @@ nb::object generated_uid_or_none(std::optional<dicom::uid::Generated> uid) {
 	return nb::str(uid->value().data(), uid->value().size());
 }
 
+const char* geometry_build_status_name(geo::GeometryBuildStatus status) noexcept {
+	switch (status) {
+	case geo::GeometryBuildStatus::ok:
+		return "ok";
+	case geo::GeometryBuildStatus::missing_required_tag:
+		return "missing_required_tag";
+	case geo::GeometryBuildStatus::invalid_value:
+		return "invalid_value";
+	case geo::GeometryBuildStatus::invalid_size:
+		return "invalid_size";
+	case geo::GeometryBuildStatus::invalid_spacing:
+		return "invalid_spacing";
+	case geo::GeometryBuildStatus::invalid_orientation:
+		return "invalid_orientation";
+	case geo::GeometryBuildStatus::singular_matrix:
+		return "singular_matrix";
+	case geo::GeometryBuildStatus::invalid_frame_index:
+		return "invalid_frame_index";
+	case geo::GeometryBuildStatus::missing_volumetric_properties:
+		return "missing_volumetric_properties";
+	case geo::GeometryBuildStatus::mixed_volumetric_properties:
+		return "mixed_volumetric_properties";
+	case geo::GeometryBuildStatus::unknown_volumetric_properties:
+		return "unknown_volumetric_properties";
+	case geo::GeometryBuildStatus::sampled_frame_geometry:
+		return "sampled_frame_geometry";
+	case geo::GeometryBuildStatus::distorted_frame_geometry:
+		return "distorted_frame_geometry";
+	case geo::GeometryBuildStatus::unsupported_frame_geometry:
+		return "unsupported_frame_geometry";
+	}
+	return "unknown";
+}
+
+template <typename T>
+T geometry_value_or_throw(geo::GeometryBuildResult<T>&& result, const char* operation) {
+	if (!result.ok()) {
+		std::ostringstream oss;
+		oss << operation << " failed: " << geometry_build_status_name(result.status());
+		if (result.tag()) {
+			oss << " at " << result.tag().to_string();
+		}
+		if (!result.message().empty()) {
+			oss << ": " << result.message();
+		}
+		const auto message = oss.str();
+		throw nb::value_error(message.c_str());
+	}
+	return std::move(result).value();
+}
+
+nb::tuple matrix4x4d_to_tuple(const geo::Matrix4x4d& matrix) {
+	nb::tuple out = nb::steal<nb::tuple>(PyTuple_New(16));
+	for (std::size_t row = 0; row < 4; ++row) {
+		for (std::size_t column = 0; column < 4; ++column) {
+			nb::object item_obj = nb::cast(matrix(row, column));
+			PyObject* item = new_reference_or_null(item_obj.ptr());
+			const auto index = static_cast<Py_ssize_t>(row * 4 + column);
+			if (PyTuple_SetItem(out.ptr(), index, item) < 0) {
+				Py_DECREF(item);
+				throw nb::python_error();
+			}
+		}
+	}
+	return out;
+}
+
+std::string repr_vec3d(const char* name, const geo::Vec3d& value) {
+	std::ostringstream oss;
+	oss << name << "(x=" << value.x << ", y=" << value.y << ", z=" << value.z << ")";
+	return oss.str();
+}
+
+std::string repr_point3d(const char* name, const geo::Point3d& value) {
+	std::ostringstream oss;
+	oss << name << "(x=" << value.x << ", y=" << value.y << ", z=" << value.z << ")";
+	return oss.str();
+}
+
 
 WellKnown require_uid(std::optional<WellKnown> uid, const char* origin, const std::string& text) {
 	if (!uid) {
@@ -3836,6 +3919,616 @@ dicom::DataSetWalkPathRef PyDataSetWalkPath::ref() const noexcept {
 		return dicom::DataSetWalkPathRef();
 	}
 	return state_->iterator->current_path();
+}
+
+struct PySegCode {
+	std::string value{};
+	std::string scheme_designator{};
+	std::string scheme_version{};
+	std::string meaning{};
+};
+
+struct PySegmentationOwner {
+	std::shared_ptr<dicom::seg::Segmentation> segmentation{};
+	nb::object buffer_owner{};
+
+	[[nodiscard]] const dicom::seg::Segmentation& get() const {
+		if (!segmentation) {
+			throw nb::value_error("Segmentation object is empty");
+		}
+		return *segmentation;
+	}
+};
+
+struct PySegmentation {
+	std::shared_ptr<PySegmentationOwner> owner{};
+
+	[[nodiscard]] const dicom::seg::Segmentation& get() const {
+		if (!owner) {
+			throw nb::value_error("Segmentation object is empty");
+		}
+		return owner->get();
+	}
+};
+
+struct PySegment {
+	std::shared_ptr<PySegmentationOwner> owner{};
+	std::uint16_t number{0};
+
+	[[nodiscard]] dicom::seg::SegmentView view() const {
+		if (!owner) {
+			throw nb::value_error("Segment object is empty");
+		}
+		auto segment = owner->get().segment_by_number(number);
+		if (!segment) {
+			throw nb::value_error("Segment no longer exists in the owning Segmentation");
+		}
+		return *segment;
+	}
+};
+
+struct PySegmentFrame {
+	std::shared_ptr<PySegmentationOwner> owner{};
+	std::size_t frame_index{0};
+
+	[[nodiscard]] dicom::seg::SegmentFrameView view() const {
+		if (!owner) {
+			throw nb::value_error("SegmentFrame object is empty");
+		}
+		if (frame_index >= owner->get().frame_count()) {
+			throw nb::index_error("SegmentFrame index out of range");
+		}
+		return owner->get().frames()[frame_index];
+	}
+};
+
+struct PySourceImageRef {
+	std::shared_ptr<PySegmentationOwner> owner{};
+	std::size_t frame_index{0};
+	std::size_t source_index{0};
+
+	[[nodiscard]] dicom::seg::SourceImageRefView view() const {
+		if (!owner) {
+			throw nb::value_error("SourceImageRef object is empty");
+		}
+		if (frame_index >= owner->get().frame_count()) {
+			throw nb::index_error("SourceImageRef frame index out of range");
+		}
+		const auto refs = owner->get().frames()[frame_index].source_images();
+		if (source_index >= refs.size()) {
+			throw nb::index_error("SourceImageRef index out of range");
+		}
+		return refs[source_index];
+	}
+};
+
+struct PySegmentList {
+	std::shared_ptr<PySegmentationOwner> owner{};
+
+	[[nodiscard]] std::size_t size() const {
+		return owner ? owner->get().segment_count() : 0;
+	}
+};
+
+struct PySegmentFrameList {
+	std::shared_ptr<PySegmentationOwner> owner{};
+	std::optional<std::uint16_t> segment_number{};
+
+	[[nodiscard]] std::size_t size() const {
+		if (!owner) {
+			return 0;
+		}
+		if (segment_number) {
+			return owner->get().frames_for_segment(*segment_number).size();
+		}
+		return owner->get().frame_count();
+	}
+
+	[[nodiscard]] std::size_t frame_index_from_ordinal(std::size_t ordinal) const {
+		if (!owner) {
+			throw nb::value_error("SegmentFrameList object is empty");
+		}
+		if (segment_number) {
+			return owner->get().frames_for_segment(*segment_number)[ordinal].index();
+		}
+		return owner->get().frames()[ordinal].index();
+	}
+};
+
+struct PySegmentFrameIterator {
+	PySegmentFrameList frames{};
+	std::size_t ordinal{0};
+};
+
+struct PySourceImageRefList {
+	std::shared_ptr<PySegmentationOwner> owner{};
+	std::size_t frame_index{0};
+
+	[[nodiscard]] std::size_t size() const {
+		if (!owner || frame_index >= owner->get().frame_count()) {
+			return 0;
+		}
+		return owner->get().frames()[frame_index].source_images().size();
+	}
+};
+
+struct PySegmentListIterator {
+	PySegmentList list{};
+	std::size_t ordinal{0};
+};
+
+struct PySourceImageRefListIterator {
+	PySourceImageRefList list{};
+	std::size_t ordinal{0};
+};
+
+struct PySliceStackInput {
+	PySliceStackInput(geo::ImagePlaneGeometry plane_value,
+	    std::string frame_of_reference_uid_value, std::size_t source_index_value,
+	    std::size_t frame_index_value)
+	    : source_index(source_index_value),
+	      frame_index(frame_index_value),
+	      plane(std::move(plane_value)),
+	      frame_of_reference_uid(std::move(frame_of_reference_uid_value)) {}
+
+	std::size_t source_index{0};
+	std::size_t frame_index{0};
+	geo::ImagePlaneGeometry plane;
+	std::string frame_of_reference_uid;
+};
+
+struct PySliceStackInputStore {
+	std::vector<geo::SliceStackInput> inputs;
+	std::vector<std::string> frame_of_reference_uids;
+};
+
+[[nodiscard]] std::size_t normalize_py_index(
+    std::ptrdiff_t index, std::size_t size, const char* label) {
+	auto normalized = index;
+	if (normalized < 0) {
+		normalized += static_cast<std::ptrdiff_t>(size);
+	}
+	if (normalized < 0 ||
+	    static_cast<std::size_t>(normalized) >= size) {
+		throw nb::index_error((std::string(label) + " index out of range").c_str());
+	}
+	return static_cast<std::size_t>(normalized);
+}
+
+[[nodiscard]] nb::object py_sequence_item(
+    nb::handle sequence, Py_ssize_t index, const char* label) {
+	PyObject* item = PySequence_GetItem(sequence.ptr(), index);
+	if (item == nullptr) {
+		std::string message(label);
+		message += " sequence item access failed";
+		PyErr_Clear();
+		throw nb::type_error(message.c_str());
+	}
+	return nb::steal<nb::object>(item);
+}
+
+[[nodiscard]] Py_ssize_t require_py_sequence_size(
+    nb::handle value, const char* label) {
+	if (!is_non_string_sequence_like_py(value)) {
+		std::string message(label);
+		message += " must be a non-string sequence";
+		throw nb::type_error(message.c_str());
+	}
+	const Py_ssize_t size = PySequence_Size(value.ptr());
+	if (size < 0) {
+		throw nb::python_error();
+	}
+	return size;
+}
+
+[[nodiscard]] std::vector<std::size_t> py_size_t_vector_from_sequence(
+    nb::handle value, const char* label) {
+	const auto size = require_py_sequence_size(value, label);
+	std::vector<std::size_t> out;
+	out.reserve(static_cast<std::size_t>(size));
+	for (Py_ssize_t i = 0; i < size; ++i) {
+		out.push_back(nb::cast<std::size_t>(py_sequence_item(value, i, label)));
+	}
+	return out;
+}
+
+[[nodiscard]] bool py_sequence_looks_like_slice_stack_inputs(
+    nb::handle value, const char* label) {
+	const auto size = require_py_sequence_size(value, label);
+	if (size == 0) {
+		return true;
+	}
+	return nb::isinstance<PySliceStackInput>(
+	    py_sequence_item(value, 0, label));
+}
+
+[[nodiscard]] PySliceStackInputStore py_slice_stack_inputs_from_sequence(
+    nb::handle value, const char* label) {
+	const auto size = require_py_sequence_size(value, label);
+	PySliceStackInputStore store;
+	store.inputs.reserve(static_cast<std::size_t>(size));
+	store.frame_of_reference_uids.reserve(static_cast<std::size_t>(size));
+	for (Py_ssize_t i = 0; i < size; ++i) {
+		nb::object item = py_sequence_item(value, i, label);
+		if (!nb::isinstance<PySliceStackInput>(item)) {
+			std::string message(label);
+			message += " must contain geometry.SliceStackInput objects";
+			throw nb::type_error(message.c_str());
+		}
+		const auto& input = nb::cast<const PySliceStackInput&>(item);
+		store.frame_of_reference_uids.push_back(input.frame_of_reference_uid);
+		store.inputs.push_back(geo::SliceStackInput{
+		    input.source_index,
+		    input.frame_index,
+		    input.plane,
+		    store.frame_of_reference_uids.back(),
+		});
+	}
+	return store;
+}
+
+[[nodiscard]] std::vector<const DataSet*> py_dataset_ptrs_from_sequence(
+    nb::handle value, const char* label) {
+	const auto size = require_py_sequence_size(value, label);
+	std::vector<const DataSet*> datasets;
+	datasets.reserve(static_cast<std::size_t>(size));
+	for (Py_ssize_t i = 0; i < size; ++i) {
+		nb::object item = py_sequence_item(value, i, label);
+		if (nb::isinstance<DicomFile>(item)) {
+			const auto& file = nb::cast<const DicomFile&>(item);
+			datasets.push_back(&file.dataset());
+			continue;
+		}
+		if (nb::isinstance<DataSet>(item)) {
+			datasets.push_back(&nb::cast<const DataSet&>(item));
+			continue;
+		}
+		std::string message(label);
+		message += " must contain DicomFile/DataSet objects or SliceStackInput objects";
+		throw nb::type_error(message.c_str());
+	}
+	return datasets;
+}
+
+[[nodiscard]] std::size_t normalize_py_seg_frame_index(
+    const dicom::seg::Segmentation& segmentation, std::ptrdiff_t frame) {
+	return normalize_py_index(frame, segmentation.frame_count(), "SEG frame");
+}
+
+[[nodiscard]] std::size_t checked_seg_frame_sample_count(
+    const dicom::seg::Segmentation& segmentation) {
+	const auto rows = segmentation.rows();
+	const auto columns = segmentation.columns();
+	if (rows != 0 &&
+	    columns > (std::numeric_limits<std::size_t>::max() / rows)) {
+		throw std::overflow_error("SEG frame size overflow");
+	}
+	return rows * columns;
+}
+
+[[nodiscard]] dicom::seg::SegmentMaskOptions make_seg_mask_options(
+    double fractional_threshold, bool error_when_not_present_in_frame) {
+	dicom::seg::SegmentMaskOptions options;
+	options.fractional_threshold = fractional_threshold;
+	options.error_when_not_present_in_frame = error_when_not_present_in_frame;
+	return options;
+}
+
+[[nodiscard]] PySegmentation py_segmentation_from_unique(
+    std::unique_ptr<dicom::seg::Segmentation> segmentation) {
+	if (!segmentation) {
+		throw nb::value_error("SEG construction returned an empty adapter");
+	}
+	auto owner = std::make_shared<PySegmentationOwner>();
+	owner->segmentation =
+	    std::shared_ptr<dicom::seg::Segmentation>(std::move(segmentation));
+	return PySegmentation{std::move(owner)};
+}
+
+[[nodiscard]] dicom::seg::Options make_seg_options(
+    bool allow_partial_source, bool validate_required_modules) {
+	dicom::seg::Options options;
+	options.allow_partial_source = allow_partial_source;
+	options.validate_required_modules = validate_required_modules;
+	return options;
+}
+
+[[nodiscard]] dicom::ReadOptions make_read_options(
+    std::optional<Tag> load_until, std::optional<bool> keep_on_error,
+    bool copy = true) {
+	dicom::ReadOptions options;
+	if (load_until) {
+		options.load_until = *load_until;
+	}
+	if (keep_on_error) {
+		options.keep_on_error = *keep_on_error;
+	}
+	options.copy = copy;
+	return options;
+}
+
+[[nodiscard]] PySegCode py_seg_code_from_view(const dicom::seg::CodeView& view) {
+	return PySegCode{
+	    std::string(view.value),
+	    std::string(view.scheme_designator),
+	    std::string(view.scheme_version),
+	    std::string(view.meaning)};
+}
+
+[[nodiscard]] nb::object py_optional_seg_code(
+    const std::optional<dicom::seg::CodeView>& code) {
+	if (!code) {
+		return nb::none();
+	}
+	return nb::cast(py_seg_code_from_view(*code));
+}
+
+[[nodiscard]] nb::object py_optional_string_view(
+    const std::optional<std::string_view>& value) {
+	if (!value) {
+		return nb::none();
+	}
+	return nb::str(value->data(), value->size());
+}
+
+template <typename T, std::size_t N>
+[[nodiscard]] nb::object py_optional_array_tuple(
+    const std::optional<std::array<T, N>>& value) {
+	if (!value) {
+		return nb::none();
+	}
+	nb::tuple out = nb::steal<nb::tuple>(PyTuple_New(static_cast<Py_ssize_t>(N)));
+	for (std::size_t i = 0; i < N; ++i) {
+		nb::object item_obj = nb::cast((*value)[i]);
+		PyObject* item = new_reference_or_null(item_obj.ptr());
+		if (PyTuple_SetItem(out.ptr(), static_cast<Py_ssize_t>(i), item) < 0) {
+			Py_DECREF(item);
+			throw nb::python_error();
+		}
+	}
+	return out;
+}
+
+[[nodiscard]] nb::object py_seg_frame_array(
+    const dicom::seg::Segmentation& segmentation, std::size_t frame_index) {
+	const auto rows = segmentation.rows();
+	const auto columns = segmentation.columns();
+	const auto samples = checked_seg_frame_sample_count(segmentation);
+	const auto labelmap_bits = segmentation.labelmap_bits_allocated();
+	const auto is_labelmap_u16 =
+	    segmentation.segmentation_type() == dicom::seg::SegmentationType::labelmap &&
+	    labelmap_bits && *labelmap_bits == 16;
+	const auto data_type = is_labelmap_u16 ? dicom::pixel::DataType::u16
+	                                      : dicom::pixel::DataType::u8;
+	const auto spec = decoded_array_spec(data_type);
+	const auto required_bytes = samples * spec.bytes_per_sample;
+	std::array<std::size_t, 4> shape{rows, columns, 0, 0};
+	std::array<std::int64_t, 4> strides{
+	    static_cast<std::int64_t>(columns), 1, 0, 0};
+	auto out = make_writable_numpy_array(
+	    2, shape, strides, spec.dtype, required_bytes);
+	{
+		nb::gil_scoped_release release;
+		if (is_labelmap_u16) {
+			auto samples_out = std::span<std::uint16_t>(
+			    reinterpret_cast<std::uint16_t*>(out.bytes.data()), samples);
+			segmentation.decode_labelmap_frame_into(frame_index, samples_out);
+		} else {
+			segmentation.decode_frame_into(frame_index, out.bytes);
+		}
+	}
+	return nb::cast(std::move(out.array));
+}
+
+[[nodiscard]] bool py_buffer_has_unsigned_format(
+    const Py_buffer& view, char expected_core, const char* context) {
+	if (view.format == nullptr || view.format[0] == '\0') {
+		throw nb::value_error(
+		    (std::string(context) + " output buffer must expose dtype format").c_str());
+	}
+	const auto format = std::string_view(view.format);
+	if (!format.empty() && (format.front() == '>' || format.front() == '!')) {
+		throw nb::value_error(
+		    (std::string(context) + " output buffer must be native-endian").c_str());
+	}
+	const auto core = strip_pep3118_endianness_prefix(format);
+	return core.size() == 1 && core.front() == expected_core;
+}
+
+void py_seg_decode_frame_into(
+    const dicom::seg::Segmentation& segmentation, std::size_t frame_index,
+    nb::handle out) {
+	PyWritableBufferView writable(out);
+	const auto& view = writable.view();
+	if (view.itemsize <= 0) {
+		throw nb::value_error("seg.decode_frame_into requires a valid output itemsize");
+	}
+	const auto labelmap_bits = segmentation.labelmap_bits_allocated();
+	const auto expected_itemsize =
+	    segmentation.segmentation_type() == dicom::seg::SegmentationType::labelmap &&
+	            labelmap_bits && *labelmap_bits == 16
+	        ? std::size_t{2}
+	        : std::size_t{1};
+	if (static_cast<std::size_t>(view.itemsize) != expected_itemsize) {
+		throw nb::value_error(
+		    "seg.decode_frame_into output itemsize does not match decoded sample size");
+	}
+	if (view.len < 0) {
+		throw nb::value_error("seg.decode_frame_into output buffer length is invalid");
+	}
+	if (expected_itemsize == 1) {
+		if (!py_buffer_has_unsigned_format(view, 'B', "seg.decode_frame_into")) {
+			throw nb::value_error(
+			    "seg.decode_frame_into output buffer dtype must be uint8");
+		}
+	} else if (!py_buffer_has_unsigned_format(view, 'H', "seg.decode_frame_into")) {
+		throw nb::value_error(
+		    "seg.decode_frame_into output buffer dtype must be native uint16");
+	}
+	const auto expected_bytes =
+	    checked_seg_frame_sample_count(segmentation) * expected_itemsize;
+	const auto actual_bytes = static_cast<std::size_t>(view.len);
+	if (actual_bytes != expected_bytes) {
+		throw nb::value_error(
+		    "seg.decode_frame_into output buffer size does not match expected frame size");
+	}
+	if (expected_bytes > 0 && view.buf == nullptr) {
+		throw nb::value_error("seg.decode_frame_into output buffer is null");
+	}
+	{
+		nb::gil_scoped_release release;
+		if (expected_itemsize == 2) {
+			auto out_span = std::span<std::uint16_t>(
+			    static_cast<std::uint16_t*>(view.buf),
+			    actual_bytes / sizeof(std::uint16_t));
+			segmentation.decode_labelmap_frame_into(frame_index, out_span);
+		} else {
+			auto out_span = std::span<std::uint8_t>(
+			    static_cast<std::uint8_t*>(view.buf), actual_bytes);
+			segmentation.decode_frame_into(frame_index, out_span);
+		}
+	}
+}
+
+[[nodiscard]] nb::bytes py_seg_decode_frame_bytes(
+    const dicom::seg::Segmentation& segmentation, std::size_t frame_index) {
+	if (segmentation.segmentation_type() == dicom::seg::SegmentationType::labelmap) {
+		std::vector<std::uint8_t> bytes;
+		{
+			nb::gil_scoped_release release;
+			bytes = segmentation.decode_labelmap_frame_bytes(frame_index);
+		}
+		return to_python_bytes(std::move(bytes));
+	}
+	std::vector<std::uint8_t> bytes(checked_seg_frame_sample_count(segmentation));
+	{
+		nb::gil_scoped_release release;
+		segmentation.decode_frame_into(frame_index, bytes);
+	}
+	return to_python_bytes(std::move(bytes));
+}
+
+[[nodiscard]] nb::tuple py_seg_present_segment_numbers(
+    const dicom::seg::Segmentation& segmentation, std::size_t frame_index) {
+	std::vector<std::uint16_t> numbers;
+	{
+		nb::gil_scoped_release release;
+		const auto span = segmentation.present_segment_numbers(frame_index);
+		numbers.assign(span.begin(), span.end());
+	}
+	nb::tuple out =
+	    nb::steal<nb::tuple>(PyTuple_New(static_cast<Py_ssize_t>(numbers.size())));
+	for (std::size_t index = 0; index < numbers.size(); ++index) {
+		PyObject* item = PyLong_FromUnsignedLong(numbers[index]);
+		if (item == nullptr) {
+			throw nb::python_error();
+		}
+		if (PyTuple_SetItem(out.ptr(), static_cast<Py_ssize_t>(index), item) < 0) {
+			Py_DECREF(item);
+			throw nb::python_error();
+		}
+	}
+	return out;
+}
+
+[[nodiscard]] nb::object py_seg_mask_array(
+    const dicom::seg::Segmentation& segmentation, std::size_t frame_index,
+    std::uint16_t segment_number, const dicom::seg::SegmentMaskOptions& options) {
+	const auto rows = segmentation.rows();
+	const auto columns = segmentation.columns();
+	const auto required_bytes = checked_seg_frame_sample_count(segmentation);
+	std::array<std::size_t, 4> shape{rows, columns, 0, 0};
+	std::array<std::int64_t, 4> strides{
+	    static_cast<std::int64_t>(columns), 1, 0, 0};
+	auto out = make_writable_numpy_array(
+	    2, shape, strides, decoded_array_spec(dicom::pixel::DataType::u8).dtype,
+	    required_bytes);
+	{
+		nb::gil_scoped_release release;
+		segmentation.mask_for_segment_into(frame_index, segment_number, out.bytes, options);
+	}
+	return nb::cast(std::move(out.array));
+}
+
+void py_seg_mask_for_segment_into(
+    const dicom::seg::Segmentation& segmentation, std::size_t frame_index,
+    std::uint16_t segment_number, nb::handle out,
+    const dicom::seg::SegmentMaskOptions& options) {
+	PyWritableBufferView writable(out);
+	const auto& view = writable.view();
+	if (view.itemsize <= 0) {
+		throw nb::value_error("seg.mask_for_segment_into requires a valid output itemsize");
+	}
+	if (static_cast<std::size_t>(view.itemsize) != 1 ||
+	    !py_buffer_has_unsigned_format(view, 'B', "seg.mask_for_segment_into")) {
+		throw nb::value_error("seg.mask_for_segment_into output buffer dtype must be uint8");
+	}
+	if (view.len < 0) {
+		throw nb::value_error("seg.mask_for_segment_into output buffer length is invalid");
+	}
+	const auto expected_bytes = checked_seg_frame_sample_count(segmentation);
+	const auto actual_bytes = static_cast<std::size_t>(view.len);
+	if (actual_bytes != expected_bytes) {
+		throw nb::value_error(
+		    "seg.mask_for_segment_into output buffer size does not match expected frame size");
+	}
+	if (expected_bytes > 0 && view.buf == nullptr) {
+		throw nb::value_error("seg.mask_for_segment_into output buffer is null");
+	}
+	auto out_span = std::span<std::uint8_t>(
+	    static_cast<std::uint8_t*>(view.buf), actual_bytes);
+	{
+		nb::gil_scoped_release release;
+		segmentation.mask_for_segment_into(
+		    frame_index, segment_number, out_span, options);
+	}
+}
+
+[[nodiscard]] PySegment py_segment_list_get(
+    const PySegmentList& self, std::ptrdiff_t index) {
+	const auto ordinal = normalize_py_index(index, self.size(), "SegmentList");
+	const auto segment = self.owner->get().segments()[ordinal];
+	return PySegment{self.owner, segment.number()};
+}
+
+[[nodiscard]] PySegmentFrame py_segment_frame_list_get(
+    const PySegmentFrameList& self, std::ptrdiff_t index) {
+	const auto ordinal = normalize_py_index(index, self.size(), "SegmentFrameList");
+	return PySegmentFrame{self.owner, self.frame_index_from_ordinal(ordinal)};
+}
+
+[[nodiscard]] PySegmentFrame py_segment_frame_iterator_next(
+    PySegmentFrameIterator& self) {
+	if (self.ordinal >= self.frames.size()) {
+		throw nb::stop_iteration();
+	}
+	return PySegmentFrame{
+	    self.frames.owner,
+	    self.frames.frame_index_from_ordinal(self.ordinal++)};
+}
+
+[[nodiscard]] PySourceImageRef py_source_image_ref_list_get(
+    const PySourceImageRefList& self, std::ptrdiff_t index) {
+	const auto ordinal = normalize_py_index(index, self.size(), "SourceImageRefList");
+	return PySourceImageRef{self.owner, self.frame_index, ordinal};
+}
+
+[[nodiscard]] PySegment py_segment_list_iterator_next(
+    PySegmentListIterator& self) {
+	if (self.ordinal >= self.list.size()) {
+		throw nb::stop_iteration();
+	}
+	return py_segment_list_get(
+	    self.list, static_cast<std::ptrdiff_t>(self.ordinal++));
+}
+
+[[nodiscard]] PySourceImageRef py_source_image_ref_list_iterator_next(
+    PySourceImageRefListIterator& self) {
+	if (self.ordinal >= self.list.size()) {
+		throw nb::stop_iteration();
+	}
+	return py_source_image_ref_list_get(
+	    self.list, static_cast<std::ptrdiff_t>(self.ordinal++));
 }
 
 }  // namespace
@@ -6342,6 +7035,1486 @@ NB_MODULE(_dicomsdl, m) {
 			    return oss.str();
 		    });
 
+	auto geometry = m.def_submodule(
+	    "geometry", "Geometry and overlay helpers for DICOM image planes and volumes.");
+
+	nb::enum_<geo::GeometryBuildStatus>(
+	    geometry, "GeometryBuildStatus", "C++ geometry construction status values.")
+		.value("ok", geo::GeometryBuildStatus::ok)
+		.value("missing_required_tag", geo::GeometryBuildStatus::missing_required_tag)
+		.value("invalid_value", geo::GeometryBuildStatus::invalid_value)
+		.value("invalid_size", geo::GeometryBuildStatus::invalid_size)
+		.value("invalid_spacing", geo::GeometryBuildStatus::invalid_spacing)
+		.value("invalid_orientation", geo::GeometryBuildStatus::invalid_orientation)
+		.value("singular_matrix", geo::GeometryBuildStatus::singular_matrix)
+		.value("invalid_frame_index", geo::GeometryBuildStatus::invalid_frame_index)
+		.value("missing_volumetric_properties",
+		    geo::GeometryBuildStatus::missing_volumetric_properties)
+		.value("mixed_volumetric_properties",
+		    geo::GeometryBuildStatus::mixed_volumetric_properties)
+		.value("unknown_volumetric_properties",
+		    geo::GeometryBuildStatus::unknown_volumetric_properties)
+		.value("sampled_frame_geometry", geo::GeometryBuildStatus::sampled_frame_geometry)
+		.value("distorted_frame_geometry", geo::GeometryBuildStatus::distorted_frame_geometry)
+		.value("unsupported_frame_geometry",
+		    geo::GeometryBuildStatus::unsupported_frame_geometry);
+
+	nb::enum_<geo::VolumetricPropertiesValue>(
+	    geometry, "VolumetricPropertiesValue",
+	    "Resolved DICOM VolumetricProperties values used by frame geometry.")
+		.value("volume", geo::VolumetricPropertiesValue::volume)
+		.value("sampled", geo::VolumetricPropertiesValue::sampled)
+		.value("distorted", geo::VolumetricPropertiesValue::distorted);
+
+	nb::enum_<geo::ImageFrameGeometryKind>(
+	    geometry, "ImageFrameGeometryKind",
+	    "Semantic kind of one multi-frame image frame geometry.")
+		.value("regular_plane", geo::ImageFrameGeometryKind::regular_plane)
+		.value("sampled_projection", geo::ImageFrameGeometryKind::sampled_projection)
+		.value("distorted", geo::ImageFrameGeometryKind::distorted);
+
+	nb::enum_<geo::OverlayCompatibility>(
+	    geometry, "OverlayCompatibility", "Overlay compatibility preflight status.")
+		.value("compatible", geo::OverlayCompatibility::compatible)
+		.value("missing_frame_of_reference",
+		    geo::OverlayCompatibility::missing_frame_of_reference)
+		.value("different_frame_of_reference",
+		    geo::OverlayCompatibility::different_frame_of_reference)
+		.value("non_parallel_planes", geo::OverlayCompatibility::non_parallel_planes)
+		.value("opposite_orientation", geo::OverlayCompatibility::opposite_orientation)
+		.value("out_of_plane", geo::OverlayCompatibility::out_of_plane)
+		.value("different_spacing", geo::OverlayCompatibility::different_spacing)
+		.value("different_extent", geo::OverlayCompatibility::different_extent)
+		.value("requires_resampling", geo::OverlayCompatibility::requires_resampling);
+
+	nb::enum_<geo::SliceStackStatus>(
+	    geometry, "SliceStackStatus", "Status for slice-stack analysis and planning.")
+		.value("ok", geo::SliceStackStatus::ok)
+		.value("empty", geo::SliceStackStatus::empty)
+		.value("missing_geometry", geo::SliceStackStatus::missing_geometry)
+		.value("missing_frame_content", geo::SliceStackStatus::missing_frame_content)
+		.value("missing_dimension_module",
+		    geo::SliceStackStatus::missing_dimension_module)
+		.value("unsupported_tiled_image",
+		    geo::SliceStackStatus::unsupported_tiled_image)
+		.value("multiple_frame_stacks", geo::SliceStackStatus::multiple_frame_stacks)
+		.value("geometry_parse_failure", geo::SliceStackStatus::geometry_parse_failure)
+		.value("missing_frame_of_reference",
+		    geo::SliceStackStatus::missing_frame_of_reference)
+		.value("mixed_frame_of_reference", geo::SliceStackStatus::mixed_frame_of_reference)
+		.value("inconsistent_rows_columns",
+		    geo::SliceStackStatus::inconsistent_rows_columns)
+		.value("inconsistent_orientation",
+		    geo::SliceStackStatus::inconsistent_orientation)
+		.value("inconsistent_pixel_spacing",
+		    geo::SliceStackStatus::inconsistent_pixel_spacing)
+		.value("inconsistent_slice_origin",
+		    geo::SliceStackStatus::inconsistent_slice_origin)
+		.value("duplicate_slice_position",
+		    geo::SliceStackStatus::duplicate_slice_position)
+		.value("non_uniform_spacing", geo::SliceStackStatus::non_uniform_spacing);
+
+	nb::class_<geo::Vec3d>(geometry, "Vec3d", "3D direction/vector in patient space.")
+		.def("__init__",
+		    [](geo::Vec3d* self, double x, double y, double z) {
+			    new (self) geo::Vec3d{x, y, z};
+		    },
+		    nb::arg("x") = 0.0, nb::arg("y") = 0.0, nb::arg("z") = 0.0)
+		.def_rw("x", &geo::Vec3d::x)
+		.def_rw("y", &geo::Vec3d::y)
+		.def_rw("z", &geo::Vec3d::z)
+		.def("__repr__",
+		    [](const geo::Vec3d& self) { return repr_vec3d("Vec3d", self); });
+
+	nb::class_<geo::Point3d>(geometry, "Point3d", "3D point in patient/world space.")
+		.def("__init__",
+		    [](geo::Point3d* self, double x, double y, double z) {
+			    new (self) geo::Point3d{x, y, z};
+		    },
+		    nb::arg("x") = 0.0, nb::arg("y") = 0.0, nb::arg("z") = 0.0)
+		.def_rw("x", &geo::Point3d::x)
+		.def_rw("y", &geo::Point3d::y)
+		.def_rw("z", &geo::Point3d::z)
+		.def("__repr__",
+		    [](const geo::Point3d& self) { return repr_point3d("Point3d", self); });
+
+	nb::class_<geo::ImagePoint2D>(geometry, "ImagePoint2D", "2D image index point.")
+		.def("__init__",
+		    [](geo::ImagePoint2D* self, double i, double j) {
+			    new (self) geo::ImagePoint2D{i, j};
+		    },
+		    nb::arg("i") = 0.0, nb::arg("j") = 0.0)
+		.def_rw("i", &geo::ImagePoint2D::i)
+		.def_rw("j", &geo::ImagePoint2D::j)
+		.def("__repr__",
+		    [](const geo::ImagePoint2D& self) {
+			    std::ostringstream oss;
+			    oss << "ImagePoint2D(i=" << self.i << ", j=" << self.j << ")";
+			    return oss.str();
+		    });
+
+	nb::class_<geo::ImagePoint3D>(geometry, "ImagePoint3D", "3D image index point.")
+		.def("__init__",
+		    [](geo::ImagePoint3D* self, double i, double j, double k) {
+			    new (self) geo::ImagePoint3D{i, j, k};
+		    },
+		    nb::arg("i") = 0.0, nb::arg("j") = 0.0, nb::arg("k") = 0.0)
+		.def_rw("i", &geo::ImagePoint3D::i)
+		.def_rw("j", &geo::ImagePoint3D::j)
+		.def_rw("k", &geo::ImagePoint3D::k)
+		.def("__repr__",
+		    [](const geo::ImagePoint3D& self) {
+			    std::ostringstream oss;
+			    oss << "ImagePoint3D(i=" << self.i << ", j=" << self.j
+			        << ", k=" << self.k << ")";
+			    return oss.str();
+		    });
+
+	nb::class_<geo::PlaneProjection2D>(
+	    geometry, "PlaneProjection2D", "Plane index plus signed normal distance.")
+		.def(nb::init<>())
+		.def_rw("index", &geo::PlaneProjection2D::index)
+		.def_rw("signed_normal_distance_mm",
+		    &geo::PlaneProjection2D::signed_normal_distance_mm);
+
+	nb::class_<geo::ImageSize2D>(geometry, "ImageSize2D", "2D image size: i=columns, j=rows.")
+		.def("__init__",
+		    [](geo::ImageSize2D* self, std::size_t i, std::size_t j) {
+			    new (self) geo::ImageSize2D{i, j};
+		    },
+		    nb::arg("i") = static_cast<std::size_t>(0),
+		    nb::arg("j") = static_cast<std::size_t>(0))
+		.def_rw("i", &geo::ImageSize2D::i)
+		.def_rw("j", &geo::ImageSize2D::j);
+
+	nb::class_<geo::ImageSize3D>(
+	    geometry, "ImageSize3D", "3D image size: i=columns, j=rows, k=slices.")
+		.def("__init__",
+		    [](geo::ImageSize3D* self, std::size_t i, std::size_t j, std::size_t k) {
+			    new (self) geo::ImageSize3D{i, j, k};
+		    },
+		    nb::arg("i") = static_cast<std::size_t>(0),
+		    nb::arg("j") = static_cast<std::size_t>(0),
+		    nb::arg("k") = static_cast<std::size_t>(0))
+		.def_rw("i", &geo::ImageSize3D::i)
+		.def_rw("j", &geo::ImageSize3D::j)
+		.def_rw("k", &geo::ImageSize3D::k);
+
+	nb::class_<geo::ImageSpacing2D>(
+	    geometry, "ImageSpacing2D", "2D image spacing in millimeters.")
+		.def("__init__",
+		    [](geo::ImageSpacing2D* self, double i, double j) {
+			    new (self) geo::ImageSpacing2D{i, j};
+		    },
+		    nb::arg("i") = 0.0, nb::arg("j") = 0.0)
+		.def_rw("i", &geo::ImageSpacing2D::i)
+		.def_rw("j", &geo::ImageSpacing2D::j);
+
+	nb::class_<geo::ImageSpacing3D>(
+	    geometry, "ImageSpacing3D", "3D image spacing in millimeters.")
+		.def("__init__",
+		    [](geo::ImageSpacing3D* self, double i, double j, double k) {
+			    new (self) geo::ImageSpacing3D{i, j, k};
+		    },
+		    nb::arg("i") = 0.0, nb::arg("j") = 0.0, nb::arg("k") = 0.0)
+		.def_rw("i", &geo::ImageSpacing3D::i)
+		.def_rw("j", &geo::ImageSpacing3D::j)
+		.def_rw("k", &geo::ImageSpacing3D::k);
+
+	nb::class_<geo::GeometryTolerance>(
+	    geometry, "GeometryTolerance", "Tolerance bundle for geometry validation/checks.")
+		.def("__init__",
+		    [](geo::GeometryTolerance* self, double orientation_tolerance,
+		        double spacing_tolerance_mm, double position_tolerance_mm,
+		        double normal_distance_tolerance_mm) {
+			    new (self) geo::GeometryTolerance{orientation_tolerance,
+			        spacing_tolerance_mm, position_tolerance_mm,
+			        normal_distance_tolerance_mm};
+		    },
+		    nb::arg("orientation_tolerance") = 1e-4,
+		    nb::arg("spacing_tolerance_mm") = 1e-3,
+		    nb::arg("position_tolerance_mm") = 1e-3,
+		    nb::arg("normal_distance_tolerance_mm") = 1e-3)
+		.def_rw("orientation_tolerance", &geo::GeometryTolerance::orientation_tolerance)
+		.def_rw("spacing_tolerance_mm", &geo::GeometryTolerance::spacing_tolerance_mm)
+		.def_rw("position_tolerance_mm", &geo::GeometryTolerance::position_tolerance_mm)
+		.def_rw("normal_distance_tolerance_mm",
+		    &geo::GeometryTolerance::normal_distance_tolerance_mm);
+
+	nb::class_<geo::Matrix4x4d>(geometry, "Matrix4x4d",
+	    "Row-major 4x4 matrix. Multiplication convention is out_h = M * in_h.")
+		.def_static("identity", &geo::Matrix4x4d::identity)
+		.def("at",
+		    [](const geo::Matrix4x4d& self, std::size_t row, std::size_t column) {
+			    if (row >= 4 || column >= 4) {
+				    throw nb::index_error("Matrix4x4d index out of range");
+			    }
+			    return self(row, column);
+		    },
+		    nb::arg("row"), nb::arg("column"))
+		.def("to_tuple", &matrix4x4d_to_tuple)
+		.def("__repr__",
+		    [](const geo::Matrix4x4d& self) {
+			    std::ostringstream oss;
+			    oss << "Matrix4x4d(";
+			    for (std::size_t i = 0; i < 16; ++i) {
+				    if (i != 0) {
+					    oss << ", ";
+				    }
+				    oss << self(i / 4, i % 4);
+			    }
+			    oss << ")";
+			    return oss.str();
+		    });
+
+	nb::class_<geo::ImagePlaneGeometry>(
+	    geometry, "ImagePlaneGeometry", "Validated 2D image plane geometry.")
+		.def_prop_ro("origin", &geo::ImagePlaneGeometry::origin)
+		.def_prop_ro("direction_i", &geo::ImagePlaneGeometry::direction_i)
+		.def_prop_ro("direction_j", &geo::ImagePlaneGeometry::direction_j)
+		.def_prop_ro("normal", &geo::ImagePlaneGeometry::normal)
+		.def_prop_ro("spacing", &geo::ImagePlaneGeometry::spacing)
+		.def_prop_ro("spacing_i", &geo::ImagePlaneGeometry::spacing_i)
+		.def_prop_ro("spacing_j", &geo::ImagePlaneGeometry::spacing_j)
+		.def_prop_ro("size", &geo::ImagePlaneGeometry::size)
+		.def_prop_ro("columns", &geo::ImagePlaneGeometry::columns)
+		.def_prop_ro("rows", &geo::ImagePlaneGeometry::rows)
+		.def_prop_ro("index_to_world_matrix",
+		    [](const geo::ImagePlaneGeometry& self) -> const geo::Matrix4x4d& {
+			    return self.index_to_world_matrix();
+		    },
+		    nb::rv_policy::reference_internal)
+		.def_prop_ro("world_to_index_matrix",
+		    [](const geo::ImagePlaneGeometry& self) -> const geo::Matrix4x4d& {
+			    return self.world_to_index_matrix();
+		    },
+		    nb::rv_policy::reference_internal)
+		.def("world_from_index", &geo::ImagePlaneGeometry::world_from_index,
+		    nb::arg("index"))
+		.def("index_from_world", &geo::ImagePlaneGeometry::index_from_world,
+		    nb::arg("world"))
+		.def("normal_distance_from_world",
+		    &geo::ImagePlaneGeometry::normal_distance_from_world,
+		    nb::arg("world"))
+		.def("contains_index", &geo::ImagePlaneGeometry::contains_index,
+		    nb::arg("index"))
+		.def("contains_world",
+		    [](const geo::ImagePlaneGeometry& self, geo::Point3d world,
+		        double normal_distance_tolerance_mm) {
+			    return self.contains_world(world, normal_distance_tolerance_mm);
+		    },
+		    nb::arg("world"), nb::arg("normal_distance_tolerance_mm") = 1e-3)
+		.def("__repr__",
+		    [](const geo::ImagePlaneGeometry& self) {
+			    std::ostringstream oss;
+			    oss << "ImagePlaneGeometry(rows=" << self.rows()
+			        << ", columns=" << self.columns() << ")";
+			    return oss.str();
+		    });
+
+	nb::class_<geo::ImageVolumeGeometry>(
+	    geometry, "ImageVolumeGeometry", "Validated rectilinear 3D image volume geometry.")
+		.def_prop_ro("origin", &geo::ImageVolumeGeometry::origin)
+		.def_prop_ro("direction_i", &geo::ImageVolumeGeometry::direction_i)
+		.def_prop_ro("direction_j", &geo::ImageVolumeGeometry::direction_j)
+		.def_prop_ro("direction_k", &geo::ImageVolumeGeometry::direction_k)
+		.def_prop_ro("spacing", &geo::ImageVolumeGeometry::spacing)
+		.def_prop_ro("spacing_i", &geo::ImageVolumeGeometry::spacing_i)
+		.def_prop_ro("spacing_j", &geo::ImageVolumeGeometry::spacing_j)
+		.def_prop_ro("spacing_k", &geo::ImageVolumeGeometry::spacing_k)
+		.def_prop_ro("size", &geo::ImageVolumeGeometry::size)
+		.def_prop_ro("columns", &geo::ImageVolumeGeometry::columns)
+		.def_prop_ro("rows", &geo::ImageVolumeGeometry::rows)
+		.def_prop_ro("slices", &geo::ImageVolumeGeometry::slices)
+		.def_prop_ro("index_to_world_matrix",
+		    [](const geo::ImageVolumeGeometry& self) -> const geo::Matrix4x4d& {
+			    return self.index_to_world_matrix();
+		    },
+		    nb::rv_policy::reference_internal)
+		.def_prop_ro("world_to_index_matrix",
+		    [](const geo::ImageVolumeGeometry& self) -> const geo::Matrix4x4d& {
+			    return self.world_to_index_matrix();
+		    },
+		    nb::rv_policy::reference_internal)
+		.def("world_from_index", &geo::ImageVolumeGeometry::world_from_index,
+		    nb::arg("index"))
+		.def("index_from_world", &geo::ImageVolumeGeometry::index_from_world,
+		    nb::arg("world"))
+		.def("contains_index", &geo::ImageVolumeGeometry::contains_index,
+		    nb::arg("index"))
+		.def("contains_world",
+		    [](const geo::ImageVolumeGeometry& self, geo::Point3d world,
+		        std::optional<geo::GeometryTolerance> tolerance) {
+			    return self.contains_world(world, tolerance.value_or(geo::GeometryTolerance{}));
+		    },
+		    nb::arg("world"), nb::arg("tolerance") = nb::none())
+		.def("__repr__",
+		    [](const geo::ImageVolumeGeometry& self) {
+			    std::ostringstream oss;
+			    oss << "ImageVolumeGeometry(rows=" << self.rows()
+			        << ", columns=" << self.columns()
+			        << ", slices=" << self.slices() << ")";
+			    return oss.str();
+		    });
+
+	nb::class_<geo::VolumetricPropertiesInfo>(
+	    geometry, "VolumetricPropertiesInfo",
+	    "Resolved VolumetricProperties value plus lightweight source metadata.")
+		.def(nb::init<>())
+		.def_ro("value", &geo::VolumetricPropertiesInfo::value)
+		.def_prop_ro("source_depth",
+		    [](const geo::VolumetricPropertiesInfo& self) {
+			    return self.source.depth();
+		    })
+		.def_prop_ro("source_leaf_tag",
+		    [](const geo::VolumetricPropertiesInfo& self) {
+			    return self.source.leaf_tag();
+		    });
+
+	nb::class_<geo::ImageFrameGeometry>(
+	    geometry, "ImageFrameGeometry",
+	    "Plane geometry plus semantic frame kind for enhanced multi-frame images.")
+		.def_prop_ro("plane",
+		    [](const geo::ImageFrameGeometry& self) -> const geo::ImagePlaneGeometry& {
+			    return self.plane;
+		    },
+		    nb::rv_policy::reference_internal)
+		.def_ro("kind", &geo::ImageFrameGeometry::kind);
+
+	nb::class_<geo::SliceStackOptions>(
+	    geometry, "SliceStackOptions", "Options for slice stack analysis/planning.")
+		.def("__init__",
+		    [](geo::SliceStackOptions* self,
+		        std::optional<geo::GeometryTolerance> tolerance,
+		        double slice_position_tolerance_mm,
+		        double origin_residual_tolerance_mm,
+		        bool allow_duplicate_positions) {
+			    geo::SliceStackOptions options;
+			    if (tolerance) {
+				    options.tolerance = *tolerance;
+			    }
+			    options.slice_position_tolerance_mm = slice_position_tolerance_mm;
+			    options.origin_residual_tolerance_mm = origin_residual_tolerance_mm;
+			    options.allow_duplicate_positions = allow_duplicate_positions;
+			    new (self) geo::SliceStackOptions(options);
+		    },
+		    nb::arg("tolerance") = nb::none(),
+		    nb::kw_only(),
+		    nb::arg("slice_position_tolerance_mm") = 1e-3,
+		    nb::arg("origin_residual_tolerance_mm") = 1e-3,
+		    nb::arg("allow_duplicate_positions") = false)
+		.def_rw("tolerance", &geo::SliceStackOptions::tolerance)
+		.def_rw("slice_position_tolerance_mm",
+		    &geo::SliceStackOptions::slice_position_tolerance_mm)
+		.def_rw("origin_residual_tolerance_mm",
+		    &geo::SliceStackOptions::origin_residual_tolerance_mm)
+		.def_rw("allow_duplicate_positions",
+		    &geo::SliceStackOptions::allow_duplicate_positions);
+
+	nb::class_<geo::ImageFrameStackOptions>(
+	    geometry, "ImageFrameStackOptions",
+	    "Options for enhanced multi-frame stack analysis/planning.")
+		.def("__init__",
+		    [](geo::ImageFrameStackOptions* self,
+		        std::optional<geo::SliceStackOptions> slice_stack,
+		        bool allow_geometry_grouping_fallback) {
+			    geo::ImageFrameStackOptions options;
+			    if (slice_stack) {
+				    options.slice_stack = *slice_stack;
+			    }
+			    options.allow_geometry_grouping_fallback =
+			        allow_geometry_grouping_fallback;
+			    new (self) geo::ImageFrameStackOptions(options);
+		    },
+		    nb::arg("slice_stack") = nb::none(),
+		    nb::arg("allow_geometry_grouping_fallback") = false)
+		.def_rw("slice_stack", &geo::ImageFrameStackOptions::slice_stack)
+		.def_rw("allow_geometry_grouping_fallback",
+		    &geo::ImageFrameStackOptions::allow_geometry_grouping_fallback);
+
+	nb::class_<PySliceStackInput>(
+	    geometry, "SliceStackInput",
+	    "Owning Python input record for slice-stack analysis.")
+		.def("__init__",
+		    [](PySliceStackInput* self, geo::ImagePlaneGeometry plane,
+		        std::string frame_of_reference_uid, std::size_t source_index,
+		        std::size_t frame_index) {
+			    new (self) PySliceStackInput(std::move(plane),
+			        std::move(frame_of_reference_uid), source_index, frame_index);
+		    },
+		    nb::arg("plane"), nb::arg("frame_of_reference_uid"),
+		    nb::arg("source_index") = static_cast<std::size_t>(0),
+		    nb::arg("frame_index") = static_cast<std::size_t>(0))
+		.def_rw("source_index", &PySliceStackInput::source_index)
+		.def_rw("frame_index", &PySliceStackInput::frame_index)
+		.def_rw("plane", &PySliceStackInput::plane)
+		.def_rw("frame_of_reference_uid", &PySliceStackInput::frame_of_reference_uid);
+
+	nb::class_<geo::SliceStackSlice>(
+	    geometry, "SliceStackSlice", "One sorted slice produced by slice-stack analysis.")
+		.def_rw("input_index", &geo::SliceStackSlice::input_index)
+		.def_rw("source_index", &geo::SliceStackSlice::source_index)
+		.def_rw("frame_index", &geo::SliceStackSlice::frame_index)
+		.def_rw("plane", &geo::SliceStackSlice::plane)
+		.def_rw("position_along_normal_mm",
+		    &geo::SliceStackSlice::position_along_normal_mm)
+		.def_rw("in_plane_residual_mm",
+		    &geo::SliceStackSlice::in_plane_residual_mm);
+
+	nb::class_<geo::SliceStackGap>(
+	    geometry, "SliceStackGap", "Spacing measurement between two sorted slices.")
+		.def_rw("lower_sorted_index", &geo::SliceStackGap::lower_sorted_index)
+		.def_rw("upper_sorted_index", &geo::SliceStackGap::upper_sorted_index)
+		.def_rw("spacing_mm", &geo::SliceStackGap::spacing_mm);
+
+	nb::class_<geo::SliceStackRun>(
+	    geometry, "SliceStackRun",
+	    "Contiguous sorted slice range with uniform spacing.")
+		.def_rw("begin_sorted_index", &geo::SliceStackRun::begin_sorted_index)
+		.def_rw("end_sorted_index", &geo::SliceStackRun::end_sorted_index)
+		.def_rw("spacing_mm", &geo::SliceStackRun::spacing_mm);
+
+	nb::class_<geo::SliceStackItem>(
+	    geometry, "SliceStackItem", "Placement record for one decoded source slice.")
+		.def_rw("source_index", &geo::SliceStackItem::source_index)
+		.def_rw("frame_index", &geo::SliceStackItem::frame_index)
+		.def_rw("target_k", &geo::SliceStackItem::target_k)
+		.def_rw("position_along_normal_mm",
+		    &geo::SliceStackItem::position_along_normal_mm)
+		.def_rw("in_plane_residual_mm",
+		    &geo::SliceStackItem::in_plane_residual_mm);
+
+	nb::class_<geo::SliceStackIssue>(
+	    geometry, "SliceStackIssue", "Structured slice-stack diagnostic.")
+		.def_rw("status", &geo::SliceStackIssue::status)
+		.def_rw("input_index", &geo::SliceStackIssue::input_index)
+		.def_rw("source_index", &geo::SliceStackIssue::source_index)
+		.def_rw("frame_index", &geo::SliceStackIssue::frame_index)
+		.def_rw("tag", &geo::SliceStackIssue::tag)
+		.def_rw("message", &geo::SliceStackIssue::message)
+		.def_prop_ro("source_depth",
+		    [](const geo::SliceStackIssue& self) {
+			    return self.source.depth();
+		    })
+		.def_prop_ro("source_leaf_tag",
+		    [](const geo::SliceStackIssue& self) {
+			    return self.source.leaf_tag();
+		    });
+
+	nb::class_<geo::DimensionIndexDescriptor>(
+	    geometry, "DimensionIndexDescriptor",
+	    "Self-describing DICOM multi-frame dimension index descriptor.")
+		.def_rw("dimension_index_pointer",
+		    &geo::DimensionIndexDescriptor::dimension_index_pointer)
+		.def_rw("functional_group_pointer",
+		    &geo::DimensionIndexDescriptor::functional_group_pointer)
+		.def_rw("dimension_organization_uid",
+		    &geo::DimensionIndexDescriptor::dimension_organization_uid)
+		.def_rw("label", &geo::DimensionIndexDescriptor::label)
+		.def_rw("private_creator", &geo::DimensionIndexDescriptor::private_creator);
+
+	nb::class_<geo::DimensionIndexValue>(
+	    geometry, "DimensionIndexValue",
+	    "One non-spatial DICOM dimension index value used for frame grouping.")
+		.def_rw("descriptor", &geo::DimensionIndexValue::descriptor)
+		.def_rw("value", &geo::DimensionIndexValue::value);
+
+	nb::class_<geo::ImageFrameStackKey>(
+	    geometry, "ImageFrameStackKey",
+	    "Grouping key for one enhanced multi-frame image stack.")
+		.def_rw("stack_id", &geo::ImageFrameStackKey::stack_id)
+		.def_rw("dimension_values", &geo::ImageFrameStackKey::dimension_values);
+
+	nb::class_<geo::SliceStackAnalysis>(
+	    geometry, "SliceStackAnalysis", "Result of slice-stack geometry analysis.")
+		.def_prop_ro("status", &geo::SliceStackAnalysis::status)
+		.def_prop_ro("ok", &geo::SliceStackAnalysis::ok)
+		.def_prop_ro("frame_of_reference_uid",
+		    &geo::SliceStackAnalysis::frame_of_reference_uid)
+		.def_prop_ro("slices",
+		    [](const geo::SliceStackAnalysis& self) {
+			    return std::vector<geo::SliceStackSlice>(
+			        self.slices().begin(), self.slices().end());
+		    })
+		.def_prop_ro("gaps",
+		    [](const geo::SliceStackAnalysis& self) {
+			    return std::vector<geo::SliceStackGap>(
+			        self.gaps().begin(), self.gaps().end());
+		    })
+		.def_prop_ro("uniform_runs",
+		    [](const geo::SliceStackAnalysis& self) {
+			    return std::vector<geo::SliceStackRun>(
+			        self.uniform_runs().begin(), self.uniform_runs().end());
+		    })
+		.def_prop_ro("issues",
+		    [](const geo::SliceStackAnalysis& self) {
+			    return std::vector<geo::SliceStackIssue>(
+			        self.issues().begin(), self.issues().end());
+		    })
+		.def_prop_ro("uniform_spacing_k",
+		    &geo::SliceStackAnalysis::uniform_spacing_k)
+		.def_prop_ro("max_in_plane_residual_mm",
+		    &geo::SliceStackAnalysis::max_in_plane_residual_mm);
+
+	nb::class_<geo::ImageFrameStackGroup>(
+	    geometry, "ImageFrameStackGroup",
+	    "One frame group from enhanced multi-frame stack analysis.")
+		.def_rw("key", &geo::ImageFrameStackGroup::key)
+		.def_rw("frame_indices", &geo::ImageFrameStackGroup::frame_indices)
+		.def_rw("analysis", &geo::ImageFrameStackGroup::analysis);
+
+	nb::class_<geo::SliceStackPlan>(
+	    geometry, "SliceStackPlan", "Uniform volume placement plan for a slice stack.")
+		.def_prop_ro("status", &geo::SliceStackPlan::status)
+		.def_prop_ro("ok", &geo::SliceStackPlan::ok)
+		.def_prop_ro("frame_of_reference_uid",
+		    &geo::SliceStackPlan::frame_of_reference_uid)
+		.def_prop_ro("volume_geometry",
+		    [](const geo::SliceStackPlan& self) -> nb::object {
+			    if (!self.volume_geometry()) {
+				    return nb::none();
+			    }
+			    return nb::cast(*self.volume_geometry());
+		    })
+		.def_prop_ro("placements",
+		    [](const geo::SliceStackPlan& self) {
+			    return std::vector<geo::SliceStackItem>(
+			        self.placements().begin(), self.placements().end());
+		    })
+		.def_prop_ro("issues",
+		    [](const geo::SliceStackPlan& self) {
+			    return std::vector<geo::SliceStackIssue>(
+			        self.issues().begin(), self.issues().end());
+		    });
+
+	nb::class_<geo::ImageFrameStackAnalysis>(
+	    geometry, "ImageFrameStackAnalysis",
+	    "Grouping and slice analysis for an enhanced multi-frame image.")
+		.def_prop_ro("status", &geo::ImageFrameStackAnalysis::status)
+		.def_prop_ro("ok", &geo::ImageFrameStackAnalysis::ok)
+		.def_prop_ro("groups",
+		    [](const geo::ImageFrameStackAnalysis& self) {
+			    return std::vector<geo::ImageFrameStackGroup>(
+			        self.groups().begin(), self.groups().end());
+		    })
+		.def_prop_ro("issues",
+		    [](const geo::ImageFrameStackAnalysis& self) {
+			    return std::vector<geo::SliceStackIssue>(
+			        self.issues().begin(), self.issues().end());
+		    });
+
+	nb::class_<geo::OverlayCheckOptions>(
+	    geometry, "OverlayCheckOptions", "Options for overlay compatibility checks.")
+		.def("__init__",
+		    [](geo::OverlayCheckOptions* self, double frame_position_tolerance_mm,
+		        double normal_distance_tolerance_mm, double orientation_tolerance,
+		        double spacing_tolerance_mm, bool require_same_grid) {
+			    new (self) geo::OverlayCheckOptions{frame_position_tolerance_mm,
+			        normal_distance_tolerance_mm, orientation_tolerance,
+			        spacing_tolerance_mm, require_same_grid};
+		    },
+		    nb::arg("frame_position_tolerance_mm") = 1e-3,
+		    nb::arg("normal_distance_tolerance_mm") = 1e-3,
+		    nb::arg("orientation_tolerance") = 1e-4,
+		    nb::arg("spacing_tolerance_mm") = 1e-3,
+		    nb::arg("require_same_grid") = false)
+		.def_rw("frame_position_tolerance_mm",
+		    &geo::OverlayCheckOptions::frame_position_tolerance_mm)
+		.def_rw("normal_distance_tolerance_mm",
+		    &geo::OverlayCheckOptions::normal_distance_tolerance_mm)
+		.def_rw("orientation_tolerance", &geo::OverlayCheckOptions::orientation_tolerance)
+		.def_rw("spacing_tolerance_mm", &geo::OverlayCheckOptions::spacing_tolerance_mm)
+		.def_rw("require_same_grid", &geo::OverlayCheckOptions::require_same_grid);
+
+	nb::class_<geo::IndexRange1D>(geometry, "IndexRange1D", "Half-open integer index range.")
+		.def("__init__",
+		    [](geo::IndexRange1D* self, std::size_t begin, std::size_t end) {
+			    new (self) geo::IndexRange1D{begin, end};
+		    },
+		    nb::arg("begin") = static_cast<std::size_t>(0),
+		    nb::arg("end") = static_cast<std::size_t>(0))
+		.def_rw("begin", &geo::IndexRange1D::begin)
+		.def_rw("end", &geo::IndexRange1D::end)
+		.def_prop_ro("empty", &geo::IndexRange1D::empty);
+
+	nb::class_<geo::OverlayCheck>(
+	    geometry, "OverlayCheck", "Result of an O(1) geometry overlay preflight.")
+		.def(nb::init<>())
+		.def_ro("status", &geo::OverlayCheck::status)
+		.def_ro("same_frame_of_reference", &geo::OverlayCheck::same_frame_of_reference)
+		.def_ro("can_transform", &geo::OverlayCheck::can_transform)
+		.def_ro("can_direct_overlay", &geo::OverlayCheck::can_direct_overlay)
+		.def_ro("same_grid", &geo::OverlayCheck::same_grid)
+		.def_ro("same_spacing", &geo::OverlayCheck::same_spacing)
+		.def_ro("same_extent", &geo::OverlayCheck::same_extent)
+		.def_ro("overlaps_extent", &geo::OverlayCheck::overlaps_extent)
+		.def_ro("source_inside_target_extent",
+		    &geo::OverlayCheck::source_inside_target_extent)
+		.def_ro("requires_resampling", &geo::OverlayCheck::requires_resampling)
+		.def_ro("target_k_range", &geo::OverlayCheck::target_k_range)
+		.def_ro("max_position_error_mm", &geo::OverlayCheck::max_position_error_mm)
+		.def_ro("max_normal_distance_mm", &geo::OverlayCheck::max_normal_distance_mm)
+		.def_ro("max_orientation_error", &geo::OverlayCheck::max_orientation_error)
+		.def_ro("max_spacing_error_mm", &geo::OverlayCheck::max_spacing_error_mm)
+		.def_prop_ro("ok", &geo::OverlayCheck::ok);
+
+	nb::class_<geo::PlaneToPlaneTransform>(
+	    geometry, "PlaneToPlaneTransform", "Cached plane-to-plane index transform.")
+		.def("target_index_from_source_index",
+		    &geo::PlaneToPlaneTransform::target_index_from_source_index,
+		    nb::arg("source"))
+		.def("source_index_from_target_index",
+		    &geo::PlaneToPlaneTransform::source_index_from_target_index,
+		    nb::arg("target"));
+
+	nb::class_<geo::PlaneToVolumeTransform>(
+	    geometry, "PlaneToVolumeTransform", "Cached plane-to-volume index transform.")
+		.def("target_index_from_source_index",
+		    &geo::PlaneToVolumeTransform::target_index_from_source_index,
+		    nb::arg("source"))
+		.def("source_index_from_target_index",
+		    &geo::PlaneToVolumeTransform::source_index_from_target_index,
+		    nb::arg("target"))
+		.def("source_projection_from_target_index",
+		    &geo::PlaneToVolumeTransform::source_projection_from_target_index,
+		    nb::arg("target"));
+
+	nb::class_<geo::VolumeToPlaneTransform>(
+	    geometry, "VolumeToPlaneTransform", "Cached volume-to-plane index transform.")
+		.def("target_index_from_source_index",
+		    &geo::VolumeToPlaneTransform::target_index_from_source_index,
+		    nb::arg("source"))
+		.def("target_projection_from_source_index",
+		    &geo::VolumeToPlaneTransform::target_projection_from_source_index,
+		    nb::arg("source"))
+		.def("source_index_from_target_index",
+		    &geo::VolumeToPlaneTransform::source_index_from_target_index,
+		    nb::arg("target"));
+
+	nb::class_<geo::VolumeToVolumeTransform>(
+	    geometry, "VolumeToVolumeTransform", "Cached volume-to-volume index transform.")
+		.def("target_index_from_source_index",
+		    &geo::VolumeToVolumeTransform::target_index_from_source_index,
+		    nb::arg("source"))
+		.def("source_index_from_target_index",
+		    &geo::VolumeToVolumeTransform::source_index_from_target_index,
+		    nb::arg("target"));
+
+	geometry.def("dot", &geo::dot, nb::arg("a"), nb::arg("b"));
+	geometry.def("cross", &geo::cross, nb::arg("a"), nb::arg("b"));
+	geometry.def("norm", &geo::norm, nb::arg("v"));
+	geometry.def("normalize", &geo::normalize, nb::arg("v"));
+
+	geometry.def("make_image_plane_geometry",
+	    [](geo::Point3d origin, geo::Vec3d direction_i, geo::Vec3d direction_j,
+	        geo::ImageSpacing2D spacing, geo::ImageSize2D size,
+	        std::optional<geo::GeometryTolerance> tolerance) {
+		    geo::ImagePlaneGeometryParams params;
+		    params.origin = origin;
+		    params.direction_i = direction_i;
+		    params.direction_j = direction_j;
+		    params.spacing = spacing;
+		    params.size = size;
+		    return geometry_value_or_throw(
+		        geo::make_image_plane_geometry(
+		            params, tolerance.value_or(geo::GeometryTolerance{})),
+		        "make_image_plane_geometry");
+	    },
+	    nb::arg("origin"), nb::arg("direction_i"), nb::arg("direction_j"),
+	    nb::arg("spacing"), nb::arg("size"), nb::arg("tolerance") = nb::none(),
+	    "Create a validated ImagePlaneGeometry or raise ValueError.");
+
+	geometry.def("make_image_volume_geometry",
+	    [](geo::Point3d origin, geo::Vec3d direction_i, geo::Vec3d direction_j,
+	        geo::Vec3d direction_k, geo::ImageSpacing3D spacing,
+	        geo::ImageSize3D size, std::optional<geo::GeometryTolerance> tolerance) {
+		    geo::ImageVolumeGeometryParams params;
+		    params.origin = origin;
+		    params.direction_i = direction_i;
+		    params.direction_j = direction_j;
+		    params.direction_k = direction_k;
+		    params.spacing = spacing;
+		    params.size = size;
+		    return geometry_value_or_throw(
+		        geo::make_image_volume_geometry(
+		            params, tolerance.value_or(geo::GeometryTolerance{})),
+		        "make_image_volume_geometry");
+	    },
+	    nb::arg("origin"), nb::arg("direction_i"), nb::arg("direction_j"),
+	    nb::arg("direction_k"), nb::arg("spacing"), nb::arg("size"),
+	    nb::arg("tolerance") = nb::none(),
+	    "Create a validated ImageVolumeGeometry or raise ValueError.");
+
+	geometry.def("plane_from_single_frame_image",
+	    [](const DicomFile& file) {
+		    return geometry_value_or_throw(
+		        geo::plane_from_single_frame_image(file), "plane_from_single_frame_image");
+	    },
+	    nb::arg("source"));
+	geometry.def("plane_from_single_frame_image",
+	    [](const DataSet& dataset) {
+		    return geometry_value_or_throw(
+		        geo::plane_from_single_frame_image(dataset),
+		        "plane_from_single_frame_image");
+	    },
+	    nb::arg("source"));
+	geometry.def("plane_from_multiframe_image",
+	    [](const DicomFile& file, std::size_t frame_index) {
+		    return geometry_value_or_throw(
+		        geo::plane_from_multiframe_image(file, frame_index),
+		        "plane_from_multiframe_image");
+	    },
+	    nb::arg("source"), nb::arg("frame_index"));
+	geometry.def("plane_from_multiframe_image",
+	    [](const DataSet& dataset, std::size_t frame_index) {
+		    return geometry_value_or_throw(
+		        geo::plane_from_multiframe_image(dataset, frame_index),
+		        "plane_from_multiframe_image");
+	    },
+	    nb::arg("source"), nb::arg("frame_index"));
+	geometry.def("frame_geometry_from_multiframe_image",
+	    [](const DicomFile& file, std::size_t frame_index) {
+		    return geometry_value_or_throw(
+		        geo::frame_geometry_from_multiframe_image(file, frame_index),
+		        "frame_geometry_from_multiframe_image");
+	    },
+	    nb::arg("source"), nb::arg("frame_index"));
+	geometry.def("frame_geometry_from_multiframe_image",
+	    [](const DataSet& dataset, std::size_t frame_index) {
+		    return geometry_value_or_throw(
+		        geo::frame_geometry_from_multiframe_image(dataset, frame_index),
+		        "frame_geometry_from_multiframe_image");
+	    },
+	    nb::arg("source"), nb::arg("frame_index"));
+	geometry.def("volumetric_properties_from_multiframe_image",
+	    [](const DicomFile& file, std::size_t frame_index) {
+		    return geometry_value_or_throw(
+		        geo::volumetric_properties_from_multiframe_image(file, frame_index),
+		        "volumetric_properties_from_multiframe_image");
+	    },
+	    nb::arg("source"), nb::arg("frame_index"));
+	geometry.def("volumetric_properties_from_multiframe_image",
+	    [](const DataSet& dataset, std::size_t frame_index) {
+		    return geometry_value_or_throw(
+		        geo::volumetric_properties_from_multiframe_image(dataset, frame_index),
+		        "volumetric_properties_from_multiframe_image");
+	    },
+	    nb::arg("source"), nb::arg("frame_index"));
+	geometry.def("frame_of_reference_from_dataset",
+	    [](const DicomFile& file) {
+		    return geometry_value_or_throw(
+		        geo::frame_of_reference_from_dataset(file),
+		        "frame_of_reference_from_dataset");
+	    },
+	    nb::arg("source"));
+	geometry.def("frame_of_reference_from_dataset",
+	    [](const DataSet& dataset) {
+		    return geometry_value_or_throw(
+		        geo::frame_of_reference_from_dataset(dataset),
+		        "frame_of_reference_from_dataset");
+	    },
+	    nb::arg("source"));
+
+	geometry.def("analyze_slice_stack",
+	    [](nb::handle sources, std::optional<geo::SliceStackOptions> options) {
+		    const auto opts = options.value_or(geo::SliceStackOptions{});
+		    if (py_sequence_looks_like_slice_stack_inputs(sources, "sources")) {
+			    auto store = py_slice_stack_inputs_from_sequence(sources, "sources");
+			    return geo::analyze_slice_stack(
+			        std::span<const geo::SliceStackInput>(
+			            store.inputs.data(), store.inputs.size()),
+			        opts);
+		    }
+		    auto datasets = py_dataset_ptrs_from_sequence(sources, "sources");
+		    return geo::analyze_slice_stack(
+		        std::span<const DataSet* const>(datasets.data(), datasets.size()),
+		        opts);
+	    },
+	    nb::arg("sources"), nb::arg("options") = nb::none(),
+	    "Analyze a classic DataSet/DicomFile list or a SliceStackInput list.");
+
+	geometry.def("plan_slice_stack",
+	    [](nb::handle sources, std::optional<geo::SliceStackOptions> options) {
+		    const auto opts = options.value_or(geo::SliceStackOptions{});
+		    if (py_sequence_looks_like_slice_stack_inputs(sources, "sources")) {
+			    auto store = py_slice_stack_inputs_from_sequence(sources, "sources");
+			    return geo::plan_slice_stack(
+			        std::span<const geo::SliceStackInput>(
+			            store.inputs.data(), store.inputs.size()),
+			        opts);
+		    }
+		    auto datasets = py_dataset_ptrs_from_sequence(sources, "sources");
+		    return geo::plan_slice_stack(
+		        std::span<const DataSet* const>(datasets.data(), datasets.size()),
+		        opts);
+	    },
+	    nb::arg("sources"), nb::arg("options") = nb::none(),
+	    "Create a uniform volume placement plan from DataSet/DicomFile or SliceStackInput sources.");
+
+	geometry.def("analyze_image_frame_stack",
+	    [](const DicomFile& file, nb::handle frame_indices,
+	        std::optional<geo::ImageFrameStackOptions> options) {
+		    const auto opts = options.value_or(geo::ImageFrameStackOptions{});
+		    if (!frame_indices || frame_indices.is_none()) {
+			    return geo::analyze_image_frame_stack(file, opts);
+		    }
+		    auto indices = py_size_t_vector_from_sequence(frame_indices, "frame_indices");
+		    return geo::analyze_image_frame_stack(file,
+		        std::span<const std::size_t>(indices.data(), indices.size()),
+		        opts);
+	    },
+	    nb::arg("file"), nb::arg("frame_indices") = nb::none(),
+	    nb::arg("options") = nb::none(),
+	    "Analyze one enhanced multi-frame image stack. When frame_indices is omitted, the file must contain one stack.");
+
+	geometry.def("plan_image_frame_stack",
+	    [](const DicomFile& file, nb::handle frame_indices,
+	        std::optional<geo::ImageFrameStackOptions> options) {
+		    const auto opts = options.value_or(geo::ImageFrameStackOptions{});
+		    if (!frame_indices || frame_indices.is_none()) {
+			    return geo::plan_image_frame_stack(file, opts);
+		    }
+		    auto indices = py_size_t_vector_from_sequence(frame_indices, "frame_indices");
+		    return geo::plan_image_frame_stack(file,
+		        std::span<const std::size_t>(indices.data(), indices.size()),
+		        opts);
+	    },
+	    nb::arg("file"), nb::arg("frame_indices") = nb::none(),
+	    nb::arg("options") = nb::none(),
+	    "Create a uniform volume placement plan for an enhanced multi-frame image stack.");
+
+	geometry.def("analyze_image_frame_stacks",
+	    [](const DicomFile& file,
+	        std::optional<geo::ImageFrameStackOptions> options) {
+		    return geo::analyze_image_frame_stacks(
+		        file, options.value_or(geo::ImageFrameStackOptions{}));
+	    },
+	    nb::arg("file"), nb::arg("options") = nb::none(),
+	    "Group and analyze all enhanced multi-frame image stacks in a DicomFile.");
+
+	geometry.def("analyze_nm_frame_stack",
+	    [](const DicomFile& file,
+	        std::optional<geo::SliceStackOptions> options) {
+		    return geo::analyze_nm_frame_stack(
+		        file, options.value_or(geo::SliceStackOptions{}));
+	    },
+	    nb::arg("file"), nb::arg("options") = nb::none(),
+	    "Analyze a Nuclear Medicine reconstructed TOMO frame stack.");
+
+	geometry.def("plan_nm_frame_stack",
+	    [](const DicomFile& file,
+	        std::optional<geo::SliceStackOptions> options) {
+		    return geo::plan_nm_frame_stack(
+		        file, options.value_or(geo::SliceStackOptions{}));
+	    },
+	    nb::arg("file"), nb::arg("options") = nb::none(),
+	    "Create a uniform volume placement plan for a Nuclear Medicine reconstructed TOMO frame stack.");
+
+	geometry.def("check_overlay_compatibility",
+	    [](const std::string& source_frame_of_reference_uid,
+	        const geo::ImagePlaneGeometry& source,
+	        const std::string& target_frame_of_reference_uid,
+	        const geo::ImagePlaneGeometry& target,
+	        std::optional<geo::OverlayCheckOptions> options) {
+		    return geo::check_overlay_compatibility(source_frame_of_reference_uid,
+		        source, target_frame_of_reference_uid, target,
+		        options.value_or(geo::OverlayCheckOptions{}));
+	    },
+	    nb::arg("source_frame_of_reference_uid"), nb::arg("source"),
+	    nb::arg("target_frame_of_reference_uid"), nb::arg("target"),
+	    nb::arg("options") = nb::none());
+	geometry.def("check_overlay_compatibility",
+	    [](const std::string& source_frame_of_reference_uid,
+	        const geo::ImagePlaneGeometry& source,
+	        const std::string& target_frame_of_reference_uid,
+	        const geo::ImageVolumeGeometry& target,
+	        std::optional<geo::OverlayCheckOptions> options) {
+		    return geo::check_overlay_compatibility(source_frame_of_reference_uid,
+		        source, target_frame_of_reference_uid, target,
+		        options.value_or(geo::OverlayCheckOptions{}));
+	    },
+	    nb::arg("source_frame_of_reference_uid"), nb::arg("source"),
+	    nb::arg("target_frame_of_reference_uid"), nb::arg("target"),
+	    nb::arg("options") = nb::none());
+	geometry.def("check_overlay_compatibility",
+	    [](const std::string& source_frame_of_reference_uid,
+	        const geo::ImageVolumeGeometry& source,
+	        const std::string& target_frame_of_reference_uid,
+	        const geo::ImagePlaneGeometry& target,
+	        std::optional<geo::OverlayCheckOptions> options) {
+		    return geo::check_overlay_compatibility(source_frame_of_reference_uid,
+		        source, target_frame_of_reference_uid, target,
+		        options.value_or(geo::OverlayCheckOptions{}));
+	    },
+	    nb::arg("source_frame_of_reference_uid"), nb::arg("source"),
+	    nb::arg("target_frame_of_reference_uid"), nb::arg("target"),
+	    nb::arg("options") = nb::none());
+	geometry.def("check_overlay_compatibility",
+	    [](const std::string& source_frame_of_reference_uid,
+	        const geo::ImageVolumeGeometry& source,
+	        const std::string& target_frame_of_reference_uid,
+	        const geo::ImageVolumeGeometry& target,
+	        std::optional<geo::OverlayCheckOptions> options) {
+		    return geo::check_overlay_compatibility(source_frame_of_reference_uid,
+		        source, target_frame_of_reference_uid, target,
+		        options.value_or(geo::OverlayCheckOptions{}));
+	    },
+	    nb::arg("source_frame_of_reference_uid"), nb::arg("source"),
+	    nb::arg("target_frame_of_reference_uid"), nb::arg("target"),
+	    nb::arg("options") = nb::none());
+
+	geometry.def("make_plane_to_plane_transform", &geo::make_plane_to_plane_transform,
+	    nb::arg("source"), nb::arg("target"));
+	geometry.def("make_plane_to_volume_transform", &geo::make_plane_to_volume_transform,
+	    nb::arg("source"), nb::arg("target"));
+	geometry.def("make_volume_to_plane_transform", &geo::make_volume_to_plane_transform,
+	    nb::arg("source"), nb::arg("target"));
+	geometry.def("make_volume_to_volume_transform",
+	    &geo::make_volume_to_volume_transform, nb::arg("source"), nb::arg("target"));
+
+	auto seg = m.def_submodule(
+	    "seg", "High-level helpers for DICOM Segmentation Storage instances.");
+
+	nb::enum_<dicom::seg::SegmentationType>(seg, "SegmentationType",
+	    "DICOM SEG SegmentationType values.")
+		.value("unknown", dicom::seg::SegmentationType::unknown)
+		.value("binary", dicom::seg::SegmentationType::binary)
+		.value("fractional", dicom::seg::SegmentationType::fractional)
+		.value("labelmap", dicom::seg::SegmentationType::labelmap);
+
+	nb::enum_<dicom::seg::SegmentationFractionalType>(
+	    seg, "SegmentationFractionalType",
+	    "DICOM SEG SegmentationFractionalType values.")
+		.value("none", dicom::seg::SegmentationFractionalType::none)
+		.value("probability", dicom::seg::SegmentationFractionalType::probability)
+		.value("occupancy", dicom::seg::SegmentationFractionalType::occupancy)
+		.value("unknown", dicom::seg::SegmentationFractionalType::unknown);
+
+	nb::enum_<dicom::seg::SegmentAlgorithmType>(
+	    seg, "SegmentAlgorithmType", "DICOM SEG SegmentAlgorithmType values.")
+		.value("unknown", dicom::seg::SegmentAlgorithmType::unknown)
+		.value("automatic", dicom::seg::SegmentAlgorithmType::automatic_)
+		.value("semiautomatic", dicom::seg::SegmentAlgorithmType::semiautomatic)
+		.value("manual", dicom::seg::SegmentAlgorithmType::manual);
+
+	nb::class_<PySegCode>(seg, "Code",
+	    "Owning Python copy of one DICOM code-sequence item.")
+		.def_prop_ro("value", [](const PySegCode& self) { return self.value; })
+		.def_prop_ro("scheme_designator",
+		    [](const PySegCode& self) { return self.scheme_designator; })
+		.def_prop_ro("scheme_version",
+		    [](const PySegCode& self) { return self.scheme_version; })
+		.def_prop_ro("meaning", [](const PySegCode& self) { return self.meaning; })
+		.def("__repr__",
+		    [](const PySegCode& self) {
+			    std::ostringstream oss;
+			    oss << "Code(value='" << self.value << "', scheme_designator='"
+			        << self.scheme_designator << "', meaning='" << self.meaning << "')";
+			    return oss.str();
+		    });
+
+	nb::class_<PySegment>(seg, "Segment",
+	    "Borrowed view of one SegmentSequence item. Keeps the owning Segmentation alive.")
+		.def_prop_ro("number", [](const PySegment& self) { return self.view().number(); })
+		.def_prop_ro("label",
+		    [](const PySegment& self) { return std::string(self.view().label()); })
+		.def_prop_ro("description",
+		    [](const PySegment& self) { return std::string(self.view().description()); })
+		.def_prop_ro("algorithm_name",
+		    [](const PySegment& self) { return std::string(self.view().algorithm_name()); })
+		.def_prop_ro("algorithm_type",
+		    [](const PySegment& self) { return self.view().algorithm_type(); })
+		.def_prop_ro("property_category",
+		    [](const PySegment& self) { return py_optional_seg_code(self.view().property_category()); })
+		.def_prop_ro("property_type",
+		    [](const PySegment& self) { return py_optional_seg_code(self.view().property_type()); })
+		.def_prop_ro("anatomic_region",
+		    [](const PySegment& self) { return py_optional_seg_code(self.view().anatomic_region()); })
+		.def_prop_ro("recommended_display_cielab",
+		    [](const PySegment& self) {
+			    return py_optional_array_tuple(self.view().recommended_display_cielab());
+		    })
+		.def_prop_ro("dataset",
+		    [](const PySegment& self) -> const DataSet& { return self.view().dataset(); },
+		    nb::rv_policy::reference_internal)
+		.def("__repr__",
+		    [](const PySegment& self) {
+			    const auto view = self.view();
+			    std::ostringstream oss;
+			    oss << "Segment(number=" << view.number() << ", label='"
+			        << view.label() << "')";
+			    return oss.str();
+		    });
+
+	nb::class_<PySourceImageRef>(seg, "SourceImageRef",
+	    "Borrowed view of one SourceImageSequence item for a SEG frame.")
+		.def_prop_ro("sop_class_uid",
+		    [](const PySourceImageRef& self) {
+			    return std::string(self.view().sop_class_uid());
+		    })
+		.def_prop_ro("sop_instance_uid",
+		    [](const PySourceImageRef& self) {
+			    return std::string(self.view().sop_instance_uid());
+		    })
+		.def_prop_ro("referenced_frame_numbers",
+		    [](const PySourceImageRef& self) {
+			    const auto frames = self.view().referenced_frame_numbers();
+			    return std::vector<std::uint32_t>(frames.begin(), frames.end());
+		    })
+		.def_prop_ro("dataset",
+		    [](const PySourceImageRef& self) -> const DataSet& {
+			    return self.view().dataset();
+		    },
+		    nb::rv_policy::reference_internal)
+		.def("__repr__",
+		    [](const PySourceImageRef& self) {
+			    const auto view = self.view();
+			    std::ostringstream oss;
+			    oss << "SourceImageRef(sop_instance_uid='"
+			        << view.sop_instance_uid() << "')";
+			    return oss.str();
+		    });
+
+	nb::class_<PySourceImageRefListIterator>(seg, "_SourceImageRefListIterator")
+		.def("__iter__",
+		    [](PySourceImageRefListIterator& self)
+		        -> PySourceImageRefListIterator& { return self; },
+		    nb::rv_policy::reference_internal)
+		.def("__next__", &py_source_image_ref_list_iterator_next);
+
+	nb::class_<PySourceImageRefList>(seg, "SourceImageRefList",
+	    "Sequence-like view of source image references for one SEG frame.")
+		.def("__len__", [](const PySourceImageRefList& self) { return self.size(); })
+		.def("__bool__", [](const PySourceImageRefList& self) { return self.size() != 0; })
+		.def("__iter__",
+		    [](const PySourceImageRefList& self) {
+			    return PySourceImageRefListIterator{self, 0};
+		    })
+		.def("__getitem__", &py_source_image_ref_list_get, nb::arg("index"))
+		.def("__repr__",
+		    [](const PySourceImageRefList& self) {
+			    std::ostringstream oss;
+			    oss << "SourceImageRefList(size=" << self.size() << ")";
+			    return oss.str();
+		    });
+
+	nb::class_<PySegmentFrame>(seg, "SegmentFrame",
+	    "Borrowed view of one stored SEG frame.")
+		.def_prop_ro("index", [](const PySegmentFrame& self) { return self.view().index(); })
+		.def_prop_ro("referenced_segment_number",
+		    [](const PySegmentFrame& self) {
+			    return self.view().referenced_segment_number();
+		    })
+		.def_prop_ro("present_segment_numbers",
+		    [](const PySegmentFrame& self) {
+			    return py_seg_present_segment_numbers(self.owner->get(), self.frame_index);
+		    })
+		.def_prop_ro("image_position_patient",
+		    [](const PySegmentFrame& self) {
+			    return py_optional_array_tuple(self.view().image_position_patient());
+		    })
+		.def_prop_ro("image_orientation_patient",
+		    [](const PySegmentFrame& self) {
+			    return py_optional_array_tuple(self.view().image_orientation_patient());
+		    })
+		.def_prop_ro("pixel_spacing",
+		    [](const PySegmentFrame& self) {
+			    return py_optional_array_tuple(self.view().pixel_spacing());
+		    })
+		.def_prop_ro("slice_thickness",
+		    [](const PySegmentFrame& self) -> nb::object {
+			    const auto value = self.view().slice_thickness();
+			    if (!value) {
+				    return nb::none();
+			    }
+			    return nb::cast(*value);
+		    })
+		.def_prop_ro("source_images",
+		    [](const PySegmentFrame& self) {
+			    return PySourceImageRefList{self.owner, self.frame_index};
+		    })
+		.def_prop_ro("per_frame_functional_groups_item",
+		    [](const PySegmentFrame& self) -> const DataSet& {
+			    return self.view().per_frame_functional_groups_item();
+		    },
+		    nb::rv_policy::reference_internal)
+		.def("to_array",
+		    [](const PySegmentFrame& self) {
+			    return py_seg_frame_array(self.owner->get(), self.frame_index);
+		    },
+		    "Decode this SEG frame as a NumPy array with shape (rows, columns).")
+		.def("decode_frame",
+		    [](const PySegmentFrame& self) {
+			    return py_seg_decode_frame_bytes(self.owner->get(), self.frame_index);
+		    },
+		    "Decode this SEG frame and return validated native typed sample bytes.")
+		.def("decode_frame_into",
+		    [](const PySegmentFrame& self, nb::handle out) -> nb::object {
+			    py_seg_decode_frame_into(self.owner->get(), self.frame_index, out);
+			    return nb::borrow<nb::object>(out);
+		    },
+		    nb::arg("out"),
+		    "Decode this SEG frame into a writable C-contiguous buffer.")
+		.def("mask_for_segment",
+		    [](const PySegmentFrame& self, std::uint16_t segment_number,
+		        double fractional_threshold, bool error_when_not_present_in_frame) {
+			    return py_seg_mask_array(self.owner->get(), self.frame_index,
+			        segment_number,
+			        make_seg_mask_options(
+			            fractional_threshold, error_when_not_present_in_frame));
+		    },
+		    nb::arg("segment_number"), nb::kw_only(),
+		    nb::arg("fractional_threshold") = 0.0,
+		    nb::arg("error_when_not_present_in_frame") = false,
+		    "Decode this SEG frame as a uint8 0/1 mask for one segment.")
+		.def("mask_for_segment_into",
+		    [](const PySegmentFrame& self, std::uint16_t segment_number,
+		        nb::handle out, double fractional_threshold,
+		        bool error_when_not_present_in_frame) -> nb::object {
+			    py_seg_mask_for_segment_into(self.owner->get(), self.frame_index,
+			        segment_number, out,
+			        make_seg_mask_options(
+			            fractional_threshold, error_when_not_present_in_frame));
+			    return nb::borrow<nb::object>(out);
+		    },
+		    nb::arg("segment_number"), nb::arg("out"), nb::kw_only(),
+		    nb::arg("fractional_threshold") = 0.0,
+		    nb::arg("error_when_not_present_in_frame") = false,
+		    "Decode this SEG frame into a writable uint8 0/1 mask buffer.")
+		.def("__repr__",
+		    [](const PySegmentFrame& self) {
+			    const auto view = self.view();
+			    std::ostringstream oss;
+			    oss << "SegmentFrame(index=" << view.index();
+			    if (self.owner->get().segmentation_type() ==
+			        dicom::seg::SegmentationType::labelmap) {
+				    oss << ", type=labelmap";
+			    } else {
+				    oss << ", referenced_segment_number="
+				        << view.referenced_segment_number();
+			    }
+			    oss << ")";
+			    return oss.str();
+		    });
+
+	nb::class_<PySegmentListIterator>(seg, "_SegmentListIterator")
+		.def("__iter__",
+		    [](PySegmentListIterator& self) -> PySegmentListIterator& {
+			    return self;
+		    },
+		    nb::rv_policy::reference_internal)
+		.def("__next__", &py_segment_list_iterator_next);
+
+	nb::class_<PySegmentList>(seg, "SegmentList",
+	    "Sequence-like view over SegmentSequence items.")
+		.def("__len__", [](const PySegmentList& self) { return self.size(); })
+		.def("__bool__", [](const PySegmentList& self) { return self.size() != 0; })
+		.def("__iter__",
+		    [](const PySegmentList& self) {
+			    return PySegmentListIterator{self, 0};
+		    })
+		.def("__getitem__", &py_segment_list_get, nb::arg("index"))
+		.def("__repr__",
+		    [](const PySegmentList& self) {
+			    std::ostringstream oss;
+			    oss << "SegmentList(size=" << self.size() << ")";
+			    return oss.str();
+		    });
+
+	nb::class_<PySegmentFrameIterator>(seg, "SegmentFrameIterator")
+		.def("__iter__",
+		    [](PySegmentFrameIterator& self) -> PySegmentFrameIterator& {
+			    return self;
+		    },
+		    nb::rv_policy::reference_internal)
+		.def("__next__", &py_segment_frame_iterator_next);
+
+	nb::class_<PySegmentFrameList>(seg, "SegmentFrameList",
+	    "Sequence-like view over stored SEG frames.")
+		.def("__len__", [](const PySegmentFrameList& self) { return self.size(); })
+		.def("__bool__", [](const PySegmentFrameList& self) { return self.size() != 0; })
+		.def("__iter__",
+		    [](const PySegmentFrameList& self) {
+			    return PySegmentFrameIterator{self, 0};
+		    })
+		.def("__getitem__", &py_segment_frame_list_get, nb::arg("index"))
+		.def("__repr__",
+		    [](const PySegmentFrameList& self) {
+			    std::ostringstream oss;
+			    oss << "SegmentFrameList(size=" << self.size() << ")";
+			    return oss.str();
+		    });
+
+	nb::class_<PySegmentation>(seg, "Segmentation",
+	    "Owning high-level adapter for a DICOM Segmentation Storage instance.")
+		.def_prop_ro("is_valid", [](const PySegmentation& self) { return self.get().is_valid(); })
+		.def_prop_ro("segmentation_type",
+		    [](const PySegmentation& self) { return self.get().segmentation_type(); })
+		.def_prop_ro("fractional_type",
+		    [](const PySegmentation& self) { return self.get().fractional_type(); })
+		.def_prop_ro("labelmap_bits_allocated",
+		    [](const PySegmentation& self) -> nb::object {
+			    const auto value = self.get().labelmap_bits_allocated();
+			    if (!value) {
+				    return nb::none();
+			    }
+			    return nb::cast(*value);
+		    })
+		.def_prop_ro("maximum_fractional_value",
+		    [](const PySegmentation& self) { return self.get().maximum_fractional_value(); })
+		.def_prop_ro("frame_of_reference_uid",
+		    [](const PySegmentation& self) {
+			    return py_optional_string_view(self.get().frame_of_reference_uid());
+		    })
+		.def_prop_ro("rows", [](const PySegmentation& self) { return self.get().rows(); })
+		.def_prop_ro("columns",
+		    [](const PySegmentation& self) { return self.get().columns(); })
+		.def_prop_ro("segment_count",
+		    [](const PySegmentation& self) { return self.get().segment_count(); })
+		.def_prop_ro("frame_count",
+		    [](const PySegmentation& self) { return self.get().frame_count(); })
+		.def_prop_ro("shared_functional_groups_item",
+		    [](const PySegmentation& self) -> const DataSet& {
+			    return self.get().shared_functional_groups_item();
+		    },
+		    nb::rv_policy::reference_internal)
+		.def_prop_ro("segments",
+		    [](const PySegmentation& self) { return PySegmentList{self.owner}; })
+		.def_prop_ro("frames",
+		    [](const PySegmentation& self) {
+			    return PySegmentFrameList{self.owner, std::nullopt};
+		    })
+		.def("segment_by_number",
+		    [](const PySegmentation& self, std::uint16_t segment_number) -> nb::object {
+			    if (!self.get().segment_by_number(segment_number)) {
+				    return nb::none();
+			    }
+			    return nb::cast(PySegment{self.owner, segment_number});
+		    },
+		    nb::arg("segment_number"),
+		    "Return one Segment by DICOM SegmentNumber, or None when absent.")
+		.def("frames_for_segment",
+		    [](const PySegmentation& self, std::uint16_t segment_number) {
+			    {
+				    nb::gil_scoped_release release;
+				    (void)self.get().frames_for_segment(segment_number).size();
+			    }
+			    return PySegmentFrameList{self.owner, segment_number};
+		    },
+		    nb::arg("segment_number"),
+		    "Return stored frames that contain segment_number.")
+		.def("segment_frame_count",
+		    [](const PySegmentation& self, std::uint16_t segment_number) {
+			    nb::gil_scoped_release release;
+			    return self.get().segment_frame_count(segment_number);
+		    },
+		    nb::arg("segment_number"))
+		.def("present_segment_numbers",
+		    [](const PySegmentation& self, std::ptrdiff_t frame) {
+			    const auto frame_index = normalize_py_seg_frame_index(self.get(), frame);
+			    return py_seg_present_segment_numbers(self.get(), frame_index);
+		    },
+		    nb::arg("frame") = 0,
+		    "Return segment numbers represented by one frame.")
+		.def("to_array",
+		    [](const PySegmentation& self, std::ptrdiff_t frame) {
+			    const auto frame_index = normalize_py_seg_frame_index(self.get(), frame);
+			    return py_seg_frame_array(self.get(), frame_index);
+		    },
+		    nb::arg("frame") = 0,
+		    "Decode one SEG frame as a NumPy array with shape (rows, columns).")
+		.def("decode_frame",
+		    [](const PySegmentation& self, std::ptrdiff_t frame) {
+			    const auto frame_index = normalize_py_seg_frame_index(self.get(), frame);
+			    return py_seg_decode_frame_bytes(self.get(), frame_index);
+		    },
+		    nb::arg("frame") = 0,
+		    "Decode one SEG frame and return validated native typed sample bytes.")
+		.def("decode_frame_into",
+		    [](const PySegmentation& self, std::ptrdiff_t frame, nb::handle out) -> nb::object {
+			    const auto frame_index = normalize_py_seg_frame_index(self.get(), frame);
+			    py_seg_decode_frame_into(self.get(), frame_index, out);
+			    return nb::borrow<nb::object>(out);
+		    },
+		    nb::arg("frame"),
+		    nb::arg("out"),
+		    "Decode one SEG frame into a writable C-contiguous buffer.")
+		.def("mask_for_segment",
+		    [](const PySegmentation& self, std::ptrdiff_t frame,
+		        std::uint16_t segment_number, double fractional_threshold,
+		        bool error_when_not_present_in_frame) {
+			    const auto frame_index = normalize_py_seg_frame_index(self.get(), frame);
+			    return py_seg_mask_array(self.get(), frame_index, segment_number,
+			        make_seg_mask_options(
+			            fractional_threshold, error_when_not_present_in_frame));
+		    },
+		    nb::arg("frame"), nb::arg("segment_number"), nb::kw_only(),
+		    nb::arg("fractional_threshold") = 0.0,
+		    nb::arg("error_when_not_present_in_frame") = false,
+		    "Decode one SEG frame as a uint8 0/1 mask for one segment.")
+		.def("mask_for_segment_into",
+		    [](const PySegmentation& self, std::ptrdiff_t frame,
+		        std::uint16_t segment_number, nb::handle out,
+		        double fractional_threshold,
+		        bool error_when_not_present_in_frame) -> nb::object {
+			    const auto frame_index = normalize_py_seg_frame_index(self.get(), frame);
+			    py_seg_mask_for_segment_into(self.get(), frame_index, segment_number,
+			        out,
+			        make_seg_mask_options(
+			            fractional_threshold, error_when_not_present_in_frame));
+			    return nb::borrow<nb::object>(out);
+		    },
+		    nb::arg("frame"), nb::arg("segment_number"), nb::arg("out"),
+		    nb::kw_only(), nb::arg("fractional_threshold") = 0.0,
+		    nb::arg("error_when_not_present_in_frame") = false,
+		    "Decode one SEG frame into a writable uint8 0/1 mask buffer.")
+		.def("validate_label_values",
+		    [](const PySegmentation& self) {
+			    nb::gil_scoped_release release;
+			    self.get().validate_label_values();
+		    },
+		    "Validate all LABELMAP stored label values against SegmentSequence.")
+		.def("__repr__",
+		    [](const PySegmentation& self) {
+			    std::ostringstream oss;
+			    oss << "Segmentation(type=";
+			    switch (self.get().segmentation_type()) {
+			    case dicom::seg::SegmentationType::binary:
+				    oss << "binary";
+				    break;
+			    case dicom::seg::SegmentationType::fractional:
+				    oss << "fractional";
+				    break;
+			    case dicom::seg::SegmentationType::labelmap:
+				    oss << "labelmap";
+				    break;
+			    case dicom::seg::SegmentationType::unknown:
+			    default:
+				    oss << "unknown";
+				    break;
+			    }
+			    oss << ", segments=" << self.get().segment_count()
+			        << ", frames=" << self.get().frame_count() << ")";
+			    return oss.str();
+		    });
+
+	geometry.def("plane_from_seg_frame",
+	    [](const PySegmentation& segmentation, std::size_t frame_index) {
+		    return geometry_value_or_throw(
+		        geo::plane_from_seg_frame(segmentation.get(), frame_index),
+		        "plane_from_seg_frame");
+	    },
+	    nb::arg("segmentation"), nb::arg("frame_index"),
+	    "Resolve one DICOM SEG frame as an ImagePlaneGeometry.");
+	geometry.def("frame_of_reference_from_segmentation",
+	    [](const PySegmentation& segmentation) {
+		    return geometry_value_or_throw(
+		        geo::frame_of_reference_from_segmentation(segmentation.get()),
+		        "frame_of_reference_from_segmentation");
+	    },
+	    nb::arg("segmentation"));
+
+	seg.def("is_segmentation_storage",
+	    [](const DicomFile& file) { return dicom::seg::is_segmentation_storage(file); },
+	    nb::arg("dicom_file"),
+	    "Return True when dicom_file declares the Segmentation Storage SOP Class UID.");
+	seg.def("is_segmentation_storage",
+	    [](const DataSet& dataset) { return dicom::seg::is_segmentation_storage(dataset); },
+	    nb::arg("dataset"),
+	    "Return True when dataset declares the Segmentation Storage SOP Class UID.");
+	seg.def("is_labelmap_segmentation_storage",
+	    [](const DicomFile& file) {
+		    return dicom::seg::is_labelmap_segmentation_storage(file);
+	    },
+	    nb::arg("dicom_file"),
+	    "Return True when dicom_file declares the Label Map Segmentation Storage SOP Class UID.");
+	seg.def("is_labelmap_segmentation_storage",
+	    [](const DataSet& dataset) {
+		    return dicom::seg::is_labelmap_segmentation_storage(dataset);
+	    },
+	    nb::arg("dataset"),
+	    "Return True when dataset declares the Label Map Segmentation Storage SOP Class UID.");
+	seg.def("is_any_segmentation_storage",
+	    [](const DicomFile& file) {
+		    return dicom::seg::is_any_segmentation_storage(file);
+	    },
+	    nb::arg("dicom_file"),
+	    "Return True when dicom_file declares any supported Segmentation Storage SOP Class UID.");
+	seg.def("is_any_segmentation_storage",
+	    [](const DataSet& dataset) {
+		    return dicom::seg::is_any_segmentation_storage(dataset);
+	    },
+	    nb::arg("dataset"),
+	    "Return True when dataset declares any supported Segmentation Storage SOP Class UID.");
+	seg.def("read_file",
+	    [](nb::handle path, std::optional<Tag> load_until,
+	        std::optional<bool> keep_on_error, bool allow_partial_source,
+	        bool validate_required_modules) {
+		    auto file = dicom::read_file(python_path_to_filesystem_path(path, "path"),
+		        make_read_options(load_until, keep_on_error));
+		    return py_segmentation_from_unique(dicom::seg::from_dicomfile(
+		        std::move(file),
+		        make_seg_options(allow_partial_source, validate_required_modules)));
+	    },
+	    nb::arg("path"),
+	    nb::kw_only(),
+	    nb::arg("load_until") = nb::none(),
+	    nb::arg("keep_on_error") = nb::none(),
+	    nb::arg("allow_partial_source") = false,
+	    nb::arg("validate_required_modules") = true,
+	    "Read a DICOM file into an owned DicomFile and adapt it as DICOM "
+	    "Segmentation Storage.");
+	seg.def("read_bytes",
+	    [](nb::object buffer, const std::string& name,
+	        std::optional<Tag> load_until, std::optional<bool> keep_on_error,
+	        bool copy, bool allow_partial_source, bool validate_required_modules) {
+		    PyBufferView view(buffer);
+		    const Py_buffer& info = view.view();
+		    if (info.ndim != 1) {
+			    throw std::invalid_argument("seg.read_bytes expects a 1-D bytes-like object");
+		    }
+		    if (!PyBuffer_IsContiguous(&info, 'C')) {
+			    throw std::invalid_argument(
+			        "seg.read_bytes expects a contiguous bytes-like object");
+		    }
+		    const std::size_t elem_size =
+		        static_cast<std::size_t>(info.itemsize <= 0 ? 1 : info.itemsize);
+		    const std::size_t total = static_cast<std::size_t>(info.len);
+		    auto read_options = make_read_options(load_until, keep_on_error, copy);
+		    std::unique_ptr<dicom::DicomFile> file;
+		    if (copy || total == 0) {
+			    std::vector<std::uint8_t> owned(total);
+			    if (total > 0) {
+				    std::memcpy(owned.data(), info.buf, total);
+			    }
+			    file = dicom::read_bytes(std::string{name}, std::move(owned), read_options);
+		    } else {
+			    if (elem_size != 1) {
+				    throw std::invalid_argument(
+				        "seg.read_bytes(copy=False) requires a byte-oriented buffer");
+			    }
+			    file = dicom::read_bytes(std::string{name},
+			        static_cast<const std::uint8_t*>(info.buf), total, read_options);
+		    }
+		    auto segmentation = py_segmentation_from_unique(dicom::seg::from_dicomfile(
+		        std::move(file),
+		        make_seg_options(allow_partial_source, validate_required_modules)));
+		    if (!copy && total > 0) {
+			    segmentation.owner->buffer_owner = std::move(buffer);
+		    }
+		    return segmentation;
+	    },
+	    nb::arg("data"),
+	    nb::kw_only(),
+	    nb::arg("name") = std::string{"<memory>"},
+	    nb::arg("load_until") = nb::none(),
+	    nb::arg("keep_on_error") = nb::none(),
+	    nb::arg("copy") = true,
+	    nb::arg("allow_partial_source") = false,
+	    nb::arg("validate_required_modules") = true,
+	    "Read SEG bytes into an owned DicomFile and adapt them as DICOM "
+	    "Segmentation Storage.");
+
 	m.def("create_encoder_context",
 	    [](const Uid& transfer_syntax, nb::handle options) {
 		    return create_encoder_context_with_options(
@@ -7409,6 +9582,8 @@ m.def("generate_study_instance_uid",
 	    "IMPLEMENTATION_CLASS_UID",
 	    "IMPLEMENTATION_VERSION_NAME",
 	    "PIXELDATA_PAYLOAD_PLACEHOLDER_MAGIC",
+	    "geometry",
+	    "seg",
 	    "log_info",
 	    "log_warn",
 	    "log_error",

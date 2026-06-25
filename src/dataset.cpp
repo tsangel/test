@@ -332,6 +332,39 @@ tag_path_element_ref_t<DataSetPtr> get_dataelement_by_path_impl(
 }
 
 template <typename DataSetPtr>
+auto sequence_item_impl(DataSetPtr* dataset, Tag sequence_tag, std::uint32_t item_index)
+    -> std::conditional_t<std::is_const_v<DataSetPtr>, const DataSet*, DataSet*> {
+	if (!dataset || !sequence_tag) {
+		return nullptr;
+	}
+	auto& element = dataset->get_dataelement(sequence_tag);
+	if (element.is_missing() || !element.vr().is_sequence()) {
+		return nullptr;
+	}
+	auto* sequence = element.as_sequence();
+	if (!sequence) {
+		return nullptr;
+	}
+	return sequence->get_dataset(item_index);
+}
+
+template <typename DataSetPtr>
+tag_path_element_ref_t<DataSetPtr> get_dataelement_by_element_path_impl(
+    DataSetPtr* dataset, ElementPathView path) {
+	if (!dataset || !path.valid()) {
+		return *NullElement();
+	}
+	DataSetPtr* current = dataset;
+	for (const auto& step : path.parents()) {
+		current = sequence_item_impl(current, step.sequence_tag, step.item_index);
+		if (!current) {
+			return *NullElement();
+		}
+	}
+	return current->get_dataelement(path.leaf_tag());
+}
+
+template <typename DataSetPtr>
 Tag parse_tag_path_token_or_throw(
     DataSetPtr* dataset, std::string_view token, std::source_location location) {
 	token = strip_parens(trim(token));
@@ -1021,6 +1054,22 @@ DataElement& DataSet::get_dataelement(std::string_view tag_path) {
 
 const DataElement& DataSet::get_dataelement(std::string_view tag_path) const {
 	return get_dataelement_by_path_impl(this, tag_path, std::source_location::current());
+}
+
+DataElement& DataSet::get_dataelement(ElementPathView path) {
+	return get_dataelement_by_element_path_impl(this, path);
+}
+
+const DataElement& DataSet::get_dataelement(ElementPathView path) const {
+	return get_dataelement_by_element_path_impl(this, path);
+}
+
+DataSet* DataSet::sequence_item(Tag sequence_tag, std::uint32_t item_index) {
+	return sequence_item_impl(this, sequence_tag, item_index);
+}
+
+const DataSet* DataSet::sequence_item(Tag sequence_tag, std::uint32_t item_index) const {
+	return sequence_item_impl(this, sequence_tag, item_index);
 }
 
 DataElement& DataSet::operator[](Tag tag) {

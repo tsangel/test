@@ -128,10 +128,12 @@ add_library(dicomsdl STATIC
     src/dicomfile.cpp
     src/dicom_file_probe.cpp
     src/dicomfile_pixel_encode.cpp
+    src/geometry.cpp
     src/json_read.cpp
     src/json_write.cpp
     src/p10_pixeldata_payload.cpp
     src/selected_read.cpp
+    src/segmentation.cpp
     src/writing/direct_write.cpp
     src/writing/transcoded_write.cpp
     src/person_name.cpp
@@ -246,6 +248,10 @@ else()
 endif()
 
 target_compile_features(dicomsdl PUBLIC cxx_std_20)
+
+if(BUILD_TESTING)
+    target_compile_definitions(dicomsdl PRIVATE DICOMSDL_SEGMENTATION_TEST_HOOKS=1)
+endif()
 
 include(DicomsdlPixelTargets)
 dicomsdl_apply_pixel_static_plugin_defines(dicomsdl)
