@@ -1127,7 +1127,7 @@ SliceStackPlan plan_image_frame_stack(
 - [x] SOP Class helper 정책 구현: `is_segmentation_storage()`는 기존 SEG만, `is_labelmap_segmentation_storage()`는 Label Map SEG만, `is_any_segmentation_storage()`는 둘 중 하나만 true로 반환한다. `SOPClassUID` / `MediaStorageSOPClassUID` 충돌은 bool helper에서 false, strict classifier에서 error다.
 - [x] 공통 API 구현: `present_segment_numbers(frame)`, `mask_for_segment(frame, segment_number, options)`, `mask_for_segment_into(...)`, `validate_label_values()`를 C++/Python에 연결했다.
 - [x] LABELMAP decode 구현: 8-bit는 기존 `decode_frame_into(uint8)`와 labelmap-specific uint8 decode를 허용하고, 16-bit는 명시적 `decode_labelmap_frame_into(uint16)` / Python native `np.uint16` 경로만 허용한다.
-- [x] LABELMAP presence cache 구현: `Segmentation` 소유 fixed-size cache array, ready empty 상태, immutable `shared_ptr<const vector<uint16_t>>`, ready entry/index no-replace, caller-owned publish, duplicate concurrent scan 허용 정책을 따른다.
+- [x] LABELMAP presence cache 구현: `Segmentation` 소유 fixed-size cache array, ready empty 상태, immutable `shared_ptr<const vector<uint16_t>>`, ready entry/index no-replace, caller-owned publish 정책을 따른다. frame 단위 lazy scan은 동시 호출 시 중복될 수 있지만, all-frame index build는 `call_once`로 한 번만 수행한다.
 - [x] payload/metadata 기본 정책 구현: native uncompressed와 지원되는 encapsulated lossless source는 동일한 typed sample contract로 처리한다. Big Endian, detached payload, missing PixelData, invalid native length/padding, lossy/near-lossless/unknown compressed source는 decode/validate/write/transcode 시 명확한 error로 처리한다. LABELMAP의 `PixelPaddingValue`는 background segment number로 허용하고, `PixelPaddingRangeLimit`은 reject한다.
 - [x] Python binding/stub 반영: `present_segment_numbers()`는 tuple, labelmap `to_array()`는 `np.uint8`/`np.uint16`, `decode_frame()` bytes는 native typed bytes, `decode_frame_into()`는 unsigned dtype/endian을 검사한다.
 - [x] 집중 테스트 추가: synthetic 8-bit/16-bit LABELMAP, lazy unknown-label validation, SOP conflict/helper, `PALETTE COLOR`, `PixelPaddingValue`, `SegmentNumber=0`, metadata-only absent segment, dtype mismatch, Big Endian, missing/trailing/padded PixelData, detached/PixSeq C++ smoke를 커버한다.
@@ -1243,7 +1243,7 @@ SliceStackPlan plan_image_frame_stack(
 - [ ] `to_array()`, `decode_frame()`, `decode_frame_into()`, `decode_labelmap_frame_into()` 같은 LABELMAP public decode API도 helper 성공 시 frame presence cache candidate를 no-replace 방식으로 publish한다. 실패 시에는 publish하지 않는다.
 - [ ] LABELMAP의 모든 public frame decode API는 stored label values를 반환하면서 동시에 membership validation을 수행한다. unknown non-background label은 decode API에서도 error다.
 - [ ] `mask_for_segment()`는 labelmap frame decode 중 presence collection과 mask generation을 한 pass에서 수행할 수 있어야 한다. presence cache가 없으면 mask 생성과 동시에 cache candidate를 만들고, helper 성공 후 caller가 frame cache publish를 시도한다.
-- [ ] 동시 lazy scan은 MVP에서 중복 수행을 허용한다. 두 thread가 같은 frame 또는 all-frame index를 동시에 scan할 수 있지만, publish는 mutex 아래에서 한 번만 성공한다. 이미 ready/published인 storage가 있으면 늦게 끝난 scan 결과는 버린다.
+- [x] 동시 lazy scan 정책을 고정한다. 같은 frame의 lazy presence scan은 중복될 수 있지만, `frames_for_segment()` / `validate_label_values()`의 all-frame index build는 `call_once`로 한 번만 수행한다. publish는 mutex 아래에서 한 번만 성공하고 이미 ready/published인 storage는 replace하지 않는다.
 - [ ] concurrent publish 순서는 `local result 완성 -> mutex 획득 -> 아직 unpublished인 entry/index만 publish -> 이미 published면 local result discard -> mutex release`로 고정한다.
 - [ ] 중복 scan을 줄이는 `in_progress` state / condition variable은 후속 최적화로 둔다. correctness와 lifetime 보장을 1차 목표로 한다.
 - [ ] 반복 호출은 cached vector/span을 재사용한다. scratch `seen` table은 호출 중 임시 저장소로만 쓰고 per-frame마다 영구 보관하지 않는다.
@@ -1349,7 +1349,7 @@ SliceStackPlan plan_image_frame_stack(
 - [ ] Python `seg.frames_for_segment(segment_number)`는 호출 시점에 all-frame build와 error propagation이 일어나고, 반환된 list view의 `len()` / iteration은 build를 다시 유발하지 않는지 테스트한다.
 - [ ] `frames_for_segment(unknown_segment)`와 `segment_frame_count(unknown_segment)`는 empty/0을 반환하고 LABELMAP PixelData scan을 유발하지 않는지 테스트한다.
 - [ ] published all-frame index에서 missing key인 known-absent segment가 re-scan 없이 empty view / count 0을 반환하는지 테스트한다.
-- [ ] concurrent lazy scan에서 같은 frame/all-frame scan이 중복될 수 있지만 ready/published storage는 한 번만 publish되고 늦게 끝난 결과가 버려지는지 stress/behavior test로 확인한다.
+- [x] concurrent lazy scan에서 ready/published storage가 한 번만 publish되는지 stress/behavior test로 확인한다. fresh LABELMAP에서 concurrent `frames_for_segment()` 최초 호출은 all-frame scan을 한 번만 수행하는지 scan count로 고정한다.
 - [ ] `mask_for_segment()`가 BINARY/FRACTIONAL/LABELMAP 모두에서 uint8 0/1 mask를 반환하는지 검증한다.
 - [ ] 8-bit LABELMAP의 metadata-only absent segment, 예: `SegmentNumber=1024`, 에 대해 `mask_for_segment(1024)`가 frame scan/unknown label validation을 수행한 뒤 zero mask를 반환하는지 테스트한다.
 - [ ] LABELMAP `mask_for_segment()`가 frame decode 중 mask와 presence cache candidate를 한 pass에서 만들고, 이후 `present_segment_numbers()`가 재-decode하지 않는지 행동/계측 테스트로 검증한다.
@@ -1395,7 +1395,8 @@ SliceStackPlan plan_image_frame_stack(
 - [ ] native-to-encapsulated BINARY transcode는 encoder가 1-bit source layout을 받을 수 있어야 한다. encoder backend가 1-bit를 직접 받지 못하면 core encode layer에서 명시적으로 unsupported를 반환하고, metadata를 `BitsAllocated=8`로 바꾸는 fallback은 금지한다.
 - [x] core 1-bit source layout/write 지원 전까지 BINARY SEG pixel transcode는 `write_with_transfer_syntax()`와 `set_transfer_syntax()` preflight에서 명확한 unsupported error로 막는다.
 - [x] `present_segment_numbers(frame)`는 encapsulated LABELMAP에서 해당 frame 하나만 decode/scan한다. `frames_for_segment()`와 `validate_label_values()`만 all-frame decode를 유발한다. 비용과 error propagation 문서화는 별도 문서 항목으로 남긴다.
-- [x] full decoded frame buffer는 기본적으로 persistent cache하지 않는다. compressed LABELMAP all-frame scan은 `frames_for_segment()` / `validate_label_values()` 내부 builder에서 decode plan 1개와 frame scratch 1개를 재사용하고, persistent cache는 기존처럼 presence list와 all-frame segment index까지만 유지한다. single-frame lazy decode는 caller별 임시 scratch를 사용한다.
+- [x] full decoded frame buffer는 기본적으로 persistent cache하지 않는다. compressed LABELMAP all-frame scan은 `frames_for_segment()` / `validate_label_values()` 내부 builder에서 decode plan 1개, frame scratch 1개, label presence `seen` table scratch 1개를 재사용하고, persistent cache는 기존처럼 presence list와 all-frame segment index까지만 유지한다. single-frame lazy decode는 caller별 임시 scratch를 사용한다.
+- [x] LABELMAP `mask_for_segment()`는 frame presence cache가 ready이고 요청 segment가 absent이면 재decode 없이 zero mask/error를 반환한다. cache가 없으면 기존처럼 frame scan을 수행해 unknown label validation과 mask 생성을 한 pass에서 처리한다.
 - [ ] Python binding에서는 compressed SEG decode/presence scan/`validate_label_values()`/`frames_for_segment()` all-frame scan과 write/transcode 중 GIL을 release한다.
 - [ ] output buffer contract는 native path와 동일하게 유지한다. `_into()` 계열에서 codec/decode/validation error가 나면 output buffer가 partial write 상태일 수 있음을 header/docstring에 명시한다.
 - [x] write/transcode 후 validation test를 추가한다. Encapsulated Uncompressed와 RLE Lossless output을 다시 SEG로 열어 C++ `decode_frame_into`/`decode_labelmap_frame_into`, Python `to_array`, `present_segment_numbers`, `mask_for_segment`, `frames_for_segment`, `validate_label_values`를 실행하고 원본 frame별 mask/label value와 비교한다. C++ RLE regression은 RLE static plugin enabled build에서 조건부 실행한다. JPEG-LS/JPEG 2000 등 추가 lossless compressed regression은 별도 항목으로 남긴다.

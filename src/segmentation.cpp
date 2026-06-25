@@ -3,6 +3,7 @@
 #include "diagnostics.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstring>
 #include <limits>
@@ -395,6 +396,8 @@ enum class LabelmapSampleByteOrder : std::uint8_t {
 struct LabelmapFrameDecodeContext {
 	std::optional<pixel::DecodePlan> decode_plan{};
 	std::vector<std::uint8_t> decoded_frame{};
+	std::array<std::uint64_t, 1024> seen_words{};
+	std::vector<std::uint16_t> present_labels{};
 };
 
 void require_lossless_seg_decode(const pixel::DecodeInfo& decode_info) {
@@ -482,10 +485,22 @@ void require_lossless_seg_decode(const pixel::DecodeInfo& decode_info) {
 	}
 	const auto bytes_per_frame = pixels_per_frame * bytes_per_sample;
 
+	LabelmapFrameDecodeContext local_decode_context{};
+	auto& active_decode_context =
+	    decode_context ? *decode_context : local_decode_context;
+
 	const auto word_count = bits_allocated == 8 ? std::size_t{4} : std::size_t{1024};
-	std::vector<std::uint64_t> seen_words(
-	    request.collect_presence ? word_count : std::size_t{0}, 0u);
-	std::vector<std::uint16_t> present;
+	auto& seen_words = active_decode_context.seen_words;
+	auto& present = active_decode_context.present_labels;
+	present.clear();
+	if (request.collect_presence) {
+		std::fill_n(seen_words.begin(), word_count, std::uint64_t{0});
+		const auto reserve_count =
+		    bits_allocated == 8 ? std::size_t{256} : std::size_t{1024};
+		if (present.capacity() < reserve_count) {
+			present.reserve(reserve_count);
+		}
+	}
 	const auto mark_seen = [&](std::uint16_t value) {
 		if (!request.collect_presence) {
 			return;
@@ -551,8 +566,7 @@ void require_lossless_seg_decode(const pixel::DecodeInfo& decode_info) {
 		    std::sort(present.begin(), present.end());
 		    return LabelmapFrameScanResult{
 		        .present_labels =
-		            std::make_shared<const std::vector<std::uint16_t>>(
-		                std::move(present)),
+		            std::make_shared<const std::vector<std::uint16_t>>(present),
 		        .decoded_written =
 		            !request.decoded_u8.empty() || !request.decoded_u16.empty(),
 		        .mask_written = !request.mask_out.empty(),
@@ -580,9 +594,6 @@ void require_lossless_seg_decode(const pixel::DecodeInfo& decode_info) {
 			throw_decode("LABELMAP PixelSequence requires encapsulated transfer syntax");
 		}
 
-		LabelmapFrameDecodeContext local_decode_context{};
-		auto& active_decode_context =
-		    decode_context ? *decode_context : local_decode_context;
 		const auto& decode_plan = labelmap_decode_plan_or_throw(
 		    file, bits_allocated, bytes_per_frame, active_decode_context);
 		auto& decoded_frame = active_decode_context.decoded_frame;
@@ -995,53 +1006,52 @@ Segmentation::ensure_labelmap_frame_index() const {
 	if (segmentation_type_ != SegmentationType::labelmap) {
 		throw_decode("LABELMAP frame index requested for non-LABELMAP SEG");
 	}
-	{
-		std::lock_guard lock(labelmap_cache_mutex_);
-		if (labelmap_frame_index_) {
-			return labelmap_frame_index_;
-		}
-	}
-
-	std::vector<std::shared_ptr<const std::vector<std::uint16_t>>> frame_labels(
-	    index_.frames.size());
-	detail::LabelmapFrameIndex local_index{};
-	LabelmapFrameDecodeContext decode_context{};
-	for (std::size_t frame_index = 0; frame_index < index_.frames.size(); ++frame_index) {
-		{
-			std::lock_guard lock(labelmap_cache_mutex_);
-			const auto& cache = labelmap_presence_cache_[frame_index];
-			if (cache.ready) {
-				frame_labels[frame_index] = cache.labels;
+	std::call_once(labelmap_frame_index_once_, [this] {
+		std::vector<std::shared_ptr<const std::vector<std::uint16_t>>> frame_labels(
+		    index_.frames.size());
+		detail::LabelmapFrameIndex local_index{};
+		LabelmapFrameDecodeContext decode_context{};
+		for (std::size_t frame_index = 0; frame_index < index_.frames.size();
+		     ++frame_index) {
+			{
+				std::lock_guard lock(labelmap_cache_mutex_);
+				const auto& cache = labelmap_presence_cache_[frame_index];
+				if (cache.ready) {
+					frame_labels[frame_index] = cache.labels;
+				}
+			}
+			if (!frame_labels[frame_index]) {
+				const auto result = decode_and_scan_labelmap_frame(*file_,
+				    index_.frames.size(), frame_index, rows_, columns_,
+				    labelmap_bits_allocated_.value_or(0), labelmap_valid_labels_,
+				    labelmap_background_value_,
+				    LabelmapFrameScanRequest{.collect_presence = true},
+				    &decode_context);
+				frame_labels[frame_index] = result.present_labels;
+			}
+			for (const auto label : *frame_labels[frame_index]) {
+				local_index.frame_indices_by_segment[label].push_back(frame_index);
 			}
 		}
-		if (!frame_labels[frame_index]) {
-			const auto result = decode_and_scan_labelmap_frame(*file_,
-			    index_.frames.size(), frame_index, rows_, columns_,
-			    labelmap_bits_allocated_.value_or(0), labelmap_valid_labels_,
-			    labelmap_background_value_,
-			    LabelmapFrameScanRequest{.collect_presence = true},
-			    &decode_context);
-			frame_labels[frame_index] = result.present_labels;
-		}
-		for (const auto label : *frame_labels[frame_index]) {
-			local_index.frame_indices_by_segment[label].push_back(frame_index);
-		}
-	}
 
-	auto published =
-	    std::make_shared<const detail::LabelmapFrameIndex>(std::move(local_index));
-	std::lock_guard lock(labelmap_cache_mutex_);
-	if (labelmap_frame_index_) {
-		return labelmap_frame_index_;
-	}
-	for (std::size_t frame_index = 0; frame_index < frame_labels.size(); ++frame_index) {
-		auto& cache = labelmap_presence_cache_[frame_index];
-		if (!cache.ready) {
-			cache.ready = true;
-			cache.labels = frame_labels[frame_index];
+		auto published =
+		    std::make_shared<const detail::LabelmapFrameIndex>(std::move(local_index));
+		std::lock_guard lock(labelmap_cache_mutex_);
+		for (std::size_t frame_index = 0; frame_index < frame_labels.size();
+		     ++frame_index) {
+			auto& cache = labelmap_presence_cache_[frame_index];
+			if (!cache.ready) {
+				cache.ready = true;
+				cache.labels = frame_labels[frame_index];
+			}
 		}
+		labelmap_frame_index_ = std::move(published);
+	});
+
+	std::lock_guard lock(labelmap_cache_mutex_);
+	if (!labelmap_frame_index_) {
+		throw_decode("LABELMAP frame index build failed");
 	}
-	labelmap_frame_index_ = std::move(published);
 	return labelmap_frame_index_;
 }
 
@@ -1327,6 +1337,24 @@ void Segmentation::mask_for_segment_into(std::size_t frame_index,
 	}
 
 	if (segmentation_type_ == SegmentationType::labelmap) {
+		std::shared_ptr<const std::vector<std::uint16_t>> cached_labels{};
+		{
+			std::lock_guard lock(labelmap_cache_mutex_);
+			const auto& cache = labelmap_presence_cache_[frame_index];
+			if (cache.ready) {
+				cached_labels = cache.labels;
+			}
+		}
+		const auto cached_target_present =
+		    cached_labels && std::binary_search(cached_labels->begin(),
+		                         cached_labels->end(), segment_number);
+		const auto target_is_background =
+		    labelmap_background_value_ && segment_number == *labelmap_background_value_;
+		if (cached_labels && !target_is_background && !cached_target_present) {
+			fill_zero_or_throw();
+			return;
+		}
+
 		const auto result = decode_and_scan_labelmap_frame(*file_,
 		    index_.frames.size(), frame_index, rows_, columns_,
 		    labelmap_bits_allocated_.value_or(0), labelmap_valid_labels_,
@@ -1334,9 +1362,9 @@ void Segmentation::mask_for_segment_into(std::size_t frame_index,
 		    LabelmapFrameScanRequest{
 		        .mask_out = out,
 		        .target_segment = segment_number,
-		        .collect_presence = true,
+		        .collect_presence = !cached_labels,
 		    });
-		{
+		if (!cached_labels) {
 			std::lock_guard lock(labelmap_cache_mutex_);
 			auto& cache = labelmap_presence_cache_[frame_index];
 			if (!cache.ready) {

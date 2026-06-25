@@ -566,6 +566,7 @@ private:
 	mutable std::mutex labelmap_cache_mutex_{};
 	mutable std::vector<detail::LabelmapFramePresenceCache>
 	    labelmap_presence_cache_{};
+	mutable std::once_flag labelmap_frame_index_once_{};
 	mutable std::shared_ptr<const detail::LabelmapFrameIndex>
 	    labelmap_frame_index_{};
 

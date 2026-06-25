@@ -1173,6 +1173,39 @@ int main() {
 		    dicom::seg::detail::labelmap_frame_scan_count() != 2) {
 			fail("known absent label should use published empty index result");
 		}
+		const auto absent_mask = seg->mask_for_segment(0, 7);
+		if (absent_mask != std::vector<std::uint8_t>(6, 0) ||
+		    dicom::seg::detail::labelmap_frame_scan_count() != 2) {
+			fail("known absent label mask should reuse presence cache");
+		}
+	}
+
+	{
+		auto seg = dicom::seg::from_dicomfile(make_labelmap_seg8_file());
+		dicom::seg::detail::reset_labelmap_frame_scan_count();
+		std::atomic<int> failures{0};
+		std::vector<std::thread> workers;
+		workers.reserve(8);
+		for (int worker_index = 0; worker_index < 8; ++worker_index) {
+			workers.emplace_back([&] {
+				try {
+					if (seg->frames_for_segment(2).size() != 2) {
+						++failures;
+					}
+				} catch (...) {
+					++failures;
+				}
+			});
+		}
+		for (auto& worker : workers) {
+			worker.join();
+		}
+		if (failures.load() != 0) {
+			fail("concurrent labelmap frame indexing returned inconsistent results");
+		}
+		if (dicom::seg::detail::labelmap_frame_scan_count() != 2) {
+			fail("concurrent labelmap frame indexing should build once");
+		}
 	}
 
 	{
