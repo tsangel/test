@@ -1370,7 +1370,7 @@ SliceStackPlan plan_image_frame_stack(
 - [x] `plane_from_seg_frame()`이 Label Map SEG synthetic sample의 geometry를 반환하는지 검증한다.
 - [ ] palette/color 관련 테스트는 core SEG adapter가 아니라 GUI/viewer test suite에서 다룬다.
 
-### SEG PixelData compression / write / transcode 후속 계획
+### PixelData compression 지원 후속 계획
 
 - [x] 범위는 read/decode뿐 아니라 기존 `DicomFile::set_transfer_syntax()` / `write_with_transfer_syntax()` / `write_bytes_with_transfer_syntax()` 경로를 통한 write/transcode까지 포함한다. SEG 전용 writer, SEG 전용 pre-serialization PixelData rewrite, 별도 fragment parser는 만들지 않는다.
 - [x] write/transcode는 "SEG wrapper가 PixelData를 미리 변환한 뒤 generic writer에 맡기는" 방식이 아니라, generic pixel/write path가 SEG metadata와 1-bit storage를 표현할 수 있도록 보강하는 방향으로 진행한다.
