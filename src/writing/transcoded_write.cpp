@@ -1,7 +1,6 @@
 #include "writing/transcoded_write.hpp"
 
 #include "writing/detail/overlay_write.hpp"
-#include "writing/detail/segmentation_write_policy.hpp"
 #include "pixel/host/adapter/host_adapter.hpp"
 #include "pixel/host/decode/decode_frame_dispatch.hpp"
 #include "pixel/host/encode/encode_set_pixel_data_runner.hpp"
@@ -367,8 +366,7 @@ prepare_streaming_transcode_state_or_throw(DicomFile& file, DataSet& dataset,
     uid::WellKnown target_transfer_syntax, WriteEncoderConfigSource encode_mode,
     std::span<const pixel::CodecOptionTextKv> codec_opt_override,
     const pixel::EncoderContext* encoder_ctx, const WriteOptions& options,
-    const TransferSyntaxWriteDecision& decision,
-    const SegPixelPayloadWritePolicy& seg_policy, bool writer_can_overwrite) {
+    const TransferSyntaxWriteDecision& decision, bool writer_can_overwrite) {
 	PreparedStreamingTranscodeState state{};
 	// Build state in the same order the write pipeline will consume it.
 	state.source_decode_layout =
@@ -384,8 +382,6 @@ prepare_streaming_transcode_state_or_throw(DicomFile& file, DataSet& dataset,
 	    encode_mode, codec_opt_override, encoder_ctx, decision);
 	prepare_streaming_encode_policy_or_throw(
 	    state, file, target_transfer_syntax, decision, writer_can_overwrite);
-	validate_seg_encode_profile_or_throw(
-	    file, seg_policy, state.codec_profile_code, "write_with_transfer_syntax");
 	measure_streaming_lossy_payload_prepass_if_needed_or_throw(
 	    state, file, target_transfer_syntax, decision);
 	prepare_streaming_overlay_or_throw(
@@ -586,13 +582,6 @@ void write_with_transfer_syntax_impl(DicomFile& file, Writer& writer,
 		// First decide whether this is a plain write, a metadata overlay, or a pixel transcode.
 		const auto decision =
 		    classify_transfer_syntax_write(file, dataset, target_transfer_syntax);
-		const auto seg_policy =
-		    classify_seg_pixel_payload_write_policy_or_throw(
-		        file, "write_with_transfer_syntax");
-		validate_seg_transfer_syntax_target_or_throw(
-		    file, seg_policy, target_transfer_syntax, "write_with_transfer_syntax");
-		validate_seg_pixel_transcode_or_throw(file, seg_policy,
-		    decision.needs_pixel_transcode, "write_with_transfer_syntax");
 		if (!decision.needs_pixel_transcode && decision.same_transfer_syntax &&
 		    options.keep_existing_meta) {
 			write_current_dataset_as_is(file, writer, target_transfer_syntax, options);
@@ -633,7 +622,7 @@ void write_with_transfer_syntax_impl(DicomFile& file, Writer& writer,
 		// For streaming transcodes, prepare shared state once and then hand off to the emit path.
 		auto state = prepare_streaming_transcode_state_or_throw(file, dataset,
 		    target_transfer_syntax, encode_mode, codec_opt_override, encoder_ctx, options,
-		    decision, seg_policy, writer.can_overwrite());
+		    decision, writer.can_overwrite());
 		// State is moved out of prepare(), so restore the pointer to whichever encoder context survived.
 		state.active_encoder_ctx = state.staged_encoder_ctx.configured()
 		    ? &state.staged_encoder_ctx

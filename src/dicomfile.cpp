@@ -8,7 +8,6 @@
 #include "pixel/host/support/dicom_pixel_support.hpp"
 #include "pixeldata_payload_placeholder.hpp"
 #include "photometric_text_detail.hpp"
-#include "writing/detail/segmentation_write_policy.hpp"
 
 #include <array>
 #include <algorithm>
@@ -627,23 +626,10 @@ void transcode_encapsulated_pixel_data_to_encapsulated(DicomFile& file,
 	const bool has_pixel_data_element = !pixel_data.is_missing();
 	const bool has_encapsulated_pixel_data = pixel_data.vr().is_pixel_sequence();
 	const bool target_uses_encapsulated_pixel_data = transfer_syntax.is_encapsulated();
-	const bool already_target_transfer_syntax = has_encapsulated_pixel_data &&
-	    source_transfer_syntax.valid() && source_transfer_syntax == transfer_syntax;
-	const bool needs_pixel_transcode = has_pixel_data_element &&
-	    ((target_uses_encapsulated_pixel_data && !already_target_transfer_syntax) ||
-	        (has_encapsulated_pixel_data && !target_uses_encapsulated_pixel_data));
-
-	const auto seg_policy =
-	    write_detail::classify_seg_pixel_payload_write_policy_or_throw(
-	        file, "DicomFile::set_transfer_syntax");
-	write_detail::validate_seg_transfer_syntax_target_or_throw(
-	    file, seg_policy, transfer_syntax, "DicomFile::set_transfer_syntax");
-	write_detail::validate_seg_pixel_transcode_or_throw(file, seg_policy,
-	    needs_pixel_transcode, "DicomFile::set_transfer_syntax");
-	write_detail::validate_seg_encode_profile_from_transfer_syntax_or_throw(
-	    file, seg_policy, transfer_syntax, "DicomFile::set_transfer_syntax");
 
 	if (target_uses_encapsulated_pixel_data && has_pixel_data_element) {
+		const bool already_target_transfer_syntax = has_encapsulated_pixel_data &&
+		    source_transfer_syntax.valid() && source_transfer_syntax == transfer_syntax;
 		if (already_target_transfer_syntax) {
 			// Keep existing encoded PixelData as-is.
 		} else if (!has_encapsulated_pixel_data) {
