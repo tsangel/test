@@ -485,20 +485,23 @@ public:
 	present_segment_numbers(std::size_t frame_index) const;
 
 	/// Decode one SEG frame into caller-provided 8-bit samples.
-	/// BINARY SEG is unpacked to 0/1 bytes. FRACTIONAL SEG currently supports the
-	/// MVP native 8-bit case and reuses one DicomFile decode plan. LABELMAP is
-	/// supported here only when BitsAllocated == 8. If an exception is thrown,
-	/// output contents are unspecified and may have been partially written.
+	/// BINARY SEG is unpacked to 0/1 bytes. FRACTIONAL SEG supports 8-bit
+	/// samples through the DicomFile decode path and rejects lossy decoded
+	/// sources. LABELMAP is supported here only when BitsAllocated == 8. If an
+	/// exception is thrown, output contents are unspecified and may have been
+	/// partially written.
 	void decode_frame_into(std::size_t frame_index,
 	    std::span<std::uint8_t> out) const;
 
-	/// Decode an 8-bit LABELMAP frame as stored label values.
+	/// Decode an 8-bit LABELMAP frame as stored label values. Native and
+	/// lossless encapsulated PixelData return the same label samples.
 	/// The output element type must exactly match BitsAllocated; this API does
 	/// not widen or truncate. Errors may leave `out` partially written.
 	void decode_labelmap_frame_into(std::size_t frame_index,
 	    std::span<std::uint8_t> out) const;
 
 	/// Decode a 16-bit LABELMAP frame as native-endian stored label values.
+	/// Native and lossless encapsulated PixelData return the same label samples.
 	/// The output element type must exactly match BitsAllocated; this API does
 	/// not widen or truncate. Errors may leave `out` partially written.
 	void decode_labelmap_frame_into(std::size_t frame_index,

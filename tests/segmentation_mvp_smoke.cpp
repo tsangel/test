@@ -311,6 +311,88 @@ std::unique_ptr<dicom::DicomFile> make_labelmap_seg16_file() {
 	return file;
 }
 
+std::unique_ptr<dicom::seg::Segmentation> roundtrip_seg_with_transfer_syntax(
+    std::unique_ptr<dicom::DicomFile> file,
+    dicom::uid::WellKnown transfer_syntax,
+    std::string name) {
+	auto bytes = file->write_bytes_with_transfer_syntax(transfer_syntax);
+	auto reread = dicom::read_bytes(std::move(name), std::move(bytes));
+	return dicom::seg::from_dicomfile(std::move(reread));
+}
+
+void verify_fractional_roundtrip(dicom::uid::WellKnown transfer_syntax) {
+	auto seg = roundtrip_seg_with_transfer_syntax(
+	    make_fractional_seg_file(), transfer_syntax, "fractional-seg-roundtrip");
+	if (seg->segmentation_type() != dicom::seg::SegmentationType::fractional) {
+		fail("fractional roundtrip segmentation type mismatch");
+	}
+	std::vector<std::uint8_t> decoded(4);
+	seg->decode_frame_into(0, decoded);
+	if (decoded != std::vector<std::uint8_t>{0, 128, 255, 64}) {
+		fail("fractional roundtrip decode mismatch");
+	}
+	const auto mask = seg->mask_for_segment(0, 1);
+	if (mask != std::vector<std::uint8_t>{0, 1, 1, 1}) {
+		fail("fractional roundtrip mask mismatch");
+	}
+	seg->validate_label_values();
+}
+
+void verify_labelmap8_roundtrip(dicom::uid::WellKnown transfer_syntax) {
+	auto seg = roundtrip_seg_with_transfer_syntax(
+	    make_labelmap_seg8_file(), transfer_syntax, "labelmap8-seg-roundtrip");
+	if (seg->segmentation_type() != dicom::seg::SegmentationType::labelmap ||
+	    seg->labelmap_bits_allocated().value_or(0) != 8) {
+		fail("labelmap8 roundtrip metadata mismatch");
+	}
+	std::vector<std::uint8_t> decoded0(6);
+	std::vector<std::uint8_t> decoded1(6);
+	seg->decode_frame_into(0, decoded0);
+	seg->decode_frame_into(1, decoded1);
+	if (decoded0 != std::vector<std::uint8_t>{0, 1, 2, 2, 0, 1} ||
+	    decoded1 != std::vector<std::uint8_t>{0, 0, 2, 0, 0, 0}) {
+		fail("labelmap8 roundtrip decode mismatch");
+	}
+	const auto present0 = seg->present_segment_numbers(0);
+	const auto present1 = seg->present_segment_numbers(1);
+	if (present0.size() != 2 || present0[0] != 1 || present0[1] != 2 ||
+	    present1.size() != 1 || present1[0] != 2) {
+		fail("labelmap8 roundtrip presence mismatch");
+	}
+	const auto mask1 = seg->mask_for_segment(0, 1);
+	if (mask1 != std::vector<std::uint8_t>{0, 1, 0, 0, 0, 1}) {
+		fail("labelmap8 roundtrip mask mismatch");
+	}
+	if (seg->frames_for_segment(2).size() != 2 ||
+	    seg->frames_for_segment(7).size() != 0) {
+		fail("labelmap8 roundtrip frames_for_segment mismatch");
+	}
+	seg->validate_label_values();
+}
+
+void verify_labelmap16_roundtrip(dicom::uid::WellKnown transfer_syntax) {
+	auto seg = roundtrip_seg_with_transfer_syntax(
+	    make_labelmap_seg16_file(), transfer_syntax, "labelmap16-seg-roundtrip");
+	if (seg->segmentation_type() != dicom::seg::SegmentationType::labelmap ||
+	    seg->labelmap_bits_allocated().value_or(0) != 16) {
+		fail("labelmap16 roundtrip metadata mismatch");
+	}
+	std::vector<std::uint16_t> decoded(4);
+	seg->decode_labelmap_frame_into(0, decoded);
+	if (decoded != std::vector<std::uint16_t>{0, 1, 300, 300}) {
+		fail("labelmap16 roundtrip decode mismatch");
+	}
+	const auto present = seg->present_segment_numbers(0);
+	if (present.size() != 2 || present[0] != 1 || present[1] != 300) {
+		fail("labelmap16 roundtrip presence mismatch");
+	}
+	const auto mask300 = seg->mask_for_segment(0, 300);
+	if (mask300 != std::vector<std::uint8_t>{0, 0, 1, 1}) {
+		fail("labelmap16 roundtrip mask mismatch");
+	}
+	seg->validate_label_values();
+}
+
 std::filesystem::path unique_temp_seg_path() {
 	const auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
 	return std::filesystem::temp_directory_path() /
@@ -664,6 +746,14 @@ int main() {
 			file->remove_dataelement("PixelData"_tag);
 			file->set_transfer_syntax("JPEGBaseline8Bit"_uid);
 		}
+	}
+
+	{
+		const auto transfer_syntax =
+		    "EncapsulatedUncompressedExplicitVRLittleEndian"_uid;
+		verify_fractional_roundtrip(transfer_syntax);
+		verify_labelmap8_roundtrip(transfer_syntax);
+		verify_labelmap16_roundtrip(transfer_syntax);
 	}
 
 	{

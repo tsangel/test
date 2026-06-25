@@ -351,11 +351,6 @@ template <typename T, typename U>
 	if (transfer_syntax == "ExplicitVRBigEndian"_uid) {
 		throw_decode("Big Endian LABELMAP PixelData is not supported");
 	}
-	if (transfer_syntax &&
-	    (!transfer_syntax.is_uncompressed() || transfer_syntax.is_encapsulated())) {
-		throw_decode(
-		    "compressed/encapsulated Label Map SEG PixelData is not supported");
-	}
 
 	file.ensure_loaded("PixelData"_tag);
 	const auto& pixel_data = file.get_dataelement("PixelData"_tag);
@@ -390,6 +385,17 @@ template <typename T, typename U>
 		}
 	}
 	return bytes;
+}
+
+enum class LabelmapSampleByteOrder : std::uint8_t {
+	little_endian,
+	native_endian,
+};
+
+void require_lossless_seg_decode(const pixel::DecodeInfo& decode_info) {
+	if (decode_info.encoded_lossy_state != pixel::EncodedLossyState::lossless) {
+		throw_decode("SEG compressed PixelData decode requires lossless source frames");
+	}
 }
 
 [[nodiscard]] LabelmapFrameScanResult decode_and_scan_labelmap_frame(
@@ -438,16 +444,12 @@ template <typename T, typename U>
 	g_labelmap_frame_scan_count.fetch_add(1, std::memory_order_relaxed);
 #endif
 
-	const auto bytes = labelmap_pixeldata_bytes(
-	    file, frame_count, pixels_per_frame, bits_allocated);
 	const auto bytes_per_sample = static_cast<std::size_t>(bits_allocated / 8u);
-	if (frame_index >
-	    std::numeric_limits<std::size_t>::max() / pixels_per_frame ||
-	    frame_index * pixels_per_frame >
-	        std::numeric_limits<std::size_t>::max() / bytes_per_sample) {
-		throw_decode("LABELMAP frame offset overflow");
+	if (bytes_per_sample == 0 ||
+	    pixels_per_frame > std::numeric_limits<std::size_t>::max() / bytes_per_sample) {
+		throw_decode("LABELMAP PixelData size overflow");
 	}
-	const auto frame_offset = frame_index * pixels_per_frame * bytes_per_sample;
+	const auto bytes_per_frame = pixels_per_frame * bytes_per_sample;
 
 	const auto word_count = bits_allocated == 8 ? std::size_t{4} : std::size_t{1024};
 	std::vector<std::uint64_t> seen_words(
@@ -466,48 +468,121 @@ template <typename T, typename U>
 	};
 
 	const auto target = request.target_segment.value_or(0);
-	bool target_seen = false;
-	for (std::size_t pixel_index = 0; pixel_index < pixels_per_frame; ++pixel_index) {
-		std::uint16_t value = 0;
-		if (bits_allocated == 8) {
-			value = bytes[frame_offset + pixel_index];
-			if (!request.decoded_u8.empty()) {
-				request.decoded_u8[pixel_index] = static_cast<std::uint8_t>(value);
+	const auto scan_frame_bytes =
+	    [&](std::span<const std::uint8_t> frame_bytes,
+	        LabelmapSampleByteOrder byte_order) {
+		    if (frame_bytes.size() < bytes_per_frame) {
+			    throw_decode("LABELMAP decoded frame size mismatch");
+		    }
+
+		    bool target_seen = false;
+		    for (std::size_t pixel_index = 0; pixel_index < pixels_per_frame; ++pixel_index) {
+			    std::uint16_t value = 0;
+			    if (bits_allocated == 8) {
+				    value = frame_bytes[pixel_index];
+				    if (!request.decoded_u8.empty()) {
+					    request.decoded_u8[pixel_index] =
+					        static_cast<std::uint8_t>(value);
+				    }
+			    } else {
+				    const auto byte_offset = pixel_index * 2u;
+				    if (byte_order == LabelmapSampleByteOrder::native_endian) {
+					    std::memcpy(&value, frame_bytes.data() + byte_offset,
+					        sizeof(value));
+				    } else {
+					    value = static_cast<std::uint16_t>(
+					        frame_bytes[byte_offset] |
+					        (static_cast<std::uint16_t>(
+					             frame_bytes[byte_offset + 1u])
+					            << 8u));
+				    }
+				    if (!request.decoded_u16.empty()) {
+					    request.decoded_u16[pixel_index] = value;
+				    }
+			    }
+
+			    if (!valid_labels.test(value)) {
+				    throw_decode(
+				        "LABELMAP PixelData references an undefined segment number");
+			    }
+			    if (!background_label || value != *background_label) {
+				    mark_seen(value);
+			    }
+			    if (!request.mask_out.empty()) {
+				    if (value == target) {
+					    target_seen = true;
+				    }
+				    request.mask_out[pixel_index] =
+				        static_cast<std::uint8_t>(value == target ? 1u : 0u);
+			    }
 			}
-		} else {
-			const auto byte_offset = frame_offset + pixel_index * 2u;
-			value = static_cast<std::uint16_t>(
-			    bytes[byte_offset] |
-			    (static_cast<std::uint16_t>(bytes[byte_offset + 1u]) << 8u));
-			if (!request.decoded_u16.empty()) {
-				request.decoded_u16[pixel_index] = value;
-			}
+
+		    std::sort(present.begin(), present.end());
+		    return LabelmapFrameScanResult{
+		        .present_labels =
+		            std::make_shared<const std::vector<std::uint16_t>>(
+		                std::move(present)),
+		        .decoded_written =
+		            !request.decoded_u8.empty() || !request.decoded_u16.empty(),
+		        .mask_written = !request.mask_out.empty(),
+		        .target_seen = target_seen,
+		    };
+	    };
+
+	file.ensure_loaded("PixelData"_tag);
+	const auto& pixel_data = file.get_dataelement("PixelData"_tag);
+	if (!pixel_data) {
+		throw_decode("LABELMAP PixelData is missing");
+	}
+	const auto transfer_syntax = file.transfer_syntax_uid();
+	if (transfer_syntax == "ExplicitVRBigEndian"_uid) {
+		throw_decode("Big Endian LABELMAP PixelData is not supported");
+	}
+	const auto* pixel_sequence = pixel_data.as_pixel_sequence();
+	if (pixel_sequence != nullptr || (transfer_syntax &&
+	        (!transfer_syntax.is_uncompressed() || transfer_syntax.is_encapsulated()))) {
+		if (pixel_sequence == nullptr) {
+			throw_decode(
+			    "compressed/encapsulated Label Map SEG PixelData requires PixelSequence");
+		}
+		if (!transfer_syntax || !transfer_syntax.is_encapsulated()) {
+			throw_decode("LABELMAP PixelSequence requires encapsulated transfer syntax");
 		}
 
-		if (!valid_labels.test(value)) {
-			throw_decode(
-			    "LABELMAP PixelData references an undefined segment number");
+		pixel::DecodeOptions decode_options{};
+		decode_options.alignment = 1;
+		decode_options.planar_out = pixel::Planar::interleaved;
+		decode_options.decode_mct = false;
+		const auto decode_plan = file.create_decode_plan(decode_options);
+		const auto expected_dtype = bits_allocated == 8
+		                                ? pixel::DataType::u8
+		                                : pixel::DataType::u16;
+		if (decode_plan.output_layout.data_type != expected_dtype ||
+		    decode_plan.output_layout.samples_per_pixel != 1 ||
+		    decode_plan.output_layout.frame_stride < bytes_per_frame) {
+			throw_decode("LABELMAP decoded frame layout mismatch");
 		}
-		if (!background_label || value != *background_label) {
-			mark_seen(value);
-		}
-		if (!request.mask_out.empty()) {
-			if (value == target) {
-				target_seen = true;
-			}
-			request.mask_out[pixel_index] =
-			    static_cast<std::uint8_t>(value == target ? 1u : 0u);
-		}
+		std::vector<std::uint8_t> decoded_frame(
+		    decode_plan.output_layout.frame_stride);
+		pixel::DecodeInfo decode_info{};
+		file.decode_into(frame_index, decoded_frame, decode_plan, decode_info);
+		require_lossless_seg_decode(decode_info);
+		return scan_frame_bytes(
+		    std::span<const std::uint8_t>(decoded_frame.data(), bytes_per_frame),
+		    LabelmapSampleByteOrder::native_endian);
 	}
 
-	std::sort(present.begin(), present.end());
-	return LabelmapFrameScanResult{
-	    .present_labels =
-	        std::make_shared<const std::vector<std::uint16_t>>(std::move(present)),
-	    .decoded_written = !request.decoded_u8.empty() || !request.decoded_u16.empty(),
-	    .mask_written = !request.mask_out.empty(),
-	    .target_seen = target_seen,
-	};
+	const auto bytes = labelmap_pixeldata_bytes(
+	    file, frame_count, pixels_per_frame, bits_allocated);
+	if (frame_index >
+	    std::numeric_limits<std::size_t>::max() / pixels_per_frame ||
+	    frame_index * pixels_per_frame >
+	        std::numeric_limits<std::size_t>::max() / bytes_per_sample) {
+		throw_decode("LABELMAP frame offset overflow");
+	}
+	const auto frame_offset = frame_index * bytes_per_frame;
+	return scan_frame_bytes(bytes.subspan(frame_offset, bytes_per_frame),
+	    LabelmapSampleByteOrder::little_endian);
 }
 
 } // namespace
@@ -1087,7 +1162,9 @@ void Segmentation::decode_frame_into(
 			throw_decode("FRACTIONAL SEG MVP requires BitsAllocated=8");
 		}
 		const auto& plan = fractional_decode_plan();
-		file_->decode_into(frame_index, out, plan);
+		pixel::DecodeInfo decode_info{};
+		file_->decode_into(frame_index, out, plan, decode_info);
+		require_lossless_seg_decode(decode_info);
 		return;
 	}
 
