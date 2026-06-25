@@ -686,6 +686,21 @@ int main() {
 			    file->set_transfer_syntax("RLELossless"_uid);
 		    },
 		    "BINARY SEG PixelData transcode");
+		if constexpr (!dicom::test::kRleBuiltin) {
+			expect_throw_contains("LABELMAP SEG RLE encoder missing write",
+			    [&] {
+				    auto file = make_labelmap_seg8_file();
+				    (void)file->write_bytes_with_transfer_syntax(
+				        "RLELossless"_uid);
+			    },
+			    "encoder binding");
+			expect_throw_contains("LABELMAP SEG RLE encoder missing set",
+			    [&] {
+				    auto file = make_labelmap_seg8_file();
+				    file->set_transfer_syntax("RLELossless"_uid);
+			    },
+			    "encoder binding");
+		}
 		expect_throw_contains("FRACTIONAL SEG lossy write preflight",
 		    [&] {
 			    auto file = make_fractional_seg_file();
@@ -904,6 +919,38 @@ int main() {
 		    [&] {
 			    (void)lossy_transcode_file->write_bytes_with_transfer_syntax(
 			        "ExplicitVRLittleEndian"_uid);
+		    },
+		    "lossless source");
+	}
+
+	if constexpr (dicom::test::kJpegLsBuiltin) {
+		auto near_lossless_source = make_labelmap_seg8_file();
+		set_multiframe_grayscale_sop_class(*near_lossless_source);
+		auto near_lossless_bytes =
+		    near_lossless_source->write_bytes_with_transfer_syntax(
+		        "JPEGLSNearLossless"_uid);
+
+		auto near_lossless_decode_bytes = near_lossless_bytes;
+		auto near_lossless_decode_file = dicom::read_bytes(
+		    "labelmap-near-lossless-jpegls-source-decode",
+		    std::move(near_lossless_decode_bytes));
+		set_labelmap_seg_sop_class(*near_lossless_decode_file);
+		auto near_lossless_seg =
+		    dicom::seg::from_dicomfile(std::move(near_lossless_decode_file));
+		std::vector<std::uint8_t> decoded(6);
+		expect_throw_contains("labelmap near-lossless source decode reject",
+		    [&] { near_lossless_seg->decode_frame_into(0, decoded); },
+		    "lossless source");
+
+		auto near_lossless_transcode_file = dicom::read_bytes(
+		    "labelmap-near-lossless-jpegls-source-transcode",
+		    std::move(near_lossless_bytes));
+		set_labelmap_seg_sop_class(*near_lossless_transcode_file);
+		expect_throw_contains("labelmap near-lossless source transcode reject",
+		    [&] {
+			    (void)near_lossless_transcode_file
+			        ->write_bytes_with_transfer_syntax(
+			            "ExplicitVRLittleEndian"_uid);
 		    },
 		    "lossless source");
 	}
