@@ -14,7 +14,9 @@ dicom_json
 selected_read
 python_dataset_guide
 simpleitk_and_vtk_bridges
-segmentation_geometry_tutorial
+segmentation
+geometry
+overlay
 cpp_dataset_guide
 dataset_walk
 sequence_and_paths
