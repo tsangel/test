@@ -485,9 +485,12 @@ void require_lossless_seg_decode(const pixel::DecodeInfo& decode_info) {
 	}
 	const auto bytes_per_frame = pixels_per_frame * bytes_per_sample;
 
-	LabelmapFrameDecodeContext local_decode_context{};
+	std::optional<LabelmapFrameDecodeContext> local_decode_context{};
+	if (!decode_context) {
+		local_decode_context.emplace();
+	}
 	auto& active_decode_context =
-	    decode_context ? *decode_context : local_decode_context;
+	    decode_context ? *decode_context : *local_decode_context;
 
 	const auto word_count = bits_allocated == 8 ? std::size_t{4} : std::size_t{1024};
 	auto& seen_words = active_decode_context.seen_words;
