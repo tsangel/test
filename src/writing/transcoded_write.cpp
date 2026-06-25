@@ -9,7 +9,9 @@
 #include "pixel/host/encode/multicomponent_transform_policy.hpp"
 #include "pixel/host/error/codec_error.hpp"
 #include "pixel/host/support/dicom_pixel_support.hpp"
+#include "pixel_decoder_plugin_abi.h"
 
+#include <cstring>
 #include <exception>
 #include <limits>
 #include <optional>
@@ -88,6 +90,103 @@ std::size_t measure_encoded_payload_bytes_from_frame_provider(DicomFile& file,
 		    encoded_payload_bytes += encoded_frame.size();
 	    });
 	return encoded_payload_bytes;
+}
+
+void validate_seg_decoded_source_lossless_or_throw(const DicomFile& file,
+    const SegPixelPayloadWritePolicy& policy,
+    const pixel_decoder_info& decode_info, std::string_view operation) {
+	if (!policy.is_segmentation()) {
+		return;
+	}
+	if (decode_info.encoded_lossy_state != PIXEL_ENCODED_LOSSY_STATE_LOSSLESS) {
+		throw_seg_write_policy_error(file, operation,
+		    "SEG compressed PixelData write/transcode requires lossless source frames");
+	}
+}
+
+[[nodiscard]] std::size_t checked_seg_frame_sample_count_or_throw(
+    const DicomFile& file, const SegPixelPayloadWritePolicy& policy,
+    const pixel::support_detail::ComputedEncodeSourceLayout& layout,
+    std::string_view operation) {
+	if (!policy.is_segmentation()) {
+		return 0;
+	}
+	if (layout.samples_per_pixel != 1) {
+		throw_seg_write_policy_error(file, operation,
+		    "SEG PixelData write requires SamplesPerPixel=1");
+	}
+	if (layout.rows != 0 &&
+	    layout.cols > std::numeric_limits<std::size_t>::max() / layout.rows) {
+		throw_seg_write_policy_error(file, operation,
+		    "SEG PixelData write frame sample count overflow");
+	}
+	return layout.rows * layout.cols;
+}
+
+[[nodiscard]] std::uint16_t read_native_u16_sample(
+    std::span<const std::uint8_t> bytes, std::size_t sample_index) noexcept {
+	std::uint16_t value = 0;
+	std::memcpy(&value, bytes.data() + sample_index * sizeof(value), sizeof(value));
+	return value;
+}
+
+void validate_seg_frame_semantics_or_throw(const DicomFile& file,
+    const SegPixelPayloadWritePolicy& policy,
+    const pixel::support_detail::ComputedEncodeSourceLayout& layout,
+    std::size_t frame_index, std::span<const std::uint8_t> frame_bytes,
+    std::string_view operation) {
+	if (!policy.is_segmentation() || policy.kind == SegPixelPayloadKind::binary) {
+		return;
+	}
+
+	const auto sample_count =
+	    checked_seg_frame_sample_count_or_throw(file, policy, layout, operation);
+	if (policy.kind == SegPixelPayloadKind::fractional) {
+		if (layout.bytes_per_sample != 1 ||
+		    frame_bytes.size() < sample_count ||
+		    !policy.maximum_fractional_value) {
+			throw_seg_write_policy_error(file, operation,
+			    "FRACTIONAL SEG PixelData write requires 8-bit decoded source frames");
+		}
+		const auto maximum = *policy.maximum_fractional_value;
+		for (std::size_t index = 0; index < sample_count; ++index) {
+			if (frame_bytes[index] > maximum) {
+				diag::throw_exception(
+				    "{} file={} frame={} reason=FRACTIONAL SEG PixelData sample exceeds MaximumFractionalValue",
+				    operation, file.path(), frame_index);
+			}
+		}
+		return;
+	}
+
+	if (policy.kind != SegPixelPayloadKind::labelmap) {
+		return;
+	}
+	if (layout.samples_per_pixel != 1 ||
+	    (policy.labelmap_bits_allocated != 8 &&
+	        policy.labelmap_bits_allocated != 16)) {
+		throw_seg_write_policy_error(file, operation,
+		    "LABELMAP SEG PixelData write requires 8-bit or 16-bit decoded source frames");
+	}
+	const auto bytes_per_sample =
+	    static_cast<std::size_t>(policy.labelmap_bits_allocated / 8u);
+	if (bytes_per_sample == 0 ||
+	    sample_count > std::numeric_limits<std::size_t>::max() / bytes_per_sample ||
+	    frame_bytes.size() < sample_count * bytes_per_sample) {
+		throw_seg_write_policy_error(file, operation,
+		    "LABELMAP SEG PixelData write frame size mismatch");
+	}
+	for (std::size_t index = 0; index < sample_count; ++index) {
+		const auto label =
+		    policy.labelmap_bits_allocated == 8
+		        ? static_cast<std::uint16_t>(frame_bytes[index])
+		        : read_native_u16_sample(frame_bytes, index);
+		if (!policy.labelmap_valid_labels.test(label)) {
+			diag::throw_exception(
+			    "{} file={} frame={} reason=LABELMAP SEG PixelData contains undefined segment label {}",
+			    operation, file.path(), frame_index, label);
+		}
+	}
 }
 
 template <typename Writer>
@@ -283,7 +382,8 @@ void prepare_streaming_encode_policy_or_throw(
 void measure_streaming_lossy_payload_prepass_if_needed_or_throw(
     PreparedStreamingTranscodeState& state, DicomFile& file,
     uid::WellKnown target_transfer_syntax,
-    const TransferSyntaxWriteDecision& decision) {
+    const TransferSyntaxWriteDecision& decision,
+    const SegPixelPayloadWritePolicy& seg_policy) {
 	if (!decision.target_is_encapsulated ||
 	    !pixel::detail::encode_profile_uses_lossy_compression(state.codec_profile_code) ||
 	    state.backpatch_lossy_ratio) {
@@ -300,9 +400,13 @@ void measure_streaming_lossy_payload_prepass_if_needed_or_throw(
 		        [&](std::size_t frame_index) -> std::span<const std::uint8_t> {
 			        const auto frame_offset =
 			            frame_index * state.encode_source_layout.source_frame_stride;
-			        return state.source_bytes.subspan(
+			        const auto frame = state.source_bytes.subspan(
 			            frame_offset,
 			            state.encode_source_layout.source_frame_size_bytes);
+			        validate_seg_frame_semantics_or_throw(file, seg_policy,
+			            state.encode_source_layout, frame_index, frame,
+			            "write_with_transfer_syntax");
+			        return frame;
 		        });
 		return;
 	}
@@ -320,12 +424,20 @@ void measure_streaming_lossy_payload_prepass_if_needed_or_throw(
 		        const auto prepared_source =
 		            pixel::support_detail::prepare_decode_frame_source_without_cache_or_throw(
 		                file, state.source_decode_layout, frame_index);
+		        pixel_decoder_info decode_info{};
 		        pixel::detail::dispatch_decode_prepared_frame(file,
 		            state.source_decode_layout, frame_index,
-		            prepared_source.bytes, frame_span, *state.decode_plan);
-		        return std::span<const std::uint8_t>(
+		            prepared_source.bytes, frame_span, *state.decode_plan,
+		            &decode_info);
+		        validate_seg_decoded_source_lossless_or_throw(
+		            file, seg_policy, decode_info, "write_with_transfer_syntax");
+		        auto frame = std::span<const std::uint8_t>(
 		            frame_span.data(),
 		            state.encode_source_layout.source_frame_size_bytes);
+		        validate_seg_frame_semantics_or_throw(file, seg_policy,
+		            state.encode_source_layout, frame_index, frame,
+		            "write_with_transfer_syntax");
+		        return frame;
 	        });
 }
 
@@ -387,7 +499,7 @@ prepare_streaming_transcode_state_or_throw(DicomFile& file, DataSet& dataset,
 	validate_seg_encode_profile_or_throw(
 	    file, seg_policy, state.codec_profile_code, "write_with_transfer_syntax");
 	measure_streaming_lossy_payload_prepass_if_needed_or_throw(
-	    state, file, target_transfer_syntax, decision);
+	    state, file, target_transfer_syntax, decision, seg_policy);
 	prepare_streaming_overlay_or_throw(
 	    state, dataset, target_transfer_syntax, options);
 	return state;
@@ -397,7 +509,8 @@ template <typename Writer>
 void write_encapsulated_transcoded_pixel_data_or_throw(DicomFile& file, Writer& writer,
     uid::WellKnown target_transfer_syntax,
     const TransferSyntaxWriteDecision& decision,
-    PreparedStreamingTranscodeState& state) {
+    PreparedStreamingTranscodeState& state,
+    const SegPixelPayloadWritePolicy& seg_policy) {
 	write_dataset_body_with_overlay_and_pixel_writer(writer, file.dataset(), state.overlay,
 	    state.write_plan,
 	    [&](const DataElement& element, auto& direct_writer, bool explicit_vr) {
@@ -480,9 +593,13 @@ void write_encapsulated_transcoded_pixel_data_or_throw(DicomFile& file, Writer& 
 				        const auto frame_offset =
 				            frame_index *
 				            state.encode_source_layout.source_frame_stride;
-				        return state.source_bytes.subspan(
+				        const auto frame = state.source_bytes.subspan(
 				            frame_offset,
 				            state.encode_source_layout.source_frame_size_bytes);
+				        validate_seg_frame_semantics_or_throw(file, seg_policy,
+				            state.encode_source_layout, frame_index, frame,
+				            "write_with_transfer_syntax");
+				        return frame;
 			        },
 			        [&](std::size_t, std::vector<std::uint8_t>&& encoded_frame) {
 				        commit_encoded_frame(std::move(encoded_frame));
@@ -503,13 +620,21 @@ void write_encapsulated_transcoded_pixel_data_or_throw(DicomFile& file, Writer& 
 				        const auto prepared_source =
 				            pixel::support_detail::prepare_decode_frame_source_without_cache_or_throw(
 				                file, state.source_decode_layout, frame_index);
+				        pixel_decoder_info decode_info{};
 				        pixel::detail::dispatch_decode_prepared_frame(file,
 				            state.source_decode_layout,
 				            frame_index, prepared_source.bytes, frame_span,
-				            *state.decode_plan);
-				        return std::span<const std::uint8_t>(
+				            *state.decode_plan, &decode_info);
+				        validate_seg_decoded_source_lossless_or_throw(
+				            file, seg_policy, decode_info,
+				            "write_with_transfer_syntax");
+				        auto frame = std::span<const std::uint8_t>(
 				            frame_span.data(),
 				            state.encode_source_layout.source_frame_size_bytes);
+				        validate_seg_frame_semantics_or_throw(file, seg_policy,
+				            state.encode_source_layout, frame_index, frame,
+				            "write_with_transfer_syntax");
+				        return frame;
 			        },
 			        [&](std::size_t, std::vector<std::uint8_t>&& encoded_frame) {
 				        commit_encoded_frame(std::move(encoded_frame));
@@ -539,7 +664,8 @@ void write_encapsulated_transcoded_pixel_data_or_throw(DicomFile& file, Writer& 
 
 template <typename Writer>
 void write_native_transcoded_pixel_data_or_throw(DicomFile& file, Writer& writer,
-    PreparedStreamingTranscodeState& state) {
+    PreparedStreamingTranscodeState& state,
+    const SegPixelPayloadWritePolicy& seg_policy) {
 	if (state.decoded_frame.size() != state.decode_plan->output_layout.frame_stride) {
 		state.decoded_frame.resize(state.decode_plan->output_layout.frame_stride);
 	}
@@ -559,12 +685,20 @@ void write_native_transcoded_pixel_data_or_throw(DicomFile& file, Writer& writer
 			        const auto prepared_source =
 			            pixel::support_detail::prepare_decode_frame_source_without_cache_or_throw(
 			                file, state.source_decode_layout, frame_index);
+			        pixel_decoder_info decode_info{};
 			        pixel::detail::dispatch_decode_prepared_frame(file,
 			            state.source_decode_layout, frame_index,
-			            prepared_source.bytes, frame_span, *state.decode_plan);
-			        return std::span<const std::uint8_t>(
+			            prepared_source.bytes, frame_span, *state.decode_plan,
+			            &decode_info);
+			        validate_seg_decoded_source_lossless_or_throw(
+			            file, seg_policy, decode_info, "write_with_transfer_syntax");
+			        auto frame = std::span<const std::uint8_t>(
 			            frame_span.data(),
 			            state.encode_source_layout.destination_frame_payload);
+			        validate_seg_frame_semantics_or_throw(file, seg_policy,
+			            state.encode_source_layout, frame_index, frame,
+			            "write_with_transfer_syntax");
+			        return frame;
 		        });
 	    });
 }
@@ -659,9 +793,10 @@ void write_with_transfer_syntax_impl(DicomFile& file, Writer& writer,
 
 		if (decision.target_is_encapsulated) {
 			write_encapsulated_transcoded_pixel_data_or_throw(
-			    file, writer, target_transfer_syntax, decision, state);
+			    file, writer, target_transfer_syntax, decision, state, seg_policy);
 		} else {
-			write_native_transcoded_pixel_data_or_throw(file, writer, state);
+			write_native_transcoded_pixel_data_or_throw(
+			    file, writer, state, seg_policy);
 		}
 	} catch (const diag::DicomException& ex) {
 		pixel::detail::rethrow_codec_exception_at_boundary_or_throw(

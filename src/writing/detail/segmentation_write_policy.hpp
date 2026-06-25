@@ -4,6 +4,7 @@
 #include "pixel/host/adapter/host_adapter.hpp"
 #include "pixel/host/encode/encode_target_policy.hpp"
 
+#include <bitset>
 #include <cstdint>
 #include <limits>
 #include <optional>
@@ -21,6 +22,10 @@ enum class SegPixelPayloadKind : std::uint8_t {
 
 struct SegPixelPayloadWritePolicy {
 	SegPixelPayloadKind kind{SegPixelPayloadKind::none};
+	std::optional<std::uint16_t> maximum_fractional_value{};
+	std::uint16_t labelmap_bits_allocated{0};
+	std::bitset<65536> labelmap_valid_labels{};
+	std::optional<std::uint16_t> labelmap_background_value{};
 
 	[[nodiscard]] bool is_segmentation() const noexcept {
 		return kind != SegPixelPayloadKind::none;
@@ -49,6 +54,12 @@ struct SegPixelPayloadWritePolicy {
 [[nodiscard]] inline long long_value_or(const DataSet& dataset, Tag tag,
     long fallback) {
 	return dataset[tag].to_long().value_or(fallback);
+}
+
+[[nodiscard]] inline const Sequence* sequence_value(
+    const DataSet& dataset, Tag tag) {
+	const auto& element = dataset.get_dataelement(tag);
+	return element ? element.as_sequence() : nullptr;
 }
 
 [[nodiscard]] inline bool is_segmentation_sop_class_uid(
@@ -136,7 +147,9 @@ inline void validate_seg_pixel_metadata_invariants_or_throw(
 		    "FRACTIONAL SEG PixelData write requires BitsStored=8");
 		require_long_tag_value(file, operation, dataset, "HighBit"_tag, 7,
 		    "FRACTIONAL SEG PixelData write requires HighBit=7");
-		if (long_value_or(dataset, "MaximumFractionalValue"_tag, 0) <= 0) {
+		const auto maximum_fractional_value =
+		    uint16_single_value(dataset.get_dataelement("MaximumFractionalValue"_tag));
+		if (!maximum_fractional_value || *maximum_fractional_value == 0) {
 			throw_seg_write_policy_error(file, operation,
 			    "FRACTIONAL SEG PixelData write requires MaximumFractionalValue");
 		}
@@ -230,12 +243,51 @@ classify_seg_pixel_payload_write_policy_or_throw(const DicomFile& file,
 			    "Label Map Segmentation Storage requires SegmentationType=LABELMAP");
 		}
 		policy.kind = SegPixelPayloadKind::fractional;
+		policy.maximum_fractional_value =
+		    uint16_single_value(dataset.get_dataelement("MaximumFractionalValue"_tag));
 	} else if (segmentation_type == "LABELMAP") {
 		if (!labelmap_sop) {
 			throw_seg_write_policy_error(file, operation,
 			    "LABELMAP SegmentationType requires Label Map Segmentation Storage");
 		}
 		policy.kind = SegPixelPayloadKind::labelmap;
+		if (const auto bits_allocated =
+		        uint16_single_value(dataset.get_dataelement("BitsAllocated"_tag))) {
+			policy.labelmap_bits_allocated = *bits_allocated;
+		}
+		if (const auto pixel_padding =
+		        uint16_single_value(dataset.get_dataelement("PixelPaddingValue"_tag))) {
+			policy.labelmap_background_value = *pixel_padding;
+		}
+		const auto* segment_sequence = sequence_value(dataset, "SegmentSequence"_tag);
+		if (!segment_sequence || segment_sequence->size() <= 0) {
+			throw_seg_write_policy_error(file, operation,
+			    "LABELMAP SEG PixelData write requires SegmentSequence");
+		}
+		for (std::size_t index = 0;
+		     index < static_cast<std::size_t>(segment_sequence->size()); ++index) {
+			const auto* item = segment_sequence->get_dataset(index);
+			if (!item) {
+				throw_seg_write_policy_error(file, operation,
+				    "LABELMAP SEG PixelData write requires SegmentSequence items");
+			}
+			const auto segment_number =
+			    uint16_single_value(item->get_dataelement("SegmentNumber"_tag));
+			if (!segment_number) {
+				throw_seg_write_policy_error(file, operation,
+				    "LABELMAP SEG PixelData write requires SegmentNumber");
+			}
+			if (policy.labelmap_valid_labels.test(*segment_number)) {
+				throw_seg_write_policy_error(file, operation,
+				    "LABELMAP SEG PixelData write requires unique SegmentNumber values");
+			}
+			policy.labelmap_valid_labels.set(*segment_number);
+		}
+		if (policy.labelmap_background_value &&
+		    !policy.labelmap_valid_labels.test(*policy.labelmap_background_value)) {
+			throw_seg_write_policy_error(file, operation,
+			    "LABELMAP SEG PixelData write requires PixelPaddingValue to reference SegmentSequence");
+		}
 	} else {
 		throw_seg_write_policy_error(file, operation,
 		    "SEG PixelData write requires SegmentationType BINARY, FRACTIONAL, or LABELMAP");

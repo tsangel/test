@@ -765,6 +765,39 @@ int main() {
 	}
 
 	{
+		auto invalid_fractional = make_fractional_seg_file();
+		set_long(*invalid_fractional, "MaximumFractionalValue", 128);
+		expect_throw_contains("fractional transcode sample validation",
+		    [&] {
+			    (void)invalid_fractional->write_bytes_with_transfer_syntax(
+			        "EncapsulatedUncompressedExplicitVRLittleEndian"_uid);
+		    },
+		    "MaximumFractionalValue");
+
+		auto invalid_labelmap = make_labelmap_seg8_file(
+		    std::vector<std::uint8_t>{0, 1, 9, 2, 0, 1, 0, 0, 2, 0, 0, 0});
+		expect_throw_contains("labelmap native transcode label validation",
+		    [&] {
+			    (void)invalid_labelmap->write_bytes_with_transfer_syntax(
+			        "EncapsulatedUncompressedExplicitVRLittleEndian"_uid);
+		    },
+		    "undefined segment");
+
+		auto encapsulated_bytes =
+		    make_labelmap_seg8_file()->write_bytes_with_transfer_syntax(
+		        "EncapsulatedUncompressedExplicitVRLittleEndian"_uid);
+		auto invalid_encapsulated = dicom::read_bytes(
+		    "labelmap-encapsulated-invalid-segment", std::move(encapsulated_bytes));
+		set_long(*invalid_encapsulated, "SegmentSequence.2.SegmentNumber", 9);
+		expect_throw_contains("labelmap encapsulated transcode label validation",
+		    [&] {
+			    (void)invalid_encapsulated->write_bytes_with_transfer_syntax(
+			        "ExplicitVRLittleEndian"_uid);
+		    },
+		    "undefined segment");
+	}
+
+	{
 		auto short_pixel_data = make_binary_seg_file();
 		short_pixel_data->set_native_pixel_data(
 		    std::vector<std::uint8_t>{0x00}, dicom::VR::OB);
