@@ -1134,7 +1134,7 @@ SliceStackPlan plan_image_frame_stack(
 - [x] 공개 계약 정리: public header, Python docstring, en/ko developer segmentation 문서에서 LABELMAP 지원 범위와 native typed sample bytes 계약을 반영했다.
 - [x] `plane_from_seg_frame()` LabelMap synthetic geometry smoke test를 추가했다.
 - [x] cache 재사용을 decode-count로 검증하는 test-only 계측 테스트, concurrent lazy scan stress, C++ header partial-write/BINARY-FRACTIONAL-LABELMAP contract 주석 보강을 추가했다.
-- [x] SEG write/transcode 초기 preflight hook 구현: 기존 `DicomFile` generic write path에서 SOP Class / `SegmentationType` 기반으로 SEG 정책을 감지하고, 타입별 metadata invariant, lossy target/profile reject, BINARY 1-bit transcode unsupported guard를 적용한다.
+- [x] SEG write/transcode 초기 preflight hook 구현: 기존 `DicomFile` generic write path에서 SOP Class / `SegmentationType` 기반으로 SEG 정책을 감지한다. `classify`와 PixelData invariant validation은 분리하고, 완전 as-is write는 기존 roundtrip 성격을 유지하며, 실제 PixelData write/transcode 경로에서 타입별 invariant, lossy target/profile reject, BINARY 1-bit transcode unsupported guard를 적용한다.
 - [ ] 남은 후속: 실제 외부 LABELMAP sample 기반 regression을 유지하고, compressed/encapsulated SEG 지원은 별도 후속 계획으로 진행한다.
 
 ### 범위 결정
@@ -1372,12 +1372,12 @@ SliceStackPlan plan_image_frame_stack(
 
 - [ ] 범위는 read/decode뿐 아니라 기존 `DicomFile::set_transfer_syntax()` / `write_with_transfer_syntax()` / `write_bytes_with_transfer_syntax()` 경로를 통한 write/transcode까지 포함한다. SEG 전용 writer, SEG 전용 pre-serialization PixelData rewrite, 별도 fragment parser는 만들지 않는다.
 - [ ] write/transcode는 "SEG wrapper가 PixelData를 미리 변환한 뒤 generic writer에 맡기는" 방식이 아니라, generic pixel/write path가 SEG metadata와 1-bit storage를 표현할 수 있도록 보강하는 방향으로 진행한다.
-- [x] generic `DicomFile` write/transcode path 안에 SEG policy preflight hook을 둔다. 위치는 transfer syntax write decision 직후와 encode policy 확정 직후로 고정하고, SOP Class / `SegmentationType` 기반으로 SEG 여부와 타입별 invariant를 한 곳에서 판정한다.
+- [x] generic `DicomFile` write/transcode path 안에 SEG policy preflight hook을 둔다. 위치는 transfer syntax write decision 직후와 encode policy 확정 직후로 고정하고, SOP Class / `SegmentationType` 기반 `classify`와 실제 PixelData write/transcode invariant validation을 분리한다.
 - [ ] public SEG API 의미는 native PixelData와 동일하게 유지한다. 압축 여부는 frame source/frame sink의 내부 구현 차이로 숨기고, `to_array()`, `decode_frame_into()`, `present_segment_numbers()`, `mask_for_segment()`, `validate_label_values()` contract는 바꾸지 않는다.
 - [ ] 지원 matrix를 read/decode, native->encapsulated write, encapsulated->native write, encapsulated->encapsulated transcode로 분리한다. FRACTIONAL 8-bit와 LABELMAP 8/16-bit는 lossless codec 기반 1차 지원 대상으로 두고, BINARY 1-bit는 core pixel layout/codec/write 모델 보강 후 지원한다.
 - [ ] BINARY compressed SEG는 기존 `PixelPayloadDecoder`가 `BitsAllocated` 8/16/32만 받는 한 바로 지원하지 않는다. 구현 전 `BitsAllocated=1` decoded layout, unpacked bool/u8 view, native 1-bit repack, encapsulated frame encoding contract 중 어떤 계층에서 1-bit를 표현할지 먼저 확정한다.
 - [ ] generic `pixel::PixelLayout` / `ConstPixelSpan` / encode source layout에 "source sample view는 u8 0/1일 수 있지만 DICOM stored BitsAllocated는 1"인 상태를 표현할 수 있는지 검토한다. 부족하면 SEG 전용 우회가 아니라 core pixel layout/encoder ABI를 확장한다.
-- [x] generic write/transcode preflight가 SEG invariants를 보존하도록 검토한다. `SegmentationType`, `BitsAllocated`, `BitsStored`, `HighBit`, `SamplesPerPixel`, `PhotometricInterpretation`, `PixelRepresentation`, `MaximumFractionalValue`가 타입별 contract를 벗어나면 write/transcode를 실패시킨다.
+- [x] generic write/transcode preflight가 active PixelData write/transcode에서 SEG metadata invariants를 보존하도록 검토한다. `SegmentationType`, `BitsAllocated`, `BitsStored`, `HighBit`, `SamplesPerPixel`, `PhotometricInterpretation`, `PixelRepresentation`, `MaximumFractionalValue`, `SegmentationFractionalType`, LABELMAP `PixelPaddingValue`, `PixelPaddingRangeLimit`, `SegmentsOverlap`이 타입별 contract를 벗어나면 실패시킨다. PixelData가 없는 `set_transfer_syntax()`와 완전 as-is write는 PixelData invariant validation을 수행하지 않는다.
 - [ ] 입력 decode는 `DecodeInfo::encoded_lossy_state` 또는 동등한 codec result 상태로 확인해 `lossy`, `near_lossless`, `unknown`을 cache publish 전에 reject한다.
 - [x] 출력 encode는 target transfer syntax/profile/options preflight에서 lossy/near-lossless 가능성을 먼저 reject하고, streaming write 도중 뒤늦게 output lossy를 발견하는 구조를 만들지 않는다.
 - [ ] Encapsulated Uncompressed는 압축은 아니지만 encapsulated frame source/sink 검증 대상으로 포함한다. 이 경로로 `PixelSequence` indexing, frame count, write overlay, metadata preservation을 먼저 검증한다.

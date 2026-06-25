@@ -553,9 +553,49 @@ int main() {
 			    auto file = make_labelmap_seg8_file();
 			    set_long(*file, "HighBit", 6);
 			    (void)file->write_bytes_with_transfer_syntax(
-			        "ExplicitVRLittleEndian"_uid);
+			        "RLELossless"_uid);
 		    },
 		    "HighBit=BitsAllocated-1");
+		expect_throw_contains("FRACTIONAL SEG fractional type write preflight",
+		    [&] {
+			    auto file = make_fractional_seg_file();
+			    file->remove_dataelement("SegmentationFractionalType"_tag);
+			    (void)file->write_bytes_with_transfer_syntax(
+			        "RLELossless"_uid);
+		    },
+		    "SegmentationFractionalType");
+		expect_throw_contains("LABELMAP SEG overlap write preflight",
+		    [&] {
+			    auto file = make_labelmap_seg8_file();
+			    set_text(*file, "SegmentsOverlap", "YES");
+			    (void)file->write_bytes_with_transfer_syntax(
+			        "RLELossless"_uid);
+		    },
+		    "SegmentsOverlap=NO");
+		expect_throw_contains("LABELMAP SEG padding write preflight",
+		    [&] {
+			    auto file = make_labelmap_seg8_file();
+			    auto& padding =
+			        file->add_dataelement("PixelPaddingValue"_tag, dicom::VR::SS);
+			    if (!padding.from_long(-1)) {
+				    fail("failed to set invalid PixelPaddingValue");
+			    }
+			    (void)file->write_bytes_with_transfer_syntax(
+			        "RLELossless"_uid);
+		    },
+		    "PixelPaddingValue");
+		{
+			auto file = make_fractional_seg_file();
+			file->set_transfer_syntax_state_only("ExplicitVRLittleEndian"_uid);
+			file->remove_dataelement("SegmentationFractionalType"_tag);
+			(void)file->write_bytes_with_transfer_syntax(
+			    "ExplicitVRLittleEndian"_uid);
+		}
+		{
+			auto file = make_binary_seg_file();
+			file->remove_dataelement("PixelData"_tag);
+			file->set_transfer_syntax("JPEGBaseline8Bit"_uid);
+		}
 	}
 
 	{

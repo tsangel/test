@@ -633,15 +633,19 @@ void transcode_encapsulated_pixel_data_to_encapsulated(DicomFile& file,
 	    ((target_uses_encapsulated_pixel_data && !already_target_transfer_syntax) ||
 	        (has_encapsulated_pixel_data && !target_uses_encapsulated_pixel_data));
 
-	const auto seg_policy =
-	    write_detail::classify_seg_pixel_payload_write_policy_or_throw(
-	        file, "DicomFile::set_transfer_syntax");
-	write_detail::validate_seg_transfer_syntax_target_or_throw(
-	    file, seg_policy, transfer_syntax, "DicomFile::set_transfer_syntax");
-	write_detail::validate_seg_pixel_transcode_or_throw(file, seg_policy,
-	    needs_pixel_transcode, "DicomFile::set_transfer_syntax");
-	write_detail::validate_seg_encode_profile_from_transfer_syntax_or_throw(
-	    file, seg_policy, transfer_syntax, "DicomFile::set_transfer_syntax");
+	if (needs_pixel_transcode) {
+		const auto seg_policy =
+		    write_detail::classify_seg_pixel_payload_write_policy_or_throw(
+		        file, "DicomFile::set_transfer_syntax");
+		write_detail::validate_seg_transfer_syntax_target_or_throw(
+		    file, seg_policy, transfer_syntax, "DicomFile::set_transfer_syntax");
+		write_detail::validate_seg_pixel_metadata_invariants_or_throw(
+		    file, "DicomFile::set_transfer_syntax", dataset, seg_policy.kind);
+		write_detail::validate_seg_pixel_transcode_or_throw(file, seg_policy,
+		    needs_pixel_transcode, "DicomFile::set_transfer_syntax");
+		write_detail::validate_seg_encode_profile_from_transfer_syntax_or_throw(
+		    file, seg_policy, transfer_syntax, "DicomFile::set_transfer_syntax");
+	}
 
 	if (target_uses_encapsulated_pixel_data && has_pixel_data_element) {
 		if (already_target_transfer_syntax) {

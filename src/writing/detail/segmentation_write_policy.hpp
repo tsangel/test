@@ -5,6 +5,7 @@
 #include "pixel/host/encode/encode_target_policy.hpp"
 
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string_view>
 
@@ -104,6 +105,12 @@ inline void validate_seg_pixel_metadata_invariants_or_throw(
 			throw_seg_write_policy_error(file, operation,
 			    "FRACTIONAL SEG PixelData write requires MaximumFractionalValue");
 		}
+		const auto fractional_type =
+		    text_value(dataset, "SegmentationFractionalType"_tag).value_or("");
+		if (fractional_type != "PROBABILITY" && fractional_type != "OCCUPANCY") {
+			throw_seg_write_policy_error(file, operation,
+			    "FRACTIONAL SEG PixelData write requires SegmentationFractionalType");
+		}
 		return;
 	}
 
@@ -131,6 +138,21 @@ inline void validate_seg_pixel_metadata_invariants_or_throw(
 		if (dataset.get_dataelement("PixelPaddingRangeLimit"_tag).is_present()) {
 			throw_seg_write_policy_error(file, operation,
 			    "LABELMAP SEG PixelData write does not support PixelPaddingRangeLimit");
+		}
+		if (const auto& pixel_padding =
+		        dataset.get_dataelement("PixelPaddingValue"_tag)) {
+			const auto padding_value = pixel_padding.to_long();
+			if (!padding_value || *padding_value < 0 ||
+			    *padding_value > std::numeric_limits<std::uint16_t>::max()) {
+				throw_seg_write_policy_error(file, operation,
+				    "LABELMAP SEG PixelData write requires PixelPaddingValue to be a single unsigned label value");
+			}
+		}
+		if (const auto segments_overlap =
+		        text_value(dataset, "SegmentsOverlap"_tag);
+		    segments_overlap && *segments_overlap != "NO") {
+			throw_seg_write_policy_error(file, operation,
+			    "LABELMAP SEG PixelData write requires SegmentsOverlap=NO when present");
 		}
 	}
 }
@@ -186,8 +208,6 @@ classify_seg_pixel_payload_write_policy_or_throw(const DicomFile& file,
 		    "SEG PixelData write requires SegmentationType BINARY, FRACTIONAL, or LABELMAP");
 	}
 
-	validate_seg_pixel_metadata_invariants_or_throw(
-	    file, operation, dataset, policy.kind);
 	return policy;
 }
 

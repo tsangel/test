@@ -586,18 +586,22 @@ void write_with_transfer_syntax_impl(DicomFile& file, Writer& writer,
 		// First decide whether this is a plain write, a metadata overlay, or a pixel transcode.
 		const auto decision =
 		    classify_transfer_syntax_write(file, dataset, target_transfer_syntax);
-		const auto seg_policy =
-		    classify_seg_pixel_payload_write_policy_or_throw(
-		        file, "write_with_transfer_syntax");
-		validate_seg_transfer_syntax_target_or_throw(
-		    file, seg_policy, target_transfer_syntax, "write_with_transfer_syntax");
-		validate_seg_pixel_transcode_or_throw(file, seg_policy,
-		    decision.needs_pixel_transcode, "write_with_transfer_syntax");
 		if (!decision.needs_pixel_transcode && decision.same_transfer_syntax &&
 		    options.keep_existing_meta) {
 			write_current_dataset_as_is(file, writer, target_transfer_syntax, options);
 			return;
 		}
+		SegPixelPayloadWritePolicy seg_policy{};
+		if (decision.has_native_pixel_data || decision.has_encapsulated_pixel_data) {
+			seg_policy = classify_seg_pixel_payload_write_policy_or_throw(
+			    file, "write_with_transfer_syntax");
+			validate_seg_transfer_syntax_target_or_throw(file, seg_policy,
+			    target_transfer_syntax, "write_with_transfer_syntax");
+			validate_seg_pixel_metadata_invariants_or_throw(file,
+			    "write_with_transfer_syntax", dataset, seg_policy.kind);
+		}
+		validate_seg_pixel_transcode_or_throw(file, seg_policy,
+		    decision.needs_pixel_transcode, "write_with_transfer_syntax");
 		if (decision.has_float_pixel_data && decision.target_is_encapsulated) {
 			diag::throw_exception(
 			    "write_with_transfer_syntax file={} target_ts={} reason=FloatPixelData/DoubleFloatPixelData cannot be written with encapsulated transfer syntaxes",
