@@ -7973,7 +7973,7 @@ NB_MODULE(_dicomsdl, m) {
 	    &geo::make_volume_to_volume_transform, nb::arg("source"), nb::arg("target"));
 
 	auto seg = m.def_submodule(
-	    "seg", "High-level helpers for DICOM Segmentation Storage instances.");
+	    "seg", "High-level helpers for supported DICOM SEG storage instances.");
 
 	nb::enum_<dicom::seg::SegmentationType>(seg, "SegmentationType",
 	    "DICOM SEG SegmentationType values.")
@@ -8142,19 +8142,26 @@ NB_MODULE(_dicomsdl, m) {
 		    [](const PySegmentFrame& self) {
 			    return py_seg_frame_array(self.owner->get(), self.frame_index);
 		    },
-		    "Decode this SEG frame as a NumPy array with shape (rows, columns).")
+		    "Decode this SEG frame as a stored-representation NumPy array with "
+		    "shape (rows, columns). BINARY returns uint8 0/1, FRACTIONAL "
+		    "returns raw uint8 samples, and LABELMAP returns uint8 or native "
+		    "uint16 label values.")
 		.def("decode_frame",
 		    [](const PySegmentFrame& self) {
 			    return py_seg_decode_frame_bytes(self.owner->get(), self.frame_index);
 		    },
-		    "Decode this SEG frame and return validated native typed sample bytes.")
+		    "Decode this SEG frame and return validated native typed sample "
+		    "bytes. For 16-bit LABELMAP these bytes match native-endian "
+		    "uint16 label samples, not necessarily the stored PixelData byte order.")
 		.def("decode_frame_into",
 		    [](const PySegmentFrame& self, nb::handle out) -> nb::object {
 			    py_seg_decode_frame_into(self.owner->get(), self.frame_index, out);
 			    return nb::borrow<nb::object>(out);
 		    },
 		    nb::arg("out"),
-		    "Decode this SEG frame into a writable C-contiguous buffer.")
+		    "Decode this SEG frame into a writable C-contiguous buffer. "
+		    "Only unsigned native-endian buffers matching the stored sample "
+		    "width are accepted; errors may leave the output partially written.")
 		.def("mask_for_segment",
 		    [](const PySegmentFrame& self, std::uint16_t segment_number,
 		        double fractional_threshold, bool error_when_not_present_in_frame) {
@@ -8166,7 +8173,9 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::arg("segment_number"), nb::kw_only(),
 		    nb::arg("fractional_threshold") = 0.0,
 		    nb::arg("error_when_not_present_in_frame") = false,
-		    "Decode this SEG frame as a uint8 0/1 mask for one segment.")
+		    "Decode this SEG frame as a semantic uint8 0/1 mask for one "
+		    "segment. Prefer this over decode_frame() when segment membership "
+		    "is needed across BINARY, FRACTIONAL, and LABELMAP.")
 		.def("mask_for_segment_into",
 		    [](const PySegmentFrame& self, std::uint16_t segment_number,
 		        nb::handle out, double fractional_threshold,
@@ -8180,7 +8189,8 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::arg("segment_number"), nb::arg("out"), nb::kw_only(),
 		    nb::arg("fractional_threshold") = 0.0,
 		    nb::arg("error_when_not_present_in_frame") = false,
-		    "Decode this SEG frame into a writable uint8 0/1 mask buffer.")
+		    "Decode this SEG frame into a writable uint8 0/1 mask buffer. "
+		    "Errors may leave the output partially written.")
 		.def("__repr__",
 		    [](const PySegmentFrame& self) {
 			    const auto view = self.view();
@@ -8246,7 +8256,7 @@ NB_MODULE(_dicomsdl, m) {
 		    });
 
 	nb::class_<PySegmentation>(seg, "Segmentation",
-	    "Owning high-level adapter for a DICOM Segmentation Storage instance.")
+	    "Owning high-level adapter for a supported DICOM SEG storage instance.")
 		.def_prop_ro("is_valid", [](const PySegmentation& self) { return self.get().is_valid(); })
 		.def_prop_ro("segmentation_type",
 		    [](const PySegmentation& self) { return self.get().segmentation_type(); })
@@ -8302,7 +8312,8 @@ NB_MODULE(_dicomsdl, m) {
 			    return PySegmentFrameList{self.owner, segment_number};
 		    },
 		    nb::arg("segment_number"),
-		    "Return stored frames that contain segment_number.")
+		    "Return stored frames where segment_number is present. LABELMAP "
+		    "builds and validates an all-frame presence index at call time.")
 		.def("segment_frame_count",
 		    [](const PySegmentation& self, std::uint16_t segment_number) {
 			    nb::gil_scoped_release release;
@@ -8315,21 +8326,28 @@ NB_MODULE(_dicomsdl, m) {
 			    return py_seg_present_segment_numbers(self.get(), frame_index);
 		    },
 		    nb::arg("frame") = 0,
-		    "Return segment numbers represented by one frame.")
+		    "Return segment numbers represented by one frame. BINARY and "
+		    "FRACTIONAL use ReferencedSegmentNumber; LABELMAP scans decoded "
+		    "non-background label values lazily.")
 		.def("to_array",
 		    [](const PySegmentation& self, std::ptrdiff_t frame) {
 			    const auto frame_index = normalize_py_seg_frame_index(self.get(), frame);
 			    return py_seg_frame_array(self.get(), frame_index);
 		    },
 		    nb::arg("frame") = 0,
-		    "Decode one SEG frame as a NumPy array with shape (rows, columns).")
+		    "Decode one SEG frame as a stored-representation NumPy array with "
+		    "shape (rows, columns). BINARY returns uint8 0/1, FRACTIONAL "
+		    "returns raw uint8 samples, and LABELMAP returns uint8 or native "
+		    "uint16 label values.")
 		.def("decode_frame",
 		    [](const PySegmentation& self, std::ptrdiff_t frame) {
 			    const auto frame_index = normalize_py_seg_frame_index(self.get(), frame);
 			    return py_seg_decode_frame_bytes(self.get(), frame_index);
 		    },
 		    nb::arg("frame") = 0,
-		    "Decode one SEG frame and return validated native typed sample bytes.")
+		    "Decode one SEG frame and return validated native typed sample "
+		    "bytes. For 16-bit LABELMAP these bytes match native-endian "
+		    "uint16 label samples, not necessarily the stored PixelData byte order.")
 		.def("decode_frame_into",
 		    [](const PySegmentation& self, std::ptrdiff_t frame, nb::handle out) -> nb::object {
 			    const auto frame_index = normalize_py_seg_frame_index(self.get(), frame);
@@ -8338,7 +8356,9 @@ NB_MODULE(_dicomsdl, m) {
 		    },
 		    nb::arg("frame"),
 		    nb::arg("out"),
-		    "Decode one SEG frame into a writable C-contiguous buffer.")
+		    "Decode one SEG frame into a writable C-contiguous buffer. "
+		    "Only unsigned native-endian buffers matching the stored sample "
+		    "width are accepted; errors may leave the output partially written.")
 		.def("mask_for_segment",
 		    [](const PySegmentation& self, std::ptrdiff_t frame,
 		        std::uint16_t segment_number, double fractional_threshold,
@@ -8351,7 +8371,9 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::arg("frame"), nb::arg("segment_number"), nb::kw_only(),
 		    nb::arg("fractional_threshold") = 0.0,
 		    nb::arg("error_when_not_present_in_frame") = false,
-		    "Decode one SEG frame as a uint8 0/1 mask for one segment.")
+		    "Decode one SEG frame as a semantic uint8 0/1 mask for one "
+		    "segment. Prefer this over decode_frame() when segment membership "
+		    "is needed across BINARY, FRACTIONAL, and LABELMAP.")
 		.def("mask_for_segment_into",
 		    [](const PySegmentation& self, std::ptrdiff_t frame,
 		        std::uint16_t segment_number, nb::handle out,
@@ -8367,7 +8389,8 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::arg("frame"), nb::arg("segment_number"), nb::arg("out"),
 		    nb::kw_only(), nb::arg("fractional_threshold") = 0.0,
 		    nb::arg("error_when_not_present_in_frame") = false,
-		    "Decode one SEG frame into a writable uint8 0/1 mask buffer.")
+		    "Decode one SEG frame into a writable uint8 0/1 mask buffer. "
+		    "Errors may leave the output partially written.")
 		.def("validate_label_values",
 		    [](const PySegmentation& self) {
 			    nb::gil_scoped_release release;
@@ -8463,7 +8486,7 @@ NB_MODULE(_dicomsdl, m) {
 	    nb::arg("allow_partial_source") = false,
 	    nb::arg("validate_required_modules") = true,
 	    "Read a DICOM file into an owned DicomFile and adapt it as DICOM "
-	    "Segmentation Storage.");
+	    "Segmentation Storage or Label Map Segmentation Storage.");
 	seg.def("read_bytes",
 	    [](nb::object buffer, const std::string& name,
 	        std::optional<Tag> load_until, std::optional<bool> keep_on_error,
@@ -8513,7 +8536,7 @@ NB_MODULE(_dicomsdl, m) {
 	    nb::arg("allow_partial_source") = false,
 	    nb::arg("validate_required_modules") = true,
 	    "Read SEG bytes into an owned DicomFile and adapt them as DICOM "
-	    "Segmentation Storage.");
+	    "Segmentation Storage or Label Map Segmentation Storage.");
 
 	m.def("create_encoder_context",
 	    [](const Uid& transfer_syntax, nb::handle options) {

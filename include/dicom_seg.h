@@ -69,9 +69,9 @@ struct Options {
 	/// metadata, but the default keeps SEG construction strict.
 	bool allow_partial_source{false};
 
-	/// Validate the required SEG modules needed by this MVP while building the
-	/// metadata index. When false, views may be empty or throw later for missing
-	/// raw items.
+	/// Validate the required SEG modules needed for safe frame interpretation
+	/// while building the metadata index. When false, views may be empty or
+	/// throw later for missing raw items.
 	bool validate_required_modules{true};
 };
 
@@ -465,10 +465,11 @@ public:
 	[[nodiscard]] std::optional<SegmentView>
 	segment_by_number(std::uint16_t segment_number) const noexcept;
 
-	/// Frames whose ReferencedSegmentNumber matches `segment_number` for
-	/// BINARY/FRACTIONAL SEG. For LABELMAP this lazily validates every frame and
-	/// builds an immutable all-frame presence index from stored label values.
-	/// Unknown SegmentSequence numbers return empty without scanning PixelData.
+	/// Frames where `segment_number` is present.
+	/// BINARY/FRACTIONAL SEG uses the declared ReferencedSegmentNumber index.
+	/// LABELMAP lazily validates every frame and builds an immutable all-frame
+	/// presence index from decoded non-background label values. Unknown
+	/// SegmentSequence numbers return empty without scanning PixelData.
 	[[nodiscard]] SegmentFrameListView
 	frames_for_segment(std::uint16_t segment_number) const;
 
@@ -484,17 +485,19 @@ public:
 	[[nodiscard]] std::span<const std::uint16_t>
 	present_segment_numbers(std::size_t frame_index) const;
 
-	/// Decode one SEG frame into caller-provided 8-bit samples.
+	/// Decode one SEG frame into caller-provided stored-representation samples.
 	/// BINARY SEG is unpacked to 0/1 bytes. FRACTIONAL SEG supports 8-bit
 	/// samples through the DicomFile decode path and rejects lossy decoded
-	/// sources. LABELMAP is supported here only when BitsAllocated == 8. If an
-	/// exception is thrown, output contents are unspecified and may have been
-	/// partially written.
+	/// sources. LABELMAP is supported here only when BitsAllocated == 8 and
+	/// validates stored label membership while decoding. If an exception is
+	/// thrown, output contents are unspecified and may have been partially
+	/// written.
 	void decode_frame_into(std::size_t frame_index,
 	    std::span<std::uint8_t> out) const;
 
 	/// Decode an 8-bit LABELMAP frame as stored label values. Native and
-	/// lossless encapsulated PixelData return the same label samples.
+	/// lossless encapsulated PixelData return the same label samples. Unknown
+	/// non-background labels are reported while decoding.
 	/// The output element type must exactly match BitsAllocated; this API does
 	/// not widen or truncate. Errors may leave `out` partially written.
 	void decode_labelmap_frame_into(std::size_t frame_index,
@@ -502,6 +505,7 @@ public:
 
 	/// Decode a 16-bit LABELMAP frame as native-endian stored label values.
 	/// Native and lossless encapsulated PixelData return the same label samples.
+	/// Unknown non-background labels are reported while decoding.
 	/// The output element type must exactly match BitsAllocated; this API does
 	/// not widen or truncate. Errors may leave `out` partially written.
 	void decode_labelmap_frame_into(std::size_t frame_index,
@@ -513,12 +517,16 @@ public:
 	[[nodiscard]] std::vector<std::uint8_t>
 	decode_labelmap_frame_bytes(std::size_t frame_index) const;
 
-	/// Decode one SEG frame into a semantic 0/1 mask for one segment.
+	/// Decode one SEG frame into a semantic uint8 0/1 mask for one segment.
+	/// Use this common API when segment membership is needed across
+	/// BINARY/FRACTIONAL/LABELMAP. SegmentSequence misses are errors; known
+	/// segments absent from the frame return a zero mask unless options request
+	/// an error.
 	[[nodiscard]] std::vector<std::uint8_t>
 	mask_for_segment(std::size_t frame_index, std::uint16_t segment_number,
 	    const SegmentMaskOptions& options = {}) const;
 
-	/// Decode one SEG frame into a caller-provided semantic 0/1 mask.
+	/// Decode one SEG frame into a caller-provided semantic uint8 0/1 mask.
 	/// If an exception is thrown, output contents are unspecified and may have
 	/// been partially written.
 	void mask_for_segment_into(std::size_t frame_index,
@@ -595,22 +603,24 @@ private:
 from_dicomfile(std::unique_ptr<DicomFile> file,
     const Options& options = {});
 
-/// Read a DICOM file and adapt it as DICOM Segmentation Storage.
+/// Read a DICOM file and adapt it as supported DICOM SEG storage.
+/// This includes Segmentation Storage for BINARY/FRACTIONAL and Label Map
+/// Segmentation Storage for LABELMAP.
 [[nodiscard]] std::unique_ptr<Segmentation>
 read_file(const std::filesystem::path& path,
     ReadOptions read_options = {}, Options options = {});
 
-/// Read in-memory DICOM bytes and adapt them as DICOM Segmentation Storage.
+/// Read in-memory DICOM bytes and adapt them as supported DICOM SEG storage.
 [[nodiscard]] std::unique_ptr<Segmentation>
 read_bytes(const std::uint8_t* data, std::size_t size,
     ReadOptions read_options = {}, Options options = {});
 
-/// Read named in-memory DICOM bytes and adapt them as DICOM Segmentation Storage.
+/// Read named in-memory DICOM bytes and adapt them as supported DICOM SEG storage.
 [[nodiscard]] std::unique_ptr<Segmentation>
 read_bytes(const std::string& name, const std::uint8_t* data,
     std::size_t size, ReadOptions read_options = {}, Options options = {});
 
-/// Take ownership of a byte buffer and adapt it as DICOM Segmentation Storage.
+/// Take ownership of a byte buffer and adapt it as supported DICOM SEG storage.
 [[nodiscard]] std::unique_ptr<Segmentation>
 read_bytes(std::string name, std::vector<std::uint8_t>&& buffer,
     ReadOptions read_options = {}, Options options = {});

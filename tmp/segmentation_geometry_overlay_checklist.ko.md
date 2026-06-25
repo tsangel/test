@@ -1398,7 +1398,7 @@ SliceStackPlan plan_image_frame_stack(
 - [x] full decoded frame buffer는 기본적으로 persistent cache하지 않는다. compressed LABELMAP all-frame scan은 `frames_for_segment()` / `validate_label_values()` 내부 builder에서 decode plan 1개, frame scratch 1개, label presence `seen` table scratch 1개를 재사용하고, persistent cache는 기존처럼 presence list와 all-frame segment index까지만 유지한다. single-frame lazy decode는 caller별 임시 scratch를 사용한다.
 - [x] LABELMAP `mask_for_segment()`는 frame presence cache가 ready이고 요청 segment가 absent이면 재decode 없이 zero mask/error를 반환한다. cache가 없으면 기존처럼 frame scan을 수행해 unknown label validation과 mask 생성을 한 pass에서 처리한다.
 - [ ] Python binding에서는 compressed SEG decode/presence scan/`validate_label_values()`/`frames_for_segment()` all-frame scan과 write/transcode 중 GIL을 release한다.
-- [ ] output buffer contract는 native path와 동일하게 유지한다. `_into()` 계열에서 codec/decode/validation error가 나면 output buffer가 partial write 상태일 수 있음을 header/docstring에 명시한다.
+- [x] output buffer contract는 native path와 동일하게 유지한다. `_into()` 계열에서 codec/decode/validation error가 나면 output buffer가 partial write 상태일 수 있음을 header/docstring에 명시한다.
 - [x] write/transcode 후 validation test를 추가한다. Encapsulated Uncompressed와 RLE Lossless output을 다시 SEG로 열어 C++ `decode_frame_into`/`decode_labelmap_frame_into`, Python `to_array`, `present_segment_numbers`, `mask_for_segment`, `frames_for_segment`, `validate_label_values`를 실행하고 원본 frame별 mask/label value와 비교한다. C++ RLE regression은 RLE static plugin enabled build에서 조건부 실행한다. JPEG-LS/JPEG 2000 등 추가 lossless compressed regression은 별도 항목으로 남긴다.
 - [x] write/transcode semantic negative test를 추가한다. FRACTIONAL sample이 `MaximumFractionalValue`를 초과하면 reject하고, LABELMAP native/encapsulated source의 decoded label이 `SegmentSequence`에 없으면 reject한다.
 - [x] malformed PixelSequence 계열 negative test를 C++ smoke로 고정한다. `NumberOfFrames`와 encapsulated frame count mismatch, empty/missing fragments, zero-length fragment, decoded length mismatch를 `write_bytes_with_transfer_syntax()` 경로에서 검증한다.
@@ -1409,21 +1409,21 @@ SliceStackPlan plan_image_frame_stack(
 - [x] unsupported compressed source codec/binding reject를 C++ smoke로 고정한다. MPEG2 transfer syntax로 위장한 Label Map SEG source가 public decode와 write/transcode에서 decoder binding error로 실패하는지 검증한다.
 - [ ] unknown lossy-state reject를 C++ smoke와 Python 테스트로 고정한다. decoder가 `EncodedLossyState::unknown`을 반환하는 fake/plugin fixture가 필요하다.
 - [ ] 실제 compressed FRACTIONAL, LABELMAP, 가능하면 BINARY SEG sample을 `../sample/seg` 기준 regression으로 돌린다. BINARY compressed는 core 1-bit layout/write 지원 전에는 명확한 unsupported/reject sample로 먼저 고정한다.
-- [ ] 문서에는 native uncompressed, encapsulated uncompressed, lossless compressed/encapsulated, lossy compressed SEG의 read/write/transcode 지원 범위를 transfer syntax별 표로 정리한다.
+- [x] 문서에는 native uncompressed, encapsulated uncompressed, lossless compressed/encapsulated, lossy compressed SEG의 read/write/transcode 지원 범위를 transfer syntax별 표로 정리한다.
 
 ### 문서 / Stub
 
-- [ ] `docs/*/developer/segmentation.md`의 Post-MVP 항목에서 Label Map SEG를 supported scope로 이동한다.
-- [ ] Python stub에서 `present_segment_numbers()`, `mask_for_segment()`, `validate_label_values()`, `SegmentMaskOptions.error_when_not_present_in_frame`, labelmap `to_array()` dtype contract, `decode_frame()` native typed bytes contract, `decode_frame_into()` buffer dtype/endian contract를 반영한다.
-- [ ] C++ header 주석에서 BINARY/FRACTIONAL/LABELMAP 각각의 pixel contract를 분리해 설명한다.
-- [ ] C++ header 주석에서 LABELMAP decode API도 unknown label membership validation을 수행하며, `decode_labelmap_frame_bytes()`는 host/native-endian typed sample bytes를 반환한다고 설명한다.
-- [ ] C++ header 주석에서 `_into()` 계열 decode/mask API는 error 시 output buffer partial write가 가능하다고 설명한다.
-- [ ] 문서에서 `referenced_segment_number`는 BINARY/FRACTIONAL compatibility accessor이고 LABELMAP에서는 error를 던진다고 설명한다. 새 공통 code는 `present_segment_numbers()` / `mask_for_segment()`를 우선 사용한다고 안내한다.
-- [ ] 문서에서 concurrent LABELMAP lazy scan은 중복 수행될 수 있지만 ready cache와 published all-frame index는 한 번만 publish된다고 설명한다.
-- [ ] 문서에서 BINARY/FRACTIONAL `present_segment_numbers()`는 PixelData가 아니라 declared `ReferencedSegmentNumber` 기반이고, LABELMAP `present_segment_numbers()`는 실제 decoded non-background label 기반이라는 의미 차이를 명확히 적는다.
-- [ ] 문서에서 Big Endian Label Map SEG는 1차 MVP에서 unsupported라고 명시한다.
-- [ ] 문서에서 `from_dicomfile()`은 LABELMAP PixelData 전체를 eager validation하지 않으며, 전체 label 검증이 필요하면 `validate_label_values()`를 호출하라고 설명한다.
-- [ ] GUI/viewer 문서에는 palette rendering이 caller responsibility임을 남기고, DicomSDL core 문서에는 label value array contract만 적는다.
+- [x] `docs/*/developer/segmentation.md`의 Post-MVP 항목에서 Label Map SEG를 supported scope로 이동한다.
+- [x] Python stub에서 `present_segment_numbers()`, `mask_for_segment()`, `validate_label_values()`, `SegmentMaskOptions.error_when_not_present_in_frame`, labelmap `to_array()` dtype contract, `decode_frame()` native typed bytes contract, `decode_frame_into()` buffer dtype/endian contract를 반영한다.
+- [x] C++ header 주석에서 BINARY/FRACTIONAL/LABELMAP 각각의 pixel contract를 분리해 설명한다.
+- [x] C++ header 주석에서 LABELMAP decode API도 unknown label membership validation을 수행하며, `decode_labelmap_frame_bytes()`는 host/native-endian typed sample bytes를 반환한다고 설명한다.
+- [x] C++ header 주석에서 `_into()` 계열 decode/mask API는 error 시 output buffer partial write가 가능하다고 설명한다.
+- [x] 문서에서 `referenced_segment_number`는 BINARY/FRACTIONAL compatibility accessor이고 LABELMAP에서는 error를 던진다고 설명한다. 새 공통 code는 `present_segment_numbers()` / `mask_for_segment()`를 우선 사용한다고 안내한다.
+- [x] 문서에서 concurrent LABELMAP lazy scan은 중복 수행될 수 있지만 ready cache와 published all-frame index는 한 번만 publish된다고 설명한다.
+- [x] 문서에서 BINARY/FRACTIONAL `present_segment_numbers()`는 PixelData가 아니라 declared `ReferencedSegmentNumber` 기반이고, LABELMAP `present_segment_numbers()`는 실제 decoded non-background label 기반이라는 의미 차이를 명확히 적는다.
+- [x] 문서에서 Big Endian Label Map SEG는 1차 MVP에서 unsupported라고 명시한다.
+- [x] 문서에서 `from_dicomfile()`은 LABELMAP PixelData 전체를 eager validation하지 않으며, 전체 label 검증이 필요하면 `validate_label_values()`를 호출하라고 설명한다.
+- [x] GUI/viewer 문서에는 palette rendering이 caller responsibility임을 남기고, DicomSDL core 문서에는 label value array contract만 적는다.
 
 ## Test Plan
 
