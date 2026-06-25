@@ -233,5 +233,48 @@ bool clear_external_codec_plugins(std::string* out_error) {
   return true;
 }
 
+#if defined(DICOMSDL_PIXEL_RUNTIME_TEST_HOOKS)
+namespace test {
+
+bool register_external_codec_plugin_api_for_test(
+    const pixel_decoder_plugin_api* decoder_api,
+    const pixel_encoder_plugin_api* encoder_api, std::string* out_error) {
+  if (decoder_api == nullptr && encoder_api == nullptr) {
+    set_optional_error(out_error, "test plugin API is empty");
+    return false;
+  }
+
+  BindingRegistry validation_registry{};
+  ExternalPluginEntry entry{};
+  entry.library_path = "in-process-test-plugin";
+  if (decoder_api != nullptr) {
+    if (!validation_registry.register_decoder_api(decoder_api)) {
+      set_optional_error(out_error, "test decoder API failed validation");
+      return false;
+    }
+    entry.has_decoder_api = true;
+    entry.decoder_api = *decoder_api;
+  }
+  if (encoder_api != nullptr) {
+    if (!validation_registry.register_encoder_api(encoder_api)) {
+      set_optional_error(out_error, "test encoder API failed validation");
+      return false;
+    }
+    entry.has_encoder_api = true;
+    entry.encoder_api = *encoder_api;
+  }
+
+  auto& state = runtime_registry_state();
+  std::lock_guard<std::mutex> lock(state.mutex);
+  ensure_initialized_locked(state);
+  state.external_plugins.push_back(entry);
+  rebuild_registry_locked(state);
+  set_optional_error(out_error, {});
+  return true;
+}
+
+}  // namespace test
+#endif
+
 }  // namespace pixel::runtime
 

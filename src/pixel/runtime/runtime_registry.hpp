@@ -21,5 +21,15 @@ namespace pixel::runtime {
 
 [[nodiscard]] bool clear_external_codec_plugins(std::string* out_error);
 
+#if defined(DICOMSDL_PIXEL_RUNTIME_TEST_HOOKS)
+namespace test {
+
+[[nodiscard]] bool register_external_codec_plugin_api_for_test(
+    const pixel_decoder_plugin_api* decoder_api,
+    const pixel_encoder_plugin_api* encoder_api, std::string* out_error);
+
+}  // namespace test
+#endif
+
 }  // namespace pixel::runtime
 

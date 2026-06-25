@@ -251,9 +251,15 @@ target_compile_features(dicomsdl PUBLIC cxx_std_20)
 
 if(BUILD_TESTING)
     target_compile_definitions(dicomsdl PRIVATE DICOMSDL_SEGMENTATION_TEST_HOOKS=1)
+    target_compile_definitions(dicomsdl PRIVATE DICOMSDL_PIXEL_RUNTIME_TEST_HOOKS=1)
 endif()
 
 include(DicomsdlPixelTargets)
+if(BUILD_TESTING AND TARGET dicomsdl_pixel_runtime)
+    target_compile_definitions(dicomsdl_pixel_runtime PRIVATE
+        DICOMSDL_PIXEL_RUNTIME_TEST_HOOKS=1
+    )
+endif()
 dicomsdl_apply_pixel_static_plugin_defines(dicomsdl)
 
 include(DicomsdlBenchmarks)

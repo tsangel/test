@@ -1407,7 +1407,8 @@ SliceStackPlan plan_image_frame_stack(
 - [x] CI/build matrix에서 RLE static plugin disabled configuration이 `dicomsdl_segmentation_mvp_smoke`를 실행하도록 고정한다. `codec-mode-matrix`의 `all_none` case가 기본 smoke regex에 `segmentation_mvp_smoke`를 포함하므로 `!kRleBuiltin` plugin-missing negative test가 CI에서 실질 coverage를 갖는다.
 - [x] near-lossless compressed source reject를 C++ smoke로 고정한다. JPEG-LS builtin build에서 non-SEG로 만든 near-lossless JPEG-LS source를 Label Map SEG로 재분류한 뒤 public decode와 write/transcode가 `lossless source` error를 내는지 검증한다.
 - [x] unsupported compressed source codec/binding reject를 C++ smoke로 고정한다. MPEG2 transfer syntax로 위장한 Label Map SEG source가 public decode와 write/transcode에서 decoder binding error로 실패하는지 검증한다.
-- [ ] unknown lossy-state reject를 C++ smoke와 Python 테스트로 고정한다. decoder가 `EncodedLossyState::unknown`을 반환하는 fake/plugin fixture가 필요하다.
+- [x] unknown lossy-state reject를 C++ smoke로 고정한다. in-process fake decoder가 `EncodedLossyState::unknown`을 반환하면 SEG public decode와 write/transcode가 lossless source error로 실패한다.
+- [ ] unknown lossy-state reject Python 테스트를 추가한다. Python에서 등록 가능한 fake shared plugin fixture가 필요하다.
 - [x] 실제 native BINARY, FRACTIONAL, LABELMAP SEG sample을 `../sample/seg` 기준 Python regression으로 돌린다.
 - [ ] 실제 compressed FRACTIONAL, LABELMAP, 가능하면 BINARY SEG sample을 `../sample/seg` 기준 regression으로 돌린다. BINARY compressed는 core 1-bit layout/write 지원 전에는 명확한 unsupported/reject sample로 먼저 고정한다.
 - [x] 문서에는 native uncompressed, encapsulated uncompressed, lossless compressed/encapsulated, lossy compressed SEG의 read/write/transcode 지원 범위를 transfer syntax별 표로 정리한다.

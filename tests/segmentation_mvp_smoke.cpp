@@ -2,12 +2,14 @@
 #include <dicom_seg.h>
 
 #include "codec_builtin_flags.hpp"
+#include "pixel/runtime/runtime_registry.hpp"
 
 #include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <exception>
 #include <filesystem>
 #include <iostream>
@@ -20,6 +22,78 @@
 
 namespace {
 using namespace dicom::literals;
+
+void* unknown_lossy_decoder_create() {
+	return new int(0);
+}
+
+void unknown_lossy_decoder_destroy(void* ctx) {
+	delete static_cast<int*>(ctx);
+}
+
+pixel_error_code unknown_lossy_decoder_configure(
+    void*, std::uint32_t, const pixel_option_list*) {
+	return PIXEL_CODEC_ERR_OK;
+}
+
+pixel_error_code unknown_lossy_decoder_decode_frame(
+    void*, const pixel_decoder_request* request) {
+	if (request == nullptr || request->source.source_buffer.data == nullptr ||
+	    request->output.dst == nullptr) {
+		return PIXEL_CODEC_ERR_INVALID_ARGUMENT;
+	}
+	const auto source_size = request->source.source_buffer.size;
+	if (request->output.dst_size < source_size) {
+		return PIXEL_CODEC_ERR_OUTPUT_TOO_SMALL;
+	}
+	std::memcpy(request->output.dst, request->source.source_buffer.data,
+	    static_cast<std::size_t>(source_size));
+	if (request->decode_info != nullptr) {
+		request->decode_info->struct_size = sizeof(pixel_decoder_info);
+		request->decode_info->abi_version = PIXEL_DECODER_PLUGIN_ABI;
+		request->decode_info->actual_color_space =
+		    PIXEL_DECODED_COLOR_SPACE_MONOCHROME;
+		request->decode_info->encoded_lossy_state =
+		    PIXEL_ENCODED_LOSSY_STATE_UNKNOWN;
+		request->decode_info->actual_dtype = request->output.dst_dtype;
+		request->decode_info->actual_planar = request->output.dst_planar;
+		request->decode_info->bits_per_sample =
+		    request->output.dst_dtype == PIXEL_DTYPE_U16 ? 16 : 8;
+	}
+	return PIXEL_CODEC_ERR_OK;
+}
+
+std::uint32_t unknown_lossy_decoder_copy_last_error_detail(
+    const void*, char*, std::uint32_t) {
+	return 0;
+}
+
+const pixel_decoder_plugin_api& unknown_lossy_decoder_api() {
+	static const pixel_decoder_plugin_api api = [] {
+		pixel_decoder_plugin_api out{};
+		out.struct_size = sizeof(pixel_decoder_plugin_api);
+		out.abi_version = PIXEL_DECODER_PLUGIN_ABI;
+		out.info.struct_size = sizeof(pixel_decoder_plugin_info);
+		out.info.abi_version = PIXEL_DECODER_PLUGIN_ABI;
+		out.info.display_name = "Unknown Lossy State Decoder Test Plugin";
+		out.info.supported_profile_flags = PIXEL_CODEC_PROFILE_RLE_LOSSLESS_DEC;
+		out.create = &unknown_lossy_decoder_create;
+		out.destroy = &unknown_lossy_decoder_destroy;
+		out.configure = &unknown_lossy_decoder_configure;
+		out.decode_frame = &unknown_lossy_decoder_decode_frame;
+		out.copy_last_error_detail =
+		    &unknown_lossy_decoder_copy_last_error_detail;
+		return out;
+	}();
+	return api;
+}
+
+struct ExternalPluginClearGuard {
+	~ExternalPluginClearGuard() {
+		std::string error;
+		(void)pixel::runtime::clear_external_codec_plugins(&error);
+	}
+};
 
 [[noreturn]] void fail(const std::string& message) {
 	std::cerr << message << std::endl;
@@ -983,6 +1057,45 @@ int main() {
 			    (void)near_lossless_transcode_file
 			        ->write_bytes_with_transfer_syntax(
 			            "ExplicitVRLittleEndian"_uid);
+		    },
+		    "lossless source");
+	}
+
+	{
+		ExternalPluginClearGuard plugin_guard{};
+		std::string plugin_error;
+		if (!pixel::runtime::test::register_external_codec_plugin_api_for_test(
+		        &unknown_lossy_decoder_api(), nullptr, &plugin_error)) {
+			fail("failed to register unknown lossy-state decoder test plugin: " +
+			    plugin_error);
+		}
+
+		auto unknown_lossy_decode_file = make_labelmap_seg8_file();
+		unknown_lossy_decode_file->reset_encapsulated_pixel_data(2);
+		unknown_lossy_decode_file->set_transfer_syntax_state_only("RLELossless"_uid);
+		unknown_lossy_decode_file->set_encoded_pixel_frame(
+		    0, std::vector<std::uint8_t>{0, 1, 2, 2, 0, 1});
+		unknown_lossy_decode_file->set_encoded_pixel_frame(
+		    1, std::vector<std::uint8_t>{0, 0, 2, 0, 0, 0});
+		auto unknown_lossy_seg =
+		    dicom::seg::from_dicomfile(std::move(unknown_lossy_decode_file));
+		std::vector<std::uint8_t> decoded(6);
+		expect_throw_contains("labelmap unknown lossy-state source decode reject",
+		    [&] { unknown_lossy_seg->decode_frame_into(0, decoded); },
+		    "lossless source");
+
+		auto unknown_lossy_transcode_file = make_labelmap_seg8_file();
+		unknown_lossy_transcode_file->reset_encapsulated_pixel_data(2);
+		unknown_lossy_transcode_file->set_transfer_syntax_state_only(
+		    "RLELossless"_uid);
+		unknown_lossy_transcode_file->set_encoded_pixel_frame(
+		    0, std::vector<std::uint8_t>{0, 1, 2, 2, 0, 1});
+		unknown_lossy_transcode_file->set_encoded_pixel_frame(
+		    1, std::vector<std::uint8_t>{0, 0, 2, 0, 0, 0});
+		expect_throw_contains("labelmap unknown lossy-state source transcode reject",
+		    [&] {
+			    (void)unknown_lossy_transcode_file
+			        ->write_bytes_with_transfer_syntax("ExplicitVRLittleEndian"_uid);
 		    },
 		    "lossless source");
 	}
