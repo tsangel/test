@@ -236,6 +236,38 @@ std::unique_ptr<dicom::DicomFile> make_fractional_seg_file() {
 	return file;
 }
 
+std::unique_ptr<dicom::DicomFile> make_non_seg_rgb_file() {
+	auto file = std::make_unique<dicom::DicomFile>();
+	file->set_transfer_syntax_state_only("ExplicitVRLittleEndian"_uid);
+	set_long(*file, "Rows", 1);
+	set_long(*file, "Columns", 2);
+	set_long(*file, "SamplesPerPixel", 3);
+	set_text(*file, "PhotometricInterpretation", "RGB");
+	set_long(*file, "BitsAllocated", 8);
+	set_long(*file, "BitsStored", 8);
+	set_long(*file, "HighBit", 7);
+	set_long(*file, "PixelRepresentation", 0);
+	file->set_native_pixel_data(
+	    std::vector<std::uint8_t>{1, 2, 3, 4, 5, 6}, dicom::VR::OB);
+	return file;
+}
+
+std::unique_ptr<dicom::DicomFile> make_non_seg_signed_file() {
+	auto file = std::make_unique<dicom::DicomFile>();
+	file->set_transfer_syntax_state_only("ExplicitVRLittleEndian"_uid);
+	set_long(*file, "Rows", 1);
+	set_long(*file, "Columns", 2);
+	set_long(*file, "SamplesPerPixel", 1);
+	set_text(*file, "PhotometricInterpretation", "MONOCHROME2");
+	set_long(*file, "BitsAllocated", 16);
+	set_long(*file, "BitsStored", 16);
+	set_long(*file, "HighBit", 15);
+	set_long(*file, "PixelRepresentation", 1);
+	file->set_native_pixel_data(
+	    std::vector<std::uint8_t>{0xFF, 0xFF, 0x00, 0x00}, dicom::VR::OW);
+	return file;
+}
+
 std::unique_ptr<dicom::DicomFile> make_labelmap_seg8_file(
     std::vector<std::uint8_t> pixel_data =
         std::vector<std::uint8_t>{0, 1, 2, 2, 0, 1, 0, 0, 2, 0, 0, 0}) {
@@ -548,6 +580,21 @@ int main() {
 			        "JPEGBaseline8Bit"_uid);
 		    },
 		    "lossless target transfer syntax");
+		expect_throw_contains("BINARY SEG photometric write preflight",
+		    [&] {
+			    auto file = make_binary_seg_file();
+			    set_text(*file, "PhotometricInterpretation", "RGB");
+			    (void)file->write_bytes_with_transfer_syntax("RLELossless"_uid);
+		    },
+		    "PhotometricInterpretation=MONOCHROME2");
+		expect_throw_contains("FRACTIONAL SEG photometric write preflight",
+		    [&] {
+			    auto file = make_fractional_seg_file();
+			    set_text(*file, "PhotometricInterpretation", "PALETTE COLOR");
+			    (void)file->write_bytes_with_transfer_syntax(
+			        "RLELossless"_uid);
+		    },
+		    "PhotometricInterpretation=MONOCHROME2");
 		expect_throw_contains("LABELMAP SEG metadata write preflight",
 		    [&] {
 			    auto file = make_labelmap_seg8_file();
@@ -584,12 +631,33 @@ int main() {
 			        "RLELossless"_uid);
 		    },
 		    "PixelPaddingValue");
+		expect_throw_contains("LABELMAP SEG padding VM write preflight",
+		    [&] {
+			    auto file = make_labelmap_seg8_file();
+			    set_longs(*file, "PixelPaddingValue", std::array<long, 2>{0, 1});
+			    (void)file->write_bytes_with_transfer_syntax(
+			        "RLELossless"_uid);
+		    },
+		    "PixelPaddingValue");
 		{
 			auto file = make_fractional_seg_file();
 			file->set_transfer_syntax_state_only("ExplicitVRLittleEndian"_uid);
 			file->remove_dataelement("SegmentationFractionalType"_tag);
 			(void)file->write_bytes_with_transfer_syntax(
 			    "ExplicitVRLittleEndian"_uid);
+		}
+		{
+			dicom::WriteOptions rebuilt_meta_options{};
+			rebuilt_meta_options.keep_existing_meta = false;
+			(void)make_non_seg_rgb_file()->write_bytes_with_transfer_syntax(
+			    "ExplicitVRLittleEndian"_uid, rebuilt_meta_options);
+			(void)make_non_seg_signed_file()->write_bytes_with_transfer_syntax(
+			    "ExplicitVRLittleEndian"_uid, rebuilt_meta_options);
+		}
+		{
+			auto file = make_non_seg_rgb_file();
+			file->set_transfer_syntax(
+			    "EncapsulatedUncompressedExplicitVRLittleEndian"_uid);
 		}
 		{
 			auto file = make_binary_seg_file();

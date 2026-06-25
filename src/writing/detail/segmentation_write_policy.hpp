@@ -76,15 +76,45 @@ inline void require_long_tag_value(const DicomFile& file,
 	}
 }
 
+[[nodiscard]] inline std::optional<std::uint16_t> uint16_single_value(
+    const DataElement& element) {
+	if (auto values = element.to_long_vector(); values && !values->empty()) {
+		if (values->size() != 1) {
+			return std::nullopt;
+		}
+		const auto value = values->front();
+		if (value < 0 || value > std::numeric_limits<std::uint16_t>::max()) {
+			return std::nullopt;
+		}
+		return static_cast<std::uint16_t>(value);
+	}
+	if (const auto value = element.to_long()) {
+		if (*value < 0 || *value > std::numeric_limits<std::uint16_t>::max()) {
+			return std::nullopt;
+		}
+		return static_cast<std::uint16_t>(*value);
+	}
+	return std::nullopt;
+}
+
 inline void validate_seg_pixel_metadata_invariants_or_throw(
     const DicomFile& file, std::string_view operation,
     const DataSet& dataset, SegPixelPayloadKind kind) {
+	if (kind == SegPixelPayloadKind::none) {
+		return;
+	}
+
 	require_long_tag_value(file, operation, dataset, "SamplesPerPixel"_tag, 1,
 	    "SEG PixelData write requires SamplesPerPixel=1");
 	require_long_tag_value(file, operation, dataset, "PixelRepresentation"_tag, 0,
 	    "SEG PixelData write requires PixelRepresentation=0");
 
 	if (kind == SegPixelPayloadKind::binary) {
+		if (text_value(dataset, "PhotometricInterpretation"_tag).value_or("") !=
+		    "MONOCHROME2") {
+			throw_seg_write_policy_error(file, operation,
+			    "BINARY SEG PixelData write requires PhotometricInterpretation=MONOCHROME2");
+		}
 		require_long_tag_value(file, operation, dataset, "BitsAllocated"_tag, 1,
 		    "BINARY SEG PixelData write requires BitsAllocated=1");
 		require_long_tag_value(file, operation, dataset, "BitsStored"_tag, 1,
@@ -95,6 +125,11 @@ inline void validate_seg_pixel_metadata_invariants_or_throw(
 	}
 
 	if (kind == SegPixelPayloadKind::fractional) {
+		if (text_value(dataset, "PhotometricInterpretation"_tag).value_or("") !=
+		    "MONOCHROME2") {
+			throw_seg_write_policy_error(file, operation,
+			    "FRACTIONAL SEG PixelData write requires PhotometricInterpretation=MONOCHROME2");
+		}
 		require_long_tag_value(file, operation, dataset, "BitsAllocated"_tag, 8,
 		    "FRACTIONAL SEG PixelData write requires BitsAllocated=8");
 		require_long_tag_value(file, operation, dataset, "BitsStored"_tag, 8,
@@ -141,9 +176,7 @@ inline void validate_seg_pixel_metadata_invariants_or_throw(
 		}
 		if (const auto& pixel_padding =
 		        dataset.get_dataelement("PixelPaddingValue"_tag)) {
-			const auto padding_value = pixel_padding.to_long();
-			if (!padding_value || *padding_value < 0 ||
-			    *padding_value > std::numeric_limits<std::uint16_t>::max()) {
+			if (!uint16_single_value(pixel_padding)) {
 				throw_seg_write_policy_error(file, operation,
 				    "LABELMAP SEG PixelData write requires PixelPaddingValue to be a single unsigned label value");
 			}
