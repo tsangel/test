@@ -267,7 +267,7 @@ if seg.segmentation_type is dicom.seg.SegmentationType.fractional:
 
 ## LABELMAP SEG frame を decode する
 
-LABELMAP SEG は label value を PixelData に直接保存します。Label value `0` は background（背景）で、0 以外の値は `SegmentSequence` の segment number に対応します。DicomSDL は保存表現をそのまま返します。8-bit label map は `uint8`、16-bit label map は native-endian `uint16` として decode されます。
+LABELMAP SEG は label value を PixelData に直接保存します。保存された値は `SegmentSequence` の segment number に対応します。`PixelPaddingValue` がある場合、その segment number は background（背景）として扱われ、`present_segment_numbers()` からは除外されます。DicomSDL は保存表現をそのまま返します。8-bit label map は `uint8`、16-bit label map は native-endian `uint16` として decode されます。
 
 ```python
 if seg.segmentation_type is dicom.seg.SegmentationType.labelmap:

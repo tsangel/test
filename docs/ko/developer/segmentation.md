@@ -48,7 +48,7 @@ fraction = raw.astype("float32") / seg.maximum_fractional_value
 
 scaling은 caller가 수행한다. probability/occupancy 소비자가 원하는 precision과 memory layout을 선택할 수 있게 하기 위해서다.
 
-LABELMAP SEG에서 `to_array()`는 저장 sample dtype을 보존한다. 8-bit label map은 `uint8`, 16-bit label map은 native-endian `uint16`을 반환한다. `present_segment_numbers(frame)`는 해당 frame에 실제 등장한 non-background label을 반환하고, `mask_for_segment(frame, segment_number)`는 요청한 segment에 대한 semantic `uint8` 0/1 mask를 반환한다. unknown stored label value는 file open 시점에는 검사하지 않고, 해당 frame을 decode/scan하거나 `validate_label_values()`를 호출할 때 error로 보고한다.
+LABELMAP SEG에서 `to_array()`는 저장 sample dtype을 보존한다. 8-bit label map은 `uint8`, 16-bit label map은 native-endian `uint16`을 반환한다. `present_segment_numbers(frame)`는 해당 frame에 실제 등장한 non-background label을 반환한다. `PixelPaddingValue`가 있으면 그 segment number를 background로 취급하고 결과에서 제외한다. `mask_for_segment(frame, segment_number)`는 요청한 segment에 대한 semantic `uint8` 0/1 mask를 반환한다. unknown stored label value는 file open 시점에는 검사하지 않고, 해당 frame을 decode/scan하거나 `validate_label_values()`를 호출할 때 error로 보고한다.
 
 ## API Pattern
 

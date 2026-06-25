@@ -48,7 +48,7 @@ fraction = raw.astype("float32") / seg.maximum_fractional_value
 
 The scaling step stays with the caller so probability and occupancy consumers can choose their output precision and memory layout.
 
-For LABELMAP SEG, `to_array()` preserves the stored sample dtype: `uint8` for 8-bit label maps and native-endian `uint16` for 16-bit label maps. `present_segment_numbers(frame)` reports non-background labels actually present in that frame, and `mask_for_segment(frame, segment_number)` returns a semantic `uint8` 0/1 mask for the requested segment. Unknown stored label values are not checked at file-open time; they are reported when the relevant frame is decoded/scanned or when `validate_label_values()` is called.
+For LABELMAP SEG, `to_array()` preserves the stored sample dtype: `uint8` for 8-bit label maps and native-endian `uint16` for 16-bit label maps. `present_segment_numbers(frame)` reports non-background labels actually present in that frame; when `PixelPaddingValue` is present, that segment number is treated as background and excluded. `mask_for_segment(frame, segment_number)` returns a semantic `uint8` 0/1 mask for the requested segment. Unknown stored label values are not checked at file-open time; they are reported when the relevant frame is decoded/scanned or when `validate_label_values()` is called.
 
 ## API Pattern
 

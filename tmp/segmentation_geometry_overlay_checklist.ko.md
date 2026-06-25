@@ -1128,7 +1128,7 @@ SliceStackPlan plan_image_frame_stack(
 - [x] 공통 API 구현: `present_segment_numbers(frame)`, `mask_for_segment(frame, segment_number, options)`, `mask_for_segment_into(...)`, `validate_label_values()`를 C++/Python에 연결했다.
 - [x] LABELMAP decode 구현: 8-bit는 기존 `decode_frame_into(uint8)`와 labelmap-specific uint8 decode를 허용하고, 16-bit는 명시적 `decode_labelmap_frame_into(uint16)` / Python native `np.uint16` 경로만 허용한다.
 - [x] LABELMAP presence cache 구현: `Segmentation` 소유 fixed-size cache array, ready empty 상태, immutable `shared_ptr<const vector<uint16_t>>`, ready entry/index no-replace, caller-owned publish, duplicate concurrent scan 허용 정책을 따른다.
-- [x] payload/metadata MVP 정책 구현: native uncompressed PixelData만 지원하고, Big Endian, compressed/encapsulated, unexpected PixelSequence, detached payload, missing PixelData, invalid length/padding은 decode/validate 시 명확한 error로 처리한다. `PixelPaddingValue`는 metadata validation에서 reject한다.
+- [x] payload/metadata MVP 정책 구현: native uncompressed PixelData만 지원하고, Big Endian, compressed/encapsulated, unexpected PixelSequence, detached payload, missing PixelData, invalid length/padding은 decode/validate 시 명확한 error로 처리한다. LABELMAP의 `PixelPaddingValue`는 background segment number로 허용하고, `PixelPaddingRangeLimit`은 reject한다.
 - [x] Python binding/stub 반영: `present_segment_numbers()`는 tuple, labelmap `to_array()`는 `np.uint8`/`np.uint16`, `decode_frame()` bytes는 native typed bytes, `decode_frame_into()`는 unsigned dtype/endian을 검사한다.
 - [x] 집중 테스트 추가: synthetic 8-bit/16-bit LABELMAP, lazy unknown-label validation, SOP conflict/helper, `PALETTE COLOR`, `PixelPaddingValue`, `SegmentNumber=0`, metadata-only absent segment, dtype mismatch, Big Endian/compressed/missing/trailing/padded PixelData, detached/PixSeq C++ smoke를 커버한다.
 - [x] 공개 계약 정리: public header, Python docstring, en/ko developer segmentation 문서에서 LABELMAP 지원 범위와 native typed sample bytes 계약을 반영했다.
@@ -1199,12 +1199,12 @@ SliceStackPlan plan_image_frame_stack(
 - [ ] `Rows`, `Columns`, `NumberOfFrames`, `FrameOfReferenceUID`, `SegmentSequence` 필수 여부를 labelmap path에서 별도로 검증한다.
 - [ ] `SegmentsOverlap`이 있으면 `NO`만 허용한다.
 - [ ] `SegmentNumber`는 unique이면 되고 1부터 연속일 필요가 없다는 점을 검증과 문서에 반영한다.
-- [ ] `SegmentNumber=0`은 background label과 충돌하므로 `SegmentSequence`에서 명확히 reject한다.
+- [ ] `SegmentNumber=0`은 LABELMAP에서 `PixelPaddingValue=0` background segment로 허용하고, BINARY/FRACTIONAL에서는 명확히 reject한다.
 - [ ] PixelData에 나타나는 non-background label value가 `SegmentSequence`에 없으면 명확한 error를 반환한다. 단, 이 검증은 `from_dicomfile()` 시점이 아니라 해당 frame decode/presence 계산 또는 `validate_label_values()` 시점에 수행한다.
-- [ ] background 값은 label value `0`으로 고정한다. `0`은 `SegmentSequence` 존재를 요구하지 않고 `present_segment_numbers()`에서 제외한다.
-- [ ] `PixelPaddingValue`가 있는 LABELMAP은 MVP에서 명확한 unsupported error로 reject한다. padding value를 background/ignored label로 해석하는 정책은 별도 후속 설계로 둔다.
+- [ ] background 값은 고정된 `0`이 아니라 `PixelPaddingValue`가 지정한 segment number로 둔다. 이 값은 `SegmentSequence`에 존재해야 하며 `present_segment_numbers()`와 LABELMAP all-frame presence index에서 제외한다.
+- [ ] LABELMAP에서 `PixelPaddingValue`는 background/ignored label로 해석한다. `PixelPaddingRangeLimit`은 표준 제약에 맞춰 unsupported/reject로 둔다.
 - [ ] 8-bit LABELMAP에서 `SegmentNumber > 255`가 `SegmentSequence`에 존재하는 것은 metadata-only absent segment로 허용한다. 해당 값은 PixelData에 나타날 수 없으므로 `present_segment_numbers()`에 나오지 않고, `mask_for_segment()`는 zero mask를 반환한다.
-- [ ] `SegmentSequence` 검증 후 instance-level `valid_label` table을 만든다. label value 공간은 최대 65536이므로 `std::bitset<65536>` 또는 동등한 compact bit table을 사용하고, `valid_label[segment_number] = true`로 채운다. `0`은 background라 valid segment로 표시하지 않는다.
+- [ ] `SegmentSequence` 검증 후 instance-level `valid_label` table을 만든다. label value 공간은 최대 65536이므로 `std::bitset<65536>` 또는 동등한 compact bit table을 사용하고, `valid_label[segment_number] = true`로 채운다. LABELMAP의 `SegmentNumber=0`도 `SegmentSequence`에 있으면 valid label로 표시하되, `PixelPaddingValue`와 같으면 presence 결과에서 제외한다.
 - [ ] `segment_by_number()` / requested segment validation은 기존 map을 쓰되, decoded PixelData label validation은 `valid_label[value]` table lookup으로 O(1) 처리한다.
 
 ### Frame / Segment data model
@@ -1311,7 +1311,7 @@ SliceStackPlan plan_image_frame_stack(
 - [ ] unknown label 검증이 `SegmentSequence`에서 만든 `valid_label` table 기반으로 동작하는지 검증한다. 예: valid segment `1`, `7`만 있는 8-bit LABELMAP에서 pixel value `9`가 나오면 decode/presence 시점에 error.
 - [ ] background label `0` 정책을 테스트로 고정한다.
 - [ ] all-background LABELMAP frame에서 `present_segment_numbers()`가 empty list를 반환하고, 반복 호출 시 "uninitialized"로 오인해 재-scan하지 않는지 테스트한다.
-- [ ] `SegmentSequence`에 `SegmentNumber=0`이 있으면 metadata validation에서 reject되는지 테스트한다.
+- [ ] LABELMAP에서 `SegmentNumber=0` + `PixelPaddingValue=0` background item이 허용되는지, BINARY/FRACTIONAL에서 `SegmentNumber=0`이 reject되는지 테스트한다.
 - [ ] `LabelMapSegmentationStorage` SOP Class가 더 이상 `"LABELMAP SEG is outside the SEG MVP scope"`로 실패하지 않는지 검증한다.
 - [ ] 기존 `SegmentationStorage` + `SegmentationType=LABELMAP` strict reject 정책을 테스트한다.
 - [ ] `SOPClassUID`와 `MediaStorageSOPClassUID`가 `SegmentationStorage` / `LabelMapSegmentationStorage`로 서로 충돌하면 strict reject되는지 테스트한다.
@@ -1361,7 +1361,7 @@ SliceStackPlan plan_image_frame_stack(
 - [ ] LABELMAP PixelData missing, detached payload marker, unexpected PixelSequence 형태가 decode/validate에서 각각 명확한 error가 되는지 테스트한다.
 - [ ] Big Endian Label Map SEG가 1차 MVP에서 명확한 unsupported error를 내는지 검증한다.
 - [ ] `PhotometricInterpretation=MONOCHROME2`와 `PALETTE COLOR` allowlist, 그 외 값 reject를 테스트한다.
-- [ ] `PixelPaddingValue`가 있는 LABELMAP은 MVP에서 명확한 unsupported error가 나는지 테스트한다.
+- [ ] `PixelPaddingValue`가 있는 LABELMAP은 background로 처리되고, `PixelPaddingRangeLimit`은 명확한 unsupported error가 나는지 테스트한다.
 - [ ] 8-bit LABELMAP에서 `SegmentNumber > 255`가 metadata-only absent segment로 허용되고, 해당 segment mask가 zero mask가 되는지 테스트한다.
 - [ ] `frames_for_segment()` / `segment_frame_count()`가 "segment가 present인 frame"이라는 공통 의미를 따르는지 검증한다.
 - [ ] `plane_from_seg_frame()`이 Label Map SEG synthetic sample의 geometry를 반환하는지 검증한다.

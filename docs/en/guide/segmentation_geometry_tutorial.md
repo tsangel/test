@@ -303,10 +303,12 @@ This keeps probability and occupancy workflows explicit. The caller can choose
 
 ## Decode a LABELMAP SEG Frame
 
-LABELMAP SEG stores label values directly in PixelData. Label value `0` is
-background; non-zero values correspond to `SegmentSequence` segment numbers.
-DicomSDL preserves the stored representation: 8-bit label maps decode to
-`uint8`, and 16-bit label maps decode to native-endian `uint16`.
+LABELMAP SEG stores label values directly in PixelData. Stored values
+correspond to `SegmentSequence` segment numbers. When `PixelPaddingValue` is
+present, that segment number is treated as background and is excluded from
+`present_segment_numbers()`. DicomSDL preserves the stored representation:
+8-bit label maps decode to `uint8`, and 16-bit label maps decode to
+native-endian `uint16`.
 
 ```python
 if seg.segmentation_type is dicom.seg.SegmentationType.labelmap:

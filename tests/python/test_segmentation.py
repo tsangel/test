@@ -170,10 +170,12 @@ def _make_labelmap_seg8(pixel_data: bytes | None = None) -> dicom.DicomFile:
     _set(df, "BitsAllocated", 8)
     _set(df, "BitsStored", 8)
     _set(df, "HighBit", 7)
+    _set(df, "PixelPaddingValue", 0)
     _set(df, "SegmentsOverlap", "NO")
-    _populate_segment(df, 0, 1, "One")
-    _populate_segment(df, 1, 2, "Two")
-    _populate_segment(df, 2, 7, "Absent")
+    _populate_segment(df, 0, 0, "Background")
+    _populate_segment(df, 1, 1, "One")
+    _populate_segment(df, 2, 2, "Two")
+    _populate_segment(df, 3, 7, "Absent")
     _populate_labelmap_frame(df, 0, 10.0)
     _populate_labelmap_frame(df, 1, 20.0)
     _set_vr(
@@ -200,8 +202,10 @@ def _make_labelmap_seg16() -> dicom.DicomFile:
     _set(df, "BitsAllocated", 16)
     _set(df, "BitsStored", 16)
     _set(df, "HighBit", 15)
-    _populate_segment(df, 0, 1, "One")
-    _populate_segment(df, 1, 300, "Three Hundred")
+    _set(df, "PixelPaddingValue", 0)
+    _populate_segment(df, 0, 0, "Background")
+    _populate_segment(df, 1, 1, "One")
+    _populate_segment(df, 2, 300, "Three Hundred")
     _populate_labelmap_frame(df, 0, 10.0)
     values = np.array([[0, 1], [300, 300]], dtype=np.uint16)
     _set_vr(df, "PixelData", dicom.VR.OW, values.tobytes())
@@ -221,8 +225,10 @@ def _make_labelmap_seg8_odd_frame(pixel_data: bytes) -> dicom.DicomFile:
     _set(df, "BitsAllocated", 8)
     _set(df, "BitsStored", 8)
     _set(df, "HighBit", 7)
-    _populate_segment(df, 0, 1, "One")
-    _populate_segment(df, 1, 2, "Two")
+    _set(df, "PixelPaddingValue", 0)
+    _populate_segment(df, 0, 0, "Background")
+    _populate_segment(df, 1, 1, "One")
+    _populate_segment(df, 2, 2, "Two")
     _populate_labelmap_frame(df, 0, 10.0)
     _set_vr(df, "PixelData", dicom.VR.OB, pixel_data)
     return df
@@ -419,8 +425,9 @@ def test_labelmap_segmentation_storage_decodes_and_indexes_labels() -> None:
     seg = _seg_from_synthetic(df)
     assert seg.segmentation_type is dicom.seg.SegmentationType.labelmap
     assert seg.labelmap_bits_allocated == 8
-    assert seg.segment_count == 3
+    assert seg.segment_count == 4
     assert seg.frame_count == 2
+    assert seg.segment_by_number(0).label == "Background"
     assert repr(seg.frames[0]) == "SegmentFrame(index=0, type=labelmap)"
     with pytest.raises(Exception, match="referenced_segment_number"):
         _ = seg.frames[0].referenced_segment_number
@@ -449,12 +456,18 @@ def test_labelmap_segmentation_storage_decodes_and_indexes_labels() -> None:
     np.testing.assert_array_equal(
         seg.mask_for_segment(0, 7), np.zeros((2, 3), dtype=np.uint8)
     )
+    np.testing.assert_array_equal(
+        seg.mask_for_segment(0, 0),
+        np.array([[1, 0, 0], [0, 1, 0]], dtype=np.uint8),
+    )
     with pytest.raises(Exception, match="not present"):
         seg.mask_for_segment(0, 7, error_when_not_present_in_frame=True)
     with pytest.raises(Exception, match="SegmentSequence"):
         seg.mask_for_segment(0, 99)
 
     assert [frame.index for frame in seg.frames_for_segment(2)] == [0, 1]
+    assert len(seg.frames_for_segment(0)) == 0
+    assert seg.segment_frame_count(0) == 0
     assert len(seg.frames_for_segment(7)) == 0
     assert seg.segment_frame_count(7) == 0
     assert len(seg.frames_for_segment(99)) == 0
@@ -484,15 +497,20 @@ def test_labelmap_sop_class_conflict_and_metadata_validation() -> None:
     with pytest.raises(Exception, match="PhotometricInterpretation"):
         _seg_from_synthetic(bad_photo)
 
-    pixel_padding = _make_labelmap_seg8()
-    _set(pixel_padding, "PixelPaddingValue", 255)
-    with pytest.raises(Exception, match="PixelPaddingValue"):
-        _seg_from_synthetic(pixel_padding)
+    pixel_padding_range = _make_labelmap_seg8()
+    _set(pixel_padding_range, "PixelPaddingRangeLimit", 1)
+    with pytest.raises(Exception, match="PixelPaddingRangeLimit"):
+        _seg_from_synthetic(pixel_padding_range)
 
-    zero_segment = _make_labelmap_seg8()
-    _set(zero_segment, "SegmentSequence.0.SegmentNumber", 0)
-    with pytest.raises(Exception, match="SegmentNumber"):
-        _seg_from_synthetic(zero_segment)
+    missing_padding_segment = _make_labelmap_seg8()
+    _set(missing_padding_segment, "PixelPaddingValue", 255)
+    with pytest.raises(Exception, match="PixelPaddingValue.*SegmentNumber"):
+        _seg_from_synthetic(missing_padding_segment)
+
+    binary_zero_segment = _make_binary_seg()
+    _set(binary_zero_segment, "SegmentSequence.0.SegmentNumber", 0)
+    with pytest.raises(Exception, match="SegmentNumber 0"):
+        _seg_from_synthetic(binary_zero_segment)
 
 
 def test_labelmap_pixeldata_payload_policy_is_lazy_and_strict() -> None:
@@ -535,10 +553,10 @@ def test_labelmap_pixeldata_payload_policy_is_lazy_and_strict() -> None:
 
 def test_labelmap_metadata_only_absent_segment_and_exact_buffer_contract() -> None:
     df = _make_labelmap_seg8()
-    _populate_segment(df, 3, 300, "Metadata Only")
+    _populate_segment(df, 4, 300, "Metadata Only")
     seg = _seg_from_synthetic(df)
 
-    assert seg.segment_count == 4
+    assert seg.segment_count == 5
     assert seg.present_segment_numbers(0) == (1, 2)
     np.testing.assert_array_equal(
         seg.mask_for_segment(0, 300), np.zeros((2, 3), dtype=np.uint8)
@@ -550,7 +568,7 @@ def test_labelmap_metadata_only_absent_segment_and_exact_buffer_contract() -> No
 def test_labelmap_unknown_pixel_label_is_lazy_validation_error() -> None:
     seg = _seg_from_synthetic(_make_labelmap_seg8(bytes([0, 1, 9, 0, 0, 0] * 2)))
 
-    assert seg.segment_count == 3
+    assert seg.segment_count == 4
     with pytest.raises(Exception, match="undefined segment number"):
         seg.present_segment_numbers(0)
     with pytest.raises(Exception, match="undefined segment number"):

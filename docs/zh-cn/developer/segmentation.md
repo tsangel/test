@@ -48,7 +48,7 @@ fraction = raw.astype("float32") / seg.maximum_fractional_value
 
 scaling 由调用方执行，这样 probability / occupancy 的使用方可以自行选择输出 precision 和 memory layout。
 
-对于 LABELMAP SEG，`to_array()` 会保留 stored sample dtype：8-bit label map 返回 `uint8`，16-bit label map 返回 native-endian `uint16`。`present_segment_numbers(frame)` 报告该 frame 中实际出现的 non-background label，`mask_for_segment(frame, segment_number)` 返回请求 segment 的 semantic `uint8` 0/1 mask。unknown stored label value 不会在 file open 时检查；它们会在相关 frame 被 decode / scan 时，或调用 `validate_label_values()` 时报告为 error。
+对于 LABELMAP SEG，`to_array()` 会保留 stored sample dtype：8-bit label map 返回 `uint8`，16-bit label map 返回 native-endian `uint16`。`present_segment_numbers(frame)` 报告该 frame 中实际出现的 non-background label；存在 `PixelPaddingValue` 时，该 segment number 会被视为 background（背景）并从结果中排除。`mask_for_segment(frame, segment_number)` 返回请求 segment 的 semantic `uint8` 0/1 mask。unknown stored label value 不会在 file open 时检查；它们会在相关 frame 被 decode / scan 时，或调用 `validate_label_values()` 时报告为 error。
 
 ## API Pattern
 

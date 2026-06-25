@@ -318,6 +318,7 @@ struct LabelmapFrameScanResult {
 	std::shared_ptr<const std::vector<std::uint16_t>> present_labels{};
 	bool decoded_written{false};
 	bool mask_written{false};
+	bool target_seen{false};
 };
 
 template <typename T, typename U>
@@ -395,6 +396,7 @@ template <typename T, typename U>
     const DicomFile& file, std::size_t frame_count, std::size_t frame_index,
     std::size_t rows, std::size_t columns, std::uint16_t bits_allocated,
     const std::bitset<65536>& valid_labels,
+    std::optional<std::uint16_t> background_label,
     const LabelmapFrameScanRequest& request) {
 	if (frame_index >= frame_count) {
 		throw_decode("frame index out of range");
@@ -464,6 +466,7 @@ template <typename T, typename U>
 	};
 
 	const auto target = request.target_segment.value_or(0);
+	bool target_seen = false;
 	for (std::size_t pixel_index = 0; pixel_index < pixels_per_frame; ++pixel_index) {
 		std::uint16_t value = 0;
 		if (bits_allocated == 8) {
@@ -481,14 +484,17 @@ template <typename T, typename U>
 			}
 		}
 
-		if (value != 0) {
-			if (!valid_labels.test(value)) {
-				throw_decode(
-				    "LABELMAP PixelData references an undefined segment number");
-			}
+		if (!valid_labels.test(value)) {
+			throw_decode(
+			    "LABELMAP PixelData references an undefined segment number");
+		}
+		if (!background_label || value != *background_label) {
 			mark_seen(value);
 		}
 		if (!request.mask_out.empty()) {
+			if (value == target) {
+				target_seen = true;
+			}
 			request.mask_out[pixel_index] =
 			    static_cast<std::uint8_t>(value == target ? 1u : 0u);
 		}
@@ -500,6 +506,7 @@ template <typename T, typename U>
 	        std::make_shared<const std::vector<std::uint16_t>>(std::move(present)),
 	    .decoded_written = !request.decoded_u8.empty() || !request.decoded_u16.empty(),
 	    .mask_written = !request.mask_out.empty(),
+	    .target_seen = target_seen,
 	};
 }
 
@@ -542,9 +549,15 @@ void Segmentation::index_segment_sequence_items(const Options& options) {
 			continue;
 		}
 		const auto number = uint16_value(*item, "SegmentNumber"_tag);
-		if (!number || *number == 0) {
+		if (!number) {
 			if (options.validate_required_modules) {
 				throw_seg("SegmentSequence item is missing SegmentNumber");
+			}
+			continue;
+		}
+		if (*number == 0 && segmentation_type_ != SegmentationType::labelmap) {
+			if (options.validate_required_modules) {
+				throw_seg("SegmentNumber 0 is only valid for LABELMAP background");
 			}
 			continue;
 		}
@@ -559,6 +572,13 @@ void Segmentation::index_segment_sequence_items(const Options& options) {
 		if (segmentation_type_ == SegmentationType::labelmap) {
 			labelmap_valid_labels_.set(*number);
 		}
+	}
+	if (segmentation_type_ == SegmentationType::labelmap &&
+	    labelmap_background_value_ &&
+	    !index_.segment_index_by_number.contains(*labelmap_background_value_) &&
+	    options.validate_required_modules) {
+		throw_seg(
+		    "LABELMAP PixelPaddingValue references a SegmentNumber absent from SegmentSequence");
 	}
 }
 
@@ -656,6 +676,7 @@ void Segmentation::extract_instance_metadata(const Options& options) {
 	rows_ = size_value(dataset, "Rows"_tag).value_or(0);
 	columns_ = size_value(dataset, "Columns"_tag).value_or(0);
 	labelmap_bits_allocated_.reset();
+	labelmap_background_value_.reset();
 
 	if (segmentation_type_ == SegmentationType::unknown &&
 	    options.validate_required_modules) {
@@ -705,6 +726,16 @@ void Segmentation::extract_instance_metadata(const Options& options) {
 		if (bits_allocated) {
 			labelmap_bits_allocated_ = *bits_allocated;
 		}
+		if (const auto& pixel_padding =
+		        dataset.get_dataelement("PixelPaddingValue"_tag)) {
+			const auto padding_value = uint16_value(pixel_padding);
+			if (padding_value) {
+				labelmap_background_value_ = *padding_value;
+			} else if (options.validate_required_modules) {
+				throw_seg(
+				    "LABELMAP PixelPaddingValue must be a single unsigned label value");
+			}
+		}
 		if (options.validate_required_modules) {
 			if (!bits_allocated || (*bits_allocated != 8 && *bits_allocated != 16)) {
 				throw_seg("LABELMAP requires BitsAllocated=8 or 16");
@@ -725,8 +756,8 @@ void Segmentation::extract_instance_metadata(const Options& options) {
 				throw_seg(
 				    "LABELMAP requires PhotometricInterpretation MONOCHROME2 or PALETTE COLOR");
 			}
-			if (dataset.get_dataelement("PixelPaddingValue"_tag)) {
-				throw_seg("LABELMAP PixelPaddingValue is not supported");
+			if (dataset.get_dataelement("PixelPaddingRangeLimit"_tag)) {
+				throw_seg("LABELMAP PixelPaddingRangeLimit is not supported");
 			}
 			if (const auto segments_overlap =
 			        string_value(dataset, "SegmentsOverlap"_tag);
@@ -847,7 +878,8 @@ Segmentation::labelmap_presence_for_frame(std::size_t frame_index) const {
 
 	const auto result = decode_and_scan_labelmap_frame(*file_, index_.frames.size(),
 	    frame_index, rows_, columns_, labelmap_bits_allocated_.value_or(0),
-	    labelmap_valid_labels_, LabelmapFrameScanRequest{.collect_presence = true});
+	    labelmap_valid_labels_, labelmap_background_value_,
+	    LabelmapFrameScanRequest{.collect_presence = true});
 
 	std::lock_guard lock(labelmap_cache_mutex_);
 	auto& cache = labelmap_presence_cache_[frame_index];
@@ -885,6 +917,7 @@ Segmentation::ensure_labelmap_frame_index() const {
 			const auto result = decode_and_scan_labelmap_frame(*file_,
 			    index_.frames.size(), frame_index, rows_, columns_,
 			    labelmap_bits_allocated_.value_or(0), labelmap_valid_labels_,
+			    labelmap_background_value_,
 			    LabelmapFrameScanRequest{.collect_presence = true});
 			frame_labels[frame_index] = result.present_labels;
 		}
@@ -1072,6 +1105,7 @@ void Segmentation::decode_labelmap_frame_into(
 	const auto result = decode_and_scan_labelmap_frame(*file_,
 	    index_.frames.size(), frame_index, rows_, columns_,
 	    labelmap_bits_allocated_.value_or(0), labelmap_valid_labels_,
+	    labelmap_background_value_,
 	    LabelmapFrameScanRequest{
 	        .decoded_u8 = out,
 	        .collect_presence = true,
@@ -1095,6 +1129,7 @@ void Segmentation::decode_labelmap_frame_into(
 	const auto result = decode_and_scan_labelmap_frame(*file_,
 	    index_.frames.size(), frame_index, rows_, columns_,
 	    labelmap_bits_allocated_.value_or(0), labelmap_valid_labels_,
+	    labelmap_background_value_,
 	    LabelmapFrameScanRequest{
 	        .decoded_u16 = out,
 	        .collect_presence = true,
@@ -1191,6 +1226,7 @@ void Segmentation::mask_for_segment_into(std::size_t frame_index,
 		const auto result = decode_and_scan_labelmap_frame(*file_,
 		    index_.frames.size(), frame_index, rows_, columns_,
 		    labelmap_bits_allocated_.value_or(0), labelmap_valid_labels_,
+		    labelmap_background_value_,
 		    LabelmapFrameScanRequest{
 		        .mask_out = out,
 		        .target_segment = segment_number,
@@ -1204,9 +1240,7 @@ void Segmentation::mask_for_segment_into(std::size_t frame_index,
 				cache.labels = result.present_labels;
 			}
 		}
-		if (options.error_when_not_present_in_frame &&
-		    !std::binary_search(result.present_labels->begin(),
-		        result.present_labels->end(), segment_number)) {
+		if (options.error_when_not_present_in_frame && !result.target_seen) {
 			throw_decode("segment is not present in this frame");
 		}
 		return;

@@ -247,10 +247,12 @@ std::unique_ptr<dicom::DicomFile> make_labelmap_seg8_file(
 	set_long(*file, "BitsAllocated", 8);
 	set_long(*file, "BitsStored", 8);
 	set_long(*file, "HighBit", 7);
+	set_long(*file, "PixelPaddingValue", 0);
 	set_text(*file, "SegmentsOverlap", "NO");
-	populate_segment(*file, 0, 1, "One");
-	populate_segment(*file, 1, 2, "Two");
-	populate_segment(*file, 2, 7, "Absent");
+	populate_segment(*file, 0, 0, "Background");
+	populate_segment(*file, 1, 1, "One");
+	populate_segment(*file, 2, 2, "Two");
+	populate_segment(*file, 3, 7, "Absent");
 	populate_labelmap_frame(*file, 0, 10.0);
 	populate_labelmap_frame(*file, 1, 20.0);
 	file->set_native_pixel_data(std::move(pixel_data), dicom::VR::OB);
@@ -266,8 +268,10 @@ std::unique_ptr<dicom::DicomFile> make_labelmap_seg16_file() {
 	set_long(*file, "BitsAllocated", 16);
 	set_long(*file, "BitsStored", 16);
 	set_long(*file, "HighBit", 15);
-	populate_segment(*file, 0, 1, "One");
-	populate_segment(*file, 1, 300, "Three Hundred");
+	set_long(*file, "PixelPaddingValue", 0);
+	populate_segment(*file, 0, 0, "Background");
+	populate_segment(*file, 1, 1, "One");
+	populate_segment(*file, 2, 300, "Three Hundred");
 	populate_labelmap_frame(*file, 0, 10.0);
 	file->set_native_pixel_data(
 	    std::vector<std::uint8_t>{0, 0, 1, 0, 0x2C, 0x01, 0x2C, 0x01},
@@ -624,11 +628,36 @@ int main() {
 			fail("labelmap segment mask mismatch");
 		}
 		if (seg->frames_for_segment(2).size() != 2 ||
+		    seg->segment_frame_count(0) != 0 ||
 		    seg->segment_frame_count(7) != 0 ||
 		    seg->frames_for_segment(99).size() != 0) {
 			fail("labelmap frames_for_segment mismatch");
 		}
+		const auto background_mask = seg->mask_for_segment(0, 0);
+		if (background_mask != std::vector<std::uint8_t>{1, 0, 0, 0, 1, 0}) {
+			fail("labelmap background mask mismatch");
+		}
 		seg->validate_label_values();
+	}
+
+	{
+		auto range_file = make_labelmap_seg8_file();
+		set_long(*range_file, "PixelPaddingRangeLimit", 1);
+		expect_throw_contains("labelmap PixelPaddingRangeLimit",
+		    [&] { (void)dicom::seg::from_dicomfile(std::move(range_file)); },
+		    "PixelPaddingRangeLimit");
+
+		auto missing_background = make_labelmap_seg8_file();
+		set_long(*missing_background, "PixelPaddingValue", 255);
+		expect_throw_contains("labelmap PixelPaddingValue missing segment",
+		    [&] { (void)dicom::seg::from_dicomfile(std::move(missing_background)); },
+		    "PixelPaddingValue");
+
+		auto binary_zero_segment = make_binary_seg_file();
+		set_long(*binary_zero_segment, "SegmentSequence.0.SegmentNumber", 0);
+		expect_throw_contains("binary SegmentNumber zero",
+		    [&] { (void)dicom::seg::from_dicomfile(std::move(binary_zero_segment)); },
+		    "SegmentNumber 0");
 	}
 
 	{

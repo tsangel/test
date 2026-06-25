@@ -353,7 +353,8 @@ public:
 	/// Segment numbers represented by this frame.
 	/// BINARY/FRACTIONAL returns the declared ReferencedSegmentNumber without
 	/// scanning PixelData. LABELMAP returns actual non-background stored label
-	/// values and validates unknown labels while scanning lazily.
+	/// values and validates unknown labels while scanning lazily. For LABELMAP,
+	/// PixelPaddingValue, when present, identifies the background label.
 	[[nodiscard]] std::span<const std::uint16_t> present_segment_numbers() const;
 
 	/// ImagePositionPatient from PlanePositionSequence, per-frame first and then
@@ -478,7 +479,8 @@ public:
 	/// Segment numbers represented by one frame.
 	/// BINARY/FRACTIONAL returns the declared ReferencedSegmentNumber without
 	/// scanning PixelData. LABELMAP returns actual non-background stored labels
-	/// from a lazily populated immutable presence cache.
+	/// from a lazily populated immutable presence cache. For LABELMAP,
+	/// PixelPaddingValue, when present, identifies the background label.
 	[[nodiscard]] std::span<const std::uint16_t>
 	present_segment_numbers(std::size_t frame_index) const;
 
@@ -551,6 +553,7 @@ private:
 	std::optional<std::string_view> frame_of_reference_uid_{};
 	const DataSet* shared_functional_groups_item_{nullptr};
 	std::bitset<65536> labelmap_valid_labels_{};
+	std::optional<std::uint16_t> labelmap_background_value_{};
 	// Small catalog/index built once at construction time for fast view lookups.
 	detail::SegmentationIndex index_{};
 	std::size_t rows_{0};

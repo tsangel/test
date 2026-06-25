@@ -48,7 +48,7 @@ fraction = raw.astype("float32") / seg.maximum_fractional_value
 
 scaling は呼び出し側で行います。probability / occupancy の利用側が、必要な precision と memory layout を選べるようにするためです。
 
-LABELMAP SEG では、`to_array()` は保存 sample の dtype を保持します。8-bit label map は `uint8`、16-bit label map は native-endian `uint16` を返します。`present_segment_numbers(frame)` はその frame に実際に存在する non-background label を返し、`mask_for_segment(frame, segment_number)` は要求された segment の semantic `uint8` 0/1 mask を返します。unknown stored label value は file open 時点では検査せず、該当 frame を decode / scan する時、または `validate_label_values()` を呼び出す時に error として報告されます。
+LABELMAP SEG では、`to_array()` は保存 sample の dtype を保持します。8-bit label map は `uint8`、16-bit label map は native-endian `uint16` を返します。`present_segment_numbers(frame)` はその frame に実際に存在する non-background label を返します。`PixelPaddingValue` がある場合、その segment number は background（背景）として扱われ、結果から除外されます。`mask_for_segment(frame, segment_number)` は要求された segment の semantic `uint8` 0/1 mask を返します。unknown stored label value は file open 時点では検査せず、該当 frame を decode / scan する時、または `validate_label_values()` を呼び出す時に error として報告されます。
 
 ## API Pattern
 

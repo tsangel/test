@@ -267,7 +267,7 @@ if seg.segmentation_type is dicom.seg.SegmentationType.fractional:
 
 ## 解码 LABELMAP SEG frame
 
-LABELMAP SEG 会把 label value 直接存储在 PixelData 中。Label value `0` 表示 background（背景），非零值对应 `SegmentSequence` 中的 segment number。DicomSDL 会保留原始存储表示：8-bit label map 解码为 `uint8`，16-bit label map 解码为 native-endian `uint16`。
+LABELMAP SEG 会把 label value 直接存储在 PixelData 中。存储值对应 `SegmentSequence` 中的 segment number。存在 `PixelPaddingValue` 时，该 segment number 会被视为 background（背景），并从 `present_segment_numbers()` 中排除。DicomSDL 会保留原始存储表示：8-bit label map 解码为 `uint8`，16-bit label map 解码为 native-endian `uint16`。
 
 ```python
 if seg.segmentation_type is dicom.seg.SegmentationType.labelmap:
