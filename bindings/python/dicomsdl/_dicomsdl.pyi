@@ -2233,7 +2233,7 @@ class _Segmentation:
         """Write a semantic uint8 0/1 mask for one segment; errors may leave out partially written."""
         ...
     def validate_label_values(self) -> None:
-        """Validate all LABELMAP stored label values against SegmentSequence."""
+        """Validate LABELMAP labels and FRACTIONAL samples."""
         ...
 
 

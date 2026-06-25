@@ -883,11 +883,34 @@ int main() {
 	}
 
 	{
+		auto invalid_fractional_read = make_fractional_seg_file();
+		set_long(*invalid_fractional_read, "MaximumFractionalValue", 128);
+		auto invalid_fractional_seg =
+		    dicom::seg::from_dicomfile(std::move(invalid_fractional_read));
+		std::vector<std::uint8_t> decoded(4);
+		expect_throw_contains("fractional read sample validation",
+		    [&] { invalid_fractional_seg->decode_frame_into(0, decoded); },
+		    "MaximumFractionalValue");
+		expect_throw_contains("fractional mask sample validation",
+		    [&] { (void)invalid_fractional_seg->mask_for_segment(0, 1); },
+		    "MaximumFractionalValue");
+		expect_throw_contains("fractional validate sample validation",
+		    [&] { invalid_fractional_seg->validate_label_values(); },
+		    "MaximumFractionalValue");
+
 		auto invalid_fractional = make_fractional_seg_file();
 		set_long(*invalid_fractional, "MaximumFractionalValue", 128);
 		expect_throw_contains("fractional transcode sample validation",
 		    [&] {
 			    (void)invalid_fractional->write_bytes_with_transfer_syntax(
+			        "EncapsulatedUncompressedExplicitVRLittleEndian"_uid);
+		    },
+		    "MaximumFractionalValue");
+		auto invalid_fractional_set = make_fractional_seg_file();
+		set_long(*invalid_fractional_set, "MaximumFractionalValue", 128);
+		expect_throw_contains("fractional set_transfer sample validation",
+		    [&] {
+			    invalid_fractional_set->set_transfer_syntax(
 			        "EncapsulatedUncompressedExplicitVRLittleEndian"_uid);
 		    },
 		    "MaximumFractionalValue");
@@ -900,16 +923,35 @@ int main() {
 			        "EncapsulatedUncompressedExplicitVRLittleEndian"_uid);
 		    },
 		    "undefined segment");
+		auto invalid_labelmap_set = make_labelmap_seg8_file(
+		    std::vector<std::uint8_t>{0, 1, 9, 2, 0, 1, 0, 0, 2, 0, 0, 0});
+		expect_throw_contains("labelmap native set_transfer label validation",
+		    [&] {
+			    invalid_labelmap_set->set_transfer_syntax(
+			        "EncapsulatedUncompressedExplicitVRLittleEndian"_uid);
+		    },
+		    "undefined segment");
 
 		auto encapsulated_bytes =
 		    make_labelmap_seg8_file()->write_bytes_with_transfer_syntax(
 		        "EncapsulatedUncompressedExplicitVRLittleEndian"_uid);
+		auto encapsulated_set_bytes = encapsulated_bytes;
 		auto invalid_encapsulated = dicom::read_bytes(
 		    "labelmap-encapsulated-invalid-segment", std::move(encapsulated_bytes));
 		set_long(*invalid_encapsulated, "SegmentSequence.2.SegmentNumber", 9);
 		expect_throw_contains("labelmap encapsulated transcode label validation",
 		    [&] {
 			    (void)invalid_encapsulated->write_bytes_with_transfer_syntax(
+			        "ExplicitVRLittleEndian"_uid);
+		    },
+		    "undefined segment");
+		auto invalid_encapsulated_set = dicom::read_bytes(
+		    "labelmap-encapsulated-invalid-segment-set",
+		    std::move(encapsulated_set_bytes));
+		set_long(*invalid_encapsulated_set, "SegmentSequence.2.SegmentNumber", 9);
+		expect_throw_contains("labelmap encapsulated set_transfer label validation",
+		    [&] {
+			    invalid_encapsulated_set->set_transfer_syntax(
 			        "ExplicitVRLittleEndian"_uid);
 		    },
 		    "undefined segment");
@@ -1009,6 +1051,7 @@ int main() {
 		    "JPEGBaseline8Bit"_uid);
 
 		auto lossy_decode_bytes = lossy_bytes;
+		auto lossy_set_bytes = lossy_bytes;
 		auto lossy_decode_file = dicom::read_bytes(
 		    "labelmap-lossy-jpeg-source-decode", std::move(lossy_decode_bytes));
 		set_labelmap_seg_sop_class(*lossy_decode_file);
@@ -1024,6 +1067,15 @@ int main() {
 		expect_throw_contains("labelmap lossy source transcode reject",
 		    [&] {
 			    (void)lossy_transcode_file->write_bytes_with_transfer_syntax(
+			        "ExplicitVRLittleEndian"_uid);
+		    },
+		    "lossless source");
+		auto lossy_set_file = dicom::read_bytes(
+		    "labelmap-lossy-jpeg-source-set", std::move(lossy_set_bytes));
+		set_labelmap_seg_sop_class(*lossy_set_file);
+		expect_throw_contains("labelmap lossy source set_transfer reject",
+		    [&] {
+			    lossy_set_file->set_transfer_syntax(
 			        "ExplicitVRLittleEndian"_uid);
 		    },
 		    "lossless source");

@@ -30,7 +30,7 @@ SEG adapter は、安全に frame を解釈するために必要な metadata を
 - `Rows`、`Columns`、`SegmentSequence`、`PerFrameFunctionalGroupsSequence` は必須です。
 - `SharedFunctionalGroupsSequence` は item をちょうど 1 つ持つ必要があります。
 - BINARY/FRACTIONAL frame は 1 つの `ReferencedSegmentNumber` に解決される必要があります。
-- FRACTIONAL SEG には `SegmentationFractionalType` と `MaximumFractionalValue` が必要です。
+- FRACTIONAL SEG には `SegmentationFractionalType` と `MaximumFractionalValue` が必要です。Sample 値は decode/mask 生成時、または `validate_label_values()` 呼び出し時に `MaximumFractionalValue` 以下か検証されます。
 - LABELMAP SEG には Label Map Segmentation Storage、`SegmentationType=LABELMAP`、`BitsAllocated` 8 または 16、unsigned single-sample pixels、`PhotometricInterpretation` `MONOCHROME2` または `PALETTE COLOR` が必要です。Stored label value の検証は file open 時には行わず、decode/presence query、または `validate_label_values()` 呼び出し時に lazy に行います。
 
 これらの条件を満たさない場合、adapter は誤解を招く mask を静かに返さず、明確に失敗します。

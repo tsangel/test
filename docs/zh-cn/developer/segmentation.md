@@ -30,7 +30,7 @@ SEG adapter 默认验证安全解释 frame 所需的 metadata。
 - `Rows`、`Columns`、`SegmentSequence` 和 `PerFrameFunctionalGroupsSequence` 是必需字段。
 - `SharedFunctionalGroupsSequence` 必须恰好包含一个 item。
 - BINARY/FRACTIONAL frame 必须能解析到一个 `ReferencedSegmentNumber`。
-- FRACTIONAL SEG 必须包含 `SegmentationFractionalType` 和 `MaximumFractionalValue`。
+- FRACTIONAL SEG 必须包含 `SegmentationFractionalType` 和 `MaximumFractionalValue`。Sample 值会在 decode/mask 生成时，或调用 `validate_label_values()` 时验证是否不超过 `MaximumFractionalValue`。
 - LABELMAP SEG 必须使用 Label Map Segmentation Storage，并具有 `SegmentationType=LABELMAP`、`BitsAllocated` 8 或 16、unsigned single-sample pixels，以及 `PhotometricInterpretation` `MONOCHROME2` 或 `PALETTE COLOR`。Stored label value 不在 file open 时验证，而是在 decode/presence query 或调用 `validate_label_values()` 时 lazy 验证。
 
 如果不满足这些条件，adapter 会明确失败，而不是静默返回可能误导 caller 的 mask。

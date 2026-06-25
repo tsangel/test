@@ -406,6 +406,24 @@ void require_lossless_seg_decode(const pixel::DecodeInfo& decode_info) {
 	}
 }
 
+void validate_fractional_frame_samples_or_throw(
+    std::span<const std::uint8_t> frame, std::size_t pixels_per_frame,
+    std::optional<std::uint16_t> maximum_fractional_value) {
+	if (!maximum_fractional_value || *maximum_fractional_value == 0) {
+		throw_decode("FRACTIONAL SEG requires MaximumFractionalValue");
+	}
+	if (frame.size() < pixels_per_frame) {
+		throw_decode("FRACTIONAL SEG decoded frame size mismatch");
+	}
+	const auto maximum = *maximum_fractional_value;
+	for (std::size_t index = 0; index < pixels_per_frame; ++index) {
+		if (frame[index] > maximum) {
+			throw_decode(
+			    "FRACTIONAL SEG PixelData sample exceeds MaximumFractionalValue");
+		}
+	}
+}
+
 [[nodiscard]] const pixel::DecodePlan& labelmap_decode_plan_or_throw(
     const DicomFile& file, std::uint16_t bits_allocated,
     std::size_t bytes_per_frame, LabelmapFrameDecodeContext& context) {
@@ -1205,6 +1223,9 @@ void Segmentation::decode_frame_into(
 		pixel::DecodeInfo decode_info{};
 		file_->decode_into(frame_index, out, plan, decode_info);
 		require_lossless_seg_decode(decode_info);
+		validate_fractional_frame_samples_or_throw(
+		    out, checked_frame_sample_count(rows_, columns_),
+		    maximum_fractional_value_);
 		return;
 	}
 
@@ -1395,6 +1416,15 @@ std::vector<std::uint8_t> Segmentation::mask_for_segment(
 void Segmentation::validate_label_values() const {
 	if (segmentation_type_ == SegmentationType::labelmap) {
 		(void)ensure_labelmap_frame_index();
+		return;
+	}
+	if (segmentation_type_ == SegmentationType::fractional) {
+		std::vector<std::uint8_t> decoded(
+		    checked_frame_sample_count(rows_, columns_));
+		for (std::size_t frame_index = 0; frame_index < index_.frames.size();
+		     ++frame_index) {
+			decode_frame_into(frame_index, decoded);
+		}
 	}
 }
 

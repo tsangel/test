@@ -333,6 +333,7 @@ print(mask.shape, mask.dtype, mask.min(), mask.max())
 ```
 
 `present_segment_numbers(frame)`는 요청한 LABELMAP frame만 스캔하고 결과를 캐시한다.
-`frames_for_segment(segment_number)`와 `validate_label_values()`는 처음 호출할 때
-모든 LABELMAP frame을 스캔할 수 있으므로, 큰 multi-frame SEG에서는 명시적인
-검증/인덱싱 작업으로 취급하는 편이 좋다.
+`frames_for_segment(segment_number)`는 처음 호출할 때 모든 LABELMAP frame을
+스캔할 수 있다. `validate_label_values()`는 모든 LABELMAP label을 검증하고
+FRACTIONAL frame을 decode해 `MaximumFractionalValue` 범위를 확인하므로, 큰
+multi-frame SEG에서는 명시적인 검증 작업으로 취급하는 편이 좋다.

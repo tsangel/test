@@ -295,4 +295,4 @@ print(mask.shape, mask.dtype, mask.min(), mask.max())
 (512, 512) uint8 0 1
 ```
 
-`present_segment_numbers(frame)` は指定された LABELMAP frame だけをスキャンして結果をキャッシュします。`frames_for_segment(segment_number)` と `validate_label_values()` は初回呼び出し時に全 LABELMAP frame をスキャンすることがあるため、大きな multi-frame SEG では明示的な検証/インデックス化操作として扱ってください。
+`present_segment_numbers(frame)` は指定された LABELMAP frame だけをスキャンして結果をキャッシュします。`frames_for_segment(segment_number)` は初回呼び出し時に全 LABELMAP frame をスキャンすることがあります。`validate_label_values()` は全 LABELMAP label を検証し、FRACTIONAL frame を decode して `MaximumFractionalValue` の範囲を確認するため、大きな multi-frame SEG では明示的な検証操作として扱ってください。

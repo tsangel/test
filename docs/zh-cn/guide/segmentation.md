@@ -295,4 +295,4 @@ print(mask.shape, mask.dtype, mask.min(), mask.max())
 (512, 512) uint8 0 1
 ```
 
-`present_segment_numbers(frame)` 只扫描请求的 LABELMAP frame，并缓存结果。`frames_for_segment(segment_number)` 和 `validate_label_values()` 第一次调用时可能扫描所有 LABELMAP frame；在大型 multi-frame SEG 中，应把它们视为显式验证/索引操作。
+`present_segment_numbers(frame)` 只扫描请求的 LABELMAP frame，并缓存结果。`frames_for_segment(segment_number)` 第一次调用时可能扫描所有 LABELMAP frame。`validate_label_values()` 会验证所有 LABELMAP label，并 decode FRACTIONAL frame 以检查 `MaximumFractionalValue` 范围；在大型 multi-frame SEG 中，应把它视为显式验证操作。

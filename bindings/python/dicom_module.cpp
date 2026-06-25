@@ -8424,7 +8424,9 @@ NB_MODULE(_dicomsdl, m) {
 			    nb::gil_scoped_release release;
 			    self.get().validate_label_values();
 		    },
-		    "Validate all LABELMAP stored label values against SegmentSequence.")
+		    "Validate stored SEG sample semantics. LABELMAP checks stored label "
+		    "values against SegmentSequence; FRACTIONAL checks samples against "
+		    "MaximumFractionalValue.")
 		.def("__repr__",
 		    [](const PySegmentation& self) {
 			    std::ostringstream oss;

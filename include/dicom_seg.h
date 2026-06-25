@@ -533,8 +533,9 @@ public:
 	    std::uint16_t segment_number, std::span<std::uint8_t> out,
 	    const SegmentMaskOptions& options = {}) const;
 
-	/// Validate all LABELMAP stored label values against SegmentSequence.
-	/// Non-LABELMAP SEG instances are a no-op.
+	/// Validate stored SEG sample semantics.
+	/// LABELMAP checks stored label values against SegmentSequence.
+	/// FRACTIONAL checks samples against MaximumFractionalValue.
 	void validate_label_values() const;
 
 private:

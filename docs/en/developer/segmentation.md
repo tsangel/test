@@ -30,7 +30,7 @@ The SEG adapter validates the metadata needed for safe frame interpretation by d
 - `Rows`, `Columns`, `SegmentSequence`, and `PerFrameFunctionalGroupsSequence` are required.
 - `SharedFunctionalGroupsSequence` must contain exactly one item.
 - BINARY and FRACTIONAL frames must resolve to one `ReferencedSegmentNumber`.
-- FRACTIONAL SEG must contain `SegmentationFractionalType` and `MaximumFractionalValue`.
+- FRACTIONAL SEG must contain `SegmentationFractionalType` and `MaximumFractionalValue`. Samples are validated against `MaximumFractionalValue` during decode/mask generation or by calling `validate_label_values()`.
 - LABELMAP SEG must use Label Map Segmentation Storage with `SegmentationType=LABELMAP`, `BitsAllocated` of 8 or 16, unsigned single-sample pixels, and `PhotometricInterpretation` of `MONOCHROME2` or `PALETTE COLOR`. Stored label values are validated lazily during decode/presence queries or by calling `validate_label_values()`.
 
 When these conditions are not met, the adapter fails loudly instead of returning a misleading mask.

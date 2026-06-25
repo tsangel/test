@@ -6,6 +6,7 @@
 #include "pixel/host/decode/decode_plan_compute.hpp"
 #include "pixel/host/encode/encode_set_pixel_data_runner.hpp"
 #include "pixel/host/support/dicom_pixel_support.hpp"
+#include "pixel_decoder_plugin_abi.h"
 #include "pixeldata_payload_placeholder.hpp"
 #include "photometric_text_detail.hpp"
 #include "writing/detail/segmentation_write_policy.hpp"
@@ -384,8 +385,18 @@ void validate_transform_metadata_frame_index_or_throw(const DataSet& dataset,
 	return nullptr;
 }
 
+void validate_set_transfer_seg_decoded_source_lossless_or_throw(
+    const DicomFile& file, const write_detail::SegPixelPayloadWritePolicy& policy,
+    const pixel::DecodeInfo& decode_info);
+
+void validate_set_transfer_seg_frame_semantics_or_throw(const DicomFile& file,
+    const write_detail::SegPixelPayloadWritePolicy& policy,
+    const pixel::support_detail::ComputedEncodeSourceLayout& layout,
+    std::size_t frame_index, std::span<const std::uint8_t> frame_bytes);
+
 [[nodiscard]] pixel::PixelBuffer decode_all_frames_to_native(DicomFile& file,
     const pixel::PixelLayout& source_layout,
+    const write_detail::SegPixelPayloadWritePolicy& seg_policy,
     std::source_location location = std::source_location::current()) {
 	// This helper materializes the full native pixel payload so transfer-syntax
 	// mutations can reuse the normal encode path afterwards.
@@ -410,6 +421,12 @@ void validate_transform_metadata_frame_index_or_throw(const DataSet& dataset,
 	// Reuse the shared owning pixel container so decode helpers and transforms
 	// can move the same type through the pipeline.
 	auto decoded = pixel::PixelBuffer::allocate(decode_plan.output_layout);
+	std::optional<pixel::support_detail::ComputedEncodeSourceLayout> seg_layout{};
+	if (seg_policy.is_segmentation()) {
+		seg_layout =
+		    pixel::support_detail::compute_encode_source_layout_without_source_bytes_or_throw(
+		        decode_plan.output_layout);
+	}
 	const auto frame_count = static_cast<std::size_t>(source_layout.frames);
 
 	// Decode into one contiguous native buffer so downstream callers can treat it
@@ -418,7 +435,16 @@ void validate_transform_metadata_frame_index_or_throw(const DataSet& dataset,
 	for (std::size_t frame_index = 0; frame_index < frame_count; ++frame_index) {
 		// Frame subviews preserve the planned single-frame layout automatically.
 		auto frame_view = decoded_view.frame(frame_index);
-		file.decode_into(frame_index, frame_view.bytes, decode_plan);
+		pixel::DecodeInfo decode_info{};
+		file.decode_into(frame_index, frame_view.bytes, decode_plan, decode_info);
+		validate_set_transfer_seg_decoded_source_lossless_or_throw(
+		    file, seg_policy, decode_info);
+		if (seg_layout) {
+			validate_set_transfer_seg_frame_semantics_or_throw(file, seg_policy,
+			    *seg_layout, frame_index,
+			    std::span<const std::uint8_t>(
+			        frame_view.bytes.data(), seg_layout->source_frame_size_bytes));
+		}
 	}
 	return decoded;
 }
@@ -458,6 +484,138 @@ void validate_transform_metadata_frame_index_or_throw(const DataSet& dataset,
 	};
 }
 
+void validate_set_transfer_seg_decoded_source_lossless_or_throw(
+    const DicomFile& file, const write_detail::SegPixelPayloadWritePolicy& policy,
+    const pixel::DecodeInfo& decode_info) {
+	if (!policy.is_segmentation()) {
+		return;
+	}
+	if (decode_info.encoded_lossy_state != pixel::EncodedLossyState::lossless) {
+		write_detail::throw_seg_write_policy_error(file,
+		    "DicomFile::set_transfer_syntax",
+		    "SEG compressed PixelData write/transcode requires lossless source frames");
+	}
+}
+
+void validate_set_transfer_seg_decoded_source_lossless_or_throw(
+    const DicomFile& file, const write_detail::SegPixelPayloadWritePolicy& policy,
+    const pixel_decoder_info& decode_info) {
+	if (!policy.is_segmentation()) {
+		return;
+	}
+	if (decode_info.encoded_lossy_state != PIXEL_ENCODED_LOSSY_STATE_LOSSLESS) {
+		write_detail::throw_seg_write_policy_error(file,
+		    "DicomFile::set_transfer_syntax",
+		    "SEG compressed PixelData write/transcode requires lossless source frames");
+	}
+}
+
+[[nodiscard]] std::size_t checked_set_transfer_seg_frame_sample_count_or_throw(
+    const DicomFile& file, const write_detail::SegPixelPayloadWritePolicy& policy,
+    const pixel::support_detail::ComputedEncodeSourceLayout& layout) {
+	if (!policy.is_segmentation()) {
+		return 0;
+	}
+	if (layout.samples_per_pixel != 1) {
+		write_detail::throw_seg_write_policy_error(file,
+		    "DicomFile::set_transfer_syntax",
+		    "SEG PixelData write requires SamplesPerPixel=1");
+	}
+	if (layout.rows != 0 &&
+	    layout.cols > std::numeric_limits<std::size_t>::max() / layout.rows) {
+		write_detail::throw_seg_write_policy_error(file,
+		    "DicomFile::set_transfer_syntax",
+		    "SEG PixelData write frame sample count overflow");
+	}
+	return layout.rows * layout.cols;
+}
+
+[[nodiscard]] std::uint16_t read_set_transfer_native_u16_sample(
+    std::span<const std::uint8_t> bytes, std::size_t sample_index) noexcept {
+	std::uint16_t value = 0;
+	std::memcpy(&value, bytes.data() + sample_index * sizeof(value), sizeof(value));
+	return value;
+}
+
+void validate_set_transfer_seg_frame_semantics_or_throw(const DicomFile& file,
+    const write_detail::SegPixelPayloadWritePolicy& policy,
+    const pixel::support_detail::ComputedEncodeSourceLayout& layout,
+    std::size_t frame_index, std::span<const std::uint8_t> frame_bytes) {
+	if (!policy.is_segmentation() ||
+	    policy.kind == write_detail::SegPixelPayloadKind::binary) {
+		return;
+	}
+
+	const auto sample_count =
+	    checked_set_transfer_seg_frame_sample_count_or_throw(file, policy, layout);
+	if (policy.kind == write_detail::SegPixelPayloadKind::fractional) {
+		if (layout.bytes_per_sample != 1 ||
+		    frame_bytes.size() < sample_count ||
+		    !policy.maximum_fractional_value) {
+			write_detail::throw_seg_write_policy_error(file,
+			    "DicomFile::set_transfer_syntax",
+			    "FRACTIONAL SEG PixelData write requires 8-bit decoded source frames");
+		}
+		const auto maximum = *policy.maximum_fractional_value;
+		for (std::size_t index = 0; index < sample_count; ++index) {
+			if (frame_bytes[index] > maximum) {
+				diag::throw_exception(
+				    "DicomFile::set_transfer_syntax file={} frame={} reason=FRACTIONAL SEG PixelData sample exceeds MaximumFractionalValue",
+				    file.path(), frame_index);
+			}
+		}
+		return;
+	}
+
+	if (policy.kind != write_detail::SegPixelPayloadKind::labelmap) {
+		return;
+	}
+	if (layout.samples_per_pixel != 1 ||
+	    (policy.labelmap_bits_allocated != 8 &&
+	        policy.labelmap_bits_allocated != 16)) {
+		write_detail::throw_seg_write_policy_error(file,
+		    "DicomFile::set_transfer_syntax",
+		    "LABELMAP SEG PixelData write requires 8-bit or 16-bit decoded source frames");
+	}
+	const auto bytes_per_sample =
+	    static_cast<std::size_t>(policy.labelmap_bits_allocated / 8u);
+	if (bytes_per_sample == 0 ||
+	    sample_count > std::numeric_limits<std::size_t>::max() / bytes_per_sample ||
+	    frame_bytes.size() < sample_count * bytes_per_sample) {
+		write_detail::throw_seg_write_policy_error(file,
+		    "DicomFile::set_transfer_syntax",
+		    "LABELMAP SEG PixelData write frame size mismatch");
+	}
+	for (std::size_t index = 0; index < sample_count; ++index) {
+		const auto label =
+		    policy.labelmap_bits_allocated == 8
+		        ? static_cast<std::uint16_t>(frame_bytes[index])
+		        : read_set_transfer_native_u16_sample(frame_bytes, index);
+		if (!policy.labelmap_valid_labels.test(label)) {
+			diag::throw_exception(
+			    "DicomFile::set_transfer_syntax file={} frame={} reason=LABELMAP SEG PixelData contains undefined segment label {}",
+			    file.path(), frame_index, label);
+		}
+	}
+}
+
+void validate_set_transfer_seg_source_span_or_throw(const DicomFile& file,
+    const write_detail::SegPixelPayloadWritePolicy& policy,
+    pixel::ConstPixelSpan source) {
+	if (!policy.is_segmentation() ||
+	    policy.kind == write_detail::SegPixelPayloadKind::binary) {
+		return;
+	}
+	const auto layout =
+	    pixel::support_detail::compute_encode_source_layout_or_throw(source);
+	for (std::size_t frame_index = 0; frame_index < layout.frames; ++frame_index) {
+		const auto frame_offset = frame_index * layout.source_frame_stride;
+		validate_set_transfer_seg_frame_semantics_or_throw(file, policy, layout,
+		    frame_index,
+		    source.bytes.subspan(frame_offset, layout.source_frame_size_bytes));
+	}
+}
+
 [[nodiscard]] pixel::PixelLayout resolve_decoded_source_layout_or_throw(
     DicomFile& file, uid::WellKnown target_ts, const pixel::DecodePlan& decode_plan) {
 	// This path describes a decode-on-demand source for re-encode without first
@@ -472,7 +630,8 @@ void validate_transform_metadata_frame_index_or_throw(const DataSet& dataset,
 	return decode_plan.output_layout;
 }
 
-void convert_encapsulated_pixel_data_to_native(DicomFile& file) {
+void convert_encapsulated_pixel_data_to_native(DicomFile& file,
+    const write_detail::SegPixelPayloadWritePolicy& seg_policy) {
 	DataSet& dataset = file.dataset();
 	const auto& pixel_data = dataset["PixelData"_tag];
 	if (!pixel_data || !pixel_data.vr().is_pixel_sequence()) {
@@ -481,7 +640,7 @@ void convert_encapsulated_pixel_data_to_native(DicomFile& file) {
 
 	const auto source_layout = pixel::support_detail::compute_decode_source_layout(file);
 	// Decode every encapsulated frame and replace PixelData with one native binary blob.
-	auto decoded = decode_all_frames_to_native(file, source_layout);
+	auto decoded = decode_all_frames_to_native(file, source_layout, seg_policy);
 	const auto storage_bits = source_layout.bits_allocated();
 	if (storage_bits <= 0) {
 		diag::throw_exception(
@@ -532,7 +691,8 @@ void transcode_encapsulated_pixel_data_to_encapsulated(DicomFile& file,
     uid::WellKnown target_transfer_syntax,
     ApplyTransferSyntaxEncodeMode encode_mode,
     std::span<const pixel::CodecOptionTextKv> codec_opt_override,
-    const pixel::EncoderContext* encoder_ctx) {
+    const pixel::EncoderContext* encoder_ctx,
+    const write_detail::SegPixelPayloadWritePolicy& seg_policy) {
 	// Stream each source frame through decode -> encode so large encapsulated inputs
 	// do not need an intermediate full-volume native allocation.
 	const auto source_decode_layout =
@@ -566,6 +726,12 @@ void transcode_encapsulated_pixel_data_to_encapsulated(DicomFile& file,
 
 	auto source_layout = resolve_decoded_source_layout_or_throw(
 	    file, target_transfer_syntax, decode_plan);
+	std::optional<pixel::support_detail::ComputedEncodeSourceLayout> seg_layout{};
+	if (seg_policy.is_segmentation()) {
+		seg_layout =
+		    pixel::support_detail::compute_encode_source_layout_without_source_bytes_or_throw(
+		        source_layout);
+	}
 	std::vector<std::uint8_t> decoded_frame(decode_plan.output_layout.frame_stride);
 
 	pixel::EncoderContext staged_encoder_ctx{};
@@ -596,9 +762,18 @@ void transcode_encapsulated_pixel_data_to_encapsulated(DicomFile& file,
 			    auto prepared_source =
 			        pixel::support_detail::prepare_decode_frame_source_or_throw(
 			            *source_pixel_sequence_snapshot, frame_index);
+			    pixel_decoder_info decode_info{};
 			    pixel::detail::dispatch_decode_prepared_frame(
 			        file, source_layout, frame_index, prepared_source.bytes, frame_span,
-			        decode_plan);
+			        decode_plan, &decode_info);
+			    validate_set_transfer_seg_decoded_source_lossless_or_throw(
+			        file, seg_policy, decode_info);
+			    if (seg_layout) {
+				    validate_set_transfer_seg_frame_semantics_or_throw(file,
+				        seg_policy, *seg_layout, frame_index,
+				        std::span<const std::uint8_t>(
+				            frame_span.data(), seg_layout->source_frame_size_bytes));
+			    }
 			    source_pixel_sequence_snapshot->clear_frame_encoded_data(frame_index);
 			    return std::span<const std::uint8_t>(
 			        frame_span.data(), frame_span.size());
@@ -633,10 +808,10 @@ void transcode_encapsulated_pixel_data_to_encapsulated(DicomFile& file,
 	    ((target_uses_encapsulated_pixel_data && !already_target_transfer_syntax) ||
 	        (has_encapsulated_pixel_data && !target_uses_encapsulated_pixel_data));
 
+	write_detail::SegPixelPayloadWritePolicy seg_policy{};
 	if (needs_pixel_transcode) {
-		const auto seg_policy =
-		    write_detail::classify_seg_pixel_payload_write_policy_or_throw(
-		        file, "DicomFile::set_transfer_syntax");
+		seg_policy = write_detail::classify_seg_pixel_payload_write_policy_or_throw(
+		    file, "DicomFile::set_transfer_syntax");
 		write_detail::validate_seg_transfer_syntax_target_or_throw(
 		    file, seg_policy, transfer_syntax, "DicomFile::set_transfer_syntax");
 		write_detail::validate_seg_pixel_metadata_invariants_or_throw(
@@ -656,29 +831,30 @@ void transcode_encapsulated_pixel_data_to_encapsulated(DicomFile& file,
 				    "DicomFile::set_transfer_syntax file={} source_ts={} target_ts={} reason=target encapsulated transfer syntax does not support native pixel encoding",
 				    file.path(), source_transfer_syntax.value(), transfer_syntax.value());
 			}
-				auto source =
-				    build_native_source_span_from_native_pixel_data(
-				        file, transfer_syntax);
-				if (encode_mode == ApplyTransferSyntaxEncodeMode::use_plugin_defaults) {
-					file.set_pixel_data(transfer_syntax, source);
-				} else if (encode_mode == ApplyTransferSyntaxEncodeMode::use_encoder_context) {
-					file.set_pixel_data(transfer_syntax, source, *encoder_ctx);
-				} else {
-					file.set_pixel_data(transfer_syntax, source, codec_opt_override);
-				}
+			auto source =
+			    build_native_source_span_from_native_pixel_data(
+			        file, transfer_syntax);
+			validate_set_transfer_seg_source_span_or_throw(file, seg_policy, source);
+			if (encode_mode == ApplyTransferSyntaxEncodeMode::use_plugin_defaults) {
+				file.set_pixel_data(transfer_syntax, source);
+			} else if (encode_mode == ApplyTransferSyntaxEncodeMode::use_encoder_context) {
+				file.set_pixel_data(transfer_syntax, source, *encoder_ctx);
+			} else {
+				file.set_pixel_data(transfer_syntax, source, codec_opt_override);
+			}
 			return false;
 		} else if (!transfer_syntax.supports_pixel_encode()) {
 			diag::throw_exception(
 			    "DicomFile::set_transfer_syntax file={} source_ts={} target_ts={} reason=target encapsulated transfer syntax does not support encapsulated-to-encapsulated transcoding",
 			    file.path(), source_transfer_syntax.value(), transfer_syntax.value());
-			} else {
-				transcode_encapsulated_pixel_data_to_encapsulated(
-				    file, transfer_syntax, encode_mode, codec_opt_override,
-				    encoder_ctx);
-				return true;
-			}
-		} else if (has_encapsulated_pixel_data && !target_uses_encapsulated_pixel_data) {
-		convert_encapsulated_pixel_data_to_native(file);
+		} else {
+			transcode_encapsulated_pixel_data_to_encapsulated(
+			    file, transfer_syntax, encode_mode, codec_opt_override,
+			    encoder_ctx, seg_policy);
+			return true;
+		}
+	} else if (has_encapsulated_pixel_data && !target_uses_encapsulated_pixel_data) {
+		convert_encapsulated_pixel_data_to_native(file, seg_policy);
 	}
 	if (target_uses_encapsulated_pixel_data && has_float_pixel_data) {
 		diag::throw_exception(

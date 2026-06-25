@@ -336,7 +336,7 @@ Example output:
 ```
 
 `present_segment_numbers(frame)` scans only the requested LABELMAP frame and
-caches the result. `frames_for_segment(segment_number)` and
-`validate_label_values()` may scan all LABELMAP frames on first use, so treat
-them as explicit validation/indexing operations for large multi-frame SEG
-objects.
+caches the result. `frames_for_segment(segment_number)` may scan all LABELMAP
+frames on first use. `validate_label_values()` validates LABELMAP labels across
+all frames and decodes FRACTIONAL frames to check `MaximumFractionalValue`, so
+treat it as an explicit validation operation for large multi-frame SEG objects.
