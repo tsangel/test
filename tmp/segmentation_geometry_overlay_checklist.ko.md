@@ -1134,7 +1134,7 @@ SliceStackPlan plan_image_frame_stack(
 - [x] 공개 계약 정리: public header, Python docstring, en/ko developer segmentation 문서에서 LABELMAP 지원 범위와 native typed sample bytes 계약을 반영했다.
 - [x] `plane_from_seg_frame()` LabelMap synthetic geometry smoke test를 추가했다.
 - [x] cache 재사용을 decode-count로 검증하는 test-only 계측 테스트, concurrent lazy scan stress, C++ header partial-write/BINARY-FRACTIONAL-LABELMAP contract 주석 보강을 추가했다.
-- [ ] 남은 후속: 실제 외부 LABELMAP sample 기반 regression과 compressed/encapsulated Label Map SEG 지원 여부 재검토.
+- [ ] 남은 후속: 실제 외부 LABELMAP sample 기반 regression을 유지하고, compressed/encapsulated SEG 지원은 별도 후속 계획으로 진행한다.
 
 ### 범위 결정
 
@@ -1366,6 +1366,25 @@ SliceStackPlan plan_image_frame_stack(
 - [ ] `frames_for_segment()` / `segment_frame_count()`가 "segment가 present인 frame"이라는 공통 의미를 따르는지 검증한다.
 - [ ] `plane_from_seg_frame()`이 Label Map SEG synthetic sample의 geometry를 반환하는지 검증한다.
 - [ ] palette/color 관련 테스트는 core SEG adapter가 아니라 GUI/viewer test suite에서 다룬다.
+
+### PixelData compression 지원 후속 계획
+
+- [ ] 범위는 `SegmentationStorage`의 `BINARY`/`FRACTIONAL`과 `LabelMapSegmentationStorage`의 `LABELMAP` 모두에 적용한다. public API 의미는 native PixelData와 동일하게 유지하고, 압축 여부는 frame source의 내부 구현 차이로 숨긴다.
+- [ ] 1차 지원은 lossless compressed/encapsulated transfer syntax만 허용한다. segmentation label value와 binary mask의 이산 값을 보존해야 하므로 lossy transfer syntax는 명확한 unsupported error로 둔다.
+- [ ] `from_dicomfile()`은 압축 SEG에서도 metadata-only construction을 유지한다. codec availability, fragment integrity, decoded length, unknown label validation은 frame decode/presence 계산 또는 `validate_label_values()` 시점에 수행한다.
+- [ ] PixelData source를 native byte span과 encapsulated frame decode source로 추상화한다. SEG decode path는 source에서 host/native typed decoded frame samples를 받아 기존 BINARY/FRACTIONAL/LABELMAP scan/mask helper로 넘긴다.
+- [ ] encapsulated PixelData는 기존 `PixelSequence`, `pixel_payload_decode_descriptor()`, `PixelPayloadDecoder`/decode dispatch 경로를 우선 재사용한다. SEG 전용 fragment parser를 새로 만들지 않는다.
+- [ ] `NumberOfFrames`와 encapsulated frame count가 일치하는지 검증한다. Basic Offset Table이 비어 있어도 기존 PixelSequence frame indexing으로 frame을 얻을 수 있으면 허용하고, frame을 특정할 수 없거나 fragment가 비정상이면 decode 시 error로 처리한다.
+- [ ] Extended Offset Table/Extended Offset Table Lengths가 있는 파일은 기존 payload splitter가 지원하는 범위 안에서만 허용한다. 지원하지 않는 조합은 unsupported가 아니라 payload/indexing error로 분류할지 결정한다.
+- [ ] decoded frame byte count는 SEG metadata와 정확히 일치해야 한다. BINARY는 rows/columns 기반 bit unpack contract, FRACTIONAL은 `uint8` sample count, LABELMAP은 8-bit/16-bit sample count를 각각 고정한다.
+- [ ] LABELMAP 압축 frame decode도 `decode_and_scan_labelmap_frame(...)` 계열 공통 helper를 통과시킨다. 성공 시 presence cache candidate를 no-replace 방식으로 publish하고, 실패 시 cache를 publish하지 않는다.
+- [ ] `present_segment_numbers(frame)`는 compressed LABELMAP에서 해당 frame 하나만 decode/scan한다. `frames_for_segment()`와 `validate_label_values()`만 all-frame decode를 유발하며, 이 비용과 error propagation을 문서화한다.
+- [ ] full decoded frame buffer는 기본적으로 persistent cache하지 않는다. persistent cache는 기존처럼 LABELMAP presence list와 all-frame segment index까지만 유지해 대용량 compressed SEG 메모리 사용량을 제한한다.
+- [ ] Python binding에서는 compressed SEG decode/presence scan/`validate_label_values()`/`frames_for_segment()` all-frame scan 중 GIL을 release한다.
+- [ ] output buffer contract는 native path와 동일하게 유지한다. `_into()` 계열에서 codec/decode/validation error가 나면 output buffer가 partial write 상태일 수 있음을 header/docstring에 명시한다.
+- [ ] unsupported transfer syntax, decoder plugin 없음, malformed PixelSequence, frame count mismatch, empty/missing frame fragments, decoded length mismatch, lossy transfer syntax reject를 C++ smoke와 Python 테스트로 고정한다.
+- [ ] 실제 compressed BINARY, FRACTIONAL, LABELMAP SEG sample을 `../sample/seg` 기준 regression으로 돌린다. 각 sample은 `read_file`, `to_array`, `present_segment_numbers`, `mask_for_segment`, `validate_label_values`를 최소 검증한다.
+- [ ] 문서에는 native uncompressed, lossless compressed/encapsulated, lossy compressed SEG의 지원 범위를 transfer syntax별 표로 정리한다.
 
 ### 문서 / Stub
 
