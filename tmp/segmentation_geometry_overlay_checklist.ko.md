@@ -1137,7 +1137,7 @@ SliceStackPlan plan_image_frame_stack(
 - [x] SEG write/transcode 초기 preflight hook 구현: 기존 `DicomFile` generic write path에서 SOP Class / `SegmentationType` 기반으로 SEG 정책을 감지한다. `classify`와 PixelData invariant validation은 분리하고, 완전 as-is write는 기존 roundtrip 성격을 유지하며, 실제 PixelData write/transcode 경로에서 타입별 invariant, lossy target/profile reject, BINARY 1-bit transcode unsupported guard를 적용한다.
 - [x] Encapsulated Uncompressed와 RLE Lossless SEG roundtrip regression을 추가했다. FRACTIONAL 8-bit, LABELMAP 8-bit, LABELMAP 16-bit는 기존 generic write/transcode 경로로 쓰고 다시 SEG API로 읽어 `decode`, presence, mask, `frames_for_segment`, `validate_label_values()`를 검증한다.
 - [x] write/transcode streaming semantic validation 구현: compressed source decode는 `DecodeInfo::encoded_lossy_state`가 lossless일 때만 허용하고, FRACTIONAL sample이 `MaximumFractionalValue`를 넘거나 LABELMAP decoded label이 `SegmentSequence`에 없으면 native/encapsulated transcode 중 reject한다.
-- [ ] 남은 후속: 실제 외부 compressed FRACTIONAL/LABELMAP sample 기반 regression, unsupported/plugin-missing negative test, BINARY 1-bit core layout/write 지원을 진행한다.
+- [ ] 남은 후속: Python fake shared plugin fixture 기반 unknown lossy-state reject 테스트, 실제 외부 compressed FRACTIONAL/LABELMAP sample 기반 regression, Extended Offset Table coverage, BINARY 1-bit core layout/write 지원을 진행한다.
 
 ### 범위 결정
 
@@ -1282,8 +1282,8 @@ SliceStackPlan plan_image_frame_stack(
 - [ ] `mask_for_segment_into(frame, segment_number, out, options)` allocation-free overload를 C++/Python에 둔다.
 - [ ] requested segment가 해당 frame에 present하지 않으면 기본적으로 zero mask를 반환하고, `SegmentMaskOptions::error_when_not_present_in_frame=true`이면 error를 낸다.
 - [ ] requested segment가 `SegmentSequence`에 없는 경우는 frame presence 여부와 무관하게 명확한 error로 처리한다. 존재하지만 해당 frame에 없으면 기본 zero mask, strict 옵션에서 error로 처리한다.
-- [ ] compressed/encapsulated Label Map SEG는 MVP에서 명시적으로 unsupported로 둔다.
-- [ ] MVP는 uncompressed native PixelData만 지원한다. Big Endian transfer syntax는 1차 구현에서 명확한 unsupported error로 둔다. 지원하려면 DicomFile endian-normalized decode path와 16-bit LABELMAP 테스트를 함께 추가한다.
+- [x] compressed/encapsulated Label Map SEG는 Encapsulated Uncompressed와 등록된 lossless codec 경로에서 기존 `PixelPayloadDecoder` 기반으로 지원한다.
+- [x] LABELMAP은 native uncompressed와 지원되는 encapsulated lossless PixelData를 지원한다. Big Endian transfer syntax는 1차 구현에서 명확한 unsupported error로 둔다.
 - [ ] native PixelData length 검증은 DICOM element padding byte를 고려한다. expected byte count와 정확히 같거나, expected가 홀수일 때 `expected + 1`이고 마지막 byte가 `0x00`인 경우만 허용한다. 그 외 trailing data나 short data는 size mismatch error로 처리한다.
 - [ ] `validate_label_values()`를 추가하면 모든 frame을 명시적으로 decode/scan해 unknown label, unsupported compressed PixelData, bad payload length를 한 번에 확인하는 expensive API로 문서화한다.
 - [ ] all-frame segment-to-frame index가 이미 성공적으로 published된 상태라면 `validate_label_values()`는 전체 frame validation이 완료된 것으로 보고 재-scan 없이 return한다.
@@ -1298,7 +1298,7 @@ SliceStackPlan plan_image_frame_stack(
 
 ### Geometry / overlay 연동
 
-- [ ] `plane_from_seg_frame()`은 Label Map SEG에서도 frame geometry를 읽을 수 있어야 한다.
+- [x] `plane_from_seg_frame()`은 Label Map SEG에서도 frame geometry를 읽을 수 있어야 한다.
 - [ ] Label Map SEG frame geometry는 `PerFrameFunctionalGroupsSequence -> SharedFunctionalGroupsSequence` strict resolution을 그대로 따른다.
 - [ ] labelmap이라고 해서 root dataset geometry fallback을 추가하지 않는다.
 - [ ] overlay compatibility helper는 label value semantics를 보지 않고 geometry와 `FrameOfReferenceUID`만 판정한다.
@@ -1315,7 +1315,7 @@ SliceStackPlan plan_image_frame_stack(
 - [ ] background label `0` 정책을 테스트로 고정한다.
 - [ ] all-background LABELMAP frame에서 `present_segment_numbers()`가 empty list를 반환하고, 반복 호출 시 "uninitialized"로 오인해 재-scan하지 않는지 테스트한다.
 - [ ] LABELMAP에서 `SegmentNumber=0` + `PixelPaddingValue=0` background item이 허용되는지, BINARY/FRACTIONAL에서 `SegmentNumber=0`이 reject되는지 테스트한다.
-- [ ] `LabelMapSegmentationStorage` SOP Class가 더 이상 `"LABELMAP SEG is outside the SEG MVP scope"`로 실패하지 않는지 검증한다.
+- [x] `LabelMapSegmentationStorage` SOP Class가 더 이상 `"LABELMAP SEG is outside the SEG MVP scope"`로 실패하지 않는지 검증한다.
 - [ ] 기존 `SegmentationStorage` + `SegmentationType=LABELMAP` strict reject 정책을 테스트한다.
 - [ ] `SOPClassUID`와 `MediaStorageSOPClassUID`가 `SegmentationStorage` / `LabelMapSegmentationStorage`로 서로 충돌하면 strict reject되는지 테스트한다.
 - [ ] SOP Class UID가 충돌하는 dataset에서 `is_segmentation_storage()` / `is_labelmap_segmentation_storage()` bool helper가 `false`를 반환하는지 테스트한다.
@@ -1360,14 +1360,14 @@ SliceStackPlan plan_image_frame_stack(
 - [ ] `validate_label_values()`가 기존 ready cache entry나 published all-frame index를 replace하지 않는지 테스트한다.
 - [ ] `validate_label_values()` 실패 시 validate 중 새로 scan한 partial cache/index가 publish되지 않고 다음 호출에서 재시도되는지 테스트한다. validate 시작 전에 이미 ready였던 cache entry는 유지되는지도 확인한다.
 - [ ] BINARY/FRACTIONAL의 기존 `referenced_segment_number`, `frames_for_segment`, `decode_frame_into(uint8)` API가 깨지지 않았음을 호환성 테스트로 고정한다.
-- [ ] compressed/encapsulated Label Map SEG가 MVP에서 명확한 unsupported error를 내는지 검증한다.
-- [ ] LABELMAP PixelData missing, detached payload marker, unexpected PixelSequence 형태가 decode/validate에서 각각 명확한 error가 되는지 테스트한다.
+- [x] compressed/encapsulated Label Map SEG lossless path를 C++/Python roundtrip regression으로 검증한다. unsupported codec/binding은 명확한 decoder binding error로 고정한다.
+- [x] LABELMAP PixelData missing, detached payload marker, unexpected PixelSequence 형태가 decode/validate에서 각각 명확한 error가 되는지 테스트한다.
 - [ ] Big Endian Label Map SEG가 1차 MVP에서 명확한 unsupported error를 내는지 검증한다.
 - [ ] `PhotometricInterpretation=MONOCHROME2`와 `PALETTE COLOR` allowlist, 그 외 값 reject를 테스트한다.
 - [ ] `PixelPaddingValue`가 있는 LABELMAP은 background로 처리되고, `PixelPaddingRangeLimit`은 명확한 unsupported error가 나는지 테스트한다.
 - [ ] 8-bit LABELMAP에서 `SegmentNumber > 255`가 metadata-only absent segment로 허용되고, 해당 segment mask가 zero mask가 되는지 테스트한다.
 - [ ] `frames_for_segment()` / `segment_frame_count()`가 "segment가 present인 frame"이라는 공통 의미를 따르는지 검증한다.
-- [ ] `plane_from_seg_frame()`이 Label Map SEG synthetic sample의 geometry를 반환하는지 검증한다.
+- [x] `plane_from_seg_frame()`이 Label Map SEG synthetic sample의 geometry를 반환하는지 검증한다.
 - [ ] palette/color 관련 테스트는 core SEG adapter가 아니라 GUI/viewer test suite에서 다룬다.
 
 ### SEG PixelData compression / write / transcode 후속 계획
@@ -1380,7 +1380,7 @@ SliceStackPlan plan_image_frame_stack(
 - [ ] BINARY compressed SEG는 기존 `PixelPayloadDecoder`가 `BitsAllocated` 8/16/32만 받는 한 바로 지원하지 않는다. 구현 전 `BitsAllocated=1` decoded layout, unpacked bool/u8 view, native 1-bit repack, encapsulated frame encoding contract 중 어떤 계층에서 1-bit를 표현할지 먼저 확정한다.
 - [ ] generic `pixel::PixelLayout` / `ConstPixelSpan` / encode source layout에 "source sample view는 u8 0/1일 수 있지만 DICOM stored BitsAllocated는 1"인 상태를 표현할 수 있는지 검토한다. 부족하면 SEG 전용 우회가 아니라 core pixel layout/encoder ABI를 확장한다.
 - [x] generic write/transcode preflight가 active PixelData write/transcode에서 SEG metadata invariants를 보존하도록 검토한다. `SegmentationType`, `BitsAllocated`, `BitsStored`, `HighBit`, `SamplesPerPixel`, `PhotometricInterpretation`, `PixelRepresentation`, `MaximumFractionalValue`, `SegmentationFractionalType`, LABELMAP `PixelPaddingValue`, `PixelPaddingRangeLimit`, `SegmentsOverlap`이 타입별 contract를 벗어나면 실패시킨다. PixelData가 없는 `set_transfer_syntax()`와 완전 as-is write는 PixelData invariant validation을 수행하지 않는다.
-- [x] 입력 decode는 `DecodeInfo::encoded_lossy_state` 또는 동등한 codec result 상태로 확인해 `lossy`, `near_lossless`, `unknown`을 cache publish 전에 reject한다. SEG public decode path의 FRACTIONAL/LABELMAP frame decode와 write/transcode streaming input decode path는 `DecodeInfo`를 확인해 lossless source만 허용한다. 실제 lossy-source fixture 회귀 테스트는 malformed/unsupported negative test 항목에 남긴다.
+- [x] 입력 decode는 `DecodeInfo::encoded_lossy_state` 또는 동등한 codec result 상태로 확인해 `lossy`, `near_lossless`, `unknown`을 cache publish 전에 reject한다. SEG public decode path의 FRACTIONAL/LABELMAP frame decode와 write/transcode streaming input decode path는 `DecodeInfo`를 확인해 lossless source만 허용한다. lossy, near-lossless, unknown lossy-state, unsupported codec/binding fixture는 C++ smoke regression으로 고정했다.
 - [x] 출력 encode는 target transfer syntax/profile/options preflight에서 lossy/near-lossless 가능성을 먼저 reject하고, streaming write 도중 뒤늦게 output lossy를 발견하는 구조를 만들지 않는다.
 - [x] Encapsulated Uncompressed는 압축은 아니지만 encapsulated frame source/sink 검증 대상으로 포함한다. FRACTIONAL, LABELMAP 8-bit, LABELMAP 16-bit SEG를 `write_bytes_with_transfer_syntax()`로 쓴 뒤 다시 SEG API로 읽는 C++/Python roundtrip regression을 추가했다.
 - [x] `from_dicomfile()`은 압축 SEG에서도 metadata-only construction을 유지한다. codec availability, fragment integrity, decoded length, lossy state, unknown label validation은 frame decode/presence 계산 또는 `validate_label_values()` 시점에 수행한다.
