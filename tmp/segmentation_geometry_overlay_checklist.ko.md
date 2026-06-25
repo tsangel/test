@@ -1294,7 +1294,7 @@ SliceStackPlan plan_image_frame_stack(
 
 - [ ] Python `seg.frames_for_segment(segment_number)`는 LABELMAP에서 호출 시점에 all-frame index build를 수행하고 예외도 이 시점에 발생하게 한다. lazy list view로 비용/예외를 `len()`이나 iteration까지 미루지 않는다.
 - [ ] Python `present_segment_numbers()` 반환값은 borrowed memory view가 아니라 `tuple[int, ...]`로 둔다.
-- [ ] Python LABELMAP decode, presence scan, `validate_label_values()`, `frames_for_segment()` all-frame scan은 GIL을 release한다.
+- [x] Python LABELMAP decode, presence scan, `validate_label_values()`, `frames_for_segment()` all-frame scan은 GIL을 release한다.
 
 ### Geometry / overlay 연동
 
@@ -1397,7 +1397,7 @@ SliceStackPlan plan_image_frame_stack(
 - [x] `present_segment_numbers(frame)`는 encapsulated LABELMAP에서 해당 frame 하나만 decode/scan한다. `frames_for_segment()`와 `validate_label_values()`만 all-frame decode를 유발한다. 비용과 error propagation 문서화는 별도 문서 항목으로 남긴다.
 - [x] full decoded frame buffer는 기본적으로 persistent cache하지 않는다. compressed LABELMAP all-frame scan은 `frames_for_segment()` / `validate_label_values()` 내부 builder에서 decode plan 1개, frame scratch 1개, label presence `seen` table scratch 1개를 재사용하고, persistent cache는 기존처럼 presence list와 all-frame segment index까지만 유지한다. single-frame lazy decode는 caller별 임시 scratch를 사용한다.
 - [x] LABELMAP `mask_for_segment()`는 frame presence cache가 ready이고 요청 segment가 absent이면 재decode 없이 zero mask/error를 반환한다. cache가 없으면 기존처럼 frame scan을 수행해 unknown label validation과 mask 생성을 한 pass에서 처리한다.
-- [ ] Python binding에서는 compressed SEG decode/presence scan/`validate_label_values()`/`frames_for_segment()` all-frame scan과 write/transcode 중 GIL을 release한다.
+- [x] Python binding에서는 compressed SEG decode/presence scan/`validate_label_values()`/`frames_for_segment()` all-frame scan과 write/transcode 중 GIL을 release한다.
 - [x] output buffer contract는 native path와 동일하게 유지한다. `_into()` 계열에서 codec/decode/validation error가 나면 output buffer가 partial write 상태일 수 있음을 header/docstring에 명시한다.
 - [x] write/transcode 후 validation test를 추가한다. Encapsulated Uncompressed와 RLE Lossless output을 다시 SEG로 열어 C++ `decode_frame_into`/`decode_labelmap_frame_into`, Python `to_array`, `present_segment_numbers`, `mask_for_segment`, `frames_for_segment`, `validate_label_values`를 실행하고 원본 frame별 mask/label value와 비교한다. C++ RLE regression은 RLE static plugin enabled build에서 조건부 실행한다. JPEG-LS/JPEG 2000 등 추가 lossless compressed regression은 별도 항목으로 남긴다.
 - [x] write/transcode semantic negative test를 추가한다. FRACTIONAL sample이 `MaximumFractionalValue`를 초과하면 reject하고, LABELMAP native/encapsulated source의 decoded label이 `SegmentSequence`에 없으면 reject한다.
@@ -1408,6 +1408,7 @@ SliceStackPlan plan_image_frame_stack(
 - [x] near-lossless compressed source reject를 C++ smoke로 고정한다. JPEG-LS builtin build에서 non-SEG로 만든 near-lossless JPEG-LS source를 Label Map SEG로 재분류한 뒤 public decode와 write/transcode가 `lossless source` error를 내는지 검증한다.
 - [x] unsupported compressed source codec/binding reject를 C++ smoke로 고정한다. MPEG2 transfer syntax로 위장한 Label Map SEG source가 public decode와 write/transcode에서 decoder binding error로 실패하는지 검증한다.
 - [ ] unknown lossy-state reject를 C++ smoke와 Python 테스트로 고정한다. decoder가 `EncodedLossyState::unknown`을 반환하는 fake/plugin fixture가 필요하다.
+- [x] 실제 native BINARY, FRACTIONAL, LABELMAP SEG sample을 `../sample/seg` 기준 Python regression으로 돌린다.
 - [ ] 실제 compressed FRACTIONAL, LABELMAP, 가능하면 BINARY SEG sample을 `../sample/seg` 기준 regression으로 돌린다. BINARY compressed는 core 1-bit layout/write 지원 전에는 명확한 unsupported/reject sample로 먼저 고정한다.
 - [x] 문서에는 native uncompressed, encapsulated uncompressed, lossless compressed/encapsulated, lossy compressed SEG의 read/write/transcode 지원 범위를 transfer syntax별 표로 정리한다.
 

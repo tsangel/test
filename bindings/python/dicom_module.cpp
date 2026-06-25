@@ -1590,6 +1590,7 @@ void set_transfer_syntax_with_options(
     DicomFile& self, Uid transfer_syntax, nb::handle options) {
 	const auto text_options =
 	    parse_encoder_options_to_text_storage(options, transfer_syntax);
+	nb::gil_scoped_release release;
 	if (text_options.auto_mode) {
 		self.set_transfer_syntax(transfer_syntax);
 		return;
@@ -1608,6 +1609,7 @@ void write_with_transfer_syntax_with_options(DicomFile& self, nb::handle path,
 	const auto output_path = python_path_to_filesystem_path(path, "path");
 	const auto text_options =
 	    parse_encoder_options_to_text_storage(options, transfer_syntax);
+	nb::gil_scoped_release release;
 	if (text_options.auto_mode) {
 		self.write_with_transfer_syntax(output_path, transfer_syntax, write_options);
 		return;
@@ -1623,8 +1625,10 @@ void write_with_transfer_syntax_with_encoder_context(DicomFile& self, nb::handle
 	write_options.include_preamble = include_preamble;
 	write_options.write_file_meta = write_file_meta;
 	write_options.keep_existing_meta = keep_existing_meta;
-	self.write_with_transfer_syntax(python_path_to_filesystem_path(path, "path"),
-	    transfer_syntax, encoder_context, write_options);
+	const auto output_path = python_path_to_filesystem_path(path, "path");
+	nb::gil_scoped_release release;
+	self.write_with_transfer_syntax(
+	    output_path, transfer_syntax, encoder_context, write_options);
 }
 
 [[nodiscard]] std::vector<std::uint8_t> write_bytes_with_transfer_syntax_with_options(
@@ -1637,11 +1641,17 @@ void write_with_transfer_syntax_with_encoder_context(DicomFile& self, nb::handle
 
 	const auto text_options =
 	    parse_encoder_options_to_text_storage(options, transfer_syntax);
-	if (text_options.auto_mode) {
-		return self.write_bytes_with_transfer_syntax(transfer_syntax, write_options);
+	std::vector<std::uint8_t> out;
+	{
+		nb::gil_scoped_release release;
+		if (text_options.auto_mode) {
+			out = self.write_bytes_with_transfer_syntax(transfer_syntax, write_options);
+		} else {
+			out = self.write_bytes_with_transfer_syntax(
+			    transfer_syntax, text_options.span(), write_options);
+		}
 	}
-	return self.write_bytes_with_transfer_syntax(
-	    transfer_syntax, text_options.span(), write_options);
+	return out;
 }
 
 [[nodiscard]] std::vector<std::uint8_t>
@@ -1652,8 +1662,13 @@ write_bytes_with_transfer_syntax_with_encoder_context(DicomFile& self,
 	write_options.include_preamble = include_preamble;
 	write_options.write_file_meta = write_file_meta;
 	write_options.keep_existing_meta = keep_existing_meta;
-	return self.write_bytes_with_transfer_syntax(
-	    transfer_syntax, encoder_context, write_options);
+	std::vector<std::uint8_t> out;
+	{
+		nb::gil_scoped_release release;
+		out = self.write_bytes_with_transfer_syntax(
+		    transfer_syntax, encoder_context, write_options);
+	}
+	return out;
 }
 
 void set_pixel_data_with_options(DicomFile& self, Uid transfer_syntax,
@@ -1663,6 +1678,7 @@ void set_pixel_data_with_options(DicomFile& self, Uid transfer_syntax,
 	const auto source = build_pixel_span_or_throw(source_view.view());
 	const auto text_options =
 	    parse_encoder_options_to_text_storage(options, transfer_syntax);
+	nb::gil_scoped_release release;
 	if (text_options.auto_mode) {
 		if (frame_index.has_value()) {
 			self.set_pixel_data(transfer_syntax, source, *frame_index);
@@ -1684,6 +1700,7 @@ void set_pixel_data_with_encoder_context(DicomFile& self, Uid transfer_syntax,
     const EncoderContext& encoder_context) {
 	PyReadOnlyBufferView source_view(source_obj);
 	const auto source = build_pixel_span_or_throw(source_view.view());
+	nb::gil_scoped_release release;
 	if (frame_index.has_value()) {
 		self.set_pixel_data(transfer_syntax, source, *frame_index,
 		    encoder_context);
@@ -6418,6 +6435,7 @@ NB_MODULE(_dicomsdl, m) {
 		.def("set_transfer_syntax",
 		    [](DicomFile& self, const Uid& transfer_syntax,
 		        const EncoderContext& encoder_context) {
+			    nb::gil_scoped_release release;
 			    self.set_transfer_syntax(transfer_syntax, encoder_context);
 		    },
 		    nb::arg("transfer_syntax"),
@@ -6427,9 +6445,10 @@ NB_MODULE(_dicomsdl, m) {
 		.def("set_transfer_syntax",
 		    [](DicomFile& self, const std::string& transfer_syntax_text,
 		        const EncoderContext& encoder_context) {
-			    self.set_transfer_syntax(
-			        parse_transfer_syntax_text_or_throw(transfer_syntax_text),
-			        encoder_context);
+			    const auto transfer_syntax =
+			        parse_transfer_syntax_text_or_throw(transfer_syntax_text);
+			    nb::gil_scoped_release release;
+			    self.set_transfer_syntax(transfer_syntax, encoder_context);
 		    },
 		    nb::arg("transfer_syntax"),
 		    nb::kw_only(),
@@ -6553,8 +6572,11 @@ NB_MODULE(_dicomsdl, m) {
 		.def("write_file",
 		    [](DicomFile& self, nb::handle path, bool include_preamble,
 		        bool write_file_meta, bool keep_existing_meta) {
-			    self.write_file(python_path_to_filesystem_path(path, "path"),
-			        make_write_options(include_preamble, write_file_meta, keep_existing_meta));
+			    const auto output_path = python_path_to_filesystem_path(path, "path");
+			    const auto write_options =
+			        make_write_options(include_preamble, write_file_meta, keep_existing_meta);
+			    nb::gil_scoped_release release;
+			    self.write_file(output_path, write_options);
 		    },
 		    nb::arg("path"),
 		    nb::kw_only(),
@@ -6633,8 +6655,14 @@ NB_MODULE(_dicomsdl, m) {
 		.def("write_bytes",
 		    [](DicomFile& self, bool include_preamble, bool write_file_meta,
 		        bool keep_existing_meta) {
-			    return to_python_bytes(self.write_bytes(
-			        make_write_options(include_preamble, write_file_meta, keep_existing_meta)));
+			    const auto write_options =
+			        make_write_options(include_preamble, write_file_meta, keep_existing_meta);
+			    std::vector<std::uint8_t> out;
+			    {
+				    nb::gil_scoped_release release;
+				    out = self.write_bytes(write_options);
+			    }
+			    return to_python_bytes(std::move(out));
 		    },
 		    nb::kw_only(),
 		    nb::arg("include_preamble") = true,

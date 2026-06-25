@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import numpy as np
 import pytest
 
 import dicomsdl as dicom
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _set(df: dicom.DicomFile, key: str, value: object) -> None:
@@ -658,11 +661,7 @@ def test_labelmap_16bit_uses_uint16_decode_contract() -> None:
     )
 
 
-def test_optional_local_seg_sample_regression() -> None:
-    path = os.environ.get("DICOMSDL_SEG_SAMPLE_PATH")
-    if not path:
-        pytest.skip("set DICOMSDL_SEG_SAMPLE_PATH to enable local SEG sample regression")
-
+def _assert_real_seg_sample(path: Path) -> None:
     seg = dicom.seg.read_file(path)
     assert seg.is_valid
     assert seg.segment_count > 0
@@ -672,4 +671,46 @@ def test_optional_local_seg_sample_regression() -> None:
     assert seg.frame_of_reference_uid
     decoded = seg.to_array(0)
     assert decoded.shape == (seg.rows, seg.columns)
-    assert decoded.dtype == np.uint8
+    if (
+        seg.segmentation_type == dicom.seg.SegmentationType.labelmap
+        and seg.labelmap_bits_allocated == 16
+    ):
+        assert decoded.dtype == np.uint16
+    else:
+        assert decoded.dtype == np.uint8
+
+    present = seg.present_segment_numbers(0)
+    assert isinstance(present, tuple)
+    if present:
+        mask = seg.mask_for_segment(0, present[0])
+        assert mask.shape == (seg.rows, seg.columns)
+        assert mask.dtype == np.uint8
+        assert np.isin(mask, (0, 1)).all()
+        assert len(seg.frames_for_segment(present[0])) > 0
+
+    seg.validate_label_values()
+
+
+def test_optional_local_seg_sample_regression() -> None:
+    path = os.environ.get("DICOMSDL_SEG_SAMPLE_PATH")
+    if not path:
+        pytest.skip("set DICOMSDL_SEG_SAMPLE_PATH to enable local SEG sample regression")
+
+    _assert_real_seg_sample(Path(path))
+
+
+def test_optional_local_seg_sample_directory_regression() -> None:
+    root = Path(
+        os.environ.get(
+            "DICOMSDL_SEG_SAMPLE_DIR", REPO_ROOT.parent / "sample" / "seg"
+        )
+    )
+    if not root.exists():
+        pytest.skip(f"SEG sample directory is not available: {root}")
+
+    paths = sorted(root.glob("*.dcm"))
+    if not paths:
+        pytest.skip(f"SEG sample directory has no DICOM files: {root}")
+
+    for path in paths:
+        _assert_real_seg_sample(path)
