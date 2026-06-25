@@ -392,10 +392,40 @@ enum class LabelmapSampleByteOrder : std::uint8_t {
 	native_endian,
 };
 
+struct LabelmapFrameDecodeContext {
+	std::optional<pixel::DecodePlan> decode_plan{};
+	std::vector<std::uint8_t> decoded_frame{};
+};
+
 void require_lossless_seg_decode(const pixel::DecodeInfo& decode_info) {
 	if (decode_info.encoded_lossy_state != pixel::EncodedLossyState::lossless) {
 		throw_decode("SEG compressed PixelData decode requires lossless source frames");
 	}
+}
+
+[[nodiscard]] const pixel::DecodePlan& labelmap_decode_plan_or_throw(
+    const DicomFile& file, std::uint16_t bits_allocated,
+    std::size_t bytes_per_frame, LabelmapFrameDecodeContext& context) {
+	auto create_plan = [&] {
+		pixel::DecodeOptions decode_options{};
+		decode_options.alignment = 1;
+		decode_options.planar_out = pixel::Planar::interleaved;
+		decode_options.decode_mct = false;
+		auto decode_plan = file.create_decode_plan(decode_options);
+		const auto expected_dtype = bits_allocated == 8 ? pixel::DataType::u8
+		                                                : pixel::DataType::u16;
+		if (decode_plan.output_layout.data_type != expected_dtype ||
+		    decode_plan.output_layout.samples_per_pixel != 1 ||
+		    decode_plan.output_layout.frame_stride < bytes_per_frame) {
+			throw_decode("LABELMAP decoded frame layout mismatch");
+		}
+		return decode_plan;
+	};
+
+	if (!context.decode_plan) {
+		context.decode_plan = create_plan();
+	}
+	return *context.decode_plan;
 }
 
 [[nodiscard]] LabelmapFrameScanResult decode_and_scan_labelmap_frame(
@@ -403,7 +433,8 @@ void require_lossless_seg_decode(const pixel::DecodeInfo& decode_info) {
     std::size_t rows, std::size_t columns, std::uint16_t bits_allocated,
     const std::bitset<65536>& valid_labels,
     std::optional<std::uint16_t> background_label,
-    const LabelmapFrameScanRequest& request) {
+    const LabelmapFrameScanRequest& request,
+    LabelmapFrameDecodeContext* decode_context = nullptr) {
 	if (frame_index >= frame_count) {
 		throw_decode("frame index out of range");
 	}
@@ -549,21 +580,15 @@ void require_lossless_seg_decode(const pixel::DecodeInfo& decode_info) {
 			throw_decode("LABELMAP PixelSequence requires encapsulated transfer syntax");
 		}
 
-		pixel::DecodeOptions decode_options{};
-		decode_options.alignment = 1;
-		decode_options.planar_out = pixel::Planar::interleaved;
-		decode_options.decode_mct = false;
-		const auto decode_plan = file.create_decode_plan(decode_options);
-		const auto expected_dtype = bits_allocated == 8
-		                                ? pixel::DataType::u8
-		                                : pixel::DataType::u16;
-		if (decode_plan.output_layout.data_type != expected_dtype ||
-		    decode_plan.output_layout.samples_per_pixel != 1 ||
-		    decode_plan.output_layout.frame_stride < bytes_per_frame) {
-			throw_decode("LABELMAP decoded frame layout mismatch");
+		LabelmapFrameDecodeContext local_decode_context{};
+		auto& active_decode_context =
+		    decode_context ? *decode_context : local_decode_context;
+		const auto& decode_plan = labelmap_decode_plan_or_throw(
+		    file, bits_allocated, bytes_per_frame, active_decode_context);
+		auto& decoded_frame = active_decode_context.decoded_frame;
+		if (decoded_frame.size() != decode_plan.output_layout.frame_stride) {
+			decoded_frame.resize(decode_plan.output_layout.frame_stride);
 		}
-		std::vector<std::uint8_t> decoded_frame(
-		    decode_plan.output_layout.frame_stride);
 		pixel::DecodeInfo decode_info{};
 		file.decode_into(frame_index, decoded_frame, decode_plan, decode_info);
 		require_lossless_seg_decode(decode_info);
@@ -980,6 +1005,7 @@ Segmentation::ensure_labelmap_frame_index() const {
 	std::vector<std::shared_ptr<const std::vector<std::uint16_t>>> frame_labels(
 	    index_.frames.size());
 	detail::LabelmapFrameIndex local_index{};
+	LabelmapFrameDecodeContext decode_context{};
 	for (std::size_t frame_index = 0; frame_index < index_.frames.size(); ++frame_index) {
 		{
 			std::lock_guard lock(labelmap_cache_mutex_);
@@ -993,7 +1019,8 @@ Segmentation::ensure_labelmap_frame_index() const {
 			    index_.frames.size(), frame_index, rows_, columns_,
 			    labelmap_bits_allocated_.value_or(0), labelmap_valid_labels_,
 			    labelmap_background_value_,
-			    LabelmapFrameScanRequest{.collect_presence = true});
+			    LabelmapFrameScanRequest{.collect_presence = true},
+			    &decode_context);
 			frame_labels[frame_index] = result.present_labels;
 		}
 		for (const auto label : *frame_labels[frame_index]) {
