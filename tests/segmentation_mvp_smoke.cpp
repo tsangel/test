@@ -1,6 +1,8 @@
 #include <dicom.h>
 #include <dicom_seg.h>
 
+#include "codec_builtin_flags.hpp"
+
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -749,11 +751,17 @@ int main() {
 	}
 
 	{
-		const auto transfer_syntax =
-		    "EncapsulatedUncompressedExplicitVRLittleEndian"_uid;
-		verify_fractional_roundtrip(transfer_syntax);
-		verify_labelmap8_roundtrip(transfer_syntax);
-		verify_labelmap16_roundtrip(transfer_syntax);
+		std::vector<dicom::uid::WellKnown> transfer_syntaxes{
+		    "EncapsulatedUncompressedExplicitVRLittleEndian"_uid,
+		};
+		if constexpr (dicom::test::kRleBuiltin) {
+			transfer_syntaxes.push_back("RLELossless"_uid);
+		}
+		for (const auto transfer_syntax : transfer_syntaxes) {
+			verify_fractional_roundtrip(transfer_syntax);
+			verify_labelmap8_roundtrip(transfer_syntax);
+			verify_labelmap16_roundtrip(transfer_syntax);
+		}
 	}
 
 	{

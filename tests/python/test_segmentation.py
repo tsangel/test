@@ -475,52 +475,58 @@ def test_labelmap_segmentation_storage_decodes_and_indexes_labels() -> None:
     seg.validate_label_values()
 
 
-def test_encapsulated_uncompressed_seg_roundtrip_preserves_public_api() -> None:
-    transfer_syntax = "EncapsulatedUncompressedExplicitVRLittleEndian"
+def test_lossless_encapsulated_seg_roundtrip_preserves_public_api() -> None:
+    transfer_syntaxes = (
+        "EncapsulatedUncompressedExplicitVRLittleEndian",
+        "RLELossless",
+    )
 
-    fractional = dicom.seg.read_bytes(
-        _make_fractional_seg().write_bytes_with_transfer_syntax(transfer_syntax)
-    )
-    np.testing.assert_array_equal(
-        fractional.to_array(0), np.array([[0, 128], [255, 64]], dtype=np.uint8)
-    )
-    np.testing.assert_array_equal(
-        fractional.mask_for_segment(0, 1),
-        np.array([[0, 1], [1, 1]], dtype=np.uint8),
-    )
-    fractional.validate_label_values()
+    for transfer_syntax in transfer_syntaxes:
+        fractional = dicom.seg.read_bytes(
+            _make_fractional_seg().write_bytes_with_transfer_syntax(transfer_syntax)
+        )
+        np.testing.assert_array_equal(
+            fractional.to_array(0),
+            np.array([[0, 128], [255, 64]], dtype=np.uint8),
+        )
+        np.testing.assert_array_equal(
+            fractional.mask_for_segment(0, 1),
+            np.array([[0, 1], [1, 1]], dtype=np.uint8),
+        )
+        fractional.validate_label_values()
 
-    label8 = dicom.seg.read_bytes(
-        _make_labelmap_seg8().write_bytes_with_transfer_syntax(transfer_syntax)
-    )
-    np.testing.assert_array_equal(
-        label8.to_array(0), np.array([[0, 1, 2], [2, 0, 1]], dtype=np.uint8)
-    )
-    np.testing.assert_array_equal(
-        label8.to_array(1), np.array([[0, 0, 2], [0, 0, 0]], dtype=np.uint8)
-    )
-    assert label8.present_segment_numbers(0) == (1, 2)
-    assert label8.present_segment_numbers(1) == (2,)
-    np.testing.assert_array_equal(
-        label8.mask_for_segment(0, 1),
-        np.array([[0, 1, 0], [0, 0, 1]], dtype=np.uint8),
-    )
-    assert len(label8.frames_for_segment(2)) == 2
-    assert len(label8.frames_for_segment(7)) == 0
-    label8.validate_label_values()
+        label8 = dicom.seg.read_bytes(
+            _make_labelmap_seg8().write_bytes_with_transfer_syntax(transfer_syntax)
+        )
+        np.testing.assert_array_equal(
+            label8.to_array(0),
+            np.array([[0, 1, 2], [2, 0, 1]], dtype=np.uint8),
+        )
+        np.testing.assert_array_equal(
+            label8.to_array(1), np.array([[0, 0, 2], [0, 0, 0]], dtype=np.uint8)
+        )
+        assert label8.present_segment_numbers(0) == (1, 2)
+        assert label8.present_segment_numbers(1) == (2,)
+        np.testing.assert_array_equal(
+            label8.mask_for_segment(0, 1),
+            np.array([[0, 1, 0], [0, 0, 1]], dtype=np.uint8),
+        )
+        assert len(label8.frames_for_segment(2)) == 2
+        assert len(label8.frames_for_segment(7)) == 0
+        label8.validate_label_values()
 
-    label16 = dicom.seg.read_bytes(
-        _make_labelmap_seg16().write_bytes_with_transfer_syntax(transfer_syntax)
-    )
-    np.testing.assert_array_equal(
-        label16.to_array(0), np.array([[0, 1], [300, 300]], dtype=np.uint16)
-    )
-    assert label16.present_segment_numbers(0) == (1, 300)
-    np.testing.assert_array_equal(
-        label16.mask_for_segment(0, 300),
-        np.array([[0, 0], [1, 1]], dtype=np.uint8),
-    )
-    label16.validate_label_values()
+        label16 = dicom.seg.read_bytes(
+            _make_labelmap_seg16().write_bytes_with_transfer_syntax(transfer_syntax)
+        )
+        np.testing.assert_array_equal(
+            label16.to_array(0), np.array([[0, 1], [300, 300]], dtype=np.uint16)
+        )
+        assert label16.present_segment_numbers(0) == (1, 300)
+        np.testing.assert_array_equal(
+            label16.mask_for_segment(0, 300),
+            np.array([[0, 0], [1, 1]], dtype=np.uint8),
+        )
+        label16.validate_label_values()
 
 
 def test_labelmap_sop_class_conflict_and_metadata_validation() -> None:

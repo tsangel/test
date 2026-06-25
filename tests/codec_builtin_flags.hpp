@@ -2,6 +2,12 @@
 
 namespace dicom::test {
 
+#if defined(DICOMSDL_PIXEL_RLE_STATIC_PLUGIN_ENABLED) && DICOMSDL_PIXEL_RLE_STATIC_PLUGIN_ENABLED
+inline constexpr bool kRleBuiltin = true;
+#else
+inline constexpr bool kRleBuiltin = false;
+#endif
+
 #if defined(DICOMSDL_PIXEL_JPEG_STATIC_PLUGIN_ENABLED) && DICOMSDL_PIXEL_JPEG_STATIC_PLUGIN_ENABLED
 inline constexpr bool kJpegBuiltin = true;
 #else
