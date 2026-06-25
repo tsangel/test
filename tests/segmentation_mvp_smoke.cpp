@@ -313,6 +313,35 @@ std::unique_ptr<dicom::DicomFile> make_labelmap_seg16_file() {
 	return file;
 }
 
+dicom::PixelFrame& require_pixel_frame(
+    dicom::DicomFile& file, std::size_t frame_index) {
+	auto* pixel_sequence =
+	    file.dataset()["PixelData"_tag].as_pixel_sequence();
+	if (!pixel_sequence) {
+		fail("PixelData is not a PixelSequence");
+	}
+	auto* frame = pixel_sequence->frame(frame_index);
+	if (!frame) {
+		fail("PixelSequence frame is missing");
+	}
+	return *frame;
+}
+
+void set_labelmap_seg_sop_class(dicom::DicomFile& file) {
+	set_text(file, "SOPClassUID", "LabelMapSegmentationStorage"_uid.value());
+	set_text(file, "MediaStorageSOPClassUID",
+	    "LabelMapSegmentationStorage"_uid.value());
+	set_text(file, "Modality", "SEG");
+}
+
+void set_multiframe_grayscale_sop_class(dicom::DicomFile& file) {
+	set_text(file, "SOPClassUID",
+	    "MultiFrameGrayscaleByteSecondaryCaptureImageStorage"_uid.value());
+	set_text(file, "MediaStorageSOPClassUID",
+	    "MultiFrameGrayscaleByteSecondaryCaptureImageStorage"_uid.value());
+	set_text(file, "Modality", "OT");
+}
+
 std::unique_ptr<dicom::seg::Segmentation> roundtrip_seg_with_transfer_syntax(
     std::unique_ptr<dicom::DicomFile> file,
     dicom::uid::WellKnown transfer_syntax,
@@ -795,6 +824,88 @@ int main() {
 			        "ExplicitVRLittleEndian"_uid);
 		    },
 		    "undefined segment");
+	}
+
+	{
+		auto encapsulated_bytes =
+		    make_labelmap_seg8_file()->write_bytes_with_transfer_syntax(
+		        "EncapsulatedUncompressedExplicitVRLittleEndian"_uid);
+		auto frame_count_mismatch = dicom::read_bytes(
+		    "labelmap-encapsulated-frame-count-mismatch",
+		    std::move(encapsulated_bytes));
+		set_long(*frame_count_mismatch, "NumberOfFrames", 3);
+		expect_throw_contains("labelmap encapsulated frame count mismatch",
+		    [&] {
+			    (void)frame_count_mismatch->write_bytes_with_transfer_syntax(
+			        "ExplicitVRLittleEndian"_uid);
+		    },
+		    "frame index out of range");
+
+		auto missing_fragments = make_labelmap_seg8_file();
+		missing_fragments->reset_encapsulated_pixel_data(2);
+		missing_fragments->set_transfer_syntax_state_only(
+		    "EncapsulatedUncompressedExplicitVRLittleEndian"_uid);
+		expect_throw_contains("labelmap encapsulated missing fragments",
+		    [&] {
+			    (void)missing_fragments->write_bytes_with_transfer_syntax(
+			        "ExplicitVRLittleEndian"_uid);
+		    },
+		    "no fragments");
+
+		auto zero_length_fragment = make_labelmap_seg8_file();
+		zero_length_fragment->reset_encapsulated_pixel_data(2);
+		zero_length_fragment->set_transfer_syntax_state_only(
+		    "EncapsulatedUncompressedExplicitVRLittleEndian"_uid);
+		require_pixel_frame(*zero_length_fragment, 0)
+		    .set_fragments(std::vector<dicom::PixelFragment>{{0, 0}});
+		expect_throw_contains("labelmap encapsulated zero-length fragment",
+		    [&] {
+			    (void)zero_length_fragment->write_bytes_with_transfer_syntax(
+			        "ExplicitVRLittleEndian"_uid);
+		    },
+		    "zero-length fragment");
+
+		auto short_frame = make_labelmap_seg8_file();
+		short_frame->reset_encapsulated_pixel_data(2);
+		short_frame->set_transfer_syntax_state_only(
+		    "EncapsulatedUncompressedExplicitVRLittleEndian"_uid);
+		short_frame->set_encoded_pixel_frame(
+		    0, std::vector<std::uint8_t>{0, 1, 2});
+		short_frame->set_encoded_pixel_frame(
+		    1, std::vector<std::uint8_t>{0, 0, 2, 0, 0, 0});
+		expect_throw_contains("labelmap encapsulated decoded length mismatch",
+		    [&] {
+			    (void)short_frame->write_bytes_with_transfer_syntax(
+			        "ExplicitVRLittleEndian"_uid);
+		    },
+		    "shorter");
+	}
+
+	if constexpr (dicom::test::kJpegBuiltin) {
+		auto lossy_source = make_labelmap_seg8_file();
+		set_multiframe_grayscale_sop_class(*lossy_source);
+		auto lossy_bytes = lossy_source->write_bytes_with_transfer_syntax(
+		    "JPEGBaseline8Bit"_uid);
+
+		auto lossy_decode_bytes = lossy_bytes;
+		auto lossy_decode_file = dicom::read_bytes(
+		    "labelmap-lossy-jpeg-source-decode", std::move(lossy_decode_bytes));
+		set_labelmap_seg_sop_class(*lossy_decode_file);
+		auto lossy_seg = dicom::seg::from_dicomfile(std::move(lossy_decode_file));
+		std::vector<std::uint8_t> decoded(6);
+		expect_throw_contains("labelmap lossy source decode reject",
+		    [&] { lossy_seg->decode_frame_into(0, decoded); },
+		    "lossless source");
+
+		auto lossy_transcode_file = dicom::read_bytes(
+		    "labelmap-lossy-jpeg-source-transcode", std::move(lossy_bytes));
+		set_labelmap_seg_sop_class(*lossy_transcode_file);
+		expect_throw_contains("labelmap lossy source transcode reject",
+		    [&] {
+			    (void)lossy_transcode_file->write_bytes_with_transfer_syntax(
+			        "ExplicitVRLittleEndian"_uid);
+		    },
+		    "lossless source");
 	}
 
 	{
