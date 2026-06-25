@@ -1134,6 +1134,7 @@ SliceStackPlan plan_image_frame_stack(
 - [x] 공개 계약 정리: public header, Python docstring, en/ko developer segmentation 문서에서 LABELMAP 지원 범위와 native typed sample bytes 계약을 반영했다.
 - [x] `plane_from_seg_frame()` LabelMap synthetic geometry smoke test를 추가했다.
 - [x] cache 재사용을 decode-count로 검증하는 test-only 계측 테스트, concurrent lazy scan stress, C++ header partial-write/BINARY-FRACTIONAL-LABELMAP contract 주석 보강을 추가했다.
+- [x] SEG write/transcode 초기 preflight hook 구현: 기존 `DicomFile` generic write path에서 SOP Class / `SegmentationType` 기반으로 SEG 정책을 감지하고, 타입별 metadata invariant, lossy target/profile reject, BINARY 1-bit transcode unsupported guard를 적용한다.
 - [ ] 남은 후속: 실제 외부 LABELMAP sample 기반 regression을 유지하고, compressed/encapsulated SEG 지원은 별도 후속 계획으로 진행한다.
 
 ### 범위 결정
@@ -1367,24 +1368,37 @@ SliceStackPlan plan_image_frame_stack(
 - [ ] `plane_from_seg_frame()`이 Label Map SEG synthetic sample의 geometry를 반환하는지 검증한다.
 - [ ] palette/color 관련 테스트는 core SEG adapter가 아니라 GUI/viewer test suite에서 다룬다.
 
-### PixelData compression 지원 후속 계획
+### SEG PixelData compression / write / transcode 후속 계획
 
-- [ ] 범위는 `SegmentationStorage`의 `BINARY`/`FRACTIONAL`과 `LabelMapSegmentationStorage`의 `LABELMAP` 모두에 적용한다. public API 의미는 native PixelData와 동일하게 유지하고, 압축 여부는 frame source의 내부 구현 차이로 숨긴다.
-- [ ] 1차 지원은 lossless compressed/encapsulated transfer syntax만 허용한다. segmentation label value와 binary mask의 이산 값을 보존해야 하므로 lossy transfer syntax는 명확한 unsupported error로 둔다.
-- [ ] `from_dicomfile()`은 압축 SEG에서도 metadata-only construction을 유지한다. codec availability, fragment integrity, decoded length, unknown label validation은 frame decode/presence 계산 또는 `validate_label_values()` 시점에 수행한다.
-- [ ] PixelData source를 native byte span과 encapsulated frame decode source로 추상화한다. SEG decode path는 source에서 host/native typed decoded frame samples를 받아 기존 BINARY/FRACTIONAL/LABELMAP scan/mask helper로 넘긴다.
-- [ ] encapsulated PixelData는 기존 `PixelSequence`, `pixel_payload_decode_descriptor()`, `PixelPayloadDecoder`/decode dispatch 경로를 우선 재사용한다. SEG 전용 fragment parser를 새로 만들지 않는다.
-- [ ] `NumberOfFrames`와 encapsulated frame count가 일치하는지 검증한다. Basic Offset Table이 비어 있어도 기존 PixelSequence frame indexing으로 frame을 얻을 수 있으면 허용하고, frame을 특정할 수 없거나 fragment가 비정상이면 decode 시 error로 처리한다.
-- [ ] Extended Offset Table/Extended Offset Table Lengths가 있는 파일은 기존 payload splitter가 지원하는 범위 안에서만 허용한다. 지원하지 않는 조합은 unsupported가 아니라 payload/indexing error로 분류할지 결정한다.
-- [ ] decoded frame byte count는 SEG metadata와 정확히 일치해야 한다. BINARY는 rows/columns 기반 bit unpack contract, FRACTIONAL은 `uint8` sample count, LABELMAP은 8-bit/16-bit sample count를 각각 고정한다.
-- [ ] LABELMAP 압축 frame decode도 `decode_and_scan_labelmap_frame(...)` 계열 공통 helper를 통과시킨다. 성공 시 presence cache candidate를 no-replace 방식으로 publish하고, 실패 시 cache를 publish하지 않는다.
+- [ ] 범위는 read/decode뿐 아니라 기존 `DicomFile::set_transfer_syntax()` / `write_with_transfer_syntax()` / `write_bytes_with_transfer_syntax()` 경로를 통한 write/transcode까지 포함한다. SEG 전용 writer, SEG 전용 pre-serialization PixelData rewrite, 별도 fragment parser는 만들지 않는다.
+- [ ] write/transcode는 "SEG wrapper가 PixelData를 미리 변환한 뒤 generic writer에 맡기는" 방식이 아니라, generic pixel/write path가 SEG metadata와 1-bit storage를 표현할 수 있도록 보강하는 방향으로 진행한다.
+- [x] generic `DicomFile` write/transcode path 안에 SEG policy preflight hook을 둔다. 위치는 transfer syntax write decision 직후와 encode policy 확정 직후로 고정하고, SOP Class / `SegmentationType` 기반으로 SEG 여부와 타입별 invariant를 한 곳에서 판정한다.
+- [ ] public SEG API 의미는 native PixelData와 동일하게 유지한다. 압축 여부는 frame source/frame sink의 내부 구현 차이로 숨기고, `to_array()`, `decode_frame_into()`, `present_segment_numbers()`, `mask_for_segment()`, `validate_label_values()` contract는 바꾸지 않는다.
+- [ ] 지원 matrix를 read/decode, native->encapsulated write, encapsulated->native write, encapsulated->encapsulated transcode로 분리한다. FRACTIONAL 8-bit와 LABELMAP 8/16-bit는 lossless codec 기반 1차 지원 대상으로 두고, BINARY 1-bit는 core pixel layout/codec/write 모델 보강 후 지원한다.
+- [ ] BINARY compressed SEG는 기존 `PixelPayloadDecoder`가 `BitsAllocated` 8/16/32만 받는 한 바로 지원하지 않는다. 구현 전 `BitsAllocated=1` decoded layout, unpacked bool/u8 view, native 1-bit repack, encapsulated frame encoding contract 중 어떤 계층에서 1-bit를 표현할지 먼저 확정한다.
+- [ ] generic `pixel::PixelLayout` / `ConstPixelSpan` / encode source layout에 "source sample view는 u8 0/1일 수 있지만 DICOM stored BitsAllocated는 1"인 상태를 표현할 수 있는지 검토한다. 부족하면 SEG 전용 우회가 아니라 core pixel layout/encoder ABI를 확장한다.
+- [x] generic write/transcode preflight가 SEG invariants를 보존하도록 검토한다. `SegmentationType`, `BitsAllocated`, `BitsStored`, `HighBit`, `SamplesPerPixel`, `PhotometricInterpretation`, `PixelRepresentation`, `MaximumFractionalValue`가 타입별 contract를 벗어나면 write/transcode를 실패시킨다.
+- [ ] 입력 decode는 `DecodeInfo::encoded_lossy_state` 또는 동등한 codec result 상태로 확인해 `lossy`, `near_lossless`, `unknown`을 cache publish 전에 reject한다.
+- [x] 출력 encode는 target transfer syntax/profile/options preflight에서 lossy/near-lossless 가능성을 먼저 reject하고, streaming write 도중 뒤늦게 output lossy를 발견하는 구조를 만들지 않는다.
+- [ ] Encapsulated Uncompressed는 압축은 아니지만 encapsulated frame source/sink 검증 대상으로 포함한다. 이 경로로 `PixelSequence` indexing, frame count, write overlay, metadata preservation을 먼저 검증한다.
+- [ ] `from_dicomfile()`은 압축 SEG에서도 metadata-only construction을 유지한다. codec availability, fragment integrity, decoded length, lossy state, unknown label validation은 frame decode/presence 계산 또는 `validate_label_values()` 시점에 수행한다.
+- [ ] PixelData source를 native direct span과 decoded scratch frame으로 분리한다. SEG decode path는 source에서 host/native typed decoded frame samples를 받아 기존 BINARY/FRACTIONAL/LABELMAP scan/mask helper로 넘긴다.
+- [ ] LABELMAP compressed decode는 `decode_and_scan_labelmap_frame(...)` 계열 공통 helper가 typed sample span을 받는 구조로 정리한다. native path는 direct span을 넘기고 compressed path는 per-frame scratch buffer를 넘긴다.
+- [ ] write/transcode 중 semantic validation 범위를 고정한다. LABELMAP은 decoded label membership, `PixelPaddingValue` background 제외 규칙, 16-bit host/native-endian label contract를 transcode frame scan에서 검증한다. FRACTIONAL은 decoded sample이 `MaximumFractionalValue`를 넘으면 reject할지 아니면 기존 metadata contract만 신뢰할지 구현 전에 결정한다.
+- [ ] encapsulated PixelData는 기존 `PixelSequence`, `pixel_payload_decode_descriptor()`, `PixelPayloadDecoder`/decode dispatch 경로를 우선 재사용한다. `NumberOfFrames`와 encapsulated frame count가 일치하지 않거나 frame을 특정할 수 없으면 decode/write 시 명확한 error로 처리한다.
+- [ ] Extended Offset Table/Extended Offset Table Lengths가 있는 파일은 기존 payload splitter/write path가 지원하는 범위 안에서만 허용한다. 부족한 부분은 generic PixelSequence/payload indexing 개선 항목으로 처리한다.
+- [ ] decoded output contract를 SEG type별로 고정한다. BINARY public decode/mask는 `uint8` 0/1, native storage/write는 1-bit packed; FRACTIONAL은 `uint8` sample; LABELMAP 8-bit는 `uint8` label, LABELMAP 16-bit는 host/native-endian `uint16_t` label이다.
+- [ ] compressed-to-native BINARY transcode는 decoded u8 mask를 native PixelData에 그대로 쓰지 않고 generic 1-bit packer를 통해 다시 bit-packed PixelData로 써야 한다. 이 packer는 SEG 전용 함수가 아니라 core native 1-bit PixelData write helper로 둔다.
+- [ ] native-to-encapsulated BINARY transcode는 encoder가 1-bit source layout을 받을 수 있어야 한다. encoder backend가 1-bit를 직접 받지 못하면 core encode layer에서 명시적으로 unsupported를 반환하고, metadata를 `BitsAllocated=8`로 바꾸는 fallback은 금지한다.
+- [x] core 1-bit source layout/write 지원 전까지 BINARY SEG pixel transcode는 `write_with_transfer_syntax()`와 `set_transfer_syntax()` preflight에서 명확한 unsupported error로 막는다.
 - [ ] `present_segment_numbers(frame)`는 compressed LABELMAP에서 해당 frame 하나만 decode/scan한다. `frames_for_segment()`와 `validate_label_values()`만 all-frame decode를 유발하며, 이 비용과 error propagation을 문서화한다.
-- [ ] full decoded frame buffer는 기본적으로 persistent cache하지 않는다. persistent cache는 기존처럼 LABELMAP presence list와 all-frame segment index까지만 유지해 대용량 compressed SEG 메모리 사용량을 제한한다.
-- [ ] Python binding에서는 compressed SEG decode/presence scan/`validate_label_values()`/`frames_for_segment()` all-frame scan 중 GIL을 release한다.
+- [ ] full decoded frame buffer는 기본적으로 persistent cache하지 않는다. compressed LABELMAP all-frame scan은 decode plan 1개와 frame scratch 1개를 재사용하고, persistent cache는 기존처럼 presence list와 all-frame segment index까지만 유지한다.
+- [ ] Python binding에서는 compressed SEG decode/presence scan/`validate_label_values()`/`frames_for_segment()` all-frame scan과 write/transcode 중 GIL을 release한다.
 - [ ] output buffer contract는 native path와 동일하게 유지한다. `_into()` 계열에서 codec/decode/validation error가 나면 output buffer가 partial write 상태일 수 있음을 header/docstring에 명시한다.
-- [ ] unsupported transfer syntax, decoder plugin 없음, malformed PixelSequence, frame count mismatch, empty/missing frame fragments, decoded length mismatch, lossy transfer syntax reject를 C++ smoke와 Python 테스트로 고정한다.
-- [ ] 실제 compressed BINARY, FRACTIONAL, LABELMAP SEG sample을 `../sample/seg` 기준 regression으로 돌린다. 각 sample은 `read_file`, `to_array`, `present_segment_numbers`, `mask_for_segment`, `validate_label_values`를 최소 검증한다.
-- [ ] 문서에는 native uncompressed, lossless compressed/encapsulated, lossy compressed SEG의 지원 범위를 transfer syntax별 표로 정리한다.
+- [ ] write/transcode 후 validation test를 추가한다. output 파일을 다시 `seg::read_file()`로 열어 `to_array`, `decode_frame_into`, `present_segment_numbers`, `mask_for_segment`, `validate_label_values`를 실행하고 원본 frame별 mask/label value와 비교한다.
+- [ ] unsupported transfer syntax, decoder/encoder plugin 없음, malformed PixelSequence, frame count mismatch, empty/missing frame fragments, decoded length mismatch, lossy/near-lossless/unknown lossy-state reject를 C++ smoke와 Python 테스트로 고정한다.
+- [ ] 실제 compressed FRACTIONAL, LABELMAP, 가능하면 BINARY SEG sample을 `../sample/seg` 기준 regression으로 돌린다. BINARY compressed는 core 1-bit layout/write 지원 전에는 명확한 unsupported/reject sample로 먼저 고정한다.
+- [ ] 문서에는 native uncompressed, encapsulated uncompressed, lossless compressed/encapsulated, lossy compressed SEG의 read/write/transcode 지원 범위를 transfer syntax별 표로 정리한다.
 
 ### 문서 / Stub
 

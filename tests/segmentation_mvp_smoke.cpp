@@ -529,6 +529,36 @@ int main() {
 	}
 
 	{
+		expect_throw_contains("BINARY SEG write RLE preflight",
+		    [&] {
+			    auto file = make_binary_seg_file();
+			    (void)file->write_bytes_with_transfer_syntax("RLELossless"_uid);
+		    },
+		    "BINARY SEG PixelData transcode");
+		expect_throw_contains("BINARY SEG set_transfer_syntax RLE preflight",
+		    [&] {
+			    auto file = make_binary_seg_file();
+			    file->set_transfer_syntax("RLELossless"_uid);
+		    },
+		    "BINARY SEG PixelData transcode");
+		expect_throw_contains("FRACTIONAL SEG lossy write preflight",
+		    [&] {
+			    auto file = make_fractional_seg_file();
+			    (void)file->write_bytes_with_transfer_syntax(
+			        "JPEGBaseline8Bit"_uid);
+		    },
+		    "lossless target transfer syntax");
+		expect_throw_contains("LABELMAP SEG metadata write preflight",
+		    [&] {
+			    auto file = make_labelmap_seg8_file();
+			    set_long(*file, "HighBit", 6);
+			    (void)file->write_bytes_with_transfer_syntax(
+			        "ExplicitVRLittleEndian"_uid);
+		    },
+		    "HighBit=BitsAllocated-1");
+	}
+
+	{
 		auto short_pixel_data = make_binary_seg_file();
 		short_pixel_data->set_native_pixel_data(
 		    std::vector<std::uint8_t>{0x00}, dicom::VR::OB);
