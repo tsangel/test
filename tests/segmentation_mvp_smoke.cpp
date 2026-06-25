@@ -896,6 +896,38 @@ int main() {
 		    "shorter");
 	}
 
+	{
+		auto unsupported_decode_file = make_labelmap_seg8_file();
+		unsupported_decode_file->reset_encapsulated_pixel_data(2);
+		unsupported_decode_file->set_transfer_syntax_state_only("MPEG2MPML"_uid);
+		unsupported_decode_file->set_encoded_pixel_frame(
+		    0, std::vector<std::uint8_t>{0x00});
+		unsupported_decode_file->set_encoded_pixel_frame(
+		    1, std::vector<std::uint8_t>{0x00});
+		auto unsupported_seg =
+		    dicom::seg::from_dicomfile(std::move(unsupported_decode_file));
+		std::vector<std::uint8_t> decoded(6);
+		expect_throw_contains("labelmap unsupported source codec decode reject",
+		    [&] { unsupported_seg->decode_frame_into(0, decoded); },
+		    "decoder binding");
+
+		auto unsupported_transcode_file = make_labelmap_seg8_file();
+		unsupported_transcode_file->reset_encapsulated_pixel_data(2);
+		unsupported_transcode_file->set_transfer_syntax_state_only(
+		    "MPEG2MPML"_uid);
+		unsupported_transcode_file->set_encoded_pixel_frame(
+		    0, std::vector<std::uint8_t>{0x00});
+		unsupported_transcode_file->set_encoded_pixel_frame(
+		    1, std::vector<std::uint8_t>{0x00});
+		expect_throw_contains(
+		    "labelmap unsupported source codec transcode reject",
+		    [&] {
+			    (void)unsupported_transcode_file->write_bytes_with_transfer_syntax(
+			        "ExplicitVRLittleEndian"_uid);
+		    },
+		    "decoder binding");
+	}
+
 	if constexpr (dicom::test::kJpegBuiltin) {
 		auto lossy_source = make_labelmap_seg8_file();
 		set_multiframe_grayscale_sop_class(*lossy_source);
