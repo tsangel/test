@@ -8,6 +8,8 @@ on:
     paths:
       - ".github/workflows/codec-mode-matrix.yml"
       - "CMakeLists.txt"
+      - "cmake/**"
+      - "include/**"
       - "scripts/run_codec_mode_matrix.sh"
       - "src/**"
       - "tests/**"
@@ -16,6 +18,8 @@ on:
     paths:
       - ".github/workflows/codec-mode-matrix.yml"
       - "CMakeLists.txt"
+      - "cmake/**"
+      - "include/**"
       - "scripts/run_codec_mode_matrix.sh"
       - "src/**"
       - "tests/**"

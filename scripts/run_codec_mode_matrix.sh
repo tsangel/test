@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_ROOT="${BUILD_ROOT:-${ROOT_DIR}/build_codec_matrix}"
 BUILD_TYPE="${BUILD_TYPE:-Release}"
 JOBS="${JOBS:-4}"
-TEST_REGEX="${TEST_REGEX:-^(basic_smoke|codec_cycle_roundtrip|codec_error_boundary)$}"
+TEST_REGEX="${TEST_REGEX:-^(basic_smoke|codec_cycle_roundtrip|codec_error_boundary|segmentation_mvp_smoke)$}"
 
 DEFAULT_CASES=(
 	"all_builtin"

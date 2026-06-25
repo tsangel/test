@@ -1404,7 +1404,7 @@ SliceStackPlan plan_image_frame_stack(
 - [x] malformed PixelSequence 계열 negative test를 C++ smoke로 고정한다. `NumberOfFrames`와 encapsulated frame count mismatch, empty/missing fragments, zero-length fragment, decoded length mismatch를 `write_bytes_with_transfer_syntax()` 경로에서 검증한다.
 - [x] lossy compressed source reject를 C++ smoke로 고정한다. JPEG builtin build에서 non-SEG로 만든 lossy JPEG source를 Label Map SEG로 재분류한 뒤 public decode와 write/transcode가 `lossless source` error를 내는지 검증한다.
 - [x] decoder/encoder plugin 없음 reject를 C++ smoke로 고정한다. RLE static plugin disabled build에서 LABELMAP RLE write/set_transfer_syntax가 encoder binding error로 실패하는지 검증한다.
-- [ ] CI/build matrix에서 RLE static plugin disabled configuration이 `dicomsdl_segmentation_mvp_smoke`를 실행하도록 고정한다. 현재 plugin-missing negative test는 `!kRleBuiltin` 조건부라 plugin-enabled 전용 CI에서는 실질 coverage가 없다.
+- [x] CI/build matrix에서 RLE static plugin disabled configuration이 `dicomsdl_segmentation_mvp_smoke`를 실행하도록 고정한다. `codec-mode-matrix`의 `all_none` case가 기본 smoke regex에 `segmentation_mvp_smoke`를 포함하므로 `!kRleBuiltin` plugin-missing negative test가 CI에서 실질 coverage를 갖는다.
 - [x] near-lossless compressed source reject를 C++ smoke로 고정한다. JPEG-LS builtin build에서 non-SEG로 만든 near-lossless JPEG-LS source를 Label Map SEG로 재분류한 뒤 public decode와 write/transcode가 `lossless source` error를 내는지 검증한다.
 - [ ] unsupported transfer syntax와 unknown lossy-state reject를 C++ smoke와 Python 테스트로 고정한다.
 - [ ] 실제 compressed FRACTIONAL, LABELMAP, 가능하면 BINARY SEG sample을 `../sample/seg` 기준 regression으로 돌린다. BINARY compressed는 core 1-bit layout/write 지원 전에는 명확한 unsupported/reject sample로 먼저 고정한다.
