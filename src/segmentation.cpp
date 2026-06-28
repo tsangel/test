@@ -1069,57 +1069,76 @@ Segmentation::ensure_labelmap_frame_index() const {
 		throw_decode("LABELMAP frame index requested for non-LABELMAP SEG");
 	}
 	{
-		std::lock_guard lock(labelmap_cache_mutex_);
+		std::unique_lock lock(labelmap_cache_mutex_);
+		while (!labelmap_frame_index_ && labelmap_frame_index_building_) {
+			labelmap_frame_index_cv_.wait(lock);
+		}
 		if (labelmap_frame_index_) {
 			return labelmap_frame_index_;
 		}
+		labelmap_frame_index_building_ = true;
 	}
 
-	std::vector<std::shared_ptr<const std::vector<std::uint16_t>>> frame_labels(
-	    index_.frames.size());
-	detail::LabelmapFrameIndex local_index{};
-	LabelmapFrameDecodeContext decode_context{};
-	for (std::size_t frame_index = 0; frame_index < index_.frames.size();
-	     ++frame_index) {
+	try {
+		std::vector<std::shared_ptr<const std::vector<std::uint16_t>>> frame_labels(
+		    index_.frames.size());
+		detail::LabelmapFrameIndex local_index{};
+		LabelmapFrameDecodeContext decode_context{};
+		for (std::size_t frame_index = 0; frame_index < index_.frames.size();
+		     ++frame_index) {
+			{
+				std::lock_guard lock(labelmap_cache_mutex_);
+				const auto& cache = labelmap_presence_cache_[frame_index];
+				if (cache.ready) {
+					frame_labels[frame_index] = cache.labels;
+				}
+			}
+			if (!frame_labels[frame_index]) {
+				const auto result = decode_and_scan_labelmap_frame(*file_,
+				    index_.frames.size(), frame_index, rows_, columns_,
+				    labelmap_bits_allocated_.value_or(0), labelmap_valid_labels_,
+				    labelmap_background_value_,
+				    LabelmapFrameScanRequest{.collect_presence = true},
+				    &decode_context);
+				frame_labels[frame_index] = result.present_labels;
+			}
+			for (const auto label : *frame_labels[frame_index]) {
+				local_index.frame_indices_by_segment[label].push_back(frame_index);
+			}
+		}
+
+		auto published =
+		    std::make_shared<const detail::LabelmapFrameIndex>(std::move(local_index));
+		std::shared_ptr<const detail::LabelmapFrameIndex> ready_index;
 		{
 			std::lock_guard lock(labelmap_cache_mutex_);
-			const auto& cache = labelmap_presence_cache_[frame_index];
-			if (cache.ready) {
-				frame_labels[frame_index] = cache.labels;
+			if (!labelmap_frame_index_) {
+				for (std::size_t frame_index = 0; frame_index < frame_labels.size();
+				     ++frame_index) {
+					auto& cache = labelmap_presence_cache_[frame_index];
+					if (!cache.ready) {
+						cache.ready = true;
+						cache.labels = frame_labels[frame_index];
+					}
+				}
+				labelmap_frame_index_ = std::move(published);
 			}
+			ready_index = labelmap_frame_index_;
+			labelmap_frame_index_building_ = false;
 		}
-		if (!frame_labels[frame_index]) {
-			const auto result = decode_and_scan_labelmap_frame(*file_,
-			    index_.frames.size(), frame_index, rows_, columns_,
-			    labelmap_bits_allocated_.value_or(0), labelmap_valid_labels_,
-			    labelmap_background_value_,
-			    LabelmapFrameScanRequest{.collect_presence = true},
-			    &decode_context);
-			frame_labels[frame_index] = result.present_labels;
+		labelmap_frame_index_cv_.notify_all();
+		if (!ready_index) {
+			throw_decode("LABELMAP frame index build failed");
 		}
-		for (const auto label : *frame_labels[frame_index]) {
-			local_index.frame_indices_by_segment[label].push_back(frame_index);
+		return ready_index;
+	} catch (...) {
+		{
+			std::lock_guard lock(labelmap_cache_mutex_);
+			labelmap_frame_index_building_ = false;
 		}
+		labelmap_frame_index_cv_.notify_all();
+		throw;
 	}
-
-	auto published =
-	    std::make_shared<const detail::LabelmapFrameIndex>(std::move(local_index));
-	std::lock_guard lock(labelmap_cache_mutex_);
-	if (!labelmap_frame_index_) {
-		for (std::size_t frame_index = 0; frame_index < frame_labels.size();
-		     ++frame_index) {
-			auto& cache = labelmap_presence_cache_[frame_index];
-			if (!cache.ready) {
-				cache.ready = true;
-				cache.labels = frame_labels[frame_index];
-			}
-		}
-		labelmap_frame_index_ = std::move(published);
-	}
-	if (!labelmap_frame_index_) {
-		throw_decode("LABELMAP frame index build failed");
-	}
-	return labelmap_frame_index_;
 }
 
 SegmentListView Segmentation::segments() const noexcept {

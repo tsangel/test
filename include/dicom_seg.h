@@ -5,6 +5,7 @@
 #include <array>
 #include <bit>
 #include <bitset>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
@@ -694,6 +695,8 @@ private:
 	mutable std::mutex fractional_decode_plan_mutex_{};
 	mutable std::optional<pixel::DecodePlan> fractional_decode_plan_{};
 	mutable std::mutex labelmap_cache_mutex_{};
+	mutable std::condition_variable labelmap_frame_index_cv_{};
+	mutable bool labelmap_frame_index_building_{false};
 	mutable std::vector<detail::LabelmapFramePresenceCache>
 	    labelmap_presence_cache_{};
 	mutable std::shared_ptr<const detail::LabelmapFrameIndex>

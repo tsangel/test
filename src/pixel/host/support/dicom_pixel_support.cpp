@@ -5,6 +5,7 @@
 #include "diagnostics.h"
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <limits>
 #include <optional>
@@ -45,6 +46,21 @@ struct NativeSourceElement {
 
 [[noreturn]] void throw_decode_frame_source_error(std::string_view reason) {
 	throw std::runtime_error(std::string(reason));
+}
+
+[[nodiscard]] const std::array<std::array<std::uint8_t, 8>, 256>&
+one_bit_expand_lut() {
+	static const auto table = [] {
+		std::array<std::array<std::uint8_t, 8>, 256> out{};
+		for (std::size_t byte = 0; byte < out.size(); ++byte) {
+			for (std::size_t bit = 0; bit < out[byte].size(); ++bit) {
+				out[byte][bit] =
+				    static_cast<std::uint8_t>((byte >> bit) & std::size_t{1});
+			}
+		}
+		return out;
+	}();
+	return table;
 }
 
 [[nodiscard]] bool checked_mul_size_t(
@@ -624,6 +640,67 @@ try_compute_native_one_bit_pixel_layout(const DicomFile& df) {
 	return compute_native_one_bit_pixel_layout_from_dataset(df.dataset());
 }
 
+[[nodiscard]] std::uint8_t shifted_one_bit_source_byte(
+    std::span<const std::uint8_t> source_bytes, std::size_t bit_index) noexcept {
+	const auto byte_index = bit_index / std::size_t{8};
+	const auto bit_offset = bit_index % std::size_t{8};
+	std::uint16_t window = 0;
+	if (byte_index < source_bytes.size()) {
+		window = source_bytes[byte_index];
+	}
+	if (bit_offset != 0 && byte_index + 1u < source_bytes.size()) {
+		window |= static_cast<std::uint16_t>(source_bytes[byte_index + 1u]) << 8u;
+	}
+	return static_cast<std::uint8_t>((window >> bit_offset) & 0xFFu);
+}
+
+void unpack_native_one_bit_mono_frame_or_throw(
+    std::span<const std::uint8_t> source_bytes,
+    const NativeOneBitPixelLayout& one_bit_layout, std::size_t frame_index,
+    std::span<std::uint8_t> dst, const pixel::PixelLayout& output_layout) {
+	if (output_layout.row_stride < one_bit_layout.cols) {
+		throw_decode_frame_source_error("output row stride is smaller than 1-bit source row");
+	}
+	std::size_t frame_used_bytes = 0;
+	if (!checked_mul_size_t(
+	        output_layout.row_stride, one_bit_layout.rows, frame_used_bytes) ||
+	    frame_used_bytes > output_layout.frame_stride) {
+		throw_decode_frame_source_error("output frame stride is smaller than decoded rows");
+	}
+
+	std::size_t frame_bit_offset = 0;
+	if (!checked_mul_size_t(frame_index, one_bit_layout.frame_bits, frame_bit_offset)) {
+		throw_decode_frame_source_error("raw 1-bit frame bit offset exceeds size_t range");
+	}
+
+	const auto& expand = one_bit_expand_lut();
+	for (std::size_t row = 0; row < one_bit_layout.rows; ++row) {
+		auto* row_dst = dst.data() + row * output_layout.row_stride;
+		auto bit_index = frame_bit_offset + row * one_bit_layout.cols;
+		std::size_t remaining = one_bit_layout.cols;
+		auto* out = row_dst;
+		while (remaining >= 8u) {
+			const auto source_byte = shifted_one_bit_source_byte(source_bytes, bit_index);
+			std::memcpy(out, expand[source_byte].data(), 8u);
+			out += 8u;
+			bit_index += 8u;
+			remaining -= 8u;
+		}
+		if (remaining != 0) {
+			const auto source_byte = shifted_one_bit_source_byte(source_bytes, bit_index);
+			std::memcpy(out, expand[source_byte].data(), remaining);
+		}
+		if (output_layout.row_stride > one_bit_layout.cols) {
+			std::memset(row_dst + one_bit_layout.cols, 0,
+			    output_layout.row_stride - one_bit_layout.cols);
+		}
+	}
+	if (output_layout.frame_stride > frame_used_bytes) {
+		std::memset(dst.data() + frame_used_bytes, 0,
+		    output_layout.frame_stride - frame_used_bytes);
+	}
+}
+
 void unpack_native_one_bit_frame_or_throw(
     std::span<const std::uint8_t> source_bytes,
     const NativeOneBitPixelLayout& one_bit_layout, std::size_t frame_index,
@@ -644,6 +721,12 @@ void unpack_native_one_bit_frame_or_throw(
 	    output_layout.cols != one_bit_layout.cols ||
 	    output_layout.samples_per_pixel != one_bit_layout.samples_per_pixel) {
 		throw_decode_frame_source_error("output layout does not match 1-bit source geometry");
+	}
+
+	if (one_bit_layout.samples_per_pixel == std::size_t{1}) {
+		unpack_native_one_bit_mono_frame_or_throw(
+		    source_bytes, one_bit_layout, frame_index, dst, output_layout);
+		return;
 	}
 
 	std::fill_n(dst.begin(), output_layout.frame_stride, std::uint8_t{0});
