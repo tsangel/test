@@ -2199,6 +2199,9 @@ private:
 	std::span<const std::uint8_t> pixel_payload_{};
 	std::vector<std::vector<Fragment>> frame_fragments_{};
 	std::string source_name_{"<pixel-payload>"};
+	bool native_one_bit_packed_{false};
+	std::size_t native_one_bit_frame_bits_{0};
+	std::size_t native_one_bit_required_payload_bytes_{0};
 };
 
 [[nodiscard]] PixelPayloadDecodeDescriptor pixel_payload_decode_descriptor(

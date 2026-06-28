@@ -16,6 +16,7 @@
 namespace dicom {
 
 namespace pixel {
+using namespace dicom::literals;
 
 namespace {
 
@@ -151,6 +152,17 @@ void assign_decode_info(const pixel_decoder_info& abi_info,
 	};
 }
 
+void assign_native_one_bit_decode_info(
+    const PixelLayout& output_layout, DecodeInfo& decode_info) {
+	decode_info = DecodeInfo{
+	    .photometric = output_layout.photometric,
+	    .encoded_lossy_state = EncodedLossyState::lossless,
+	    .data_type = DataType::u8,
+	    .planar = output_layout.planar,
+	    .bits_per_sample = 1,
+	};
+}
+
 [[nodiscard]] std::string_view trim_ascii_space(std::string_view text) noexcept {
 	while (!text.empty() && (text.front() == ' ' || text.front() == '\t' ||
 	                            text.front() == '\r' || text.front() == '\n')) {
@@ -205,6 +217,84 @@ void assign_decode_info(const pixel_decoder_info& abi_info,
 	}
 }
 
+[[nodiscard]] std::size_t checked_add_seven_divide_by_eight_or_throw(
+    std::size_t value, std::string_view stage) {
+	if (value > std::numeric_limits<std::size_t>::max() - std::size_t{7}) {
+		detail::throw_codec_stage_exception(
+		    detail::CodecStatusCode::invalid_argument, stage,
+		    "1-bit pixel payload size exceeds size_t range");
+	}
+	return (value + std::size_t{7}) / std::size_t{8};
+}
+
+[[nodiscard]] support_detail::NativeOneBitPixelLayout
+one_bit_layout_from_descriptor_or_throw(
+    const PixelPayloadDecodeDescriptor& desc) {
+	if (desc.rows == 0 || desc.cols == 0 || desc.frames == 0 ||
+	    desc.samples_per_pixel == 0) {
+		detail::throw_codec_stage_exception(
+		    detail::CodecStatusCode::invalid_argument, "create_payload_decoder",
+		    "rows, cols, frames, and samples_per_pixel must be positive");
+	}
+	if (desc.pixel_representation != 0) {
+		detail::throw_codec_stage_exception(
+		    detail::CodecStatusCode::invalid_argument, "create_payload_decoder",
+		    "1-bit pixel payload requires pixel_representation=0");
+	}
+	const auto bits_stored =
+	    desc.bits_stored != 0 ? desc.bits_stored : desc.bits_allocated;
+	if (bits_stored != 1) {
+		detail::throw_codec_stage_exception(
+		    detail::CodecStatusCode::invalid_argument, "create_payload_decoder",
+		    "1-bit pixel payload requires bits_stored=1");
+	}
+	const auto photometric =
+	    parse_photometric(trim_ascii_space(desc.photometric));
+	if (!photometric.has_value()) {
+		detail::throw_codec_stage_exception(
+		    detail::CodecStatusCode::invalid_argument, "create_payload_decoder",
+		    "unknown PhotometricInterpretation: {}", desc.photometric);
+	}
+
+	std::size_t pixels_per_plane = 0;
+	if (!detail::checked_mul_size_t(
+	        static_cast<std::size_t>(desc.rows),
+	        static_cast<std::size_t>(desc.cols), pixels_per_plane)) {
+		detail::throw_codec_stage_exception(
+		    detail::CodecStatusCode::invalid_argument, "create_payload_decoder",
+		    "1-bit frame plane size exceeds size_t range");
+	}
+	std::size_t frame_bits = 0;
+	if (!detail::checked_mul_size_t(
+	        pixels_per_plane, static_cast<std::size_t>(desc.samples_per_pixel),
+	        frame_bits)) {
+		detail::throw_codec_stage_exception(
+		    detail::CodecStatusCode::invalid_argument, "create_payload_decoder",
+		    "1-bit frame bit count exceeds size_t range");
+	}
+	std::size_t total_bits = 0;
+	if (!detail::checked_mul_size_t(
+	        frame_bits, static_cast<std::size_t>(desc.frames), total_bits)) {
+		detail::throw_codec_stage_exception(
+		    detail::CodecStatusCode::invalid_argument, "create_payload_decoder",
+		    "1-bit total bit count exceeds size_t range");
+	}
+
+	return support_detail::NativeOneBitPixelLayout{
+	    .photometric = *photometric,
+	    .planar = desc.planar_configuration == 1 ? Planar::planar
+	                                             : Planar::interleaved,
+	    .rows = desc.rows,
+	    .cols = desc.cols,
+	    .frames = desc.frames,
+	    .samples_per_pixel = desc.samples_per_pixel,
+	    .frame_bits = frame_bits,
+	    .total_bits = total_bits,
+	    .required_payload_bytes =
+	        checked_add_seven_divide_by_eight_or_throw(total_bits, "create_payload_decoder"),
+	};
+}
+
 [[nodiscard]] PixelLayout source_layout_from_descriptor_or_throw(
     const PixelPayloadDecodeDescriptor& desc) {
 	if (desc.rows == 0 || desc.cols == 0 || desc.frames == 0 ||
@@ -217,6 +307,15 @@ void assign_decode_info(const pixel_decoder_info& abi_info,
 		detail::throw_codec_stage_exception(
 		    detail::CodecStatusCode::invalid_argument, "create_payload_decoder",
 		    "pixel_representation must be 0 or 1");
+	}
+	if (desc.bits_allocated == 1) {
+		try {
+			return one_bit_layout_from_descriptor_or_throw(desc).decoded_source_layout();
+		} catch (const std::exception& e) {
+			detail::throw_codec_stage_exception(
+			    detail::CodecStatusCode::invalid_argument, "create_payload_decoder",
+			    "invalid 1-bit source layout: {}", e.what());
+		}
 	}
 
 	const auto data_type = data_type_from_descriptor_or_throw(
@@ -263,6 +362,28 @@ void assign_decode_info(const pixel_decoder_info& abi_info,
 void decode_frame_into_impl(const DicomFile& df, std::size_t frame_index,
     std::span<std::uint8_t> dst, const DecodePlan& plan,
     DecodeInfo* decode_info) {
+	if (const auto transfer_syntax = df.transfer_syntax_uid();
+	    transfer_syntax.is_uncompressed() && !transfer_syntax.is_encapsulated()) {
+		if (const auto one_bit_layout =
+		        support_detail::try_compute_native_one_bit_pixel_layout(df)) {
+			const auto& pixel_data = df.dataset()["PixelData"_tag];
+			if (!pixel_data || pixel_data.is_missing() ||
+			    pixel_data.vr().is_pixel_sequence()) {
+				detail::throw_frame_codec_stage_exception(frame_index,
+				    detail::CodecStatusCode::invalid_argument,
+				    "load_frame_source",
+				    "native 1-bit decode requires binary PixelData");
+			}
+			support_detail::unpack_native_one_bit_frame_or_throw(
+			    pixel_data.value_span(), *one_bit_layout, frame_index, dst,
+			    plan.output_layout);
+			if (decode_info != nullptr) {
+				assign_native_one_bit_decode_info(plan.output_layout, *decode_info);
+			}
+			return;
+		}
+	}
+
 	pixel_decoder_info abi_info{};
 	pixel_decoder_info* abi_info_ptr = nullptr;
 	if (decode_info != nullptr) {
@@ -285,6 +406,57 @@ void decode_frame_into_impl(const DicomFile& df, std::size_t frame_index,
 void decode_all_frames_into_impl(const DicomFile& df, std::span<std::uint8_t> dst,
     const DecodePlan& plan, DecodeInfo* decode_info,
     const ExecutionObserver* observer) {
+	if (const auto transfer_syntax = df.transfer_syntax_uid();
+	    transfer_syntax.is_uncompressed() && !transfer_syntax.is_encapsulated()) {
+		if (const auto one_bit_layout =
+		        support_detail::try_compute_native_one_bit_pixel_layout(df)) {
+			const auto frames = static_cast<std::size_t>(plan.output_layout.frames);
+			if (plan.output_layout.frame_stride >
+			    (std::numeric_limits<std::size_t>::max() / frames)) {
+				detail::throw_codec_stage_exception(
+				    detail::CodecStatusCode::invalid_argument, "validate_dst",
+				    "decoded output size overflow for all frames");
+			}
+			const auto required_bytes = plan.output_layout.frame_stride * frames;
+			if (dst.size() < required_bytes) {
+				detail::throw_codec_stage_exception(
+				    detail::CodecStatusCode::invalid_argument, "validate_dst",
+				    "destination buffer is smaller than required decoded size");
+			}
+			const auto& pixel_data = df.dataset()["PixelData"_tag];
+			if (!pixel_data || pixel_data.is_missing() ||
+			    pixel_data.vr().is_pixel_sequence()) {
+				detail::throw_codec_stage_exception(
+				    detail::CodecStatusCode::invalid_argument,
+				    "load_frame_source",
+				    "native 1-bit decode requires binary PixelData");
+			}
+			for (std::size_t frame_index = 0; frame_index < frames; ++frame_index) {
+				if (observer != nullptr && observer->should_cancel != nullptr &&
+				    observer->should_cancel(observer->user_data)) {
+					detail::throw_codec_stage_exception(
+					    detail::CodecStatusCode::cancelled, "cancel",
+					    "decode cancelled by observer after {} of {} frames",
+					    frame_index, frames);
+				}
+				auto frame_dst = dst.subspan(
+				    frame_index * plan.output_layout.frame_stride,
+				    plan.output_layout.frame_stride);
+				support_detail::unpack_native_one_bit_frame_or_throw(
+				    pixel_data.value_span(), *one_bit_layout, frame_index,
+				    frame_dst, plan.output_layout);
+				if (observer != nullptr && observer->on_progress != nullptr) {
+					observer->on_progress(
+					    frame_index + 1u, frames, observer->user_data);
+				}
+			}
+			if (decode_info != nullptr) {
+				assign_native_one_bit_decode_info(plan.output_layout, *decode_info);
+			}
+			return;
+		}
+	}
+
 	pixel_decoder_info abi_info{};
 	pixel_decoder_info* abi_info_ptr = nullptr;
 	if (decode_info != nullptr) {
@@ -317,6 +489,17 @@ std::string_view photometric_to_string(Photometric photometric) noexcept {
 DecodePlan create_decode_plan(const DicomFile& df, const DecodeOptions& opt) {
 	DecodePlan plan{};
 	// Snapshot pixel metadata once so decode_frame_into() can stay on the hot path.
+	if (const auto transfer_syntax = df.transfer_syntax_uid();
+	    transfer_syntax.is_uncompressed() && !transfer_syntax.is_encapsulated()) {
+		if (const auto one_bit_layout =
+		        support_detail::try_compute_native_one_bit_pixel_layout(df)) {
+			plan.options = opt;
+			plan.output_layout =
+			    detail::compute_decode_output_layout_or_throw(
+			        df.path(), one_bit_layout->decoded_source_layout(), plan.options);
+			return plan;
+		}
+	}
 	const auto source_layout = support_detail::compute_decode_source_layout(df);
 	// Store the caller policy unchanged so every decode entry point uses the same plan contract.
 	plan.options = opt;
@@ -359,11 +542,26 @@ PixelPayloadDecoder::PixelPayloadDecoder(
 	}
 	transfer_syntax_uid_ = *transfer_syntax;
 	source_layout_ = source_layout_from_descriptor_or_throw(desc);
+	if (desc.bits_allocated == 1) {
+		if (transfer_syntax_uid_.is_encapsulated()) {
+			detail::throw_codec_stage_exception(
+			    detail::CodecStatusCode::unsupported,
+			    "create_payload_decoder",
+			    "encapsulated 1-bit pixel payload decode is not supported");
+		}
+		const auto one_bit_layout = one_bit_layout_from_descriptor_or_throw(desc);
+		native_one_bit_packed_ = true;
+		native_one_bit_frame_bits_ = one_bit_layout.frame_bits;
+		native_one_bit_required_payload_bytes_ =
+		    one_bit_layout.required_payload_bytes;
+	}
 
 	std::size_t total_native_bytes = 0;
-	if (!detail::checked_mul_size_t(
-	        static_cast<std::size_t>(source_layout_.frames),
-	        source_layout_.frame_stride, total_native_bytes)) {
+	if (native_one_bit_packed_) {
+		total_native_bytes = native_one_bit_required_payload_bytes_;
+	} else if (!detail::checked_mul_size_t(
+	               static_cast<std::size_t>(source_layout_.frames),
+	               source_layout_.frame_stride, total_native_bytes)) {
 		detail::throw_codec_stage_exception(
 		    detail::CodecStatusCode::invalid_argument, "create_payload_decoder",
 		    "native pixel payload size exceeds size_t range");
@@ -493,6 +691,22 @@ void PixelPayloadDecoder::decode_into(std::size_t frame_index,
 			detail::throw_frame_codec_stage_exception(frame_index,
 			    detail::CodecStatusCode::invalid_argument, "validate_dst",
 			    "destination buffer is smaller than required decoded size");
+		}
+		if (native_one_bit_packed_) {
+			support_detail::NativeOneBitPixelLayout one_bit_layout{
+			    .photometric = source_layout_.photometric,
+			    .planar = source_layout_.planar,
+			    .rows = source_layout_.rows,
+			    .cols = source_layout_.cols,
+			    .frames = source_layout_.frames,
+			    .samples_per_pixel = source_layout_.samples_per_pixel,
+			    .frame_bits = native_one_bit_frame_bits_,
+			    .total_bits = 0,
+			    .required_payload_bytes = native_one_bit_required_payload_bytes_,
+			};
+			support_detail::unpack_native_one_bit_frame_or_throw(
+			    pixel_payload_, one_bit_layout, frame_index, dst, plan.output_layout);
+			return;
 		}
 
 		if (!transfer_syntax_uid_.is_encapsulated()) {

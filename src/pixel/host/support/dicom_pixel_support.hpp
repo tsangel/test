@@ -30,6 +30,20 @@ struct NativeDecodeSourceView {
 	std::size_t frame_bytes{0};
 };
 
+struct NativeOneBitPixelLayout {
+	pixel::Photometric photometric{pixel::Photometric::monochrome2};
+	pixel::Planar planar{pixel::Planar::interleaved};
+	std::size_t rows{0};
+	std::size_t cols{0};
+	std::size_t frames{0};
+	std::size_t samples_per_pixel{0};
+	std::size_t frame_bits{0};
+	std::size_t total_bits{0};
+	std::size_t required_payload_bytes{0};
+
+	[[nodiscard]] pixel::PixelLayout decoded_source_layout() const;
+};
+
 [[nodiscard]] PreparedDecodeFrameSource prepare_decode_frame_source_or_throw(
     const DicomFile& df, const pixel::PixelLayout& source_layout, std::size_t frame_index);
 [[nodiscard]] PreparedDecodeFrameSource prepare_decode_frame_source_or_throw(
@@ -46,6 +60,16 @@ prepare_decode_frame_source_without_cache_or_throw(
 
 [[nodiscard]] std::span<const std::uint8_t> native_decode_frame_bytes_or_throw(
     const NativeDecodeSourceView& source_view, std::size_t frame_index);
+
+[[nodiscard]] std::optional<NativeOneBitPixelLayout>
+try_compute_native_one_bit_pixel_layout(const DataSet& dataset);
+[[nodiscard]] std::optional<NativeOneBitPixelLayout>
+try_compute_native_one_bit_pixel_layout(const DicomFile& df);
+
+void unpack_native_one_bit_frame_or_throw(
+    std::span<const std::uint8_t> source_bytes,
+    const NativeOneBitPixelLayout& one_bit_layout, std::size_t frame_index,
+    std::span<std::uint8_t> dst, const pixel::PixelLayout& output_layout);
 
 struct ComputedEncodeSourceLayout {
 	std::size_t bytes_per_sample{0};

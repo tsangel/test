@@ -110,6 +110,12 @@ def _build_native_full(payload: bytes) -> bytes:
     return _build_part10("1.2.840.10008.1.2.1", body)
 
 
+def _build_native_one_bit_full(payload: bytes) -> bytes:
+    body = _common_pixel_metadata(columns=9, bits_allocated=1, frames="2")
+    body += _pack_explicit_le(0x7FE0, 0x0010, "OB", payload)
+    return _build_part10("1.2.840.10008.1.2.1", body)
+
+
 def _build_native_implicit_full(payload: bytes) -> bytes:
     body = b"".join(
         [
@@ -185,6 +191,35 @@ def test_split_pixeldata_payload_roundtrip_native() -> None:
 
     decoder = dicom.PixelPayloadDecoder(desc, split_payload)
     assert decoder.to_array(frame=0).tobytes() == payload
+
+
+def test_split_pixeldata_payload_roundtrip_native_one_bit() -> None:
+    payload = b"\x05\x03\x02\x00"
+    frame0 = bytes([1, 0, 1, 0, 0, 0, 0, 0, 1])
+    frame1 = bytes([1, 0, 0, 0, 0, 0, 0, 0, 1])
+    source = _build_native_one_bit_full(payload)
+
+    split = dicom.split_pixeldata_payload([], source)
+    assert split.ok is True
+    assert split.pixel_payload == payload
+    desc = split.decode_descriptor
+    assert desc.bits_allocated == 1
+    assert desc.bits_stored == 1
+    assert desc.rows == 1
+    assert desc.cols == 9
+    assert desc.frames == 2
+    assert desc.expected_payload_length == len(payload)
+
+    decoder = dicom.PixelPayloadDecoder(desc, split.pixel_payload)
+    assert decoder.to_array(frame=0).tobytes() == frame0
+    assert decoder.to_array(frame=1).tobytes() == frame1
+
+    rejoined = dicom.read_bytes_with_pixeldata_payload(
+        split.main_bytes, split.pixel_payload, name="py-split-native-1bit-rt"
+    )
+    assert rejoined.pixel_data(0) == frame0
+    assert rejoined.pixel_data(1) == frame1
+    assert dicom.join_pixeldata_payload(split.main_bytes, split.pixel_payload) == source
 
 
 def test_split_pixeldata_payload_implicit_and_encapsulated_payloads() -> None:

@@ -2186,6 +2186,46 @@ PixelPayloadDecodeDescriptor pixel_payload_decode_descriptor(const DicomFile& fi
 		    file.path());
 	}
 
+	if (transfer_syntax.is_uncompressed() && !transfer_syntax.is_encapsulated()) {
+		if (const auto one_bit_layout =
+		        support_detail::try_compute_native_one_bit_pixel_layout(file)) {
+			file.ensure_loaded("PixelData"_tag);
+			const auto& pixel_data = file.dataset()["PixelData"_tag];
+			if (!pixel_data || pixel_data.is_missing()) {
+				diag::error_and_throw(
+				    "DicomFile::pixel_payload_decode_descriptor file={} reason=PixelData is missing",
+				    file.path());
+			}
+			if (dicom::detail::is_detached_pixel_payload_marker(pixel_data)) {
+				diag::error_and_throw(
+				    "DicomFile::pixel_payload_decode_descriptor file={} reason=PixelData payload is detached",
+				    file.path());
+			}
+			if (!pixel_data.vr().is_binary()) {
+				diag::error_and_throw(
+				    "DicomFile::pixel_payload_decode_descriptor file={} reason=PixelData must be native binary",
+				    file.path());
+			}
+			PixelPayloadDecodeDescriptor desc{};
+			desc.transfer_syntax_uid = transfer_syntax.value();
+			desc.photometric = pixel::photometric_to_string(one_bit_layout->photometric);
+			desc.rows = static_cast<std::uint32_t>(one_bit_layout->rows);
+			desc.cols = static_cast<std::uint32_t>(one_bit_layout->cols);
+			desc.frames = static_cast<std::uint32_t>(one_bit_layout->frames);
+			desc.samples_per_pixel =
+			    static_cast<std::uint16_t>(one_bit_layout->samples_per_pixel);
+			desc.bits_allocated = 1;
+			desc.bits_stored = 1;
+			desc.pixel_representation = 0;
+			desc.planar_configuration =
+			    one_bit_layout->planar == Planar::planar ? std::uint16_t{1}
+			                                             : std::uint16_t{0};
+			desc.expected_payload_length = pixel_data.length();
+			desc.source_name = "<pixel-payload>";
+			return desc;
+		}
+	}
+
 	const auto source_layout = support_detail::compute_decode_source_layout(file);
 	if (source_layout.empty()) {
 		diag::error_and_throw(

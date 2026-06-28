@@ -4,6 +4,7 @@
 #include "photometric_text_detail.hpp"
 #include "diagnostics.h"
 
+#include <algorithm>
 #include <cstring>
 #include <limits>
 #include <optional>
@@ -57,6 +58,129 @@ struct NativeSourceElement {
 	}
 	out = lhs * rhs;
 	return true;
+}
+
+[[nodiscard]] bool checked_add_size_t(
+    std::size_t lhs, std::size_t rhs, std::size_t& out) noexcept {
+	if (lhs > std::numeric_limits<std::size_t>::max() - rhs) {
+		return false;
+	}
+	out = lhs + rhs;
+	return true;
+}
+
+[[nodiscard]] std::optional<std::size_t> positive_size_value(
+    const DataSet& ds, Tag tag) {
+	const auto value = ds[tag].to_long();
+	if (!value.has_value() || *value <= 0) {
+		return std::nullopt;
+	}
+	const auto as_unsigned = static_cast<unsigned long long>(*value);
+	if (as_unsigned > static_cast<unsigned long long>(
+	                      std::numeric_limits<std::size_t>::max())) {
+		return std::nullopt;
+	}
+	return static_cast<std::size_t>(as_unsigned);
+}
+
+[[nodiscard]] std::optional<NativeOneBitPixelLayout>
+compute_native_one_bit_pixel_layout_from_dataset(const DataSet& dataset) {
+	const auto bits_allocated = dataset["BitsAllocated"_tag].to_long();
+	if (!bits_allocated.has_value() || *bits_allocated != 1) {
+		return std::nullopt;
+	}
+	const auto pixel_representation =
+	    dataset["PixelRepresentation"_tag].to_long().value_or(0);
+	if (pixel_representation != 0) {
+		return std::nullopt;
+	}
+	const auto bits_stored = dataset["BitsStored"_tag].to_long().value_or(1);
+	if (bits_stored != 1) {
+		return std::nullopt;
+	}
+
+	const auto rows = positive_size_value(dataset, "Rows"_tag);
+	const auto cols = positive_size_value(dataset, "Columns"_tag);
+	if (!rows.has_value() || !cols.has_value()) {
+		return std::nullopt;
+	}
+	if (*rows > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max()) ||
+	    *cols > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max())) {
+		return std::nullopt;
+	}
+
+	std::size_t samples_per_pixel = 1;
+	if (const auto samples_value = dataset["SamplesPerPixel"_tag].to_long();
+	    samples_value.has_value()) {
+		if (*samples_value <= 0 ||
+		    static_cast<unsigned long long>(*samples_value) >
+		        static_cast<unsigned long long>(
+		            std::numeric_limits<std::uint16_t>::max())) {
+			return std::nullopt;
+		}
+		samples_per_pixel = static_cast<std::size_t>(*samples_value);
+	}
+
+	std::size_t frames = 1;
+	if (const auto frames_value = dataset["NumberOfFrames"_tag].to_long();
+	    frames_value.has_value()) {
+		if (*frames_value <= 0 ||
+		    static_cast<unsigned long long>(*frames_value) >
+		        static_cast<unsigned long long>(
+		            std::numeric_limits<std::uint32_t>::max())) {
+			return std::nullopt;
+		}
+		frames = static_cast<std::size_t>(*frames_value);
+	}
+	if (samples_per_pixel == 0 || frames == 0) {
+		return std::nullopt;
+	}
+
+	const auto stored_planar =
+	    (dataset["PlanarConfiguration"_tag].to_long().value_or(0) == 1)
+	        ? pixel::Planar::planar
+	        : pixel::Planar::interleaved;
+	const auto photometric = [&]() -> pixel::Photometric {
+		if (const auto photometric_text =
+		        dataset["PhotometricInterpretation"_tag].to_string_view();
+		    photometric_text.has_value()) {
+			if (const auto parsed = parse_photometric_from_text(*photometric_text);
+			    parsed.has_value()) {
+				return *parsed;
+			}
+		}
+		return samples_per_pixel > 1 ? pixel::Photometric::rgb
+		                             : pixel::Photometric::monochrome2;
+	}();
+
+	std::size_t pixels_per_plane = 0;
+	if (!checked_mul_size_t(*rows, *cols, pixels_per_plane)) {
+		return std::nullopt;
+	}
+	std::size_t frame_bits = 0;
+	if (!checked_mul_size_t(pixels_per_plane, samples_per_pixel, frame_bits)) {
+		return std::nullopt;
+	}
+	std::size_t total_bits = 0;
+	if (!checked_mul_size_t(frame_bits, frames, total_bits)) {
+		return std::nullopt;
+	}
+	std::size_t total_bits_plus_rounding = 0;
+	if (!checked_add_size_t(total_bits, std::size_t{7}, total_bits_plus_rounding)) {
+		return std::nullopt;
+	}
+
+	return NativeOneBitPixelLayout{
+	    .photometric = photometric,
+	    .planar = stored_planar,
+	    .rows = *rows,
+	    .cols = *cols,
+	    .frames = frames,
+	    .samples_per_pixel = samples_per_pixel,
+	    .frame_bits = frame_bits,
+	    .total_bits = total_bits,
+	    .required_payload_bytes = total_bits_plus_rounding / std::size_t{8},
+	};
 }
 
 [[nodiscard]] std::optional<NativeSourceLayout> native_source_layout_of(
@@ -303,6 +427,23 @@ std::span<const std::uint8_t> materialize_encapsulated_frame_source_or_throw(
 
 } // namespace
 
+pixel::PixelLayout NativeOneBitPixelLayout::decoded_source_layout() const {
+	pixel::PixelLayout layout{
+	    .data_type = pixel::DataType::u8,
+	    .photometric = photometric,
+	    .planar = planar,
+	    .reserved = 0,
+	    .rows = static_cast<std::uint32_t>(rows),
+	    .cols = static_cast<std::uint32_t>(cols),
+	    .frames = static_cast<std::uint32_t>(frames),
+	    .samples_per_pixel = static_cast<std::uint16_t>(samples_per_pixel),
+	    .bits_stored = 1,
+	    .row_stride = 0,
+	    .frame_stride = 0,
+	};
+	return layout.packed(1);
+}
+
 pixel::PixelLayout compute_decode_source_layout(const DicomFile& df) {
 	// Collect the pixel metadata snapshot from root-level DICOM elements once so
 	// decode, transcode, and direct raw access share one normalized source layout.
@@ -471,6 +612,79 @@ std::span<const std::uint8_t> native_decode_frame_bytes_or_throw(
 		    std::string(source_view.source_name) + " is shorter than expected");
 	}
 	return source_view.source_bytes.subspan(frame_offset, source_view.frame_bytes);
+}
+
+std::optional<NativeOneBitPixelLayout>
+try_compute_native_one_bit_pixel_layout(const DataSet& dataset) {
+	return compute_native_one_bit_pixel_layout_from_dataset(dataset);
+}
+
+std::optional<NativeOneBitPixelLayout>
+try_compute_native_one_bit_pixel_layout(const DicomFile& df) {
+	return compute_native_one_bit_pixel_layout_from_dataset(df.dataset());
+}
+
+void unpack_native_one_bit_frame_or_throw(
+    std::span<const std::uint8_t> source_bytes,
+    const NativeOneBitPixelLayout& one_bit_layout, std::size_t frame_index,
+    std::span<std::uint8_t> dst, const pixel::PixelLayout& output_layout) {
+	if (frame_index >= one_bit_layout.frames) {
+		throw_decode_frame_source_error(
+		    "raw 1-bit frame index out of range (frames=" +
+		    std::to_string(one_bit_layout.frames) + ")");
+	}
+	if (source_bytes.size() < one_bit_layout.required_payload_bytes) {
+		throw_decode_frame_source_error("PixelData is shorter than expected");
+	}
+	if (dst.size() < output_layout.frame_stride) {
+		throw_decode_frame_source_error("destination buffer is smaller than required decoded size");
+	}
+	if (output_layout.data_type != pixel::DataType::u8 ||
+	    output_layout.rows != one_bit_layout.rows ||
+	    output_layout.cols != one_bit_layout.cols ||
+	    output_layout.samples_per_pixel != one_bit_layout.samples_per_pixel) {
+		throw_decode_frame_source_error("output layout does not match 1-bit source geometry");
+	}
+
+	std::fill_n(dst.begin(), output_layout.frame_stride, std::uint8_t{0});
+
+	std::size_t frame_bit_offset = 0;
+	if (!checked_mul_size_t(frame_index, one_bit_layout.frame_bits, frame_bit_offset)) {
+		throw_decode_frame_source_error("raw 1-bit frame bit offset exceeds size_t range");
+	}
+
+	const bool source_planar =
+	    one_bit_layout.planar == pixel::Planar::planar &&
+	    one_bit_layout.samples_per_pixel > std::size_t{1};
+	const bool output_planar =
+	    output_layout.planar == pixel::Planar::planar &&
+	    one_bit_layout.samples_per_pixel > std::size_t{1};
+	const auto rows = one_bit_layout.rows;
+	const auto cols = one_bit_layout.cols;
+	const auto samples = one_bit_layout.samples_per_pixel;
+	const std::size_t pixels_per_plane = rows * cols;
+	const std::size_t output_plane_stride = output_layout.row_stride * rows;
+
+	for (std::size_t row = 0; row < rows; ++row) {
+		for (std::size_t col = 0; col < cols; ++col) {
+			for (std::size_t sample = 0; sample < samples; ++sample) {
+				const auto source_component = source_planar
+				                                  ? sample * pixels_per_plane + row * cols + col
+				                                  : (row * cols + col) * samples + sample;
+				const auto bit_index = frame_bit_offset + source_component;
+				const auto byte_index = bit_index / std::size_t{8};
+				const auto bit_offset = bit_index % std::size_t{8};
+				const auto value =
+				    static_cast<std::uint8_t>((source_bytes[byte_index] >> bit_offset) & 0x01u);
+				const auto output_offset = output_planar
+				                               ? sample * output_plane_stride +
+				                                     row * output_layout.row_stride + col
+				                               : row * output_layout.row_stride +
+				                                     col * samples + sample;
+				dst[output_offset] = value;
+			}
+		}
+	}
 }
 
 namespace {

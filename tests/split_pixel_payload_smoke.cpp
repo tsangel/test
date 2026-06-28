@@ -433,6 +433,61 @@ int main() {
 	}
 
 	{
+		const std::vector<std::uint8_t> pixel_payload{
+		    0x05u, 0x03u, 0x02u, 0x00u};
+		const std::vector<std::uint8_t> frame0{
+		    1u, 0u, 1u, 0u, 0u, 0u, 0u, 0u, 1u};
+		const std::vector<std::uint8_t> frame1{
+		    1u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 1u};
+		std::vector<std::uint8_t> body;
+		append_common_pixel_metadata(body, 9, 1, "2");
+		const auto raw_pixel_element =
+		    explicit_pixeldata_element('O', 'B', pixel_payload);
+		append_bytes(body, raw_pixel_element);
+		const auto source = build_part10("1.2.840.10008.1.2.1", body);
+
+		const auto split = dicom::split_pixeldata_payload(
+		    dicom::DataSetSelection{}, "raw-split-native-1bit",
+		    std::span<const std::uint8_t>(source.data(), source.size()));
+		if (!split.ok()) {
+			fail("split_pixeldata_payload native 1-bit should succeed: " +
+			     split.error_message);
+		}
+		if (split.pixel_payload != pixel_payload) {
+			fail("split_pixeldata_payload native 1-bit payload mismatch");
+		}
+		const auto& desc = split.decode_descriptor;
+		if (desc.bits_allocated != 1 || desc.bits_stored != 1 ||
+		    desc.rows != 1 || desc.cols != 9 || desc.frames != 2 ||
+		    desc.expected_payload_length != pixel_payload.size()) {
+			fail("split_pixeldata_payload native 1-bit descriptor mismatch");
+		}
+		dicom::pixel::PixelPayloadDecoder decoder(
+		    desc,
+		    std::span<const std::uint8_t>(
+		        split.pixel_payload.data(), split.pixel_payload.size()));
+		const auto plan = decoder.create_decode_plan();
+		if (plan.output_layout.frame_stride != frame0.size()) {
+			fail("native 1-bit payload decoder frame stride mismatch");
+		}
+		if (decoder.pixel_buffer(0, plan).bytes != frame0 ||
+		    decoder.pixel_buffer(1, plan).bytes != frame1) {
+			fail("native 1-bit payload decoder unpack mismatch");
+		}
+		auto roundtrip = dicom::read_bytes_with_pixeldata_payload(
+		    "raw-split-native-1bit-rt",
+		    split.main_bytes.data(), split.main_bytes.size(),
+		    split.pixel_payload.data(), split.pixel_payload.size());
+		if (roundtrip->pixel_data(0) != frame0 ||
+		    roundtrip->pixel_data(1) != frame1) {
+			fail("reattached native 1-bit pixel_data unpack mismatch");
+		}
+		if (dicom::join_pixeldata_payload(split.main_bytes, split.pixel_payload) != source) {
+			fail("join_pixeldata_payload native 1-bit byte roundtrip mismatch");
+		}
+	}
+
+	{
 		const auto encap_value = build_two_frame_encap_payload();
 		const auto source = build_encap_full_part10("2", encap_value);
 		const auto raw_pixel_element =
