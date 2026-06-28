@@ -3,17 +3,21 @@
 #include "dicom.h"
 
 #include <array>
+#include <bit>
 #include <bitset>
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace dicom::seg {
@@ -88,6 +92,18 @@ struct SegmentMaskOptions {
 	bool error_when_not_present_in_frame{false};
 };
 
+/// Borrowed view over one native 1-bit BINARY SEG frame.
+/// `bytes` is the minimal byte window covering the frame, not the whole
+/// PixelData element. Pixel `i` is stored at local bit
+/// `first_bit_offset + i`, using the DICOM native LSB-first bit order.
+struct BinaryFrameBitsView {
+	std::span<const std::uint8_t> bytes{};
+	std::uint8_t first_bit_offset{0};
+	std::size_t bit_count{0};
+	std::size_t rows{0};
+	std::size_t columns{0};
+};
+
 class Segmentation;
 class SegmentView;
 class SegmentFrameView;
@@ -145,6 +161,46 @@ struct SegmentationIndex {
 	std::vector<std::size_t> empty_frame_indices{};
 };
 
+[[nodiscard]] inline std::uint64_t load_le64_bounded(
+    std::span<const std::uint8_t> bytes, std::size_t byte_offset) noexcept {
+	if (byte_offset >= bytes.size()) {
+		return 0;
+	}
+	const auto available = bytes.size() - byte_offset;
+	const auto count = available < 8u ? available : 8u;
+	std::uint64_t word = 0;
+	for (std::size_t index = 0; index < count; ++index) {
+		word |= static_cast<std::uint64_t>(bytes[byte_offset + index])
+		    << (index * 8u);
+	}
+	return word;
+}
+
+inline void validate_binary_frame_bits_view(BinaryFrameBitsView bits) {
+	if (bits.first_bit_offset > 7u) {
+		throw std::invalid_argument("BinaryFrameBitsView first_bit_offset must be in [0, 7]");
+	}
+	if (bits.rows != 0 &&
+	    bits.columns > std::numeric_limits<std::size_t>::max() / bits.rows) {
+		throw std::invalid_argument("BinaryFrameBitsView rows*columns overflows size_t");
+	}
+	const auto expected_bit_count = bits.rows * bits.columns;
+	if (bits.bit_count != expected_bit_count) {
+		throw std::invalid_argument("BinaryFrameBitsView bit_count must equal rows*columns");
+	}
+	if (bits.bit_count >
+	    std::numeric_limits<std::size_t>::max() - bits.first_bit_offset) {
+		throw std::invalid_argument("BinaryFrameBitsView bit count overflows size_t");
+	}
+	const auto window_bits =
+	    bits.bit_count + static_cast<std::size_t>(bits.first_bit_offset);
+	const auto required_bytes =
+	    (window_bits / 8u) + ((window_bits % 8u) != 0 ? 1u : 0u);
+	if (bits.bytes.size() != required_bytes) {
+		throw std::invalid_argument("BinaryFrameBitsView bytes must be the minimal frame window");
+	}
+}
+
 #ifdef DICOMSDL_SEGMENTATION_TEST_HOOKS
 /// Test-only instrumentation for LABELMAP scan/cache regression checks.
 void reset_labelmap_frame_scan_count() noexcept;
@@ -152,6 +208,39 @@ void reset_labelmap_frame_scan_count() noexcept;
 #endif
 
 } // namespace detail
+
+/// Iterate frame-local pixel indices whose native BINARY SEG bit is set.
+template <class Visitor>
+void for_each_binary_frame_set_bit(
+    BinaryFrameBitsView bits, Visitor&& visitor) {
+	detail::validate_binary_frame_bits_view(bits);
+	if (bits.bit_count == 0) {
+		return;
+	}
+	auto&& fn = visitor;
+	std::size_t local_bit = 0;
+	while (local_bit < bits.bit_count) {
+		const auto window_bit =
+		    static_cast<std::size_t>(bits.first_bit_offset) + local_bit;
+		const auto byte_offset = window_bit / 8u;
+		const auto bit_offset = static_cast<unsigned>(window_bit % 8u);
+		auto word =
+		    detail::load_le64_bounded(bits.bytes, byte_offset) >> bit_offset;
+		const auto available_bits = static_cast<std::size_t>(64u - bit_offset);
+		const auto remaining_bits = bits.bit_count - local_bit;
+		const auto chunk_bits =
+		    remaining_bits < available_bits ? remaining_bits : available_bits;
+		if (chunk_bits < 64u) {
+			word &= (std::uint64_t{1} << chunk_bits) - 1u;
+		}
+		while (word != 0) {
+			const auto bit = static_cast<std::size_t>(std::countr_zero(word));
+			fn(local_bit + bit);
+			word &= word - 1u;
+		}
+		local_bit += chunk_bits;
+	}
+}
 
 /// Lightweight borrowed list view over SegmentSequence items.
 /// SegmentView objects returned from this view remain valid while the owning
@@ -484,6 +573,21 @@ public:
 	/// PixelPaddingValue, when present, identifies the background label.
 	[[nodiscard]] std::span<const std::uint16_t>
 	present_segment_numbers(std::size_t frame_index) const;
+
+	/// Borrow the native bit-packed storage for one BINARY SEG frame.
+	/// The returned byte window is minimal for the frame and may start at a
+	/// non-zero bit offset. The view is valid only while this Segmentation and
+	/// its PixelData storage remain alive.
+	[[nodiscard]] BinaryFrameBitsView
+	binary_frame_bits(std::size_t frame_index) const;
+
+	/// Iterate frame-local pixel indices whose BINARY SEG bit is set.
+	template <class Visitor>
+	void for_each_binary_frame_set_bit(
+	    std::size_t frame_index, Visitor&& visitor) const {
+		dicom::seg::for_each_binary_frame_set_bit(
+		    binary_frame_bits(frame_index), std::forward<Visitor>(visitor));
+	}
 
 	/// Decode one SEG frame into caller-provided stored-representation samples.
 	/// BINARY SEG is unpacked to 0/1 bytes. FRACTIONAL SEG supports 8-bit

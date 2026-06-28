@@ -297,6 +297,23 @@ std::unique_ptr<dicom::DicomFile> make_binary_seg_file() {
 	return file;
 }
 
+std::unique_ptr<dicom::DicomFile> make_unaligned_binary_seg_file() {
+	auto file = std::make_unique<dicom::DicomFile>();
+	populate_common_seg_metadata(*file, "BINARY", 2, 2, 3);
+	set_long(*file, "BitsAllocated", 1);
+	set_long(*file, "BitsStored", 1);
+	set_long(*file, "HighBit", 0);
+	populate_segment(*file, 0, 1, "First");
+	populate_segment(*file, 1, 2, "Second");
+	populate_frame(*file, 0, 1, 10.0);
+	populate_frame(*file, 1, 2, 20.0);
+	// Frame 0 has local bits 0,2,5 set. Frame 1 starts at absolute bit 6
+	// and has local bits 0,1,4 set.
+	file->set_native_pixel_data(
+	    std::vector<std::uint8_t>{0xE5, 0x04}, dicom::VR::OB);
+	return file;
+}
+
 std::unique_ptr<dicom::DicomFile> make_fractional_seg_file() {
 	auto file = std::make_unique<dicom::DicomFile>();
 	populate_common_seg_metadata(*file, "FRACTIONAL", 1, 2, 2);
@@ -642,6 +659,60 @@ int main() {
 		    0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0};
 		if (decoded1 != expected1) {
 			fail("binary frame 1 unpack mismatch");
+		}
+		const auto bits0 = seg->binary_frame_bits(0);
+		if (bits0.bytes.size() != 2 || bits0.first_bit_offset != 0 ||
+		    bits0.bit_count != 16 || bits0.rows != 2 || bits0.columns != 8) {
+			fail("binary frame bits view metadata mismatch");
+		}
+		std::vector<std::size_t> set_bits0;
+		seg->for_each_binary_frame_set_bit(
+		    0, [&](std::size_t pixel_index) { set_bits0.push_back(pixel_index); });
+		if (set_bits0 != std::vector<std::size_t>{0, 2, 4, 6, 8, 9, 10, 11}) {
+			fail("binary member set-bit iterator mismatch");
+		}
+		std::vector<std::size_t> free_set_bits0;
+		dicom::seg::for_each_binary_frame_set_bit(
+		    bits0, [&](std::size_t pixel_index) {
+			    free_set_bits0.push_back(pixel_index);
+		    });
+		if (free_set_bits0 != set_bits0) {
+			fail("binary free set-bit iterator mismatch");
+		}
+	}
+
+	{
+		auto seg =
+		    dicom::seg::from_dicomfile(make_unaligned_binary_seg_file());
+		const auto bits0 = seg->binary_frame_bits(0);
+		if (bits0.bytes.size() != 1 || bits0.first_bit_offset != 0 ||
+		    bits0.bit_count != 6 || bits0.rows != 2 || bits0.columns != 3) {
+			fail("unaligned binary frame 0 bits view metadata mismatch");
+		}
+		const auto bits1 = seg->binary_frame_bits(1);
+		if (bits1.bytes.size() != 2 || bits1.first_bit_offset != 6 ||
+		    bits1.bit_count != 6 || bits1.rows != 2 || bits1.columns != 3) {
+			fail("unaligned binary frame 1 bits view metadata mismatch");
+		}
+		std::vector<std::size_t> set_bits0;
+		std::vector<std::size_t> set_bits1;
+		seg->for_each_binary_frame_set_bit(
+		    0, [&](std::size_t pixel_index) { set_bits0.push_back(pixel_index); });
+		seg->for_each_binary_frame_set_bit(
+		    1, [&](std::size_t pixel_index) { set_bits1.push_back(pixel_index); });
+		if (set_bits0 != std::vector<std::size_t>{0, 2, 5}) {
+			fail("unaligned binary frame 0 set-bit iterator mismatch");
+		}
+		if (set_bits1 != std::vector<std::size_t>{0, 1, 4}) {
+			fail("unaligned binary frame 1 set-bit iterator mismatch");
+		}
+		std::vector<std::uint8_t> decoded0(6);
+		std::vector<std::uint8_t> decoded1(6);
+		seg->decode_frame_into(0, decoded0);
+		seg->decode_frame_into(1, decoded1);
+		if (decoded0 != std::vector<std::uint8_t>{1, 0, 1, 0, 0, 1} ||
+		    decoded1 != std::vector<std::uint8_t>{1, 1, 0, 0, 1, 0}) {
+			fail("unaligned binary frame unpack mismatch");
 		}
 	}
 

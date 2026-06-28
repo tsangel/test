@@ -1143,6 +1143,85 @@ Segmentation::present_segment_numbers(std::size_t frame_index) const {
 	return std::span<const std::uint16_t>(&index_.frames[frame_index].referenced_segment_number, 1);
 }
 
+BinaryFrameBitsView
+Segmentation::binary_frame_bits(std::size_t frame_index) const {
+	if (frame_index >= index_.frames.size()) {
+		throw_decode("frame index out of range");
+	}
+	if (segmentation_type_ != SegmentationType::binary) {
+		throw_decode("binary_frame_bits requires BINARY SEG");
+	}
+
+	file_->ensure_loaded("PixelData"_tag);
+
+	const auto transfer_syntax = file_->transfer_syntax_uid();
+	if (transfer_syntax &&
+	    (!transfer_syntax.is_uncompressed() || transfer_syntax.is_encapsulated())) {
+		throw_decode("compressed/encapsulated BINARY SEG PixelData is not supported");
+	}
+	const auto bits_allocated =
+	    file_->get_dataelement("BitsAllocated"_tag).to_long().value_or(0);
+	const auto bits_stored =
+	    file_->get_dataelement("BitsStored"_tag).to_long().value_or(0);
+	const auto pixel_representation =
+	    file_->get_dataelement("PixelRepresentation"_tag).to_long().value_or(0);
+	if (bits_allocated != 1 || bits_stored != 1 || pixel_representation != 0) {
+		throw_decode(
+		    "BINARY SEG requires BitsAllocated=1, BitsStored=1 and PixelRepresentation=0");
+	}
+
+	const auto pixels_per_frame = checked_frame_sample_count(rows_, columns_);
+	if (frame_index >
+	    std::numeric_limits<std::size_t>::max() / pixels_per_frame) {
+		throw_decode("frame bit offset overflows size_t");
+	}
+	if (index_.frames.size() >
+	    std::numeric_limits<std::size_t>::max() / pixels_per_frame) {
+		throw_decode("total bit count overflows size_t");
+	}
+	const auto frame_bit_offset = frame_index * pixels_per_frame;
+	const auto total_bits = index_.frames.size() * pixels_per_frame;
+	const auto expected_bytes =
+	    (total_bits / 8u) + ((total_bits % 8u) != 0 ? 1u : 0u);
+
+	const auto& pixel_data = file_->get_dataelement("PixelData"_tag);
+	if (!pixel_data) {
+		throw_decode("BINARY SEG PixelData is missing");
+	}
+	if (pixel_data.as_pixel_sequence()) {
+		throw_decode("compressed/encapsulated BINARY SEG PixelData is not supported");
+	}
+	if (dicom::detail::is_detached_pixel_payload_marker(pixel_data)) {
+		throw_decode("BINARY SEG PixelData payload is detached");
+	}
+	const auto bytes = pixel_data.value_span();
+	if (bytes.size() < expected_bytes) {
+		throw_decode("BINARY SEG PixelData size mismatch");
+	}
+
+	const auto first_byte = frame_bit_offset / 8u;
+	const auto first_bit_offset =
+	    static_cast<std::uint8_t>(frame_bit_offset % 8u);
+	if (pixels_per_frame >
+	    std::numeric_limits<std::size_t>::max() - first_bit_offset) {
+		throw_decode("BINARY SEG frame bit window overflows size_t");
+	}
+	const auto window_bits =
+	    pixels_per_frame + static_cast<std::size_t>(first_bit_offset);
+	const auto window_bytes =
+	    (window_bits / 8u) + ((window_bits % 8u) != 0 ? 1u : 0u);
+	if (first_byte > bytes.size() || window_bytes > bytes.size() - first_byte) {
+		throw_decode("BINARY SEG PixelData size mismatch");
+	}
+	return BinaryFrameBitsView{
+	    bytes.subspan(first_byte, window_bytes),
+	    first_bit_offset,
+	    pixels_per_frame,
+	    rows_,
+	    columns_,
+	};
+}
+
 void Segmentation::decode_frame_into(
     std::size_t frame_index, std::span<std::uint8_t> out) const {
 	if (frame_index >= index_.frames.size()) {
@@ -1159,54 +1238,13 @@ void Segmentation::decode_frame_into(
 	if (segmentation_type_ == SegmentationType::binary) {
 		// DICOM BINARY SEG stores one bit per pixel across the multi-frame
 		// native PixelData stream. Expose it as one byte per pixel for callers.
-		const auto transfer_syntax = file_->transfer_syntax_uid();
-		if (transfer_syntax &&
-		    (!transfer_syntax.is_uncompressed() ||
-		        transfer_syntax.is_encapsulated())) {
-			throw_decode(
-			    "compressed/encapsulated BINARY SEG PixelData is not supported");
-		}
-		const auto bits_allocated =
-		    file_->get_dataelement("BitsAllocated"_tag).to_long().value_or(0);
-		const auto bits_stored =
-		    file_->get_dataelement("BitsStored"_tag).to_long().value_or(0);
-		if (bits_allocated != 1 || bits_stored != 1) {
-			throw_decode("BINARY SEG requires BitsAllocated=1 and BitsStored=1");
-		}
-		if (rows_ == 0 || columns_ == 0 ||
-		    columns_ > std::numeric_limits<std::size_t>::max() / rows_) {
-			throw_decode("invalid Rows or Columns");
-		}
-		const auto pixels_per_frame = rows_ * columns_;
-		if (out.size() < pixels_per_frame) {
+		const auto bits = binary_frame_bits(frame_index);
+		if (out.size() < bits.bit_count) {
 			throw_decode("destination buffer is smaller than decoded frame");
 		}
-		if (frame_index >
-		    std::numeric_limits<std::size_t>::max() / pixels_per_frame) {
-			throw_decode("frame bit offset overflows size_t");
-		}
-		const auto frame_bit_offset = frame_index * pixels_per_frame;
-		const auto total_bits = index_.frames.size() * pixels_per_frame;
-		const auto& pixel_data = file_->get_dataelement("PixelData"_tag);
-		if (!pixel_data) {
-			throw_decode("BINARY SEG PixelData is missing");
-		}
-		if (pixel_data.as_pixel_sequence()) {
-			throw_decode(
-			    "compressed/encapsulated BINARY SEG PixelData is not supported");
-		}
-		if (dicom::detail::is_detached_pixel_payload_marker(pixel_data)) {
-			throw_decode("BINARY SEG PixelData payload is detached");
-		}
-		const auto bytes = pixel_data.value_span();
-		if (bytes.size() < (total_bits + 7u) / 8u) {
-			throw_decode("BINARY SEG PixelData size mismatch");
-		}
-		for (std::size_t pixel_index = 0; pixel_index < pixels_per_frame; ++pixel_index) {
-			const auto bit_index = frame_bit_offset + pixel_index;
-			out[pixel_index] = static_cast<std::uint8_t>(
-			    (bytes[bit_index / 8u] >> (bit_index % 8u)) & 0x01u);
-		}
+		std::fill_n(out.begin(), bits.bit_count, std::uint8_t{0});
+		dicom::seg::for_each_binary_frame_set_bit(bits,
+		    [&](std::size_t pixel_index) { out[pixel_index] = 1u; });
 		return;
 	}
 
