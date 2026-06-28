@@ -287,9 +287,10 @@ print(packed.label_set(code))
 ```
 
 需要显示 LUT 时，传入 dense 的 `label_id -> RGBA` table。返回数组的 shape 是
-`(256, 256, 4)`，可作为 RGBA8 LUT 按存储的 label code 直接索引。Overlap
-label code 的颜色由其包含的 label RGBA 平均得到；如果 application 需要其他
-blend policy，可以通过 `label_set()` 读取 label 组成并自行构建 LUT。
+`(label_code_count, 4)`，可按存储的 label code 直接索引。Overlap label code 的
+颜色由其包含的 label RGBA 平均得到；如果 application 需要其他 blend policy，可以
+通过 `label_set()` 读取 label 组成并自行构建 LUT。Renderer 如果需要 2D texture，
+padding 或 reshape 应由 application 决定。
 
 ```python
 label_rgba_by_label_id = [
@@ -302,7 +303,7 @@ rgba_lut = packed.build_rgba8_lut(
     label_rgba_by_label_id,
     background=(0, 0, 0, 0),
 )
-assert rgba_lut.shape == (256, 256, 4)
+assert rgba_lut.shape == (packed.label_code_count, 4)
 ```
 
 如果 viewer pipeline 已经拥有 staging buffer，可以使用 allocation-free variant。

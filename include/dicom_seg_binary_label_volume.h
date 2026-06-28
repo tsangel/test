@@ -250,6 +250,10 @@ public:
 	[[nodiscard]] std::size_t overlap_entry_count() const noexcept {
 		return overlap_entries_.size();
 	}
+	[[nodiscard]] std::size_t label_code_count() const noexcept {
+		return static_cast<std::size_t>(single_label_code_end_) + 1u +
+		    overlap_entries_.size();
+	}
 
 private:
 	using LabelSetCodeCache4 =
@@ -373,24 +377,24 @@ void restore_binary_label_mask(std::span<const BinaryLabelCode> label_volume,
     const BinaryLabelCodeTable& code_table, BinaryLabelId label_id,
     BinaryLabelCodeSet& label_code_set, std::span<std::uint8_t> mask_out);
 
-/// Fill a dense label-code -> RGBA table for GPU/CPU display.
+/// Fill a dense label-code -> RGBA table for CPU/GPU display.
 /// The resolver decides colors and overlap blending policy for every non-empty
-/// label set. `out_lut` must cover the full uint16 label-code space so it can be
-/// uploaded as a 256x256 RGBA texture without remapping.
+/// label set. `out_lut` must contain at least code_table.label_code_count()
+/// RGBA entries. Applications can pad or reshape the result for their GPU API.
 template <class ResolveColor>
 void build_binary_label_rgba8_lut(
     const BinaryLabelCodeTable& code_table,
     std::span<BinaryLabelRgba8> out_lut,
     ResolveColor&& resolve_color,
     BinaryLabelRgba8 background_color = {}) {
-	constexpr auto required_size =
-	    static_cast<std::size_t>(kBinaryLabelMaxCode) + 1u;
+	const auto required_size = code_table.label_code_count();
 	if (out_lut.size() < required_size) {
 		throw std::invalid_argument(
-		    "BINARY SEG RGBA LUT must cover all uint16 label codes");
+		    "BINARY SEG RGBA LUT does not cover used label codes");
 	}
 
-	std::fill(out_lut.begin(), out_lut.end(), background_color);
+	std::fill(out_lut.begin(), out_lut.begin() + required_size,
+	    background_color);
 	auto&& resolver = resolve_color;
 	for (std::size_t code = 1; code < required_size; ++code) {
 		const auto label_code = static_cast<BinaryLabelCode>(code);

@@ -318,10 +318,11 @@ print(packed.label_set(code))
 ```
 
 For a display LUT, provide a dense `label_id -> RGBA` table. The returned array
-has shape `(256, 256, 4)` and can be uploaded as an RGBA8 texture that is indexed
-by the stored label code. Overlap label-code colors are averaged from their
-member labels; applications that need a different blend policy can use
-`label_set()` and build their own LUT.
+has shape `(label_code_count, 4)` and is indexed by the stored label code.
+Overlap label-code colors are averaged from their member labels; applications
+that need a different blend policy can use `label_set()` and build their own
+LUT. If a renderer wants a 2D texture, padding or reshaping this table belongs
+to the application.
 
 ```python
 label_rgba_by_label_id = [
@@ -334,7 +335,7 @@ rgba_lut = packed.build_rgba8_lut(
     label_rgba_by_label_id,
     background=(0, 0, 0, 0),
 )
-assert rgba_lut.shape == (256, 256, 4)
+assert rgba_lut.shape == (packed.label_code_count, 4)
 ```
 
 For viewer pipelines that already own a staging buffer, use the allocation-free

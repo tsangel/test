@@ -289,10 +289,11 @@ print(packed.label_set(code))
 ```
 
 表示用 LUT が必要な場合は、dense な `label_id -> RGBA` table を渡します。返される
-配列は shape `(256, 256, 4)` の RGBA8 LUT で、格納された label code で直接
-index できます。Overlap label code の色は、含まれる label の RGBA 平均で作られ
-ます。別の blend policy が必要な application は、`label_set()` で label 構成を
-読み取り、独自の LUT を作れます。
+配列は shape `(label_code_count, 4)` で、格納された label code で直接 index でき
+ます。Overlap label code の色は、含まれる label の RGBA 平均で作られます。別の
+blend policy が必要な application は、`label_set()` で label 構成を読み取り、
+独自の LUT を作れます。Renderer が 2D texture を必要とする場合、padding や
+reshape は application 側で決めます。
 
 ```python
 label_rgba_by_label_id = [
@@ -305,7 +306,7 @@ rgba_lut = packed.build_rgba8_lut(
     label_rgba_by_label_id,
     background=(0, 0, 0, 0),
 )
-assert rgba_lut.shape == (256, 256, 4)
+assert rgba_lut.shape == (packed.label_code_count, 4)
 ```
 
 Viewer pipeline がすでに staging buffer を所有している場合は、allocation-free variant

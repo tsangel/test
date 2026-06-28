@@ -4763,12 +4763,11 @@ py_binary_label_rgba8_table_by_label_id(
 	        ? dicom::seg::BinaryLabelRgba8{}
 	        : py_binary_label_rgba8_from_sequence(background, "background");
 
-	const std::array<std::size_t, 4> shape{256, 256, 4, 0};
-	const std::array<std::int64_t, 4> strides{1024, 4, 1, 0};
-	constexpr auto label_code_count =
-	    static_cast<std::size_t>(dicom::seg::kBinaryLabelMaxCode) + 1u;
+	const auto label_code_count = volume.code_table.label_code_count();
+	const std::array<std::size_t, 4> shape{label_code_count, 4, 0, 0};
+	const std::array<std::int64_t, 4> strides{4, 1, 0, 0};
 	auto out = make_writable_numpy_array(
-	    3, shape, strides, decoded_array_spec(dicom::pixel::DataType::u8).dtype,
+	    2, shape, strides, decoded_array_spec(dicom::pixel::DataType::u8).dtype,
 	    label_code_count * sizeof(dicom::seg::BinaryLabelRgba8));
 	auto lut = std::span<dicom::seg::BinaryLabelRgba8>(
 	    reinterpret_cast<dicom::seg::BinaryLabelRgba8*>(out.bytes.data()),
@@ -8498,6 +8497,10 @@ NB_MODULE(_dicomsdl, m) {
 		    [](const PyBinaryLabelVolume& self) {
 			    return self.get().code_table.overlap_entry_count();
 		    })
+		.def_prop_ro("label_code_count",
+		    [](const PyBinaryLabelVolume& self) {
+			    return self.get().code_table.label_code_count();
+		    })
 		.def("label_id_for_segment_number",
 		    [](const PyBinaryLabelVolume& self,
 		        std::uint16_t segment_number) -> nb::object {
@@ -8531,7 +8534,7 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::arg("label_rgba_by_label_id"),
 		    nb::kw_only(),
 		    nb::arg("background") = nb::none(),
-		    "Build a uint8 RGBA LUT with shape (256, 256, 4). "
+		    "Build a uint8 RGBA LUT with shape (label_code_count, 4). "
 		    "label_rgba_by_label_id is indexed by dense label_id; "
 		    "overlap colors are averaged from their member labels.")
 		.def("restore_mask_for_label_id",

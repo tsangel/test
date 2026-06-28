@@ -329,6 +329,7 @@ def test_binary_segmentation_builds_packed_label_volume() -> None:
     assert packed.source_dicom_segment_by_label_id == [0, 1, 2]
     assert packed.single_label_code_end == 2
     assert packed.overlap_entry_count == 0
+    assert packed.label_code_count == 3
     assert packed.label_id_for_segment_number(1) == 1
     assert packed.label_id_for_segment_number(2) == 2
     assert packed.label_id_for_segment_number(99) is None
@@ -344,11 +345,11 @@ def test_binary_segmentation_builds_packed_label_volume() -> None:
         ],
         background=(1, 2, 3, 4),
     )
-    assert rgba.shape == (256, 256, 4)
+    assert rgba.shape == (packed.label_code_count, 4)
     assert rgba.dtype == np.uint8
-    np.testing.assert_array_equal(rgba.reshape(-1, 4)[0], [1, 2, 3, 4])
-    np.testing.assert_array_equal(rgba.reshape(-1, 4)[1], [10, 20, 30, 100])
-    np.testing.assert_array_equal(rgba.reshape(-1, 4)[2], [50, 60, 70, 200])
+    np.testing.assert_array_equal(rgba[0], [1, 2, 3, 4])
+    np.testing.assert_array_equal(rgba[1], [10, 20, 30, 100])
+    np.testing.assert_array_equal(rgba[2], [50, 60, 70, 200])
 
     expected0 = np.array(
         [[1, 0, 1, 0, 1, 0, 1, 0], [1, 1, 1, 1, 0, 0, 0, 0]],
@@ -395,13 +396,14 @@ def test_binary_segmentation_builds_packed_label_volume() -> None:
     overlapped = seg.build_binary_label_volume([(0, 0), (1, 0)], slices=1)
     overlap_code = int(overlapped.label_volume[0, 1, 0])
     assert overlapped.label_set(overlap_code) == (1, 2)
+    assert overlapped.label_code_count == overlap_code + 1
     overlap_rgba = overlapped.build_rgba8_lut(
         [
             (0, 0, 0, 0),
             (10, 20, 30, 100),
             (50, 60, 70, 200),
         ]
-    ).reshape(-1, 4)
+    )
     np.testing.assert_array_equal(overlap_rgba[overlap_code], [30, 40, 50, 150])
 
     with pytest.raises(Exception, match="label_rgba_by_label_id"):

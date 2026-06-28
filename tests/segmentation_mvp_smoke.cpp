@@ -656,7 +656,7 @@ void verify_binary_label_code_table_and_restore() {
 
 	const dicom::seg::BinaryLabelRgba8 background{1, 2, 3, 4};
 	std::vector<dicom::seg::BinaryLabelRgba8> lut(
-	    static_cast<std::size_t>(dicom::seg::kBinaryLabelMaxCode) + 1u);
+	    volume.code_table.label_code_count());
 	dicom::seg::build_binary_label_rgba8_lut(
 	    volume.code_table,
 	    lut,

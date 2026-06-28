@@ -317,9 +317,11 @@ print(packed.label_set(code))
 ```
 
 Display LUT가 필요하면 dense `label_id -> RGBA` table을 넘긴다. 반환 배열은
-shape `(256, 256, 4)`인 RGBA8 LUT라서 저장된 label code로 바로 index할 수 있다.
+shape `(label_code_count, 4)`이고 저장된 label code로 바로 index할 수 있다.
 Overlap label code의 색은 포함된 label들의 RGBA 평균으로 만든다. 다른 blend 정책이
 필요한 application은 `label_set()`으로 label 구성을 읽어서 LUT를 직접 만들면 된다.
+Renderer가 2D texture를 원한다면 table을 padding하거나 reshape하는 일은 application이
+결정한다.
 
 ```python
 label_rgba_by_label_id = [
@@ -332,7 +334,7 @@ rgba_lut = packed.build_rgba8_lut(
     label_rgba_by_label_id,
     background=(0, 0, 0, 0),
 )
-assert rgba_lut.shape == (256, 256, 4)
+assert rgba_lut.shape == (packed.label_code_count, 4)
 ```
 
 Viewer pipeline이 이미 staging buffer를 소유하고 있다면 allocation-free variant를
