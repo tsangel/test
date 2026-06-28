@@ -57,6 +57,20 @@ void configure_minimal_integral_pixel_metadata(dicom::DicomFile& df) {
 	}
 }
 
+void configure_native_one_bit_pixel_metadata(dicom::DicomFile& df) {
+	set_long_element(df, "Rows"_tag, dicom::VR::US, 1, "Rows");
+	set_long_element(df, "Columns"_tag, dicom::VR::US, 9, "Columns");
+	set_long_element(df, "SamplesPerPixel"_tag, dicom::VR::US, 1, "SamplesPerPixel");
+	set_long_element(df, "BitsAllocated"_tag, dicom::VR::US, 1, "BitsAllocated");
+	set_long_element(df, "BitsStored"_tag, dicom::VR::US, 1, "BitsStored");
+	set_long_element(df, "HighBit"_tag, dicom::VR::US, 0, "HighBit");
+	set_long_element(df, "PixelRepresentation"_tag, dicom::VR::US, 0, "PixelRepresentation");
+	set_long_element(df, "NumberOfFrames"_tag, dicom::VR::IS, 2, "NumberOfFrames");
+	if (!df.set_value("PhotometricInterpretation"_tag, std::string_view("MONOCHROME2"))) {
+		fail("failed to set PhotometricInterpretation");
+	}
+}
+
 [[nodiscard]] dicom::pixel::PixelLayout make_mono_layout(
     dicom::pixel::DataType data_type, std::uint16_t bits_stored) {
 	dicom::pixel::PixelLayout layout{
@@ -233,6 +247,44 @@ int main() {
 		    std::span<std::uint8_t>(dst.data(), dst.size()), plan,
 		    "ExplicitVRLittleEndian"_uid.value(),
 		    "invalid_argument", "load_frame_source");
+	}
+
+	{
+		dicom::DicomFile df{};
+		df.set_transfer_syntax("ExplicitVRLittleEndian"_uid);
+		configure_native_one_bit_pixel_metadata(df);
+		df.set_native_pixel_data(std::vector<std::uint8_t>{0x00});
+
+		const auto plan = df.create_decode_plan(dicom::pixel::DecodeOptions{});
+		std::vector<std::uint8_t> dst(plan.output_layout.frame_stride, std::uint8_t{0});
+		expect_decode_throw("native 1-bit load_frame_source throw message", df, 0,
+		    std::span<std::uint8_t>(dst.data(), dst.size()), plan,
+		    "ExplicitVRLittleEndian"_uid.value(),
+		    "invalid_argument", "load_frame_source");
+
+		std::vector<std::uint8_t> all_dst(
+		    plan.output_layout.frame_stride * plan.output_layout.frames,
+		    std::uint8_t{0});
+		try {
+			dicom::pixel::decode_all_frames_into(
+			    df, std::span<std::uint8_t>(all_dst.data(), all_dst.size()), plan);
+			fail("native 1-bit all-frames load_frame_source throw message should throw");
+		} catch (const std::exception& e) {
+			const std::string what = e.what();
+			expect_contains(what, "pixel::decode_all_frames_into",
+			    "native 1-bit all-frames load_frame_source throw message");
+			expect_contains(what,
+			    std::string("ts=") + std::string("ExplicitVRLittleEndian"_uid.value()),
+			    "native 1-bit all-frames load_frame_source throw message");
+			expect_contains(what, "frame=0",
+			    "native 1-bit all-frames load_frame_source throw message");
+			expect_contains(what, "status=invalid_argument",
+			    "native 1-bit all-frames load_frame_source throw message");
+			expect_contains(what, "stage=load_frame_source",
+			    "native 1-bit all-frames load_frame_source throw message");
+			expect_contains(what, "PixelData is shorter than expected",
+			    "native 1-bit all-frames load_frame_source throw message");
+		}
 	}
 
 	{
