@@ -320,6 +320,65 @@ def test_segmentation_read_bytes_decodes_binary_frames() -> None:
     np.testing.assert_array_equal(out, expected1)
 
 
+def test_binary_segmentation_builds_packed_label_volume() -> None:
+    seg = _seg_from_synthetic(_make_binary_seg())
+
+    packed = seg.build_binary_label_volume([(0, 0), (1, 1)], slices=2)
+
+    assert packed.shape == (2, 2, 8)
+    assert packed.source_dicom_segment_by_label_id == [0, 1, 2]
+    assert packed.single_label_code_end == 2
+    assert packed.overlap_entry_count == 0
+    assert packed.label_id_for_segment_number(1) == 1
+    assert packed.label_id_for_segment_number(2) == 2
+    assert packed.label_id_for_segment_number(99) is None
+    assert packed.label_set(0) == ()
+    assert packed.label_set(1) == (1,)
+    assert packed.label_codes_for_label_id(1) == (1,)
+
+    expected0 = np.array(
+        [[1, 0, 1, 0, 1, 0, 1, 0], [1, 1, 1, 1, 0, 0, 0, 0]],
+        dtype=np.uint16,
+    )
+    expected1 = np.array(
+        [[0, 0, 0, 0, 0, 0, 0, 2], [2, 2, 0, 0, 2, 2, 0, 0]],
+        dtype=np.uint16,
+    )
+    expected_volume = np.stack([expected0, expected1])
+    assert packed.label_volume.dtype == np.uint16
+    np.testing.assert_array_equal(packed.label_volume, expected_volume)
+
+    mask1 = np.zeros((2, 2, 8), dtype=np.uint8)
+    mask1[0] = expected0.astype(np.uint8)
+    np.testing.assert_array_equal(packed.restore_mask_for_segment(1), mask1)
+
+    mask2 = np.zeros((2, 2, 8), dtype=np.uint8)
+    mask2[1] = (expected1 == 2).astype(np.uint8)
+    np.testing.assert_array_equal(packed.restore_mask_for_label_id(2), mask2)
+
+    with pytest.raises(Exception, match="SegmentNumber"):
+        packed.restore_mask_for_segment(99)
+
+    out = np.empty((2, 2, 8), dtype=np.uint16)
+    packed_into = seg.build_binary_label_volume_into(
+        out, [(0, 0), (1, 1)], slices=2
+    )
+    np.testing.assert_array_equal(out, expected_volume)
+    np.testing.assert_array_equal(packed_into.label_volume, expected_volume)
+    assert np.shares_memory(packed_into.label_volume, out)
+    np.testing.assert_array_equal(packed_into.restore_mask_for_segment(2), mask2)
+
+    with pytest.raises(Exception, match="uint16"):
+        seg.build_binary_label_volume_into(
+            np.empty((2, 2, 8), dtype=np.int16), [(0, 0), (1, 1)], slices=2
+        )
+
+    with pytest.raises(Exception, match="volume shape"):
+        seg.build_binary_label_volume_into(
+            np.empty((2, 2, 7), dtype=np.uint16), [(0, 0), (1, 1)], slices=2
+        )
+
+
 def test_segmentation_read_file_and_read_bytes(tmp_path) -> None:
     df = _make_binary_seg()
     path = tmp_path / "seg.dcm"

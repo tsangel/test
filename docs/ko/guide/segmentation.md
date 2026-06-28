@@ -268,6 +268,73 @@ True
 (256, 256) uint8 0 1
 ```
 
+## BINARY SEG frame을 하나의 label volume으로 pack하기
+
+이 기능이 가장 필요한 경우는 서로 거의 겹치지 않는 많은 수의 BINARY segment가 들어
+있는 SEG다. Viewer 같은 application을 만들 때 이런 경우 segment마다 3D mask texture를
+만들면 memory와 GPU binding 작업이 낭비된다. DicomSDL은 이런 BINARY SEG frame들을
+하나의 `uint16` label volume으로 pack할 수 있다. Target grid 선택과 각 SEG frame을
+어떤 slice에 둘지는 application이 결정한다.
+
+```python
+import numpy as np
+
+# application의 image geometry / stack 코드가 만든 값이다.
+slice_count = 127
+slice_index_by_frame = {...}  # frame_index -> slice_index
+
+frame_placements = [
+    (frame.index, slice_index_by_frame[frame.index])
+    for frame in seg.frames
+]
+
+packed = seg.build_binary_label_volume(frame_placements, slices=slice_count)
+labels = packed.label_volume
+
+print(labels.shape, labels.dtype)
+print(packed.source_dicom_segment_by_label_id[:4])
+```
+
+예시 출력:
+
+```text
+(127, 256, 256) uint16
+[0, 1, 2, 3]
+```
+
+`labels`의 shape은 `(slices, rows, columns)`다. Code `0`은 background다.
+나머지 값은 runtime label code이며, 어떤 code는 두 개 이상의 segment overlap을
+나타낼 수 있다. Semantic membership이 필요하면 반환된 `BinaryLabelVolume` 객체의
+table API를 사용한다.
+
+```python
+segment_number = 2
+label_id = packed.label_id_for_segment_number(segment_number)
+mask = packed.restore_mask_for_segment(segment_number)
+
+code = int(labels[30, 120, 90])
+print(packed.label_set(code))
+```
+
+Viewer pipeline이 이미 staging buffer를 소유하고 있다면 allocation-free variant를
+사용한다.
+
+```python
+label_volume = np.empty((slice_count, seg.rows, seg.columns), dtype=np.uint16)
+
+packed = seg.build_binary_label_volume_into(
+    label_volume,
+    frame_placements,
+    slices=slice_count,
+)
+
+assert np.shares_memory(packed.label_volume, label_volume)
+```
+
+`build_binary_label_volume_into()`는 application이 CPU/GPU staging allocation을 직접
+관리하려는 경우에 권장된다. Visibility, color, opacity, lookup-table rendering은
+viewer 책임으로 남는다.
+
 ## FRACTIONAL SEG mask decode
 
 FRACTIONAL SEG는 8-bit raw sample을 저장한다. DicomSDL은 raw sample을 그대로

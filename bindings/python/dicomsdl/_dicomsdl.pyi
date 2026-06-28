@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import enum
 import os
-from typing import Any, Callable, Iterator, Literal, Optional, Sequence, TypeAlias, overload
+from typing import Any, Callable, Iterable, Iterator, Literal, Optional, Sequence, TypeAlias, overload
 
 DICOM_STANDARD_VERSION: str
 DICOMSDL_VERSION: str
@@ -2172,6 +2172,32 @@ class _SegmentFrameIterator:
     def __next__(self) -> _SegmentFrame: ...
 
 
+class _BinaryLabelVolume:
+    @property
+    def shape(self) -> tuple[int, int, int]: ...
+    @property
+    def label_volume(self) -> Any:
+        """Read-only uint16 array with shape (slices, rows, columns)."""
+        ...
+    @property
+    def source_dicom_segment_by_label_id(self) -> list[int]:
+        """Dense table where index label_id maps to DICOM SegmentNumber; index 0 is background."""
+        ...
+    @property
+    def single_label_code_end(self) -> int: ...
+    @property
+    def overlap_entry_count(self) -> int: ...
+    def label_id_for_segment_number(self, segment_number: int, /) -> int | None: ...
+    def label_set(self, label_code: int, /) -> tuple[int, ...]: ...
+    def label_codes_for_label_id(self, label_id: int, /) -> tuple[int, ...]: ...
+    def restore_mask_for_label_id(self, label_id: int, /) -> Any:
+        """Restore one label_id as a uint8 0/1 array with volume shape."""
+        ...
+    def restore_mask_for_segment(self, segment_number: int, /) -> Any:
+        """Restore one DICOM SegmentNumber as a uint8 0/1 array."""
+        ...
+
+
 class _Segmentation:
     @property
     def is_valid(self) -> bool: ...
@@ -2241,6 +2267,27 @@ class _Segmentation:
     ) -> Any:
         """Write a semantic uint8 0/1 mask for one segment; errors may leave out partially written."""
         ...
+    def build_binary_label_volume(
+        self,
+        frame_placements: Iterable[tuple[int, int]],
+        /,
+        *,
+        slices: int,
+        single_label_code_end: int = ...,
+    ) -> _BinaryLabelVolume:
+        """Build a packed uint16 BINARY SEG label volume from (frame_index, slice_index) placements."""
+        ...
+    def build_binary_label_volume_into(
+        self,
+        out: Any,
+        frame_placements: Iterable[tuple[int, int]],
+        /,
+        *,
+        slices: int,
+        single_label_code_end: int = ...,
+    ) -> _BinaryLabelVolume:
+        """Build a packed BINARY SEG label volume into an existing writable native uint16 buffer."""
+        ...
     def validate_label_values(self) -> None:
         """Validate LABELMAP labels and FRACTIONAL samples."""
         ...
@@ -2258,6 +2305,7 @@ class _SegModule:
     SegmentFrame: type[_SegmentFrame]
     SegmentFrameList: type[_SegmentFrameList]
     SegmentFrameIterator: type[_SegmentFrameIterator]
+    BinaryLabelVolume: type[_BinaryLabelVolume]
     SourceImageRef: type[_SourceImageRef]
     SourceImageRefList: type[_SourceImageRefList]
     def is_segmentation_storage(self, source: DicomFile | DataSet, /) -> bool: ...

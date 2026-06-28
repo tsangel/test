@@ -239,6 +239,71 @@ True
 (256, 256) uint8 0 1
 ```
 
+## 将 BINARY SEG frame 打包成一个 label volume
+
+这个功能最适合包含大量、且很少互相 overlap 的 BINARY segment 的 SEG。在构建 viewer
+这类 application 时，如果为这种 SEG 的每个 segment 创建一个 3D mask texture，会浪费
+memory 和 GPU binding work。DicomSDL 可以把这些 BINARY SEG frame 打包成一个
+`uint16` label volume。Target grid 的选择，以及每个 SEG frame 放到哪个 slice，由
+application 决定。
+
+```python
+import numpy as np
+
+# 由 application 的 image geometry / stack 代码生成。
+slice_count = 127
+slice_index_by_frame = {...}  # frame_index -> slice_index
+
+frame_placements = [
+    (frame.index, slice_index_by_frame[frame.index])
+    for frame in seg.frames
+]
+
+packed = seg.build_binary_label_volume(frame_placements, slices=slice_count)
+labels = packed.label_volume
+
+print(labels.shape, labels.dtype)
+print(packed.source_dicom_segment_by_label_id[:4])
+```
+
+示例输出：
+
+```text
+(127, 256, 256) uint16
+[0, 1, 2, 3]
+```
+
+`labels` 的 shape 是 `(slices, rows, columns)`。Code `0` 表示 background。
+其他值是 runtime label code，其中某些 code 可能表示两个或更多 segment 的 overlap。
+需要 semantic membership 时，请使用返回的 `BinaryLabelVolume` 对象上的 table API。
+
+```python
+segment_number = 2
+label_id = packed.label_id_for_segment_number(segment_number)
+mask = packed.restore_mask_for_segment(segment_number)
+
+code = int(labels[30, 120, 90])
+print(packed.label_set(code))
+```
+
+如果 viewer pipeline 已经拥有 staging buffer，可以使用 allocation-free variant。
+
+```python
+label_volume = np.empty((slice_count, seg.rows, seg.columns), dtype=np.uint16)
+
+packed = seg.build_binary_label_volume_into(
+    label_volume,
+    frame_placements,
+    slices=slice_count,
+)
+
+assert np.shares_memory(packed.label_volume, label_volume)
+```
+
+当 application 想直接管理 CPU/GPU staging allocation 时，推荐使用
+`build_binary_label_volume_into()`。Visibility、color、opacity 和 lookup-table
+rendering 仍然由 viewer 负责。
+
 ## 解码 FRACTIONAL SEG mask
 
 FRACTIONAL SEG 存储 8-bit raw sample。DicomSDL 返回这些 raw sample，scaling 由调用方明确完成。

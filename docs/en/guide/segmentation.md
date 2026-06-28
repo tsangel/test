@@ -269,6 +269,73 @@ True
 (256, 256) uint8 0 1
 ```
 
+## Pack BINARY SEG Frames as One Label Volume
+
+The main motivation is a BINARY SEG object with many segments that rarely
+overlap. When building an application such as a viewer, uploading one 3D mask
+texture per segment wastes memory and GPU binding work in that case. DicomSDL
+can pack those BINARY SEG frames into one `uint16` label volume. The application
+still chooses the target grid and maps each SEG frame to a slice index.
+
+```python
+import numpy as np
+
+# Produced by the image geometry / stack chosen by your application.
+slice_count = 127
+slice_index_by_frame = {...}  # frame_index -> slice_index
+
+frame_placements = [
+    (frame.index, slice_index_by_frame[frame.index])
+    for frame in seg.frames
+]
+
+packed = seg.build_binary_label_volume(frame_placements, slices=slice_count)
+labels = packed.label_volume
+
+print(labels.shape, labels.dtype)
+print(packed.source_dicom_segment_by_label_id[:4])
+```
+
+Example output:
+
+```text
+(127, 256, 256) uint16
+[0, 1, 2, 3]
+```
+
+`labels` has shape `(slices, rows, columns)`. Code `0` is background. Other
+codes are runtime label codes; some codes can represent an overlap of two or
+more segments. Use the returned `BinaryLabelVolume` object when you need
+semantic membership:
+
+```python
+segment_number = 2
+label_id = packed.label_id_for_segment_number(segment_number)
+mask = packed.restore_mask_for_segment(segment_number)
+
+code = int(labels[30, 120, 90])
+print(packed.label_set(code))
+```
+
+For viewer pipelines that already own a staging buffer, use the allocation-free
+variant:
+
+```python
+label_volume = np.empty((slice_count, seg.rows, seg.columns), dtype=np.uint16)
+
+packed = seg.build_binary_label_volume_into(
+    label_volume,
+    frame_placements,
+    slices=slice_count,
+)
+
+assert np.shares_memory(packed.label_volume, label_volume)
+```
+
+`build_binary_label_volume_into()` is the preferred path when an application
+wants to control CPU/GPU staging allocation. Visibility, colors, opacity, and
+lookup-table rendering remain viewer responsibilities.
+
 ## Decode a FRACTIONAL SEG Mask
 
 FRACTIONAL SEG stores 8-bit raw samples. DicomSDL returns those raw samples and

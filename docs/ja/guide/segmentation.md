@@ -239,6 +239,74 @@ True
 (256, 256) uint8 0 1
 ```
 
+## BINARY SEG frame を 1 つの label volume に pack する
+
+この機能が特に役立つのは、ほとんど overlap しない多数の BINARY segment を含む SEG
+です。Viewer のような application を作る場合、このような SEG で segment ごとに
+3D mask texture を作ると memory と GPU binding work が無駄になりやすくなります。
+DicomSDL はそのような BINARY SEG frame を 1 つの `uint16` label volume に pack
+できます。Target grid の選択と、各 SEG frame をどの slice に置くかは application が
+決めます。
+
+```python
+import numpy as np
+
+# application の image geometry / stack code が作った値です。
+slice_count = 127
+slice_index_by_frame = {...}  # frame_index -> slice_index
+
+frame_placements = [
+    (frame.index, slice_index_by_frame[frame.index])
+    for frame in seg.frames
+]
+
+packed = seg.build_binary_label_volume(frame_placements, slices=slice_count)
+labels = packed.label_volume
+
+print(labels.shape, labels.dtype)
+print(packed.source_dicom_segment_by_label_id[:4])
+```
+
+出力例:
+
+```text
+(127, 256, 256) uint16
+[0, 1, 2, 3]
+```
+
+`labels` の shape は `(slices, rows, columns)` です。Code `0` は background です。
+それ以外の値は runtime label code で、1 つの code が複数 segment の overlap を表す
+ことがあります。Semantic membership が必要な場合は、返された `BinaryLabelVolume`
+object の table API を使います。
+
+```python
+segment_number = 2
+label_id = packed.label_id_for_segment_number(segment_number)
+mask = packed.restore_mask_for_segment(segment_number)
+
+code = int(labels[30, 120, 90])
+print(packed.label_set(code))
+```
+
+Viewer pipeline がすでに staging buffer を所有している場合は、allocation-free variant
+を使います。
+
+```python
+label_volume = np.empty((slice_count, seg.rows, seg.columns), dtype=np.uint16)
+
+packed = seg.build_binary_label_volume_into(
+    label_volume,
+    frame_placements,
+    slices=slice_count,
+)
+
+assert np.shares_memory(packed.label_volume, label_volume)
+```
+
+`build_binary_label_volume_into()` は、application が CPU/GPU staging allocation を直接
+管理したい場合に適しています。Visibility、color、opacity、lookup-table rendering は
+viewer の責務です。
+
 ## FRACTIONAL SEG mask を decode する
 
 FRACTIONAL SEG は 8-bit raw sample を保存します。DicomSDL は raw sample をそのまま返し、scaling は呼び出し側で明示的に行います。

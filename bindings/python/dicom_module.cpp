@@ -13,6 +13,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <unordered_set>
 #include <vector>
 
@@ -31,6 +32,7 @@
 #include <dicom_endian.h>
 #include <dicom_geometry.h>
 #include <dicom_seg.h>
+#include <dicom_seg_binary_label_volume.h>
 #include <diagnostics.h>
 #include <photometric_text_detail.hpp>
 #include "pixel/host/adapter/host_adapter.hpp"
@@ -3968,6 +3970,23 @@ struct PySegmentation {
 	}
 };
 
+struct PyBinaryLabelVolume {
+	std::shared_ptr<dicom::seg::BinaryLabelVolume> volume{};
+	nb::object external_label_volume_owner{};
+
+	[[nodiscard]] const dicom::seg::BinaryLabelVolume& get() const {
+		if (!volume) {
+			throw nb::value_error("BinaryLabelVolume object is empty");
+		}
+		return *volume;
+	}
+
+	[[nodiscard]] bool has_external_label_volume() const noexcept {
+		return external_label_volume_owner.is_valid() &&
+		       !external_label_volume_owner.is_none();
+	}
+};
+
 struct PySegment {
 	std::shared_ptr<PySegmentationOwner> owner{};
 	std::uint16_t number{0};
@@ -4499,6 +4518,307 @@ void py_seg_mask_for_segment_into(
 		segmentation.mask_for_segment_into(
 		    frame_index, segment_number, out_span, options);
 	}
+}
+
+[[nodiscard]] std::array<std::int64_t, 4> py_binary_label_volume_strides(
+    dicom::seg::BinaryLabelVolumeSize size) {
+	if (size.rows != 0 &&
+	    size.columns > std::numeric_limits<std::size_t>::max() / size.rows) {
+		throw std::overflow_error("BinaryLabelVolume plane size overflow");
+	}
+	const auto plane = size.rows * size.columns;
+	if (plane > static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max()) ||
+	    size.columns >
+	        static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max())) {
+		throw std::overflow_error("BinaryLabelVolume ndarray stride overflow");
+	}
+	return {static_cast<std::int64_t>(plane),
+	    static_cast<std::int64_t>(size.columns), 1, 0};
+}
+
+[[nodiscard]] std::array<std::size_t, 4> py_binary_label_volume_shape(
+    dicom::seg::BinaryLabelVolumeSize size) {
+	return {size.slices, size.rows, size.columns, 0};
+}
+
+void py_validate_binary_label_volume_buffer(const Py_buffer& view,
+    const dicom::seg::BinaryLabelVolume& volume, const char* context) {
+	if (view.itemsize <= 0) {
+		throw nb::value_error(
+		    (std::string(context) + " requires a valid output itemsize").c_str());
+	}
+	if (static_cast<std::size_t>(view.itemsize) !=
+	        sizeof(dicom::seg::BinaryLabelCode) ||
+	    !py_buffer_has_unsigned_format(view, 'H', context)) {
+		throw nb::value_error(
+		    (std::string(context) + " buffer dtype must be native uint16").c_str());
+	}
+	if (view.len < 0) {
+		throw nb::value_error(
+		    (std::string(context) + " buffer length is invalid").c_str());
+	}
+	const auto voxels = dicom::seg::binary_label_volume_voxel_count(volume.size);
+	const auto expected_bytes = voxels * sizeof(dicom::seg::BinaryLabelCode);
+	if (static_cast<std::size_t>(view.len) != expected_bytes) {
+		throw nb::value_error(
+		    (std::string(context) + " buffer size does not match volume shape").c_str());
+	}
+	if (expected_bytes > 0 && view.buf == nullptr) {
+		throw nb::value_error((std::string(context) + " buffer is null").c_str());
+	}
+}
+
+class PyBinaryLabelVolumeBufferView {
+public:
+	PyBinaryLabelVolumeBufferView(nb::handle obj,
+	    const dicom::seg::BinaryLabelVolume& volume, const char* context,
+	    bool writable = false)
+	    : context_(context) {
+		const int flags = (writable ? PyBUF_WRITABLE : 0) |
+		    PyBUF_C_CONTIGUOUS | PyBUF_FORMAT | PyBUF_ND;
+		if (PyObject_GetBuffer(obj.ptr(), &view_, flags) != 0) {
+			throw nb::type_error(
+			    (std::string(context) + " expects a C-contiguous buffer object").c_str());
+		}
+		try {
+			py_validate_binary_label_volume_buffer(view_, volume, context);
+		} catch (...) {
+			PyBuffer_Release(&view_);
+			view_.obj = nullptr;
+			throw;
+		}
+	}
+
+	~PyBinaryLabelVolumeBufferView() {
+		if (view_.obj != nullptr) {
+			PyBuffer_Release(&view_);
+		}
+	}
+
+	PyBinaryLabelVolumeBufferView(const PyBinaryLabelVolumeBufferView&) = delete;
+	PyBinaryLabelVolumeBufferView& operator=(
+	    const PyBinaryLabelVolumeBufferView&) = delete;
+
+	[[nodiscard]] std::span<dicom::seg::BinaryLabelCode> writable_codes() const {
+		return std::span<dicom::seg::BinaryLabelCode>(
+		    static_cast<dicom::seg::BinaryLabelCode*>(view_.buf),
+		    static_cast<std::size_t>(view_.len) /
+		        sizeof(dicom::seg::BinaryLabelCode));
+	}
+
+	[[nodiscard]] std::span<const dicom::seg::BinaryLabelCode> codes() const {
+		return std::span<const dicom::seg::BinaryLabelCode>(
+		    static_cast<const dicom::seg::BinaryLabelCode*>(view_.buf),
+		    static_cast<std::size_t>(view_.len) /
+		        sizeof(dicom::seg::BinaryLabelCode));
+	}
+
+	[[nodiscard]] const void* data() const noexcept { return view_.buf; }
+
+private:
+	const char* context_{nullptr};
+	Py_buffer view_{};
+};
+
+[[nodiscard]] nb::object py_binary_label_volume_array(
+    const PyBinaryLabelVolume& self) {
+	const auto& volume = self.get();
+	const auto shape = py_binary_label_volume_shape(volume.size);
+	const auto strides = py_binary_label_volume_strides(volume.size);
+	const void* data_ptr = nullptr;
+	nb::capsule owner_capsule;
+	if (self.has_external_label_volume()) {
+		auto* external = new PyBinaryLabelVolumeBufferView(
+		    self.external_label_volume_owner, volume,
+		    "BinaryLabelVolume.label_volume");
+		data_ptr = external->data();
+		owner_capsule = nb::capsule(external, [](void* ptr) noexcept {
+			delete static_cast<PyBinaryLabelVolumeBufferView*>(ptr);
+		});
+	} else {
+		data_ptr = volume.label_volume.empty()
+		    ? nullptr
+		    : static_cast<const void*>(volume.label_volume.data());
+		auto* owner = new std::shared_ptr<dicom::seg::BinaryLabelVolume>(self.volume);
+		owner_capsule = nb::capsule(owner, [](void* ptr) noexcept {
+			delete static_cast<std::shared_ptr<dicom::seg::BinaryLabelVolume>*>(ptr);
+		});
+	}
+	return nb::cast(nb::ndarray<nb::numpy, const std::uint16_t>(
+	    data_ptr, 3, shape.data(), owner_capsule, strides.data(),
+	    decoded_array_spec(dicom::pixel::DataType::u16).dtype,
+	    nb::device::cpu::value, 0, 'C'));
+}
+
+[[nodiscard]] nb::tuple py_binary_label_set_tuple(
+    dicom::seg::BinaryLabelSetView view) {
+	nb::tuple out =
+	    nb::steal<nb::tuple>(PyTuple_New(static_cast<Py_ssize_t>(view.size())));
+	for (std::size_t index = 0; index < view.size(); ++index) {
+		PyObject* item = PyLong_FromUnsignedLong(view[index]);
+		if (item == nullptr) {
+			throw nb::python_error();
+		}
+		if (PyTuple_SetItem(out.ptr(), static_cast<Py_ssize_t>(index), item) < 0) {
+			Py_DECREF(item);
+			throw nb::python_error();
+		}
+	}
+	return out;
+}
+
+[[nodiscard]] nb::tuple py_binary_label_code_tuple(
+    std::span<const dicom::seg::BinaryLabelCode> codes) {
+	nb::tuple out =
+	    nb::steal<nb::tuple>(PyTuple_New(static_cast<Py_ssize_t>(codes.size())));
+	for (std::size_t index = 0; index < codes.size(); ++index) {
+		PyObject* item = PyLong_FromUnsignedLong(codes[index]);
+		if (item == nullptr) {
+			throw nb::python_error();
+		}
+		if (PyTuple_SetItem(out.ptr(), static_cast<Py_ssize_t>(index), item) < 0) {
+			Py_DECREF(item);
+			throw nb::python_error();
+		}
+	}
+	return out;
+}
+
+[[nodiscard]] std::optional<dicom::seg::BinaryLabelId>
+py_binary_label_id_for_segment_number(
+    const dicom::seg::BinaryLabelVolume& volume, std::uint16_t segment_number) {
+	const auto& table = volume.source_dicom_segment_by_label_id;
+	for (std::size_t label_id = 1; label_id < table.size(); ++label_id) {
+		if (table[label_id] == segment_number) {
+			return static_cast<dicom::seg::BinaryLabelId>(label_id);
+		}
+	}
+	return std::nullopt;
+}
+
+[[nodiscard]] nb::object py_binary_label_restore_mask_for_label_id(
+    const PyBinaryLabelVolume& self, dicom::seg::BinaryLabelId label_id) {
+	const auto& volume = self.get();
+	const auto voxels =
+	    dicom::seg::binary_label_volume_voxel_count(volume.size);
+	const auto shape = py_binary_label_volume_shape(volume.size);
+	const auto strides = py_binary_label_volume_strides(volume.size);
+	auto out = make_writable_numpy_array(
+	    3, shape, strides, decoded_array_spec(dicom::pixel::DataType::u8).dtype,
+	    voxels);
+	if (self.has_external_label_volume()) {
+		PyBinaryLabelVolumeBufferView external(
+		    self.external_label_volume_owner, volume,
+		    "BinaryLabelVolume.restore_mask");
+		{
+			nb::gil_scoped_release release;
+			dicom::seg::restore_binary_label_mask(external.codes(),
+			    volume.code_table, label_id, out.bytes);
+		}
+	} else {
+		{
+			nb::gil_scoped_release release;
+			dicom::seg::restore_binary_label_mask(volume.label_volume,
+			    volume.code_table, label_id, out.bytes);
+		}
+	}
+	return nb::cast(std::move(out.array));
+}
+
+[[nodiscard]] nb::object py_binary_label_restore_mask_for_segment(
+    const PyBinaryLabelVolume& self, std::uint16_t segment_number) {
+	const auto label_id =
+	    py_binary_label_id_for_segment_number(self.get(), segment_number);
+	if (!label_id) {
+		throw nb::value_error("SegmentNumber is not present in BinaryLabelVolume");
+	}
+	return py_binary_label_restore_mask_for_label_id(self, *label_id);
+}
+
+[[nodiscard]] std::vector<dicom::seg::BinarySegmentationFramePlacement>
+py_binary_label_frame_placements(nb::handle placements) {
+	using Pair = std::tuple<std::size_t, std::size_t>;
+	std::vector<Pair> pairs;
+	try {
+		pairs = nb::cast<std::vector<Pair>>(placements);
+	} catch (const nb::cast_error&) {
+		throw nb::type_error(
+		    "frame_placements must be an iterable of (frame_index, slice_index) pairs");
+	}
+	std::vector<dicom::seg::BinarySegmentationFramePlacement> out;
+	out.reserve(pairs.size());
+	for (const auto& [frame_index, slice_index] : pairs) {
+		out.push_back(dicom::seg::BinarySegmentationFramePlacement{
+		    .frame_index = frame_index,
+		    .slice_index = slice_index,
+		});
+	}
+	return out;
+}
+
+[[nodiscard]] PyBinaryLabelVolume py_seg_build_binary_label_volume(
+    const dicom::seg::Segmentation& segmentation, nb::handle frame_placements,
+    std::size_t slices, std::uint16_t single_label_code_end) {
+	const auto placements = py_binary_label_frame_placements(frame_placements);
+	auto volume = std::make_shared<dicom::seg::BinaryLabelVolume>();
+	{
+		nb::gil_scoped_release release;
+		dicom::seg::BinarySegmentationFrameSetBitSource source(
+		    segmentation,
+		    dicom::seg::BinaryLabelVolumeSize{
+		        .columns = segmentation.columns(),
+		        .rows = segmentation.rows(),
+		        .slices = slices,
+		    },
+		    placements);
+		dicom::seg::BinaryLabelVolumeBuildOptions options;
+		options.volume_options.single_label_code_end = single_label_code_end;
+		*volume = dicom::seg::build_binary_label_volume_from_segmentation(
+		    source, options);
+	}
+	return PyBinaryLabelVolume{std::move(volume)};
+}
+
+[[nodiscard]] PyBinaryLabelVolume py_seg_build_binary_label_volume_into(
+    const dicom::seg::Segmentation& segmentation, nb::handle out,
+    nb::handle frame_placements, std::size_t slices,
+    std::uint16_t single_label_code_end) {
+	const auto placements = py_binary_label_frame_placements(frame_placements);
+	auto volume = std::make_shared<dicom::seg::BinaryLabelVolume>();
+	volume->size = dicom::seg::BinaryLabelVolumeSize{
+	    .columns = segmentation.columns(),
+	    .rows = segmentation.rows(),
+	    .slices = slices,
+	};
+	PyBinaryLabelVolumeBufferView out_view(
+	    out, *volume, "seg.build_binary_label_volume_into", true);
+	{
+		nb::gil_scoped_release release;
+		dicom::seg::BinarySegmentationFrameSetBitSource source(
+		    segmentation, volume->size, placements);
+		dicom::seg::BinaryLabelVolumeBuildOptions options;
+		options.volume_options.single_label_code_end = single_label_code_end;
+		volume->code_table = dicom::seg::create_binary_label_code_table(
+		    source.source_dicom_segment_numbers(), options.volume_options);
+		volume->source_dicom_segment_by_label_id =
+		    dicom::seg::make_binary_label_source_segment_table(
+		        source.source_dicom_segment_numbers(),
+		        volume->code_table.single_label_code_end());
+		dicom::seg::build_binary_label_volume_from_segmentation_into(
+		    source,
+		    dicom::seg::BinaryLabelVolumeBuildTarget{
+		        .size = volume->size,
+		        .label_volume = out_view.writable_codes(),
+		        .code_table = &volume->code_table,
+		        .source_dicom_segment_by_label_id =
+		            std::span<const std::uint16_t>(
+		                volume->source_dicom_segment_by_label_id.data(),
+		                volume->source_dicom_segment_by_label_id.size()),
+		        .source_frame_map = &volume->source_frame_map,
+		    },
+		    options);
+	}
+	return PyBinaryLabelVolume{std::move(volume), nb::borrow<nb::object>(out)};
 }
 
 [[nodiscard]] PySegment py_segment_list_get(
@@ -8048,6 +8368,79 @@ NB_MODULE(_dicomsdl, m) {
 			    return oss.str();
 		    });
 
+	nb::class_<PyBinaryLabelVolume>(seg, "BinaryLabelVolume",
+	    "Packed BINARY SEG label volume result with overlap label-code table.")
+		.def_prop_ro("shape",
+		    [](const PyBinaryLabelVolume& self) {
+			    const auto size = self.get().size;
+			    return nb::make_tuple(size.slices, size.rows, size.columns);
+		    })
+		.def_prop_ro("label_volume", &py_binary_label_volume_array,
+		    "Read-only uint16 NumPy view with shape (slices, rows, columns).")
+		.def_prop_ro("source_dicom_segment_by_label_id",
+		    [](const PyBinaryLabelVolume& self) {
+			    return self.get().source_dicom_segment_by_label_id;
+		    },
+		    "Dense table where index label_id maps to DICOM SegmentNumber; "
+		    "index 0 is background.")
+		.def_prop_ro("single_label_code_end",
+		    [](const PyBinaryLabelVolume& self) {
+			    return self.get().code_table.single_label_code_end();
+		    })
+		.def_prop_ro("overlap_entry_count",
+		    [](const PyBinaryLabelVolume& self) {
+			    return self.get().code_table.overlap_entry_count();
+		    })
+		.def("label_id_for_segment_number",
+		    [](const PyBinaryLabelVolume& self,
+		        std::uint16_t segment_number) -> nb::object {
+			    const auto label_id =
+			        py_binary_label_id_for_segment_number(self.get(), segment_number);
+			    if (!label_id) {
+				    return nb::none();
+			    }
+			    return nb::cast(*label_id);
+		    },
+		    nb::arg("segment_number"),
+		    "Return the dense label_id for one DICOM SegmentNumber, or None.")
+		.def("label_set",
+		    [](const PyBinaryLabelVolume& self,
+		        dicom::seg::BinaryLabelCode label_code) {
+			    return py_binary_label_set_tuple(
+			        self.get().code_table.label_set_by_label_code(label_code));
+		    },
+		    nb::arg("label_code"),
+		    "Return label_ids represented by one stored label code.")
+		.def("label_codes_for_label_id",
+		    [](const PyBinaryLabelVolume& self,
+		        dicom::seg::BinaryLabelId label_id) {
+			    return py_binary_label_code_tuple(
+			        self.get().code_table.label_codes_for_label_id(label_id));
+		    },
+		    nb::arg("label_id"),
+		    "Return direct and overlap label codes containing one label_id.")
+		.def("restore_mask_for_label_id",
+		    &py_binary_label_restore_mask_for_label_id,
+		    nb::arg("label_id"),
+		    "Restore one label_id as a uint8 0/1 NumPy mask with volume shape.")
+		.def("restore_mask_for_segment",
+		    &py_binary_label_restore_mask_for_segment,
+		    nb::arg("segment_number"),
+		    "Restore one DICOM SegmentNumber as a uint8 0/1 NumPy mask.")
+		.def("__repr__",
+		    [](const PyBinaryLabelVolume& self) {
+			    const auto size = self.get().size;
+			    std::ostringstream oss;
+			    oss << "BinaryLabelVolume(shape=(" << size.slices << ", "
+			        << size.rows << ", " << size.columns << "), labels="
+			        << (self.get().source_dicom_segment_by_label_id.empty()
+			                ? 0
+			                : self.get().source_dicom_segment_by_label_id.size() - 1)
+			        << ", overlaps=" << self.get().code_table.overlap_entry_count()
+			        << ")";
+			    return oss.str();
+		    });
+
 	nb::class_<PySegment>(seg, "Segment",
 	    "Borrowed view of one SegmentSequence item. Keeps the owning Segmentation alive.")
 		.def_prop_ro("number", [](const PySegment& self) { return self.view().number(); })
@@ -8428,6 +8821,30 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::arg("error_when_not_present_in_frame") = false,
 		    "Decode one SEG frame into a writable uint8 0/1 mask buffer. "
 		    "Errors may leave the output partially written.")
+		.def("build_binary_label_volume",
+		    [](const PySegmentation& self, nb::handle frame_placements,
+		        std::size_t slices, std::uint16_t single_label_code_end) {
+			    return py_seg_build_binary_label_volume(
+			        self.get(), frame_placements, slices, single_label_code_end);
+		    },
+		    nb::arg("frame_placements"), nb::kw_only(), nb::arg("slices"),
+		    nb::arg("single_label_code_end") = 0,
+		    "Build a packed uint16 BINARY SEG label volume. frame_placements "
+		    "must contain one (frame_index, slice_index) pair per SEG frame; "
+		    "geometry/grid selection remains the caller's responsibility.")
+		.def("build_binary_label_volume_into",
+		    [](const PySegmentation& self, nb::handle out,
+		        nb::handle frame_placements, std::size_t slices,
+		        std::uint16_t single_label_code_end) {
+			    return py_seg_build_binary_label_volume_into(self.get(), out,
+			        frame_placements, slices, single_label_code_end);
+		    },
+		    nb::arg("out"), nb::arg("frame_placements"), nb::kw_only(),
+		    nb::arg("slices"), nb::arg("single_label_code_end") = 0,
+		    "Build a packed BINARY SEG label volume into an existing writable "
+		    "native uint16 buffer with shape-compatible size. Returns metadata "
+		    "that keeps the caller-owned buffer usable for label lookup and mask "
+		    "restoration.")
 		.def("validate_label_values",
 		    [](const PySegmentation& self) {
 			    nb::gil_scoped_release release;

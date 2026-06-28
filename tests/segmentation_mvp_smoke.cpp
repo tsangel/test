@@ -1,4 +1,5 @@
 #include <dicom.h>
+#include <dicom_seg_binary_label_volume.h>
 #include <dicom_seg.h>
 
 #include "codec_builtin_flags.hpp"
@@ -12,6 +13,7 @@
 #include <cstring>
 #include <exception>
 #include <filesystem>
+#include <initializer_list>
 #include <iostream>
 #include <memory>
 #include <span>
@@ -180,6 +182,50 @@ std::vector<std::uint8_t> detached_pixel_payload_marker(
 	append_u32_le(marker, value_length);
 	append_u64_le(marker, payload_length);
 	return marker;
+}
+
+auto visit_indices(std::initializer_list<std::size_t> indices) {
+	return [indices](auto&& visit) {
+		for (std::size_t index : indices) {
+			visit(index);
+		}
+	};
+}
+
+struct TestBinaryFrameSetBitSource {
+	dicom::seg::BinaryLabelVolumeSize size{};
+	std::vector<std::uint16_t> segments{};
+	std::vector<dicom::seg::BinaryLabelFrame> frames{};
+	std::vector<std::vector<std::size_t>> set_bits_by_frame{};
+};
+
+void visit_test_binary_frame_set_bits(
+    const void* context,
+    std::size_t frame_ordinal,
+    dicom::seg::BinaryFrameSetBitVisitor visitor,
+    void* user_data) {
+	const auto& source =
+	    *static_cast<const TestBinaryFrameSetBitSource*>(context);
+	for (std::size_t pixel_index : source.set_bits_by_frame[frame_ordinal]) {
+		visitor(pixel_index, user_data);
+	}
+}
+
+dicom::seg::BinaryFrameSetBitSource make_test_binary_frame_set_bit_source(
+    const TestBinaryFrameSetBitSource& source) {
+	return dicom::seg::BinaryFrameSetBitSource(
+	    source.size, source.segments, source.frames, &source,
+	    &visit_test_binary_frame_set_bits);
+}
+
+std::vector<std::uint8_t> restored_binary_label_mask(
+    const dicom::seg::BinaryLabelVolume& volume,
+    dicom::seg::BinaryLabelId label_id) {
+	std::vector<std::uint8_t> mask(volume.label_volume.size(), 0);
+	dicom::seg::BinaryLabelCodeSet label_code_set;
+	dicom::seg::restore_binary_label_mask(volume.label_volume,
+	    volume.code_table, label_id, label_code_set, mask);
+	return mask;
 }
 
 void populate_common_seg_metadata(dicom::DicomFile& file, std::string_view type,
@@ -560,6 +606,179 @@ void verify_labelmap16_roundtrip(dicom::uid::WellKnown transfer_syntax) {
 	seg->validate_label_values();
 }
 
+void verify_binary_label_code_table_and_restore() {
+	const std::array<std::uint16_t, 4> segments = {1, 2, 3, 4};
+	dicom::seg::BinaryLabelVolume volume =
+	    dicom::seg::create_empty_binary_label_volume({6, 1, 1}, segments);
+
+	dicom::seg::paint_absent_label_into_volume(
+	    volume.label_volume, 1, volume.code_table, visit_indices({0, 1, 4}));
+	dicom::seg::paint_absent_label_into_volume(
+	    volume.label_volume, 2, volume.code_table, visit_indices({1, 2, 4}));
+
+	const dicom::seg::BinaryLabelCode pair_code = volume.label_volume[1];
+	if (pair_code <= volume.code_table.single_label_code_end()) {
+		fail("binary label pair overlap code was not allocated");
+	}
+	if (volume.label_volume[4] != pair_code ||
+	    volume.code_table.overlap_entry_count() != 1) {
+		fail("binary label pair overlap code was not reused");
+	}
+
+	dicom::seg::paint_absent_label_into_volume(
+	    volume.label_volume, 3, volume.code_table, visit_indices({1, 3}));
+	const dicom::seg::BinaryLabelCode triple_code = volume.label_volume[1];
+	const auto triple = volume.code_table.label_set_by_label_code(triple_code);
+	if (triple.size() != 3 || triple[0] != 1 || triple[1] != 2 ||
+	    triple[2] != 3) {
+		fail("binary label triple label_set mismatch");
+	}
+
+	dicom::seg::paint_maybe_present_label_into_volume(
+	    volume.label_volume, 2, volume.code_table, visit_indices({1, 4}));
+	if (volume.label_volume[1] != triple_code ||
+	    volume.label_volume[4] != pair_code) {
+		fail("binary label maybe-present duplicate should be no-op");
+	}
+
+	if (restored_binary_label_mask(volume, 1) !=
+	    std::vector<std::uint8_t>{1, 1, 0, 0, 1, 0}) {
+		fail("binary label restore mask 1 mismatch");
+	}
+	if (restored_binary_label_mask(volume, 2) !=
+	    std::vector<std::uint8_t>{0, 1, 1, 0, 1, 0}) {
+		fail("binary label restore mask 2 mismatch");
+	}
+	if (volume.code_table.telemetry().overlap_label_set_count_2_to_4 != 2 ||
+	    volume.code_table.telemetry().reused_overlap_label_set_count < 1) {
+		fail("binary label overlap telemetry mismatch");
+	}
+}
+
+void verify_binary_label_volume_build_into_caller_buffer() {
+	const TestBinaryFrameSetBitSource source{
+	    .size = {4, 1, 2},
+	    .segments = {10, 20},
+	    .frames = {
+	        {.source_frame_index = 0, .label_id = 2, .slice_index = 1},
+	        {.source_frame_index = 1, .label_id = 1, .slice_index = 0},
+	    },
+	    .set_bits_by_frame = {
+	        {1},
+	        {0, 2},
+	    },
+	};
+
+	std::vector<dicom::seg::BinaryLabelCode> label_volume(8, 999);
+	auto code_table = dicom::seg::create_binary_label_code_table(
+	    source.segments);
+	auto source_segment_by_label_id =
+	    dicom::seg::make_binary_label_source_segment_table(
+	        source.segments, code_table.single_label_code_end());
+	std::vector<dicom::seg::BinaryLabelSourceFrameMapEntry> frame_map;
+	dicom::seg::BinaryLabelVolumeBuildTelemetry telemetry;
+
+	dicom::seg::build_binary_label_volume_into(
+	    make_test_binary_frame_set_bit_source(source),
+	    dicom::seg::BinaryLabelVolumeBuildTarget{
+	        .size = source.size,
+	        .label_volume = label_volume,
+	        .code_table = &code_table,
+	        .source_dicom_segment_by_label_id = source_segment_by_label_id,
+	        .source_frame_map = &frame_map,
+	    },
+	    dicom::seg::BinaryLabelVolumeBuildOptions{
+	        .segments_overlap = dicom::seg::BinaryLabelSegmentsOverlap::no,
+	        .telemetry = &telemetry,
+	    });
+
+	if (label_volume !=
+	    std::vector<dicom::seg::BinaryLabelCode>{1, 0, 1, 0, 0, 2, 0, 0}) {
+		fail("binary label build_into caller buffer mismatch");
+	}
+	if (frame_map.size() != 2 || frame_map[0].source_frame_index != 0 ||
+	    frame_map[0].dicom_segment_number != 20 ||
+	    frame_map[1].source_frame_index != 1 ||
+	    frame_map[1].non_empty_pixel_count != 2) {
+		fail("binary label build_into frame map mismatch");
+	}
+	if (telemetry.source_frame_count != 2 ||
+	    telemetry.visited_set_bit_count != 3 ||
+	    telemetry.non_empty_frame_count != 2) {
+		fail("binary label build_into telemetry mismatch");
+	}
+}
+
+void verify_binary_label_volume_from_segmentation_adapter() {
+	auto seg = dicom::seg::from_dicomfile(make_unaligned_binary_seg_file());
+	const std::array<dicom::seg::BinarySegmentationFramePlacement, 2>
+	    placements = {
+	        dicom::seg::BinarySegmentationFramePlacement{
+	            .frame_index = 0, .slice_index = 0},
+	        dicom::seg::BinarySegmentationFramePlacement{
+	            .frame_index = 1, .slice_index = 1},
+	    };
+	const dicom::seg::BinarySegmentationFrameSetBitSource source(
+	    *seg, dicom::seg::BinaryLabelVolumeSize{.columns = 3, .rows = 2, .slices = 2},
+	    placements);
+	dicom::seg::BinaryLabelVolumeBuildTelemetry telemetry;
+	dicom::seg::BinaryLabelVolume volume =
+	    dicom::seg::build_binary_label_volume_from_segmentation(
+	        source,
+	        dicom::seg::BinaryLabelVolumeBuildOptions{
+	            .segments_overlap = dicom::seg::BinaryLabelSegmentsOverlap::undefined,
+	            .telemetry = &telemetry,
+	        });
+
+	if (volume.source_dicom_segment_by_label_id.size() != 3 ||
+	    volume.source_dicom_segment_by_label_id[1] != 1 ||
+	    volume.source_dicom_segment_by_label_id[2] != 2) {
+		fail("binary label segmentation source segment table mismatch");
+	}
+	if (volume.label_volume !=
+	    std::vector<dicom::seg::BinaryLabelCode>{1, 0, 1, 0, 0, 1,
+	                                            2, 2, 0, 0, 2, 0}) {
+		fail("binary label segmentation adapter volume mismatch");
+	}
+	if (restored_binary_label_mask(volume, 1) !=
+	    std::vector<std::uint8_t>{1, 0, 1, 0, 0, 1,
+	                              0, 0, 0, 0, 0, 0}) {
+		fail("binary label segmentation adapter restore label 1 mismatch");
+	}
+	if (restored_binary_label_mask(volume, 2) !=
+	    std::vector<std::uint8_t>{0, 0, 0, 0, 0, 0,
+	                              1, 1, 0, 0, 1, 0}) {
+		fail("binary label segmentation adapter restore label 2 mismatch");
+	}
+	if (volume.source_frame_map.size() != 2 ||
+	    !volume.source_frame_map[0].image_position_patient ||
+	    volume.source_frame_map[1].slice_index != 1 ||
+	    telemetry.visited_set_bit_count != 6) {
+		fail("binary label segmentation adapter frame map mismatch");
+	}
+}
+
+void verify_binary_label_volume_segments_overlap_no_rejects() {
+	auto file = make_unaligned_binary_seg_file();
+	set_text(*file, "SegmentsOverlap", "NO");
+	auto seg = dicom::seg::from_dicomfile(std::move(file));
+	const std::array<dicom::seg::BinarySegmentationFramePlacement, 2>
+	    placements = {
+	        dicom::seg::BinarySegmentationFramePlacement{
+	            .frame_index = 0, .slice_index = 0},
+	        dicom::seg::BinarySegmentationFramePlacement{
+	            .frame_index = 1, .slice_index = 0},
+	    };
+	const dicom::seg::BinarySegmentationFrameSetBitSource source(
+	    *seg, dicom::seg::BinaryLabelVolumeSize{.columns = 3, .rows = 2, .slices = 1},
+	    placements);
+	expect_throw_contains("binary label SegmentsOverlap=NO",
+	    [&] {
+		    (void)dicom::seg::build_binary_label_volume_from_segmentation(source);
+	    },
+	    "SegmentsOverlap=NO");
+}
+
 std::filesystem::path unique_temp_seg_path() {
 	const auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
 	return std::filesystem::temp_directory_path() /
@@ -569,6 +788,11 @@ std::filesystem::path unique_temp_seg_path() {
 } // namespace
 
 int main() {
+	verify_binary_label_code_table_and_restore();
+	verify_binary_label_volume_build_into_caller_buffer();
+	verify_binary_label_volume_from_segmentation_adapter();
+	verify_binary_label_volume_segments_overlap_no_rejects();
+
 	{
 		auto file = make_binary_seg_file();
 		if (!dicom::seg::is_segmentation_storage(*file)) {
