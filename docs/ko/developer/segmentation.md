@@ -5,7 +5,7 @@
 ## 지원 범위
 
 - SOP Class: BINARY/FRACTIONAL은 Segmentation Storage(`1.2.840.10008.5.1.4.1.1.66.4`), LABELMAP은 Label Map Segmentation Storage(`1.2.840.10008.5.1.4.1.1.66.7`)를 지원합니다.
-- BINARY SEG: native 1-bit multi-frame PixelData의 read/decode를 지원합니다. compressed BINARY SEG로의 pixel transcode 또는 compressed BINARY SEG에서의 transcode는 core pixel layer가 stored `BitsAllocated=1` layout을 끝까지 표현할 수 있게 된 뒤 지원합니다.
+- BINARY SEG: native 1-bit multi-frame PixelData와 Encapsulated Uncompressed frame payload의 read/decode를 지원합니다. compressed BINARY SEG로의 pixel transcode 또는 compressed BINARY SEG에서의 transcode는 core pixel layer가 stored `BitsAllocated=1` layout을 끝까지 표현할 수 있게 된 뒤 지원합니다.
 - FRACTIONAL SEG: 8-bit sample을 native uncompressed, Encapsulated Uncompressed, 그리고 codec이 있는 lossless compressed transfer syntax에서 지원합니다. decode 결과는 raw `uint8` sample이며, caller가 `raw_value / MaximumFractionalValue`로 변환할 수 있습니다.
 - LABELMAP SEG: Label Map Segmentation Storage에서 8-bit와 16-bit stored label sample을 native uncompressed, Encapsulated Uncompressed, 그리고 codec이 있는 lossless compressed transfer syntax로 지원합니다. decode는 stored label value를 보존하며, palette lookup과 color rendering은 viewer/UI layer의 책임입니다.
 - lossy 또는 near-lossless compressed SEG source/target은 거부합니다. Big Endian Label Map SEG는 이 계약에서 지원하지 않습니다.
@@ -17,7 +17,7 @@
 | --- | --- | --- | --- |
 | Native uncompressed Little Endian | read/decode 지원 | read/write/transcode 지원 | read/write/transcode 지원 |
 | Native Explicit VR Big Endian | BINARY native read는 generic DICOM path를 따름 | generic pixel path가 지원하는 범위에서만 지원 | 미지원 |
-| Encapsulated Uncompressed Explicit VR Little Endian | BINARY pixel transcode 미지원 | read/write/transcode 지원 | read/write/transcode 지원 |
+| Encapsulated Uncompressed Explicit VR Little Endian | read/decode 지원; BINARY pixel transcode 미지원 | read/write/transcode 지원 | read/write/transcode 지원 |
 | RLE Lossless, JPEG-LS Lossless, JPEG 2000 Lossless, HTJ2K Lossless, JPEG XL Lossless 같은 codec 등록된 lossless compressed image syntax | core 1-bit layout/write 지원 전까지 미지원 | read/write/transcode 지원 | read/write/transcode 지원 |
 | Lossy 또는 near-lossless compressed syntax | 거부 | 거부 | 거부 |
 | 지원하지 않는 compressed/video/referenced source codec | frame decode 또는 transcode 시점에 거부 | frame decode 또는 transcode 시점에 거부 | frame decode 또는 transcode 시점에 거부 |

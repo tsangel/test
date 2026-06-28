@@ -5,7 +5,7 @@
 ## 支持范围
 
 - SOP Class：BINARY/FRACTIONAL 使用 Segmentation Storage（`1.2.840.10008.5.1.4.1.1.66.4`），LABELMAP 使用 Label Map Segmentation Storage（`1.2.840.10008.5.1.4.1.1.66.7`）。
-- BINARY SEG：支持 native 1-bit multi-frame PixelData 的 read/decode。compressed BINARY SEG 的 pixel transcode 暂不支持，直到 core pixel layer 能 end to end 表示 stored `BitsAllocated=1` layout。
+- BINARY SEG：支持 native 1-bit multi-frame PixelData 和 Encapsulated Uncompressed frame payload 的 read/decode。compressed BINARY SEG 的 pixel transcode 暂不支持，直到 core pixel layer 能 end to end 表示 stored `BitsAllocated=1` layout。
 - FRACTIONAL SEG：支持 8-bit samples，适用于 native uncompressed、Encapsulated Uncompressed，以及有对应 codec 的 lossless compressed transfer syntax。decode 返回 raw `uint8` samples，caller 可以用 `raw_value / MaximumFractionalValue` 转换。
 - LABELMAP SEG：通过 Label Map Segmentation Storage 支持 8-bit 和 16-bit stored label samples，适用于 native uncompressed、Encapsulated Uncompressed，以及有对应 codec 的 lossless compressed transfer syntax。decode 保留 stored label value；palette lookup 和 color rendering 属于 viewer/UI layer 的职责。
 - lossy 或 near-lossless compressed SEG source/target 会被拒绝。本契约不支持 Big Endian Label Map SEG。
@@ -17,7 +17,7 @@
 | --- | --- | --- | --- |
 | Native uncompressed Little Endian | 支持 read/decode | 支持 read/write/transcode | 支持 read/write/transcode |
 | Native Explicit VR Big Endian | BINARY native read 遵循 generic DICOM path | 仅在 generic pixel path 支持的范围内支持 | 不支持 |
-| Encapsulated Uncompressed Explicit VR Little Endian | 不支持 BINARY pixel transcode | 支持 read/write/transcode | 支持 read/write/transcode |
+| Encapsulated Uncompressed Explicit VR Little Endian | 支持 read/decode；不支持 BINARY pixel transcode | 支持 read/write/transcode | 支持 read/write/transcode |
 | RLE Lossless、JPEG-LS Lossless、JPEG 2000 Lossless、HTJ2K Lossless、JPEG XL Lossless 等已注册 codec 的 lossless compressed image syntax | core 1-bit layout/write support 完成前不支持 | 支持 read/write/transcode | 支持 read/write/transcode |
 | Lossy 或 near-lossless compressed syntax | 拒绝 | 拒绝 | 拒绝 |
 | 不支持的 compressed/video/referenced source codec | 在 frame decode 或 transcode 时拒绝 | 在 frame decode 或 transcode 时拒绝 | 在 frame decode 或 transcode 时拒绝 |

@@ -102,10 +102,11 @@ struct SegmentMaskOptions {
 	bool error_when_not_present_in_frame{false};
 };
 
-/// Borrowed view over one native 1-bit BINARY SEG frame.
+/// Borrowed view over one bit-packed 1-bit BINARY SEG frame.
 /// `bytes` is the minimal byte window covering the frame, not the whole
-/// PixelData element. Pixel `i` is stored at local bit
-/// `first_bit_offset + i`, using the DICOM native LSB-first bit order.
+/// PixelData element. For Encapsulated Uncompressed frames the window excludes
+/// the optional even-length padding byte. Pixel `i` is stored at local bit
+/// `first_bit_offset + i`, using the DICOM LSB-first bit order.
 struct BinaryFrameBitsView {
 	std::span<const std::uint8_t> bytes{};
 	std::uint8_t first_bit_offset{0};
@@ -587,10 +588,12 @@ public:
 	[[nodiscard]] std::span<const std::uint16_t>
 	present_segment_numbers(std::size_t frame_index) const;
 
-	/// Borrow the native bit-packed storage for one BINARY SEG frame.
-	/// The returned byte window is minimal for the frame and may start at a
-	/// non-zero bit offset. The view is valid only while this Segmentation and
-	/// its PixelData storage remain alive.
+	/// Borrow the bit-packed storage for one BINARY SEG frame.
+	/// Native frames may start at a non-zero bit offset in the shared PixelData
+	/// stream. Encapsulated Uncompressed frames start at bit offset zero in the
+	/// frame item payload. The returned byte window is minimal for the frame and
+	/// remains valid only while this Segmentation and its PixelData storage stay
+	/// alive.
 	[[nodiscard]] BinaryFrameBitsView
 	binary_frame_bits(std::size_t frame_index) const;
 

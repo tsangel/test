@@ -188,7 +188,7 @@ for frame in seg.frames:
 
 ## 解码 BINARY SEG mask
 
-BINARY SEG 在 DICOM 中以 native 1-bit pixel 存储。DicomSDL 会 unpack，并返回值为 `0` 或 `1` 的 `uint8` mask。
+BINARY SEG 在 DICOM 中以 1-bit pixel 存储。DicomSDL 会 unpack，并返回值为 `0` 或 `1` 的 `uint8` mask。Native uncompressed 和 Encapsulated Uncompressed BINARY SEG 都可以这样读取。C++ 调用方如果想避免 unpack 整个 frame，可以使用 `binary_frame_bits()` 和 `for_each_binary_frame_set_bit()` 只遍历 set bit。
 
 ```python
 mask = seg.to_array(0)

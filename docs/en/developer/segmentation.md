@@ -5,7 +5,7 @@ This page records the public contract for DicomSDL's high-level DICOM Segmentati
 ## Supported Scope
 
 - SOP Classes: Segmentation Storage (`1.2.840.10008.5.1.4.1.1.66.4`) for BINARY/FRACTIONAL and Label Map Segmentation Storage (`1.2.840.10008.5.1.4.1.1.66.7`) for LABELMAP.
-- BINARY SEG: native 1-bit multi-frame PixelData is supported for read/decode. Pixel transcode to or from compressed BINARY SEG is intentionally unsupported until the core pixel layer can represent stored `BitsAllocated=1` layouts end to end.
+- BINARY SEG: native 1-bit multi-frame PixelData and Encapsulated Uncompressed frame payloads are supported for read/decode. Pixel transcode to or from compressed BINARY SEG is intentionally unsupported until the core pixel layer can represent stored `BitsAllocated=1` layouts end to end.
 - FRACTIONAL SEG: 8-bit samples are supported for native uncompressed, Encapsulated Uncompressed, and lossless compressed transfer syntaxes when the corresponding codec is available. Decoding returns raw `uint8` samples; callers can convert with `raw_value / MaximumFractionalValue`.
 - LABELMAP SEG: 8-bit and 16-bit stored label samples are supported through Label Map Segmentation Storage for native uncompressed, Encapsulated Uncompressed, and lossless compressed transfer syntaxes when the corresponding codec is available. Decoding preserves stored label values; palette lookup and color rendering are viewer/UI responsibilities.
 - Lossy and near-lossless compressed SEG sources and targets are rejected. Big Endian Label Map SEG is unsupported in this contract.
@@ -17,7 +17,7 @@ This page records the public contract for DicomSDL's high-level DICOM Segmentati
 | --- | --- | --- | --- |
 | Native uncompressed Little Endian | read/decode supported | read/write/transcode supported | read/write/transcode supported |
 | Native Explicit VR Big Endian | BINARY native read follows the generic DICOM path | supported only where the generic pixel path supports it | unsupported |
-| Encapsulated Uncompressed Explicit VR Little Endian | unsupported for BINARY pixel transcode | read/write/transcode supported | read/write/transcode supported |
+| Encapsulated Uncompressed Explicit VR Little Endian | read/decode supported; BINARY pixel transcode unsupported | read/write/transcode supported | read/write/transcode supported |
 | Lossless compressed image syntax with registered codec, such as RLE Lossless, JPEG-LS Lossless, JPEG 2000 Lossless, HTJ2K Lossless, or JPEG XL Lossless | unsupported until core 1-bit layout/write support lands | read/write/transcode supported | read/write/transcode supported |
 | Lossy or near-lossless compressed syntax | rejected | rejected | rejected |
 | Unsupported compressed/video/referenced source codec | rejected at frame decode or transcode time | rejected at frame decode or transcode time | rejected at frame decode or transcode time |

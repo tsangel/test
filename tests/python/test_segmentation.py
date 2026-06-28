@@ -394,7 +394,7 @@ def test_unsupported_segmentation_errors_are_explicit() -> None:
     assert compressed_bytes.count(explicit_uid) >= 1
     compressed_bytes = compressed_bytes.replace(explicit_uid, rle_uid, 1)
     seg = dicom.seg.read_bytes(compressed_bytes)
-    with pytest.raises(Exception, match="compressed/encapsulated BINARY SEG"):
+    with pytest.raises(Exception, match="compressed BINARY SEG"):
         seg.decode_frame(0)
 
     short_pixel_data = _make_binary_seg()

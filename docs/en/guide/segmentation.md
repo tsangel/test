@@ -214,8 +214,11 @@ metadata index built at open time.
 
 ## Decode a BINARY SEG Mask
 
-For BINARY SEG, DICOM stores native 1-bit pixels. DicomSDL returns an unpacked
-`uint8` mask with values `0` and `1`.
+For BINARY SEG, DICOM stores 1-bit pixels. DicomSDL returns an unpacked
+`uint8` mask with values `0` and `1`. Native uncompressed and Encapsulated
+Uncompressed BINARY SEG can be read this way. In C++, callers that need to
+avoid unpacking a whole frame can use `binary_frame_bits()` with
+`for_each_binary_frame_set_bit()`.
 
 ```python
 mask = seg.to_array(0)

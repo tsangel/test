@@ -456,6 +456,34 @@ std::unique_ptr<dicom::seg::Segmentation> roundtrip_seg_with_transfer_syntax(
 	return dicom::seg::from_dicomfile(std::move(reread));
 }
 
+void verify_seg_extended_offset_table_written(
+    dicom::uid::WellKnown transfer_syntax) {
+	auto bytes = make_labelmap_seg8_file()->write_bytes_with_transfer_syntax(
+	    transfer_syntax);
+	auto reread = dicom::read_bytes(
+	    "labelmap8-seg-eot", bytes.data(), bytes.size());
+	if (!reread) {
+		fail("labelmap8 EOT reread returned null");
+	}
+	const auto& pixel_data = reread->get_dataelement("PixelData"_tag);
+	if (pixel_data.is_missing() || !pixel_data.vr().is_pixel_sequence()) {
+		fail("labelmap8 EOT roundtrip should write encapsulated PixelData");
+	}
+	const auto* pixel_sequence = pixel_data.as_pixel_sequence();
+	if (!pixel_sequence || pixel_sequence->extended_offset_table_count() != 2) {
+		fail("labelmap8 EOT roundtrip should backpatch ExtendedOffsetTable");
+	}
+	auto seg = dicom::seg::from_dicomfile(std::move(reread));
+	std::vector<std::uint8_t> decoded0(6);
+	std::vector<std::uint8_t> decoded1(6);
+	seg->decode_frame_into(0, decoded0);
+	seg->decode_frame_into(1, decoded1);
+	if (decoded0 != std::vector<std::uint8_t>{0, 1, 2, 2, 0, 1} ||
+	    decoded1 != std::vector<std::uint8_t>{0, 0, 2, 0, 0, 0}) {
+		fail("labelmap8 EOT roundtrip decode mismatch");
+	}
+}
+
 void verify_fractional_roundtrip(dicom::uid::WellKnown transfer_syntax) {
 	auto seg = roundtrip_seg_with_transfer_syntax(
 	    make_fractional_seg_file(), transfer_syntax, "fractional-seg-roundtrip");
@@ -744,6 +772,50 @@ int main() {
 	}
 
 	{
+		auto file = make_binary_seg_file();
+		file->reset_encapsulated_pixel_data(2);
+		file->set_transfer_syntax_state_only(
+		    "EncapsulatedUncompressedExplicitVRLittleEndian"_uid);
+		file->set_encoded_pixel_frame(
+		    0, std::vector<std::uint8_t>{0x55, 0x0F});
+		file->set_encoded_pixel_frame(
+		    1, std::vector<std::uint8_t>{0x80, 0x33});
+		auto seg = dicom::seg::from_dicomfile(std::move(file));
+
+		const auto bits0 = seg->binary_frame_bits(0);
+		if (bits0.bytes.size() != 2 || bits0.first_bit_offset != 0 ||
+		    bits0.bit_count != 16 || bits0.rows != 2 || bits0.columns != 8) {
+			fail("encapsulated uncompressed binary frame bits view metadata mismatch");
+		}
+		const auto bits1 = seg->binary_frame_bits(1);
+		if (bits1.bytes.size() != 2 || bits1.first_bit_offset != 0 ||
+		    bits1.bit_count != 16 || bits1.rows != 2 || bits1.columns != 8) {
+			fail("encapsulated uncompressed binary frame 1 bits metadata mismatch");
+		}
+
+		std::vector<std::size_t> set_bits0;
+		std::vector<std::size_t> set_bits1;
+		seg->for_each_binary_frame_set_bit(
+		    0, [&](std::size_t pixel_index) { set_bits0.push_back(pixel_index); });
+		seg->for_each_binary_frame_set_bit(
+		    1, [&](std::size_t pixel_index) { set_bits1.push_back(pixel_index); });
+		if (set_bits0 != std::vector<std::size_t>{0, 2, 4, 6, 8, 9, 10, 11}) {
+			fail("encapsulated uncompressed binary frame 0 set-bit mismatch");
+		}
+		if (set_bits1 != std::vector<std::size_t>{7, 8, 9, 12, 13}) {
+			fail("encapsulated uncompressed binary frame 1 set-bit mismatch");
+		}
+
+		std::vector<std::uint8_t> decoded(16);
+		seg->decode_frame_into(1, decoded);
+		const std::vector<std::uint8_t> expected{
+		    0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0};
+		if (decoded != expected) {
+			fail("encapsulated uncompressed binary frame unpack mismatch");
+		}
+	}
+
+	{
 		auto yes_file = make_binary_seg_file();
 		set_text(*yes_file, "SegmentsOverlap", "YES");
 		auto yes_seg = dicom::seg::from_dicomfile(std::move(yes_file));
@@ -859,10 +931,10 @@ int main() {
 		std::vector<std::uint8_t> decoded(16);
 		expect_throw_contains("compressed binary SEG decode",
 		    [&] { seg->decode_frame_into(0, decoded); },
-		    "compressed/encapsulated BINARY SEG");
+		    "compressed BINARY SEG");
 		expect_throw_contains("compressed binary SEG bits",
 		    [&] { (void)seg->binary_frame_bits(0); },
-		    "compressed/encapsulated BINARY SEG");
+		    "compressed BINARY SEG");
 
 		auto deflated_frame_file = make_binary_seg_file();
 		deflated_frame_file->set_transfer_syntax_state_only(
@@ -871,7 +943,7 @@ int main() {
 		    dicom::seg::from_dicomfile(std::move(deflated_frame_file));
 		expect_throw_contains("Deflated Image Frame binary SEG decode",
 		    [&] { deflated_frame_seg->decode_frame_into(0, decoded); },
-		    "compressed/encapsulated BINARY SEG");
+		    "compressed BINARY SEG");
 	}
 
 	{
@@ -1006,6 +1078,7 @@ int main() {
 			verify_fractional_roundtrip(transfer_syntax);
 			verify_labelmap8_roundtrip(transfer_syntax);
 			verify_labelmap16_roundtrip(transfer_syntax);
+			verify_seg_extended_offset_table_written(transfer_syntax);
 		}
 	}
 
@@ -1297,6 +1370,10 @@ int main() {
 		auto missing_pixel_data = make_binary_seg_file();
 		missing_pixel_data->remove_dataelement("PixelData"_tag);
 		auto seg = dicom::seg::from_dicomfile(std::move(missing_pixel_data));
+		std::vector<std::uint8_t> decoded(16);
+		expect_throw_contains("missing binary SEG decode",
+		    [&] { seg->decode_frame_into(0, decoded); },
+		    "PixelData is missing");
 		expect_throw_contains("missing binary SEG bits",
 		    [&] { (void)seg->binary_frame_bits(0); },
 		    "PixelData is missing");
@@ -1306,6 +1383,10 @@ int main() {
 		auto seg = dicom::seg::from_dicomfile(make_fractional_seg_file());
 		expect_throw_contains("fractional binary frame bits",
 		    [&] { (void)seg->binary_frame_bits(0); },
+		    "BINARY SEG");
+		auto labelmap_seg = dicom::seg::from_dicomfile(make_labelmap_seg8_file());
+		expect_throw_contains("labelmap binary frame bits",
+		    [&] { (void)labelmap_seg->binary_frame_bits(0); },
 		    "BINARY SEG");
 	}
 
@@ -1334,6 +1415,43 @@ int main() {
 		std::vector<std::uint8_t> even_decoded(6);
 		expect_throw_contains("extra binary SEG PixelData byte",
 		    [&] { extra_even_seg->decode_frame_into(0, even_decoded); },
+		    "PixelData size mismatch");
+
+		auto encapsulated_padded_file = make_single_pixel_binary_seg_file({});
+		encapsulated_padded_file->reset_encapsulated_pixel_data(1);
+		encapsulated_padded_file->set_transfer_syntax_state_only(
+		    "EncapsulatedUncompressedExplicitVRLittleEndian"_uid);
+		encapsulated_padded_file->set_encoded_pixel_frame(
+		    0, std::vector<std::uint8_t>{0x01, 0x00});
+		auto encapsulated_padded =
+		    dicom::seg::from_dicomfile(std::move(encapsulated_padded_file));
+		encapsulated_padded->decode_frame_into(0, decoded);
+		if (decoded != std::vector<std::uint8_t>{1}) {
+			fail("encapsulated binary SEG zero padding byte decode mismatch");
+		}
+
+		auto encapsulated_nonzero_padding_file =
+		    make_single_pixel_binary_seg_file({});
+		encapsulated_nonzero_padding_file->reset_encapsulated_pixel_data(1);
+		encapsulated_nonzero_padding_file->set_transfer_syntax_state_only(
+		    "EncapsulatedUncompressedExplicitVRLittleEndian"_uid);
+		encapsulated_nonzero_padding_file->set_encoded_pixel_frame(
+		    0, std::vector<std::uint8_t>{0x01, 0x7F});
+		auto encapsulated_nonzero_padding = dicom::seg::from_dicomfile(
+		    std::move(encapsulated_nonzero_padding_file));
+		expect_throw_contains(
+		    "encapsulated non-zero binary SEG PixelData padding byte",
+		    [&] { encapsulated_nonzero_padding->decode_frame_into(0, decoded); },
+		    "padding byte");
+
+		auto encapsulated_missing_frame = make_binary_seg_file();
+		encapsulated_missing_frame->reset_encapsulated_pixel_data(2);
+		encapsulated_missing_frame->set_transfer_syntax_state_only(
+		    "EncapsulatedUncompressedExplicitVRLittleEndian"_uid);
+		auto encapsulated_missing_seg =
+		    dicom::seg::from_dicomfile(std::move(encapsulated_missing_frame));
+		expect_throw_contains("encapsulated binary SEG missing frame payload",
+		    [&] { (void)encapsulated_missing_seg->binary_frame_bits(0); },
 		    "PixelData size mismatch");
 	}
 

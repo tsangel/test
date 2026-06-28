@@ -362,6 +362,24 @@ template <typename T, typename U>
 	return rows * columns;
 }
 
+[[nodiscard]] std::size_t checked_binary_frame_byte_count(
+    std::size_t bit_count) {
+	return (bit_count / 8u) + ((bit_count % 8u) != 0 ? 1u : 0u);
+}
+
+[[nodiscard]] std::span<const std::uint8_t> checked_binary_frame_payload(
+    std::span<const std::uint8_t> bytes, std::size_t expected_bytes) {
+	const bool allows_even_length_padding =
+	    (expected_bytes % 2u) != 0 && bytes.size() == expected_bytes + 1u;
+	if (bytes.size() != expected_bytes && !allows_even_length_padding) {
+		throw_decode("BINARY SEG PixelData size mismatch");
+	}
+	if (allows_even_length_padding && bytes[expected_bytes] != 0) {
+		throw_decode("BINARY SEG PixelData padding byte must be zero");
+	}
+	return bytes.subspan(0, expected_bytes);
+}
+
 [[nodiscard]] std::span<const std::uint8_t> labelmap_pixeldata_bytes(
     const DicomFile& file, std::size_t frame_count,
     std::size_t pixels_per_frame, std::uint16_t bits_allocated) {
@@ -1178,9 +1196,8 @@ Segmentation::binary_frame_bits(std::size_t frame_index) const {
 	file_->ensure_loaded("PixelData"_tag);
 
 	const auto transfer_syntax = file_->transfer_syntax_uid();
-	if (transfer_syntax &&
-	    (!transfer_syntax.is_uncompressed() || transfer_syntax.is_encapsulated())) {
-		throw_decode("compressed/encapsulated BINARY SEG PixelData is not supported");
+	if (transfer_syntax && !transfer_syntax.is_uncompressed()) {
+		throw_decode("compressed BINARY SEG PixelData is not supported");
 	}
 	const auto bits_allocated =
 	    file_->get_dataelement("BitsAllocated"_tag).to_long().value_or(0);
@@ -1194,6 +1211,20 @@ Segmentation::binary_frame_bits(std::size_t frame_index) const {
 	}
 
 	const auto pixels_per_frame = checked_frame_sample_count(rows_, columns_);
+	const auto frame_expected_bytes =
+	    checked_binary_frame_byte_count(pixels_per_frame);
+	if (transfer_syntax && transfer_syntax.is_encapsulated()) {
+		const auto frame_bytes = checked_binary_frame_payload(
+		    file_->encoded_pixel_frame_view(frame_index), frame_expected_bytes);
+		return BinaryFrameBitsView{
+		    frame_bytes,
+		    0,
+		    pixels_per_frame,
+		    rows_,
+		    columns_,
+		};
+	}
+
 	if (frame_index >
 	    std::numeric_limits<std::size_t>::max() / pixels_per_frame) {
 		throw_decode("frame bit offset overflows size_t");
@@ -1204,28 +1235,20 @@ Segmentation::binary_frame_bits(std::size_t frame_index) const {
 	}
 	const auto frame_bit_offset = frame_index * pixels_per_frame;
 	const auto total_bits = index_.frames.size() * pixels_per_frame;
-	const auto expected_bytes =
-	    (total_bits / 8u) + ((total_bits % 8u) != 0 ? 1u : 0u);
+	const auto expected_bytes = checked_binary_frame_byte_count(total_bits);
 
 	const auto& pixel_data = file_->get_dataelement("PixelData"_tag);
 	if (!pixel_data) {
 		throw_decode("BINARY SEG PixelData is missing");
 	}
 	if (pixel_data.as_pixel_sequence()) {
-		throw_decode("compressed/encapsulated BINARY SEG PixelData is not supported");
+		throw_decode("unexpected encapsulated BINARY SEG PixelData");
 	}
 	if (dicom::detail::is_detached_pixel_payload_marker(pixel_data)) {
 		throw_decode("BINARY SEG PixelData payload is detached");
 	}
-	const auto bytes = pixel_data.value_span();
-	const bool allows_even_length_padding =
-	    (expected_bytes % 2u) != 0 && bytes.size() == expected_bytes + 1u;
-	if (bytes.size() != expected_bytes && !allows_even_length_padding) {
-		throw_decode("BINARY SEG PixelData size mismatch");
-	}
-	if (allows_even_length_padding && bytes[expected_bytes] != 0) {
-		throw_decode("BINARY SEG PixelData padding byte must be zero");
-	}
+	const auto bytes =
+	    checked_binary_frame_payload(pixel_data.value_span(), expected_bytes);
 
 	const auto first_byte = frame_bit_offset / 8u;
 	const auto first_bit_offset =

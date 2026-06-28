@@ -5,7 +5,7 @@
 ## 対応範囲
 
 - SOP Class: BINARY/FRACTIONAL は Segmentation Storage（`1.2.840.10008.5.1.4.1.1.66.4`）、LABELMAP は Label Map Segmentation Storage（`1.2.840.10008.5.1.4.1.1.66.7`）をサポートします。
-- BINARY SEG: native 1-bit multi-frame PixelData の read/decode をサポートします。compressed BINARY SEG への pixel transcode、または compressed BINARY SEG からの transcode は、core pixel layer が stored `BitsAllocated=1` layout を end to end で表現できるようになるまで意図的に未対応です。
+- BINARY SEG: native 1-bit multi-frame PixelData と Encapsulated Uncompressed frame payload の read/decode をサポートします。compressed BINARY SEG への pixel transcode、または compressed BINARY SEG からの transcode は、core pixel layer が stored `BitsAllocated=1` layout を end to end で表現できるようになるまで意図的に未対応です。
 - FRACTIONAL SEG: 8-bit samples を native uncompressed、Encapsulated Uncompressed、対応 codec がある lossless compressed transfer syntax でサポートします。decode 結果は raw `uint8` samples で、caller は `raw_value / MaximumFractionalValue` で変換できます。
 - LABELMAP SEG: Label Map Segmentation Storage で 8-bit と 16-bit の stored label samples を native uncompressed、Encapsulated Uncompressed、対応 codec がある lossless compressed transfer syntax でサポートします。decode は stored label value を保持します。palette lookup と color rendering は viewer/UI layer の責務です。
 - lossy または near-lossless compressed SEG source/target は拒否します。Big Endian Label Map SEG はこの契約ではサポートしません。
@@ -17,7 +17,7 @@
 | --- | --- | --- | --- |
 | Native uncompressed Little Endian | read/decode 対応 | read/write/transcode 対応 | read/write/transcode 対応 |
 | Native Explicit VR Big Endian | BINARY native read は generic DICOM path に従う | generic pixel path が対応する範囲のみ対応 | 未対応 |
-| Encapsulated Uncompressed Explicit VR Little Endian | BINARY pixel transcode は未対応 | read/write/transcode 対応 | read/write/transcode 対応 |
+| Encapsulated Uncompressed Explicit VR Little Endian | read/decode 対応。BINARY pixel transcode は未対応 | read/write/transcode 対応 | read/write/transcode 対応 |
 | RLE Lossless、JPEG-LS Lossless、JPEG 2000 Lossless、HTJ2K Lossless、JPEG XL Lossless など、登録済み codec を持つ lossless compressed image syntax | core 1-bit layout/write support までは未対応 | read/write/transcode 対応 | read/write/transcode 対応 |
 | Lossy または near-lossless compressed syntax | 拒否 | 拒否 | 拒否 |
 | 未対応の compressed/video/referenced source codec | frame decode または transcode 時に拒否 | frame decode または transcode 時に拒否 | frame decode または transcode 時に拒否 |

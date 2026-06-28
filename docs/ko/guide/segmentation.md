@@ -213,8 +213,11 @@ for frame in seg.frames:
 
 ## BINARY SEG mask decode
 
-BINARY SEG는 DICOM 안에 native 1-bit pixel로 저장된다. DicomSDL은 이를 unpack해서
-값이 `0` 또는 `1`인 `uint8` mask로 돌려준다.
+BINARY SEG는 DICOM 안에 1-bit pixel로 저장된다. DicomSDL은 이를 unpack해서
+값이 `0` 또는 `1`인 `uint8` mask로 돌려준다. Native uncompressed와 Encapsulated
+Uncompressed BINARY SEG를 이 방식으로 읽을 수 있다. C++에서 frame 전체를
+unpack하지 않고 set bit만 순회하려면 `binary_frame_bits()`와
+`for_each_binary_frame_set_bit()`를 사용한다.
 
 ```python
 mask = seg.to_array(0)
