@@ -1195,8 +1195,13 @@ Segmentation::binary_frame_bits(std::size_t frame_index) const {
 		throw_decode("BINARY SEG PixelData payload is detached");
 	}
 	const auto bytes = pixel_data.value_span();
-	if (bytes.size() < expected_bytes) {
+	const bool allows_even_length_padding =
+	    (expected_bytes % 2u) != 0 && bytes.size() == expected_bytes + 1u;
+	if (bytes.size() != expected_bytes && !allows_even_length_padding) {
 		throw_decode("BINARY SEG PixelData size mismatch");
+	}
+	if (allows_even_length_padding && bytes[expected_bytes] != 0) {
+		throw_decode("BINARY SEG PixelData padding byte must be zero");
 	}
 
 	const auto first_byte = frame_bit_offset / 8u;

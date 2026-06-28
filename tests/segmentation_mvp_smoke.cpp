@@ -314,6 +314,19 @@ std::unique_ptr<dicom::DicomFile> make_unaligned_binary_seg_file() {
 	return file;
 }
 
+std::unique_ptr<dicom::DicomFile> make_single_pixel_binary_seg_file(
+    std::vector<std::uint8_t> pixel_data) {
+	auto file = std::make_unique<dicom::DicomFile>();
+	populate_common_seg_metadata(*file, "BINARY", 1, 1, 1);
+	set_long(*file, "BitsAllocated", 1);
+	set_long(*file, "BitsStored", 1);
+	set_long(*file, "HighBit", 0);
+	populate_segment(*file, 0, 1, "Single");
+	populate_frame(*file, 0, 1, 10.0);
+	file->set_native_pixel_data(std::move(pixel_data), dicom::VR::OB);
+	return file;
+}
+
 std::unique_ptr<dicom::DicomFile> make_fractional_seg_file() {
 	auto file = std::make_unique<dicom::DicomFile>();
 	populate_common_seg_metadata(*file, "FRACTIONAL", 1, 2, 2);
@@ -1231,6 +1244,34 @@ int main() {
 		std::vector<std::uint8_t> decoded(16);
 		expect_throw_contains("short binary SEG PixelData",
 		    [&] { seg->decode_frame_into(0, decoded); },
+		    "PixelData size mismatch");
+	}
+
+	{
+		auto padded_pixel_data =
+		    dicom::seg::from_dicomfile(make_single_pixel_binary_seg_file(
+		        std::vector<std::uint8_t>{0x01, 0x00}));
+		std::vector<std::uint8_t> decoded(1);
+		padded_pixel_data->decode_frame_into(0, decoded);
+		if (decoded != std::vector<std::uint8_t>{1}) {
+			fail("binary SEG zero padding byte decode mismatch");
+		}
+
+		auto nonzero_padding =
+		    dicom::seg::from_dicomfile(make_single_pixel_binary_seg_file(
+		        std::vector<std::uint8_t>{0x01, 0x7F}));
+		expect_throw_contains("non-zero binary SEG PixelData padding byte",
+		    [&] { nonzero_padding->decode_frame_into(0, decoded); },
+		    "padding byte");
+
+		auto extra_even_length_padding = make_unaligned_binary_seg_file();
+		extra_even_length_padding->set_native_pixel_data(
+		    std::vector<std::uint8_t>{0xE5, 0x04, 0x00}, dicom::VR::OB);
+		auto extra_even_seg =
+		    dicom::seg::from_dicomfile(std::move(extra_even_length_padding));
+		std::vector<std::uint8_t> even_decoded(6);
+		expect_throw_contains("extra binary SEG PixelData byte",
+		    [&] { extra_even_seg->decode_frame_into(0, even_decoded); },
 		    "PixelData size mismatch");
 	}
 
