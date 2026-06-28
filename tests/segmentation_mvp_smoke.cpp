@@ -731,6 +731,70 @@ void verify_binary_label_volume_build_into_caller_buffer() {
 	    telemetry.non_empty_frame_count != 2) {
 		fail("binary label build_into telemetry mismatch");
 	}
+
+	std::vector<dicom::seg::BinaryLabelCode> reserved_label_volume(8, 777);
+	auto reserved_code_table = dicom::seg::create_binary_label_code_table(
+	    source.segments,
+	    dicom::seg::BinaryLabelVolumeOptions{.single_label_code_end = 8});
+	std::vector<std::uint16_t> compact_source_segment_table{0, 10, 20};
+	dicom::seg::build_binary_label_volume_into(
+	    make_test_binary_frame_set_bit_source(source),
+	    dicom::seg::BinaryLabelVolumeBuildTarget{
+	        .size = source.size,
+	        .label_volume = reserved_label_volume,
+	        .code_table = &reserved_code_table,
+	        .source_dicom_segment_by_label_id = compact_source_segment_table,
+	    },
+	    dicom::seg::BinaryLabelVolumeBuildOptions{
+	        .segments_overlap = dicom::seg::BinaryLabelSegmentsOverlap::no,
+	    });
+	if (reserved_label_volume !=
+	    std::vector<dicom::seg::BinaryLabelCode>{1, 0, 1, 0, 0, 2, 0, 0}) {
+		fail("binary label build_into compact source segment table mismatch");
+	}
+
+	std::vector<dicom::seg::BinaryLabelCode> bad_label_volume(8, 0);
+	auto short_code_table = dicom::seg::create_binary_label_code_table(
+	    source.segments);
+	std::vector<std::uint16_t> short_source_segment_table{0, 10};
+	expect_throw_contains("binary label build_into short source segment table",
+	    [&] {
+		    dicom::seg::build_binary_label_volume_into(
+		        make_test_binary_frame_set_bit_source(source),
+		        dicom::seg::BinaryLabelVolumeBuildTarget{
+		            .size = source.size,
+		            .label_volume = bad_label_volume,
+		            .code_table = &short_code_table,
+		            .source_dicom_segment_by_label_id =
+		                short_source_segment_table,
+		        },
+		        dicom::seg::BinaryLabelVolumeBuildOptions{
+		            .segments_overlap =
+		                dicom::seg::BinaryLabelSegmentsOverlap::no,
+		        });
+	    },
+	    "source_dicom_segment_by_label_id");
+
+	auto non_background_zero_code_table =
+	    dicom::seg::create_binary_label_code_table(source.segments);
+	std::vector<std::uint16_t> non_background_zero_table{99, 10, 20};
+	expect_throw_contains("binary label build_into source segment table zero",
+	    [&] {
+		    dicom::seg::build_binary_label_volume_into(
+		        make_test_binary_frame_set_bit_source(source),
+		        dicom::seg::BinaryLabelVolumeBuildTarget{
+		            .size = source.size,
+		            .label_volume = bad_label_volume,
+		            .code_table = &non_background_zero_code_table,
+		            .source_dicom_segment_by_label_id =
+		                non_background_zero_table,
+		        },
+		        dicom::seg::BinaryLabelVolumeBuildOptions{
+		            .segments_overlap =
+		                dicom::seg::BinaryLabelSegmentsOverlap::no,
+		        });
+	    },
+	    "index 0");
 }
 
 void verify_binary_label_volume_from_segmentation_adapter() {

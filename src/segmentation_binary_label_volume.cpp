@@ -116,6 +116,22 @@ void validate_binary_label_frame_metadata(
 	}
 }
 
+void validate_binary_label_source_segment_table(
+    std::span<const std::uint16_t> source_segment_by_label_id,
+    std::size_t source_label_count) {
+	if (source_segment_by_label_id.empty()) {
+		return;
+	}
+	if (source_segment_by_label_id.size() <= source_label_count) {
+		throw std::invalid_argument(
+		    "source_dicom_segment_by_label_id must cover all source label_ids");
+	}
+	if (source_segment_by_label_id.front() != 0) {
+		throw std::invalid_argument(
+		    "source_dicom_segment_by_label_id index 0 must be background");
+	}
+}
+
 template <class VisitVoxel>
 struct BinarySetBitCallbackContext {
 	VisitVoxel* visit_voxel{nullptr};
@@ -656,12 +672,6 @@ void build_binary_label_volume_into(
 		throw std::invalid_argument(
 		    "BINARY SEG code_table does not cover all source labels");
 	}
-	clear_binary_label_volume(target.label_volume);
-	if (target.source_frame_map) {
-		target.source_frame_map->clear();
-		target.source_frame_map->reserve(source.frames().size());
-	}
-
 	std::vector<std::uint16_t> local_source_segment_by_label_id;
 	std::span<const std::uint16_t> source_segment_by_label_id =
 	    target.source_dicom_segment_by_label_id;
@@ -671,6 +681,14 @@ void build_binary_label_volume_into(
 		        source.source_dicom_segment_numbers(),
 		        target.code_table->single_label_code_end());
 		source_segment_by_label_id = local_source_segment_by_label_id;
+	}
+	validate_binary_label_source_segment_table(source_segment_by_label_id,
+	    source.source_dicom_segment_numbers().size());
+
+	clear_binary_label_volume(target.label_volume);
+	if (target.source_frame_map) {
+		target.source_frame_map->clear();
+		target.source_frame_map->reserve(source.frames().size());
 	}
 
 	const BinaryLabelVolumeSize size = target.size;
@@ -738,9 +756,7 @@ void build_binary_label_volume_into(
 		if (target.source_frame_map) {
 			const std::size_t label_index = frame.label_id;
 			const std::uint16_t dicom_segment_number =
-			    label_index < source_segment_by_label_id.size()
-			        ? source_segment_by_label_id[label_index]
-			        : 0;
+			    source_segment_by_label_id[label_index];
 			target.source_frame_map->push_back(BinaryLabelSourceFrameMapEntry{
 			    .source_frame_index = frame.source_frame_index,
 			    .dicom_segment_number = dicom_segment_number,
