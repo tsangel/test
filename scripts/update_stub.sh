@@ -111,11 +111,13 @@ find "${TMP_PYTHON_ROOT}/dicomsdl" -maxdepth 1 \( -type f -o -type l \) \
 
 NATIVE_MODULE_PATH=""
 while IFS= read -r candidate; do
-	NATIVE_MODULE_PATH="$candidate"
-	break
+	if [[ "$candidate" =~ /lib\.[^/]+/dicomsdl/_dicomsdl ]]; then
+		NATIVE_MODULE_PATH="$candidate"
+		break
+	fi
 done < <(find "${BUILD_DIR}" \( -type f -o -type l \) \
 	\( -name '_dicomsdl*.so' -o -name '_dicomsdl*.pyd' -o -name '_dicomsdl*.dylib' \) \
-	| sort | rg '/lib\.[^/]+/dicomsdl/_dicomsdl')
+	| sort)
 
 if [[ -z "${NATIVE_MODULE_PATH}" ]]; then
 	while IFS= read -r candidate; do
