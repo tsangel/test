@@ -33,6 +33,17 @@ constexpr BinaryLabelCode kBinaryLabelMaxCode =
     std::numeric_limits<BinaryLabelCode>::max();
 constexpr std::size_t kBinaryLabelMaxOverlapSetSize = 128;
 
+struct BinaryLabelRgba8 {
+	std::uint8_t r{0};
+	std::uint8_t g{0};
+	std::uint8_t b{0};
+	std::uint8_t a{0};
+
+	friend bool operator==(
+	    const BinaryLabelRgba8& lhs,
+	    const BinaryLabelRgba8& rhs) = default;
+};
+
 struct BinaryLabelVolumeSize {
 	std::size_t columns{0};
 	std::size_t rows{0};
@@ -361,6 +372,35 @@ void restore_binary_label_mask(std::span<const BinaryLabelCode> label_volume,
 void restore_binary_label_mask(std::span<const BinaryLabelCode> label_volume,
     const BinaryLabelCodeTable& code_table, BinaryLabelId label_id,
     BinaryLabelCodeSet& label_code_set, std::span<std::uint8_t> mask_out);
+
+/// Fill a dense label-code -> RGBA table for GPU/CPU display.
+/// The resolver decides colors and overlap blending policy for every non-empty
+/// label set. `out_lut` must cover the full uint16 label-code space so it can be
+/// uploaded as a 256x256 RGBA texture without remapping.
+template <class ResolveColor>
+void build_binary_label_rgba8_lut(
+    const BinaryLabelCodeTable& code_table,
+    std::span<BinaryLabelRgba8> out_lut,
+    ResolveColor&& resolve_color,
+    BinaryLabelRgba8 background_color = {}) {
+	constexpr auto required_size =
+	    static_cast<std::size_t>(kBinaryLabelMaxCode) + 1u;
+	if (out_lut.size() < required_size) {
+		throw std::invalid_argument(
+		    "BINARY SEG RGBA LUT must cover all uint16 label codes");
+	}
+
+	std::fill(out_lut.begin(), out_lut.end(), background_color);
+	auto&& resolver = resolve_color;
+	for (std::size_t code = 1; code < required_size; ++code) {
+		const auto label_code = static_cast<BinaryLabelCode>(code);
+		const BinaryLabelSetView label_set =
+		    code_table.label_set_by_label_code(label_code);
+		if (!label_set.is_empty()) {
+			out_lut[code] = resolver(label_code, label_set);
+		}
+	}
+}
 
 /// Fast path for sources declaring SegmentsOverlap=NO.
 template <class VisitSetVoxel>

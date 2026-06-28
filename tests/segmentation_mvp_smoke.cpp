@@ -653,6 +653,30 @@ void verify_binary_label_code_table_and_restore() {
 	    volume.code_table.telemetry().reused_overlap_label_set_count < 1) {
 		fail("binary label overlap telemetry mismatch");
 	}
+
+	const dicom::seg::BinaryLabelRgba8 background{1, 2, 3, 4};
+	std::vector<dicom::seg::BinaryLabelRgba8> lut(
+	    static_cast<std::size_t>(dicom::seg::kBinaryLabelMaxCode) + 1u);
+	dicom::seg::build_binary_label_rgba8_lut(
+	    volume.code_table,
+	    lut,
+	    [](dicom::seg::BinaryLabelCode,
+	        dicom::seg::BinaryLabelSetView label_set) {
+		    const auto first = label_set.size() > 0 ? label_set[0] : 0;
+		    const auto second = label_set.size() > 1 ? label_set[1] : 0;
+		    return dicom::seg::BinaryLabelRgba8{
+		        static_cast<std::uint8_t>(first),
+		        static_cast<std::uint8_t>(second),
+		        static_cast<std::uint8_t>(label_set.size()),
+		        255};
+	    },
+	    background);
+	if (!(lut[0] == background) ||
+	    !(lut[1] == dicom::seg::BinaryLabelRgba8{1, 0, 1, 255}) ||
+	    !(lut[pair_code] == dicom::seg::BinaryLabelRgba8{1, 2, 2, 255}) ||
+	    !(lut[triple_code] == dicom::seg::BinaryLabelRgba8{1, 2, 3, 255})) {
+		fail("binary label RGBA LUT mismatch");
+	}
 }
 
 void verify_binary_label_volume_build_into_caller_buffer() {

@@ -4696,6 +4696,113 @@ py_binary_label_id_for_segment_number(
 	return std::nullopt;
 }
 
+[[nodiscard]] dicom::seg::BinaryLabelRgba8 py_binary_label_rgba8_from_sequence(
+    nb::handle value, const char* context) {
+	PyObject* sequence = PySequence_Fast(value.ptr(), context);
+	if (sequence == nullptr) {
+		throw nb::python_error();
+	}
+	nb::object owner = nb::steal<nb::object>(sequence);
+	if (PySequence_Fast_GET_SIZE(sequence) != 4) {
+		throw nb::value_error(
+		    (std::string(context) + " must be an RGBA tuple/list of length 4").c_str());
+	}
+	std::array<std::uint8_t, 4> out{};
+	for (Py_ssize_t index = 0; index < 4; ++index) {
+		PyObject* item = PySequence_Fast_GET_ITEM(sequence, index);
+		const long value_long = PyLong_AsLong(item);
+		if (value_long == -1 && PyErr_Occurred()) {
+			throw nb::python_error();
+		}
+		if (value_long < 0 || value_long > 255) {
+			throw nb::value_error(
+			    (std::string(context) + " RGBA components must be in [0, 255]").c_str());
+		}
+		out[static_cast<std::size_t>(index)] =
+		    static_cast<std::uint8_t>(value_long);
+	}
+	return dicom::seg::BinaryLabelRgba8{out[0], out[1], out[2], out[3]};
+}
+
+[[nodiscard]] std::vector<dicom::seg::BinaryLabelRgba8>
+py_binary_label_rgba8_table_by_label_id(
+    nb::handle table, dicom::seg::BinaryLabelId max_label_id) {
+	PyObject* sequence = PySequence_Fast(
+	    table.ptr(), "label_rgba_by_label_id must be a sequence");
+	if (sequence == nullptr) {
+		throw nb::python_error();
+	}
+	nb::object owner = nb::steal<nb::object>(sequence);
+	const auto size = static_cast<std::size_t>(PySequence_Fast_GET_SIZE(sequence));
+	if (size <= static_cast<std::size_t>(max_label_id)) {
+		throw nb::value_error(
+		    "label_rgba_by_label_id must include index 0 and every label_id");
+	}
+	std::vector<dicom::seg::BinaryLabelRgba8> colors(size);
+	for (std::size_t index = 0; index < size; ++index) {
+		PyObject* item =
+		    PySequence_Fast_GET_ITEM(sequence, static_cast<Py_ssize_t>(index));
+		colors[index] = py_binary_label_rgba8_from_sequence(
+		    nb::borrow<nb::object>(item), "label_rgba_by_label_id item");
+	}
+	return colors;
+}
+
+[[nodiscard]] nb::object py_binary_label_build_rgba8_lut(
+    const PyBinaryLabelVolume& self, nb::handle label_rgba_by_label_id,
+    nb::object background) {
+	static_assert(sizeof(dicom::seg::BinaryLabelRgba8) == 4);
+	static_assert(alignof(dicom::seg::BinaryLabelRgba8) == 1);
+	const auto& volume = self.get();
+	const auto max_label_id = static_cast<dicom::seg::BinaryLabelId>(
+	    volume.code_table.single_label_code_end());
+	const auto colors =
+	    py_binary_label_rgba8_table_by_label_id(label_rgba_by_label_id, max_label_id);
+	const dicom::seg::BinaryLabelRgba8 background_color =
+	    background.is_none()
+	        ? dicom::seg::BinaryLabelRgba8{}
+	        : py_binary_label_rgba8_from_sequence(background, "background");
+
+	const std::array<std::size_t, 4> shape{256, 256, 4, 0};
+	const std::array<std::int64_t, 4> strides{1024, 4, 1, 0};
+	constexpr auto label_code_count =
+	    static_cast<std::size_t>(dicom::seg::kBinaryLabelMaxCode) + 1u;
+	auto out = make_writable_numpy_array(
+	    3, shape, strides, decoded_array_spec(dicom::pixel::DataType::u8).dtype,
+	    label_code_count * sizeof(dicom::seg::BinaryLabelRgba8));
+	auto lut = std::span<dicom::seg::BinaryLabelRgba8>(
+	    reinterpret_cast<dicom::seg::BinaryLabelRgba8*>(out.bytes.data()),
+	    label_code_count);
+	{
+		nb::gil_scoped_release release;
+		dicom::seg::build_binary_label_rgba8_lut(
+		    volume.code_table,
+		    lut,
+		    [&](dicom::seg::BinaryLabelCode,
+		        dicom::seg::BinaryLabelSetView label_set) {
+			    std::uint32_t r = 0;
+			    std::uint32_t g = 0;
+			    std::uint32_t b = 0;
+			    std::uint32_t a = 0;
+			    for (std::size_t index = 0; index < label_set.size(); ++index) {
+				    const auto color = colors[label_set[index]];
+				    r += color.r;
+				    g += color.g;
+				    b += color.b;
+				    a += color.a;
+			    }
+			    const auto count = static_cast<std::uint32_t>(label_set.size());
+			    return dicom::seg::BinaryLabelRgba8{
+			        static_cast<std::uint8_t>(r / count),
+			        static_cast<std::uint8_t>(g / count),
+			        static_cast<std::uint8_t>(b / count),
+			        static_cast<std::uint8_t>(a / count)};
+		    },
+		    background_color);
+	}
+	return nb::cast(std::move(out.array));
+}
+
 [[nodiscard]] nb::object py_binary_label_restore_mask_for_label_id(
     const PyBinaryLabelVolume& self, dicom::seg::BinaryLabelId label_id) {
 	const auto& volume = self.get();
@@ -8419,6 +8526,14 @@ NB_MODULE(_dicomsdl, m) {
 		    },
 		    nb::arg("label_id"),
 		    "Return direct and overlap label codes containing one label_id.")
+		.def("build_rgba8_lut",
+		    &py_binary_label_build_rgba8_lut,
+		    nb::arg("label_rgba_by_label_id"),
+		    nb::kw_only(),
+		    nb::arg("background") = nb::none(),
+		    "Build a uint8 RGBA LUT with shape (256, 256, 4). "
+		    "label_rgba_by_label_id is indexed by dense label_id; "
+		    "overlap colors are averaged from their member labels.")
 		.def("restore_mask_for_label_id",
 		    &py_binary_label_restore_mask_for_label_id,
 		    nb::arg("label_id"),
