@@ -203,23 +203,32 @@ dicomsdl_fetch_charls()
 dicomsdl_fetch_libdeflate()
 dicomsdl_fetch_openjph()
 dicomsdl_fetch_libjxl()
-dicomsdl_prepare_libturbojpeg()
 
-add_dependencies(dicomsdl dicomsdl_libturbojpeg)
+set(DICOMSDL_NEEDS_LIBTURBOJPEG OFF)
+if(DICOMSDL_PIXEL_JPEG_STATIC_PLUGIN OR DICOMSDL_PIXEL_JPEG_PLUGIN)
+    set(DICOMSDL_NEEDS_LIBTURBOJPEG ON)
+endif()
+
+if(DICOMSDL_NEEDS_LIBTURBOJPEG)
+    dicomsdl_prepare_libturbojpeg()
+    add_dependencies(dicomsdl dicomsdl_libturbojpeg)
+endif()
 
 target_link_libraries(dicomsdl PUBLIC ${DICOMSDL_FMT_TARGET})
 target_link_libraries(dicomsdl PRIVATE
     ${DICOMSDL_YYJSON_TARGET}
     ${DICOMSDL_OPENJPEG_TARGET}
     ${DICOMSDL_CHARLS_TARGET}
-    dicomsdl_turbojpeg
     ${DICOMSDL_LIBDEFLATE_TARGET}
 )
 
-target_include_directories(dicomsdl PRIVATE
-    ${dicomsdl_libjpeg_turbo_SOURCE_DIR}/src
-    ${dicomsdl_libjpeg_turbo_BINARY_DIR}
-)
+if(DICOMSDL_NEEDS_LIBTURBOJPEG)
+    target_link_libraries(dicomsdl PRIVATE dicomsdl_turbojpeg)
+    target_include_directories(dicomsdl PRIVATE
+        ${dicomsdl_libjpeg_turbo_SOURCE_DIR}/src
+        ${dicomsdl_libjpeg_turbo_BINARY_DIR}
+    )
+endif()
 
 if(DICOMSDL_ENABLE_OPENJPH)
     target_link_libraries(dicomsdl PRIVATE ${DICOMSDL_OPENJPH_TARGET})
