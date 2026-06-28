@@ -4706,6 +4706,23 @@ py_binary_label_id_for_segment_number(
 	return std::nullopt;
 }
 
+[[nodiscard]] Py_ssize_t py_sequence_size_or_throw(PyObject* sequence) {
+	const Py_ssize_t size = PySequence_Size(sequence);
+	if (size < 0) {
+		throw nb::python_error();
+	}
+	return size;
+}
+
+[[nodiscard]] nb::object py_sequence_get_item_or_throw(
+    PyObject* sequence, Py_ssize_t index) {
+	PyObject* item = PySequence_GetItem(sequence, index);
+	if (item == nullptr) {
+		throw nb::python_error();
+	}
+	return nb::steal<nb::object>(item);
+}
+
 [[nodiscard]] dicom::seg::BinaryLabelRgba8 py_binary_label_rgba8_from_sequence(
     nb::handle value, const char* context) {
 	PyObject* sequence = PySequence_Fast(value.ptr(), context);
@@ -4713,14 +4730,14 @@ py_binary_label_id_for_segment_number(
 		throw nb::python_error();
 	}
 	nb::object owner = nb::steal<nb::object>(sequence);
-	if (PySequence_Fast_GET_SIZE(sequence) != 4) {
+	if (py_sequence_size_or_throw(sequence) != 4) {
 		throw nb::value_error(
 		    (std::string(context) + " must be an RGBA tuple/list of length 4").c_str());
 	}
 	std::array<std::uint8_t, 4> out{};
 	for (Py_ssize_t index = 0; index < 4; ++index) {
-		PyObject* item = PySequence_Fast_GET_ITEM(sequence, index);
-		const long value_long = PyLong_AsLong(item);
+		nb::object item = py_sequence_get_item_or_throw(sequence, index);
+		const long value_long = PyLong_AsLong(item.ptr());
 		if (value_long == -1 && PyErr_Occurred()) {
 			throw nb::python_error();
 		}
@@ -4743,17 +4760,17 @@ py_binary_label_rgba8_table_by_label_id(
 		throw nb::python_error();
 	}
 	nb::object owner = nb::steal<nb::object>(sequence);
-	const auto size = static_cast<std::size_t>(PySequence_Fast_GET_SIZE(sequence));
+	const auto size = static_cast<std::size_t>(py_sequence_size_or_throw(sequence));
 	if (size <= static_cast<std::size_t>(max_label_id)) {
 		throw nb::value_error(
 		    "label_rgba_by_label_id must include index 0 and every label_id");
 	}
 	std::vector<dicom::seg::BinaryLabelRgba8> colors(size);
 	for (std::size_t index = 0; index < size; ++index) {
-		PyObject* item =
-		    PySequence_Fast_GET_ITEM(sequence, static_cast<Py_ssize_t>(index));
+		nb::object item = py_sequence_get_item_or_throw(
+		    sequence, static_cast<Py_ssize_t>(index));
 		colors[index] = py_binary_label_rgba8_from_sequence(
-		    nb::borrow<nb::object>(item), "label_rgba_by_label_id item");
+		    item, "label_rgba_by_label_id item");
 	}
 	return colors;
 }
