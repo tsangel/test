@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstring>
 #include <cstdint>
+#include <exception>
 #include <iomanip>
 #include <limits>
 #include <memory>
@@ -59,6 +60,22 @@ std::string_view vr_to_string_view(const VR& vr);
 nb::object readonly_memoryview_from_span(
     const void* data, std::size_t size, nb::handle owner = nb::handle());
 std::vector<std::uint8_t> pybuffer_to_bytes(nb::handle value);
+
+template <typename Fn>
+void py_run_without_gil(Fn&& fn) {
+	std::exception_ptr error;
+	{
+		nb::gil_scoped_release release;
+		try {
+			fn();
+		} catch (...) {
+			error = std::current_exception();
+		}
+	}
+	if (error) {
+		std::rethrow_exception(error);
+	}
+}
 
 PyObject* new_reference_or_null(PyObject* obj) noexcept {
 	if (obj == nullptr) {
@@ -4343,8 +4360,7 @@ template <typename T, std::size_t N>
 	    static_cast<std::int64_t>(columns), 1, 0, 0};
 	auto out = make_writable_numpy_array(
 	    2, shape, strides, spec.dtype, required_bytes);
-	{
-		nb::gil_scoped_release release;
+	py_run_without_gil([&] {
 		if (is_labelmap_u16) {
 			auto samples_out = std::span<std::uint16_t>(
 			    reinterpret_cast<std::uint16_t*>(out.bytes.data()), samples);
@@ -4352,7 +4368,7 @@ template <typename T, std::size_t N>
 		} else {
 			segmentation.decode_frame_into(frame_index, out.bytes);
 		}
-	}
+	});
 	return nb::cast(std::move(out.array));
 }
 
@@ -4411,8 +4427,7 @@ void py_seg_decode_frame_into(
 	if (expected_bytes > 0 && view.buf == nullptr) {
 		throw nb::value_error("seg.decode_frame_into output buffer is null");
 	}
-	{
-		nb::gil_scoped_release release;
+	py_run_without_gil([&] {
 		if (expected_itemsize == 2) {
 			auto out_span = std::span<std::uint16_t>(
 			    static_cast<std::uint16_t*>(view.buf),
@@ -4423,35 +4438,32 @@ void py_seg_decode_frame_into(
 			    static_cast<std::uint8_t*>(view.buf), actual_bytes);
 			segmentation.decode_frame_into(frame_index, out_span);
 		}
-	}
+	});
 }
 
 [[nodiscard]] nb::bytes py_seg_decode_frame_bytes(
     const dicom::seg::Segmentation& segmentation, std::size_t frame_index) {
 	if (segmentation.segmentation_type() == dicom::seg::SegmentationType::labelmap) {
 		std::vector<std::uint8_t> bytes;
-		{
-			nb::gil_scoped_release release;
+		py_run_without_gil([&] {
 			bytes = segmentation.decode_labelmap_frame_bytes(frame_index);
-		}
+		});
 		return to_python_bytes(std::move(bytes));
 	}
 	std::vector<std::uint8_t> bytes(checked_seg_frame_sample_count(segmentation));
-	{
-		nb::gil_scoped_release release;
+	py_run_without_gil([&] {
 		segmentation.decode_frame_into(frame_index, bytes);
-	}
+	});
 	return to_python_bytes(std::move(bytes));
 }
 
 [[nodiscard]] nb::tuple py_seg_present_segment_numbers(
     const dicom::seg::Segmentation& segmentation, std::size_t frame_index) {
 	std::vector<std::uint16_t> numbers;
-	{
-		nb::gil_scoped_release release;
+	py_run_without_gil([&] {
 		const auto span = segmentation.present_segment_numbers(frame_index);
 		numbers.assign(span.begin(), span.end());
-	}
+	});
 	nb::tuple out =
 	    nb::steal<nb::tuple>(PyTuple_New(static_cast<Py_ssize_t>(numbers.size())));
 	for (std::size_t index = 0; index < numbers.size(); ++index) {
@@ -4479,10 +4491,9 @@ void py_seg_decode_frame_into(
 	auto out = make_writable_numpy_array(
 	    2, shape, strides, decoded_array_spec(dicom::pixel::DataType::u8).dtype,
 	    required_bytes);
-	{
-		nb::gil_scoped_release release;
+	py_run_without_gil([&] {
 		segmentation.mask_for_segment_into(frame_index, segment_number, out.bytes, options);
-	}
+	});
 	return nb::cast(std::move(out.array));
 }
 
@@ -4513,11 +4524,10 @@ void py_seg_mask_for_segment_into(
 	}
 	auto out_span = std::span<std::uint8_t>(
 	    static_cast<std::uint8_t*>(view.buf), actual_bytes);
-	{
-		nb::gil_scoped_release release;
+	py_run_without_gil([&] {
 		segmentation.mask_for_segment_into(
 		    frame_index, segment_number, out_span, options);
-	}
+	});
 }
 
 [[nodiscard]] std::array<std::int64_t, 4> py_binary_label_volume_strides(
@@ -4772,8 +4782,7 @@ py_binary_label_rgba8_table_by_label_id(
 	auto lut = std::span<dicom::seg::BinaryLabelRgba8>(
 	    reinterpret_cast<dicom::seg::BinaryLabelRgba8*>(out.bytes.data()),
 	    label_code_count);
-	{
-		nb::gil_scoped_release release;
+	py_run_without_gil([&] {
 		dicom::seg::build_binary_label_rgba8_lut(
 		    volume.code_table,
 		    lut,
@@ -4798,7 +4807,7 @@ py_binary_label_rgba8_table_by_label_id(
 			        static_cast<std::uint8_t>(a / count)};
 		    },
 		    background_color);
-	}
+	});
 	return nb::cast(std::move(out.array));
 }
 
@@ -4816,17 +4825,15 @@ py_binary_label_rgba8_table_by_label_id(
 		PyBinaryLabelVolumeBufferView external(
 		    self.external_label_volume_owner, volume,
 		    "BinaryLabelVolume.restore_mask");
-		{
-			nb::gil_scoped_release release;
+		py_run_without_gil([&] {
 			dicom::seg::restore_binary_label_mask(external.codes(),
 			    volume.code_table, label_id, out.bytes);
-		}
+		});
 	} else {
-		{
-			nb::gil_scoped_release release;
+		py_run_without_gil([&] {
 			dicom::seg::restore_binary_label_mask(volume.label_volume,
 			    volume.code_table, label_id, out.bytes);
-		}
+		});
 	}
 	return nb::cast(std::move(out.array));
 }
@@ -4867,8 +4874,7 @@ py_binary_label_frame_placements(nb::handle placements) {
     std::size_t slices, std::uint16_t single_label_code_end) {
 	const auto placements = py_binary_label_frame_placements(frame_placements);
 	auto volume = std::make_shared<dicom::seg::BinaryLabelVolume>();
-	{
-		nb::gil_scoped_release release;
+	py_run_without_gil([&] {
 		dicom::seg::BinarySegmentationFrameSetBitSource source(
 		    segmentation,
 		    dicom::seg::BinaryLabelVolumeSize{
@@ -4881,7 +4887,7 @@ py_binary_label_frame_placements(nb::handle placements) {
 		options.volume_options.single_label_code_end = single_label_code_end;
 		*volume = dicom::seg::build_binary_label_volume_from_segmentation(
 		    source, options);
-	}
+	});
 	return PyBinaryLabelVolume{std::move(volume)};
 }
 
@@ -4898,8 +4904,7 @@ py_binary_label_frame_placements(nb::handle placements) {
 	};
 	PyBinaryLabelVolumeBufferView out_view(
 	    out, *volume, "seg.build_binary_label_volume_into", true);
-	{
-		nb::gil_scoped_release release;
+	py_run_without_gil([&] {
 		dicom::seg::BinarySegmentationFrameSetBitSource source(
 		    segmentation, volume->size, placements);
 		dicom::seg::BinaryLabelVolumeBuildOptions options;
@@ -4923,7 +4928,7 @@ py_binary_label_frame_placements(nb::handle placements) {
 		        .source_frame_map = &volume->source_frame_map,
 		    },
 		    options);
-	}
+	});
 	return PyBinaryLabelVolume{std::move(volume), nb::borrow<nb::object>(out)};
 }
 
@@ -8853,10 +8858,9 @@ NB_MODULE(_dicomsdl, m) {
 		    "Return one Segment by DICOM SegmentNumber, or None when absent.")
 		.def("frames_for_segment",
 		    [](const PySegmentation& self, std::uint16_t segment_number) {
-			    {
-				    nb::gil_scoped_release release;
+			    py_run_without_gil([&] {
 				    (void)self.get().frames_for_segment(segment_number).size();
-			    }
+			    });
 			    return PySegmentFrameList{self.owner, segment_number};
 		    },
 		    nb::arg("segment_number"),
@@ -8864,8 +8868,11 @@ NB_MODULE(_dicomsdl, m) {
 		    "builds and validates an all-frame presence index at call time.")
 		.def("segment_frame_count",
 		    [](const PySegmentation& self, std::uint16_t segment_number) {
-			    nb::gil_scoped_release release;
-			    return self.get().segment_frame_count(segment_number);
+			    std::size_t count = 0;
+			    py_run_without_gil([&] {
+				    count = self.get().segment_frame_count(segment_number);
+			    });
+			    return count;
 		    },
 		    nb::arg("segment_number"))
 		.def("present_segment_numbers",
@@ -8965,8 +8972,9 @@ NB_MODULE(_dicomsdl, m) {
 		    "restoration.")
 		.def("validate_label_values",
 		    [](const PySegmentation& self) {
-			    nb::gil_scoped_release release;
-			    self.get().validate_label_values();
+			    py_run_without_gil([&] {
+				    self.get().validate_label_values();
+			    });
 		    },
 		    "Validate stored SEG sample semantics. LABELMAP checks stored label "
 		    "values against SegmentSequence; FRACTIONAL checks samples against "
