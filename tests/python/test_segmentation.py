@@ -246,6 +246,7 @@ def test_segmentation_read_bytes_decodes_binary_frames() -> None:
     assert seg.is_valid
     assert seg.segmentation_type is dicom.seg.SegmentationType.binary
     assert seg.fractional_type is dicom.seg.SegmentationFractionalType.none
+    assert seg.segments_overlap is dicom.seg.SegmentsOverlap.undefined
     assert seg.frame_of_reference_uid == "1.2.826.0.1.3680043.10.543.42"
     assert seg.rows == 2
     assert seg.columns == 8
@@ -427,6 +428,7 @@ def test_labelmap_segmentation_storage_decodes_and_indexes_labels() -> None:
 
     seg = _seg_from_synthetic(df)
     assert seg.segmentation_type is dicom.seg.SegmentationType.labelmap
+    assert seg.segments_overlap is dicom.seg.SegmentsOverlap.no
     assert seg.labelmap_bits_allocated == 8
     assert seg.segment_count == 4
     assert seg.frame_count == 2

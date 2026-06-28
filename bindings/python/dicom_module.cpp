@@ -8018,6 +8018,13 @@ NB_MODULE(_dicomsdl, m) {
 		.value("occupancy", dicom::seg::SegmentationFractionalType::occupancy)
 		.value("unknown", dicom::seg::SegmentationFractionalType::unknown);
 
+	nb::enum_<dicom::seg::SegmentsOverlap>(
+	    seg, "SegmentsOverlap", "DICOM SEG SegmentsOverlap values.")
+		.value("unknown", dicom::seg::SegmentsOverlap::unknown)
+		.value("no", dicom::seg::SegmentsOverlap::no)
+		.value("yes", dicom::seg::SegmentsOverlap::yes)
+		.value("undefined", dicom::seg::SegmentsOverlap::undefined);
+
 	nb::enum_<dicom::seg::SegmentAlgorithmType>(
 	    seg, "SegmentAlgorithmType", "DICOM SEG SegmentAlgorithmType values.")
 		.value("unknown", dicom::seg::SegmentAlgorithmType::unknown)
@@ -8290,6 +8297,8 @@ NB_MODULE(_dicomsdl, m) {
 		    [](const PySegmentation& self) { return self.get().segmentation_type(); })
 		.def_prop_ro("fractional_type",
 		    [](const PySegmentation& self) { return self.get().fractional_type(); })
+		.def_prop_ro("segments_overlap",
+		    [](const PySegmentation& self) { return self.get().segments_overlap(); })
 		.def_prop_ro("labelmap_bits_allocated",
 		    [](const PySegmentation& self) -> nb::object {
 			    const auto value = self.get().labelmap_bits_allocated();

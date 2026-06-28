@@ -41,6 +41,16 @@ enum class SegmentationFractionalType : std::uint8_t {
 	unknown,
 };
 
+/// DICOM Segments Overlap (0062,0013).
+/// Missing values are exposed as undefined, matching the DICOM attribute's
+/// "overlap not known" semantics for callers choosing a conservative path.
+enum class SegmentsOverlap : std::uint8_t {
+	unknown,
+	no,
+	yes,
+	undefined,
+};
+
 /// DICOM Segment Algorithm Type (0062,0008).
 enum class SegmentAlgorithmType : std::uint8_t {
 	unknown,
@@ -506,6 +516,9 @@ public:
 	/// Instance-level SegmentationFractionalType (0062,0010).
 	[[nodiscard]] SegmentationFractionalType fractional_type() const noexcept;
 
+	/// Instance-level SegmentsOverlap (0062,0013). Missing is undefined.
+	[[nodiscard]] SegmentsOverlap segments_overlap() const noexcept;
+
 	/// BitsAllocated for LABELMAP samples, or nullopt for non-LABELMAP SEG.
 	[[nodiscard]] std::optional<std::uint16_t>
 	labelmap_bits_allocated() const noexcept;
@@ -664,6 +677,7 @@ private:
 	std::unique_ptr<DicomFile> file_;
 	SegmentationType segmentation_type_{SegmentationType::unknown};
 	SegmentationFractionalType fractional_type_{SegmentationFractionalType::none};
+	SegmentsOverlap segments_overlap_{SegmentsOverlap::undefined};
 	std::optional<std::uint16_t> labelmap_bits_allocated_{};
 	std::optional<std::uint16_t> maximum_fractional_value_{};
 	std::optional<std::string_view> frame_of_reference_uid_{};

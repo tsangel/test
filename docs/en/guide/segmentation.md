@@ -29,6 +29,7 @@ seg = dicom.seg.read_file(seg_path)
 print(seg.is_valid)
 print(seg.segmentation_type)
 print(seg.fractional_type)
+print(seg.segments_overlap)
 print(seg.maximum_fractional_value)
 print(seg.frame_of_reference_uid)
 print(seg.rows, seg.columns, seg.segment_count, seg.frame_count)
@@ -40,6 +41,7 @@ Example output:
 True
 SegmentationType.binary
 SegmentationFractionalType.none
+SegmentsOverlap.undefined
 None
 1.3.6.1.4.1.43046.3.380371456.2303.1779756601.801016
 256 256 97 2885

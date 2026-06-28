@@ -1137,6 +1137,8 @@ SliceStackPlan plan_image_frame_stack(
 - [x] SEG write/transcode 초기 preflight hook 구현: 기존 `DicomFile` generic write path에서 SOP Class / `SegmentationType` 기반으로 SEG 정책을 감지한다. `classify`와 PixelData invariant validation은 분리하고, 완전 as-is write는 기존 roundtrip 성격을 유지하며, 실제 PixelData write/transcode 경로에서 타입별 invariant, lossy target/profile reject, BINARY 1-bit transcode unsupported guard를 적용한다.
 - [x] Encapsulated Uncompressed와 RLE Lossless SEG roundtrip regression을 추가했다. FRACTIONAL 8-bit, LABELMAP 8-bit, LABELMAP 16-bit는 기존 generic write/transcode 경로로 쓰고 다시 SEG API로 읽어 `decode`, presence, mask, `frames_for_segment`, `validate_label_values()`를 검증한다.
 - [x] write/transcode streaming semantic validation 구현: compressed source decode는 `DecodeInfo::encoded_lossy_state`가 lossless일 때만 허용하고, FRACTIONAL sample이 `MaximumFractionalValue`를 넘거나 LABELMAP decoded label이 `SegmentSequence`에 없으면 native/encapsulated transcode 중 reject한다.
+- [x] BINARY native 1-bit frame read source API 구현: `BinaryFrameBitsView`와 `for_each_binary_frame_set_bit()`로 native PixelData를 `uint8` frame으로 전부 unpack하지 않고 set-bit iterator로 처리할 수 있게 했다. 최소 byte window, unaligned frame start, DICOM LSB-first bit order, even-length zero padding, detached/missing/compressed reject, visitor exception propagation을 smoke test로 고정했다.
+- [x] BINARY SEG `SegmentsOverlap` metadata accessor 구현: `SegmentsOverlap` enum과 `Segmentation::segments_overlap()` / Python `seg.segments_overlap`를 노출하고, missing은 `undefined`, `NO`/`YES`/`UNDEFINED`는 각각 enum 값, 알 수 없는 값은 `unknown`으로 반환한다.
 - [ ] 남은 후속: Python fake shared plugin fixture 기반 unknown lossy-state reject 테스트, 실제 외부 compressed FRACTIONAL/LABELMAP sample 기반 regression, Extended Offset Table coverage, BINARY 1-bit core layout/write 지원을 진행한다.
 
 ### 범위 결정

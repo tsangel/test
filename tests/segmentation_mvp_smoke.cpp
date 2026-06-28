@@ -17,6 +17,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <stdexcept>
 #include <thread>
 #include <vector>
 
@@ -480,6 +481,9 @@ void verify_labelmap8_roundtrip(dicom::uid::WellKnown transfer_syntax) {
 	    seg->labelmap_bits_allocated().value_or(0) != 8) {
 		fail("labelmap8 roundtrip metadata mismatch");
 	}
+	if (seg->segments_overlap() != dicom::seg::SegmentsOverlap::no) {
+		fail("labelmap8 roundtrip SegmentsOverlap mismatch");
+	}
 	std::vector<std::uint8_t> decoded0(6);
 	std::vector<std::uint8_t> decoded1(6);
 	seg->decode_frame_into(0, decoded0);
@@ -549,6 +553,9 @@ int main() {
 		}
 		if (seg->segmentation_type() != dicom::seg::SegmentationType::binary) {
 			fail("binary segmentation type mismatch");
+		}
+		if (seg->segments_overlap() != dicom::seg::SegmentsOverlap::undefined) {
+			fail("missing SegmentsOverlap should be undefined");
 		}
 		if (!seg->frame_of_reference_uid() ||
 		    *seg->frame_of_reference_uid() !=
@@ -692,6 +699,13 @@ int main() {
 		if (free_set_bits0 != set_bits0) {
 			fail("binary free set-bit iterator mismatch");
 		}
+		expect_throw_contains("binary set-bit visitor exception",
+		    [&] {
+			    seg->for_each_binary_frame_set_bit(0, [](std::size_t) {
+				    throw std::runtime_error("visitor stop");
+			    });
+		    },
+		    "visitor stop");
 	}
 
 	{
@@ -726,6 +740,30 @@ int main() {
 		if (decoded0 != std::vector<std::uint8_t>{1, 0, 1, 0, 0, 1} ||
 		    decoded1 != std::vector<std::uint8_t>{1, 1, 0, 0, 1, 0}) {
 			fail("unaligned binary frame unpack mismatch");
+		}
+	}
+
+	{
+		auto yes_file = make_binary_seg_file();
+		set_text(*yes_file, "SegmentsOverlap", "YES");
+		auto yes_seg = dicom::seg::from_dicomfile(std::move(yes_file));
+		if (yes_seg->segments_overlap() != dicom::seg::SegmentsOverlap::yes) {
+			fail("SegmentsOverlap=YES metadata mismatch");
+		}
+
+		auto no_file = make_binary_seg_file();
+		set_text(*no_file, "SegmentsOverlap", "NO");
+		auto no_seg = dicom::seg::from_dicomfile(std::move(no_file));
+		if (no_seg->segments_overlap() != dicom::seg::SegmentsOverlap::no) {
+			fail("SegmentsOverlap=NO metadata mismatch");
+		}
+
+		auto unknown_file = make_binary_seg_file();
+		set_text(*unknown_file, "SegmentsOverlap", "MAYBE");
+		auto unknown_seg = dicom::seg::from_dicomfile(std::move(unknown_file));
+		if (unknown_seg->segments_overlap() !=
+		    dicom::seg::SegmentsOverlap::unknown) {
+			fail("unknown SegmentsOverlap metadata mismatch");
 		}
 	}
 
@@ -810,6 +848,8 @@ int main() {
 		std::vector<std::uint8_t> decoded(16);
 		expect_throw_contains("detached binary SEG decode",
 		    [&] { seg->decode_frame_into(0, decoded); }, "detached");
+		expect_throw_contains("detached binary SEG bits",
+		    [&] { (void)seg->binary_frame_bits(0); }, "detached");
 	}
 
 	{
@@ -819,6 +859,9 @@ int main() {
 		std::vector<std::uint8_t> decoded(16);
 		expect_throw_contains("compressed binary SEG decode",
 		    [&] { seg->decode_frame_into(0, decoded); },
+		    "compressed/encapsulated BINARY SEG");
+		expect_throw_contains("compressed binary SEG bits",
+		    [&] { (void)seg->binary_frame_bits(0); },
 		    "compressed/encapsulated BINARY SEG");
 
 		auto deflated_frame_file = make_binary_seg_file();
@@ -1245,6 +1288,25 @@ int main() {
 		expect_throw_contains("short binary SEG PixelData",
 		    [&] { seg->decode_frame_into(0, decoded); },
 		    "PixelData size mismatch");
+		expect_throw_contains("short binary SEG bits",
+		    [&] { (void)seg->binary_frame_bits(0); },
+		    "PixelData size mismatch");
+	}
+
+	{
+		auto missing_pixel_data = make_binary_seg_file();
+		missing_pixel_data->remove_dataelement("PixelData"_tag);
+		auto seg = dicom::seg::from_dicomfile(std::move(missing_pixel_data));
+		expect_throw_contains("missing binary SEG bits",
+		    [&] { (void)seg->binary_frame_bits(0); },
+		    "PixelData is missing");
+	}
+
+	{
+		auto seg = dicom::seg::from_dicomfile(make_fractional_seg_file());
+		expect_throw_contains("fractional binary frame bits",
+		    [&] { (void)seg->binary_frame_bits(0); },
+		    "BINARY SEG");
 	}
 
 	{

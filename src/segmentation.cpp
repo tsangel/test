@@ -206,6 +206,23 @@ template <std::size_t N>
 	return SegmentationFractionalType::unknown;
 }
 
+[[nodiscard]] SegmentsOverlap parse_segments_overlap(
+    std::string_view value) noexcept {
+	if (text_equals(value, "NO")) {
+		return SegmentsOverlap::no;
+	}
+	if (text_equals(value, "YES")) {
+		return SegmentsOverlap::yes;
+	}
+	if (text_equals(value, "UNDEFINED")) {
+		return SegmentsOverlap::undefined;
+	}
+	if (value.empty()) {
+		return SegmentsOverlap::undefined;
+	}
+	return SegmentsOverlap::unknown;
+}
+
 [[nodiscard]] SegmentAlgorithmType parse_algorithm_type(
     std::string_view value) noexcept {
 	if (text_equals(value, "AUTOMATIC")) {
@@ -803,6 +820,8 @@ void Segmentation::extract_instance_metadata(const Options& options) {
 	    string_value_or_empty(dataset, "SegmentationType"_tag));
 	fractional_type_ = parse_fractional_type(
 	    string_value_or_empty(dataset, "SegmentationFractionalType"_tag));
+	segments_overlap_ =
+	    parse_segments_overlap(string_value_or_empty(dataset, "SegmentsOverlap"_tag));
 	maximum_fractional_value_ = uint16_value(dataset, "MaximumFractionalValue"_tag);
 	frame_of_reference_uid_ = string_value(dataset, "FrameOfReferenceUID"_tag);
 	rows_ = size_value(dataset, "Rows"_tag).value_or(0);
@@ -925,6 +944,10 @@ SegmentationType Segmentation::segmentation_type() const noexcept {
 
 SegmentationFractionalType Segmentation::fractional_type() const noexcept {
 	return fractional_type_;
+}
+
+SegmentsOverlap Segmentation::segments_overlap() const noexcept {
+	return segments_overlap_;
 }
 
 std::optional<std::uint16_t>
