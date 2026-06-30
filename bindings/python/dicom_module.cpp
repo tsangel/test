@@ -4706,6 +4706,48 @@ py_binary_label_id_for_segment_number(
 	return std::nullopt;
 }
 
+[[nodiscard]] nb::object py_binary_label_index_tuple(
+    const std::array<std::size_t, 3>& value) {
+	return nb::make_tuple(value[0], value[1], value[2]);
+}
+
+[[nodiscard]] nb::object py_binary_label_optional_index_tuple(
+    const dicom::seg::BinaryLabelStats& stats,
+    const std::array<std::size_t, 3>& value) {
+	if (!stats.has_voxels()) {
+		return nb::none();
+	}
+	return py_binary_label_index_tuple(value);
+}
+
+[[nodiscard]] nb::object py_binary_label_stats_centroid(
+    const dicom::seg::BinaryLabelStats& stats) {
+	const auto centroid = stats.centroid_index_xyz();
+	if (!centroid) {
+		return nb::none();
+	}
+	return nb::make_tuple((*centroid)[0], (*centroid)[1], (*centroid)[2]);
+}
+
+[[nodiscard]] dicom::seg::BinaryLabelStats py_binary_label_stats_for_label_id(
+    const PyBinaryLabelVolume& self, dicom::seg::BinaryLabelId label_id) {
+	const auto& stats = self.get().label_stats_by_label_id;
+	if (label_id >= stats.size()) {
+		throw nb::index_error("BinaryLabelVolume label_id is out of range");
+	}
+	return stats[label_id];
+}
+
+[[nodiscard]] dicom::seg::BinaryLabelStats py_binary_label_stats_for_segment(
+    const PyBinaryLabelVolume& self, std::uint16_t segment_number) {
+	const auto label_id =
+	    py_binary_label_id_for_segment_number(self.get(), segment_number);
+	if (!label_id) {
+		throw nb::value_error("SegmentNumber is not present in BinaryLabelVolume");
+	}
+	return py_binary_label_stats_for_label_id(self, *label_id);
+}
+
 [[nodiscard]] Py_ssize_t py_sequence_size_or_throw(PyObject* sequence) {
 	const Py_ssize_t size = PySequence_Size(sequence);
 	if (size < 0) {
@@ -4943,6 +4985,7 @@ py_binary_label_frame_placements(nb::handle placements) {
 		                volume->source_dicom_segment_by_label_id.data(),
 		                volume->source_dicom_segment_by_label_id.size()),
 		        .source_frame_map = &volume->source_frame_map,
+		        .label_stats_by_label_id = &volume->label_stats_by_label_id,
 		    },
 		    options);
 	});
@@ -8496,6 +8539,50 @@ NB_MODULE(_dicomsdl, m) {
 			    return oss.str();
 		    });
 
+	nb::class_<dicom::seg::BinaryLabelStats>(seg, "BinaryLabelStats",
+	    "Per-label voxel count, index bounds, and centroid for a BinaryLabelVolume.")
+		.def_prop_ro("has_voxels",
+		    [](const dicom::seg::BinaryLabelStats& self) {
+			    return self.has_voxels();
+		    })
+		.def_prop_ro("voxel_count",
+		    [](const dicom::seg::BinaryLabelStats& self) {
+			    return self.voxel_count;
+		    })
+		.def_prop_ro("index_sum",
+		    [](const dicom::seg::BinaryLabelStats& self) {
+			    return nb::make_tuple(self.index_sum_xyz[0],
+			        self.index_sum_xyz[1], self.index_sum_xyz[2]);
+		    },
+		    "Sum of voxel indices as (x, y, z).")
+		.def_prop_ro("min_index",
+		    [](const dicom::seg::BinaryLabelStats& self) {
+			    return py_binary_label_optional_index_tuple(
+			        self, self.min_index_xyz);
+		    },
+		    "Minimum voxel index as (x, y, z), or None when empty.")
+		.def_prop_ro("max_index",
+		    [](const dicom::seg::BinaryLabelStats& self) {
+			    return py_binary_label_optional_index_tuple(
+			        self, self.max_index_xyz);
+		    },
+		    "Maximum voxel index as (x, y, z), or None when empty.")
+		.def_prop_ro("centroid_index",
+		    &py_binary_label_stats_centroid,
+		    "Centroid voxel index as (x, y, z), or None when empty.")
+		.def("__repr__",
+		    [](const dicom::seg::BinaryLabelStats& self) {
+			    std::ostringstream oss;
+			    oss << "BinaryLabelStats(voxel_count=" << self.voxel_count;
+			    if (self.has_voxels()) {
+				    const auto centroid = self.centroid_index_xyz();
+				    oss << ", centroid_index=(" << (*centroid)[0] << ", "
+				        << (*centroid)[1] << ", " << (*centroid)[2] << ")";
+			    }
+			    oss << ")";
+			    return oss.str();
+		    });
+
 	nb::class_<PyBinaryLabelVolume>(seg, "BinaryLabelVolume",
 	    "Packed BINARY SEG label volume result with overlap label-code table.")
 		.def_prop_ro("shape",
@@ -8551,6 +8638,14 @@ NB_MODULE(_dicomsdl, m) {
 		    },
 		    nb::arg("label_id"),
 		    "Return direct and overlap label codes containing one label_id.")
+		.def("label_stats_for_label_id",
+		    &py_binary_label_stats_for_label_id,
+		    nb::arg("label_id"),
+		    "Return per-label stats for one dense label_id.")
+		.def("label_stats_for_segment",
+		    &py_binary_label_stats_for_segment,
+		    nb::arg("segment_number"),
+		    "Return per-label stats for one DICOM SegmentNumber.")
 		.def("build_rgba8_lut",
 		    &py_binary_label_build_rgba8_lut,
 		    nb::arg("label_rgba_by_label_id"),

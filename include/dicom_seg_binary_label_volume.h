@@ -316,6 +316,32 @@ struct BinaryLabelSourceFrameMapEntry {
 	std::optional<std::array<double, 3>> image_position_patient{};
 };
 
+/// Per-label semantic membership statistics for a packed BINARY SEG label
+/// volume. Overlap voxels contribute to every label contained by their stored
+/// label code. Index order is x, y, z (column, row, slice).
+struct BinaryLabelStats {
+	std::uint64_t voxel_count{0};
+	std::array<std::uint64_t, 3> index_sum_xyz{0, 0, 0};
+	std::array<std::size_t, 3> min_index_xyz{0, 0, 0};
+	std::array<std::size_t, 3> max_index_xyz{0, 0, 0};
+
+	[[nodiscard]] bool has_voxels() const noexcept {
+		return voxel_count != 0;
+	}
+	[[nodiscard]] std::optional<std::array<double, 3>>
+	centroid_index_xyz() const {
+		if (!has_voxels()) {
+			return std::nullopt;
+		}
+		const auto denominator = static_cast<double>(voxel_count);
+		return std::array<double, 3>{
+		    static_cast<double>(index_sum_xyz[0]) / denominator,
+		    static_cast<double>(index_sum_xyz[1]) / denominator,
+		    static_cast<double>(index_sum_xyz[2]) / denominator,
+		};
+	}
+};
+
 /// Owning convenience result. Apps that already own a CPU/GPU staging buffer can
 /// call build_binary_label_volume_into() instead.
 struct BinaryLabelVolume {
@@ -324,6 +350,8 @@ struct BinaryLabelVolume {
 	BinaryLabelCodeTable code_table{};
 	std::vector<std::uint16_t> source_dicom_segment_by_label_id{};
 	std::vector<BinaryLabelSourceFrameMapEntry> source_frame_map{};
+	/// Indexed by dense label_id; index 0 is background and remains empty.
+	std::vector<BinaryLabelStats> label_stats_by_label_id{};
 };
 
 struct BinaryLabelVolumeBuildTelemetry {
@@ -345,6 +373,9 @@ struct BinaryLabelVolumeBuildTarget {
 	BinaryLabelCodeTable* code_table{nullptr};
 	std::span<const std::uint16_t> source_dicom_segment_by_label_id{};
 	std::vector<BinaryLabelSourceFrameMapEntry>* source_frame_map{nullptr};
+	/// Optional stats output. When provided, build_binary_label_volume_into()
+	/// resets it to single_label_code_end + 1 entries before painting.
+	std::vector<BinaryLabelStats>* label_stats_by_label_id{nullptr};
 };
 
 [[nodiscard]] std::size_t binary_label_volume_voxel_count(
@@ -407,12 +438,13 @@ void build_binary_label_rgba8_lut(
 }
 
 /// Fast path for sources declaring SegmentsOverlap=NO.
-template <class VisitSetVoxel>
+template <class VisitSetVoxel, class OnLabelAdded>
 void paint_no_overlap_label_into_volume(
     std::span<BinaryLabelCode> label_volume,
     BinaryLabelId label_id,
     BinaryLabelCodeTable& code_table,
-    VisitSetVoxel&& visit_set_voxel) {
+    VisitSetVoxel&& visit_set_voxel,
+    OnLabelAdded&& on_label_added) {
 	if (!code_table.is_valid_label_id(label_id)) {
 		throw std::invalid_argument("paint_no_overlap label_id is out of range");
 	}
@@ -423,6 +455,7 @@ void paint_no_overlap_label_into_volume(
 		BinaryLabelCode& current = label_volume[voxel_index];
 		if (current == kBinaryLabelBackgroundCode) {
 			current = label_id;
+			on_label_added(voxel_index, label_id);
 			return;
 		}
 		if (current == label_id) {
@@ -434,13 +467,25 @@ void paint_no_overlap_label_into_volume(
 	});
 }
 
-/// Fast path when the caller knows this label has not been painted yet.
 template <class VisitSetVoxel>
-void paint_absent_label_into_volume(
+void paint_no_overlap_label_into_volume(
     std::span<BinaryLabelCode> label_volume,
     BinaryLabelId label_id,
     BinaryLabelCodeTable& code_table,
     VisitSetVoxel&& visit_set_voxel) {
+	paint_no_overlap_label_into_volume(label_volume, label_id, code_table,
+	    std::forward<VisitSetVoxel>(visit_set_voxel),
+	    [](std::size_t, BinaryLabelId) {});
+}
+
+/// Fast path when the caller knows this label has not been painted yet.
+template <class VisitSetVoxel, class OnLabelAdded>
+void paint_absent_label_into_volume(
+    std::span<BinaryLabelCode> label_volume,
+    BinaryLabelId label_id,
+    BinaryLabelCodeTable& code_table,
+    VisitSetVoxel&& visit_set_voxel,
+    OnLabelAdded&& on_label_added) {
 	if (!code_table.is_valid_label_id(label_id)) {
 		throw std::invalid_argument("paint_absent label_id is out of range");
 	}
@@ -451,25 +496,40 @@ void paint_absent_label_into_volume(
 		BinaryLabelCode& current = label_volume[voxel_index];
 		if (current == kBinaryLabelBackgroundCode) {
 			current = label_id;
+			on_label_added(voxel_index, label_id);
 			return;
 		}
 		if (code_table.is_single_label_code(current)) {
 			current = code_table.overlap_label_code_for_two_single_labels(
 			    current, label_id);
+			on_label_added(voxel_index, label_id);
 			return;
 		}
 		current = code_table.overlap_label_code_after_adding_absent_label(
 		    current, label_id);
+		on_label_added(voxel_index, label_id);
 	});
 }
 
-/// Slower path when this label may already be present in destination voxels.
 template <class VisitSetVoxel>
-void paint_maybe_present_label_into_volume(
+void paint_absent_label_into_volume(
     std::span<BinaryLabelCode> label_volume,
     BinaryLabelId label_id,
     BinaryLabelCodeTable& code_table,
     VisitSetVoxel&& visit_set_voxel) {
+	paint_absent_label_into_volume(label_volume, label_id, code_table,
+	    std::forward<VisitSetVoxel>(visit_set_voxel),
+	    [](std::size_t, BinaryLabelId) {});
+}
+
+/// Slower path when this label may already be present in destination voxels.
+template <class VisitSetVoxel, class OnLabelAdded>
+void paint_maybe_present_label_into_volume(
+    std::span<BinaryLabelCode> label_volume,
+    BinaryLabelId label_id,
+    BinaryLabelCodeTable& code_table,
+    VisitSetVoxel&& visit_set_voxel,
+    OnLabelAdded&& on_label_added) {
 	if (!code_table.is_valid_label_id(label_id)) {
 		throw std::invalid_argument("paint_maybe_present label_id is out of range");
 	}
@@ -480,18 +540,37 @@ void paint_maybe_present_label_into_volume(
 		BinaryLabelCode& current = label_volume[voxel_index];
 		if (current == kBinaryLabelBackgroundCode) {
 			current = label_id;
+			on_label_added(voxel_index, label_id);
 			return;
 		}
 		if (code_table.is_single_label_code(current)) {
 			if (current != label_id) {
 				current = code_table.overlap_label_code_for_two_single_labels(
 				    current, label_id);
+				on_label_added(voxel_index, label_id);
 			}
 			return;
 		}
-		current = code_table.overlap_label_code_after_maybe_adding_label(
+		const BinaryLabelSetView current_label_set =
+		    code_table.label_set_by_label_code(current);
+		if (current_label_set.contains(label_id)) {
+			return;
+		}
+		current = code_table.overlap_label_code_after_adding_absent_label(
 		    current, label_id);
+		on_label_added(voxel_index, label_id);
 	});
+}
+
+template <class VisitSetVoxel>
+void paint_maybe_present_label_into_volume(
+    std::span<BinaryLabelCode> label_volume,
+    BinaryLabelId label_id,
+    BinaryLabelCodeTable& code_table,
+    VisitSetVoxel&& visit_set_voxel) {
+	paint_maybe_present_label_into_volume(label_volume, label_id, code_table,
+	    std::forward<VisitSetVoxel>(visit_set_voxel),
+	    [](std::size_t, BinaryLabelId) {});
 }
 
 struct BinarySegmentationFramePlacement {

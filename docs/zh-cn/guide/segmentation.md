@@ -286,6 +286,17 @@ code = int(labels[30, 120, 90])
 print(packed.label_set(code))
 ```
 
+`BinaryLabelVolume` 在构建 volume 时也会保存每个 label 的 voxel 统计。
+坐标使用 voxel index 的 `(x, y, z)` 顺序，其中 `x` 是 column，`y` 是 row，
+`z` 是 slice。
+
+```python
+stats = packed.label_stats_for_segment(segment_number)
+print(stats.voxel_count)
+print(stats.min_index, stats.max_index)
+print(stats.centroid_index)
+```
+
 需要显示 LUT 时，传入 dense 的 `label_id -> RGBA` table。返回数组的 shape 是
 `(label_code_count, 4)`，可按存储的 label code 直接索引。Overlap label code 的
 颜色由其包含的 label RGBA 平均得到；如果 application 需要其他 blend policy，可以

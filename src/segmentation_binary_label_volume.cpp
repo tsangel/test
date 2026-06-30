@@ -5,6 +5,8 @@
 #include <limits>
 #include <numeric>
 #include <stdexcept>
+#include <string>
+#include <string_view>
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
@@ -131,6 +133,94 @@ void validate_binary_label_source_segment_table(
 		    "source_dicom_segment_by_label_id index 0 must be background");
 	}
 }
+
+void reset_binary_label_stats_table(
+    std::vector<BinaryLabelStats>& stats_by_label_id,
+    BinaryLabelCode single_label_code_end) {
+	stats_by_label_id.assign(
+	    static_cast<std::size_t>(single_label_code_end) + 1u,
+	    BinaryLabelStats{});
+}
+
+[[nodiscard]] std::uint64_t checked_size_to_u64(
+    std::size_t value, std::string_view label) {
+	if (value > static_cast<std::size_t>(
+	                std::numeric_limits<std::uint64_t>::max())) {
+		throw std::overflow_error(std::string(label) + " exceeds uint64 range");
+	}
+	return static_cast<std::uint64_t>(value);
+}
+
+[[nodiscard]] std::uint64_t checked_add_u64(
+    std::uint64_t lhs, std::uint64_t rhs, std::string_view label) {
+	if (lhs > std::numeric_limits<std::uint64_t>::max() - rhs) {
+		throw std::overflow_error(std::string(label) + " overflow");
+	}
+	return lhs + rhs;
+}
+
+class BinaryLabelStatsAccumulator final {
+public:
+	BinaryLabelStatsAccumulator(
+	    std::vector<BinaryLabelStats>* stats_by_label_id,
+	    BinaryLabelVolumeSize size,
+	    std::size_t slice_pixels)
+	    : stats_by_label_id_(stats_by_label_id),
+	      size_(size),
+	      slice_pixels_(slice_pixels) {}
+
+	void add(std::size_t voxel_index, BinaryLabelId label_id) {
+		if (stats_by_label_id_ == nullptr) {
+			return;
+		}
+		if (label_id >= stats_by_label_id_->size()) {
+			throw std::out_of_range("BINARY SEG stats label_id is out of range");
+		}
+		const auto xyz = xyz_for_voxel(voxel_index);
+		BinaryLabelStats& stats = (*stats_by_label_id_)[label_id];
+		const bool first_voxel = !stats.has_voxels();
+		if (stats.voxel_count == std::numeric_limits<std::uint64_t>::max()) {
+			throw std::overflow_error("BINARY SEG stats voxel_count overflow");
+		}
+		stats.voxel_count += 1u;
+		for (std::size_t axis = 0; axis < xyz.size(); ++axis) {
+			stats.index_sum_xyz[axis] = checked_add_u64(
+			    stats.index_sum_xyz[axis],
+			    checked_size_to_u64(xyz[axis], "BINARY SEG stats index"),
+			    "BINARY SEG stats index sum");
+			if (first_voxel) {
+				stats.min_index_xyz[axis] = xyz[axis];
+				stats.max_index_xyz[axis] = xyz[axis];
+			} else {
+				stats.min_index_xyz[axis] =
+				    std::min(stats.min_index_xyz[axis], xyz[axis]);
+				stats.max_index_xyz[axis] =
+				    std::max(stats.max_index_xyz[axis], xyz[axis]);
+			}
+		}
+	}
+
+private:
+	[[nodiscard]] std::array<std::size_t, 3> xyz_for_voxel(
+	    std::size_t voxel_index) {
+		if (voxel_index == last_voxel_index_) {
+			return last_xyz_;
+		}
+		const std::size_t z = voxel_index / slice_pixels_;
+		const std::size_t local = voxel_index - z * slice_pixels_;
+		const std::size_t y = local / size_.columns;
+		const std::size_t x = local - y * size_.columns;
+		last_voxel_index_ = voxel_index;
+		last_xyz_ = {x, y, z};
+		return last_xyz_;
+	}
+
+	std::vector<BinaryLabelStats>* stats_by_label_id_{nullptr};
+	BinaryLabelVolumeSize size_{};
+	std::size_t slice_pixels_{0};
+	std::size_t last_voxel_index_{std::numeric_limits<std::size_t>::max()};
+	std::array<std::size_t, 3> last_xyz_{0, 0, 0};
+};
 
 template <class VisitVoxel>
 struct BinarySetBitCallbackContext {
@@ -646,6 +736,9 @@ BinaryLabelVolume create_empty_binary_label_volume(
 	    make_binary_label_source_segment_table(
 	        source_dicom_segment_numbers,
 	        volume.code_table.single_label_code_end());
+	reset_binary_label_stats_table(
+	    volume.label_stats_by_label_id,
+	    volume.code_table.single_label_code_end());
 	return volume;
 }
 
@@ -686,6 +779,11 @@ void build_binary_label_volume_into(
 	    source.source_dicom_segment_numbers().size());
 
 	clear_binary_label_volume(target.label_volume);
+	if (target.label_stats_by_label_id) {
+		reset_binary_label_stats_table(
+		    *target.label_stats_by_label_id,
+		    target.code_table->single_label_code_end());
+	}
 	if (target.source_frame_map) {
 		target.source_frame_map->clear();
 		target.source_frame_map->reserve(source.frames().size());
@@ -696,6 +794,8 @@ void build_binary_label_volume_into(
 	if (target.label_volume.size() / size.slices != slice_pixels) {
 		throw std::logic_error("BINARY SEG label_volume size mismatch");
 	}
+	BinaryLabelStatsAccumulator stats_accumulator(
+	    target.label_stats_by_label_id, size, slice_pixels);
 
 	const auto frames = source.frames();
 	std::vector<std::size_t> frame_order(frames.size());
@@ -741,13 +841,19 @@ void build_binary_label_volume_into(
 			    &visit_binary_source_frame_set_bit<VisitVoxel>,
 			    &callback_context);
 		};
+		auto on_label_added = [&](std::size_t voxel_index,
+		                          BinaryLabelId label_id) {
+			stats_accumulator.add(voxel_index, label_id);
+		};
 
 		if (options.segments_overlap == BinaryLabelSegmentsOverlap::no) {
 			paint_no_overlap_label_into_volume(target.label_volume,
-			    frame.label_id, *target.code_table, visit_set_voxels);
+			    frame.label_id, *target.code_table, visit_set_voxels,
+			    on_label_added);
 		} else {
 			paint_absent_label_into_volume(target.label_volume,
-			    frame.label_id, *target.code_table, visit_set_voxels);
+			    frame.label_id, *target.code_table, visit_set_voxels,
+			    on_label_added);
 		}
 
 		if (options.telemetry && frame_set_bit_count > 0) {
@@ -791,6 +897,7 @@ BinaryLabelVolume build_binary_label_volume(
 	        .source_dicom_segment_by_label_id =
 	            volume.source_dicom_segment_by_label_id,
 	        .source_frame_map = &volume.source_frame_map,
+	        .label_stats_by_label_id = &volume.label_stats_by_label_id,
 	    },
 	    options);
 	return volume;

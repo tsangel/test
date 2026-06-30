@@ -317,6 +317,17 @@ code = int(labels[30, 120, 90])
 print(packed.label_set(code))
 ```
 
+`BinaryLabelVolume` also stores per-label voxel statistics while it builds the
+volume. The coordinates are voxel indices in `(x, y, z)` order, where `x` is
+column, `y` is row, and `z` is slice:
+
+```python
+stats = packed.label_stats_for_segment(segment_number)
+print(stats.voxel_count)
+print(stats.min_index, stats.max_index)
+print(stats.centroid_index)
+```
+
 For a display LUT, provide a dense `label_id -> RGBA` table. The returned array
 has shape `(label_code_count, 4)` and is indexed by the stored label code.
 Overlap label-code colors are averaged from their member labels; applications

@@ -337,6 +337,22 @@ def test_binary_segmentation_builds_packed_label_volume() -> None:
     assert packed.label_set(1) == (1,)
     assert packed.label_codes_for_label_id(1) == (1,)
 
+    stats1 = packed.label_stats_for_segment(1)
+    assert stats1.has_voxels is True
+    assert stats1.voxel_count == 8
+    assert stats1.min_index == (0, 0, 0)
+    assert stats1.max_index == (6, 1, 0)
+    assert stats1.index_sum == (18, 4, 0)
+    assert stats1.centroid_index == pytest.approx((2.25, 0.5, 0.0))
+
+    stats2 = packed.label_stats_for_label_id(2)
+    assert stats2.has_voxels is True
+    assert stats2.voxel_count == 5
+    assert stats2.min_index == (0, 0, 1)
+    assert stats2.max_index == (7, 1, 1)
+    assert stats2.index_sum == (17, 4, 5)
+    assert stats2.centroid_index == pytest.approx((3.4, 0.8, 1.0))
+
     rgba = packed.build_rgba8_lut(
         [
             (0, 0, 0, 0),
@@ -382,6 +398,10 @@ def test_binary_segmentation_builds_packed_label_volume() -> None:
     np.testing.assert_array_equal(packed_into.label_volume, expected_volume)
     assert np.shares_memory(packed_into.label_volume, out)
     np.testing.assert_array_equal(packed_into.restore_mask_for_segment(2), mask2)
+    assert packed_into.label_stats_for_segment(1).voxel_count == 8
+    assert packed_into.label_stats_for_segment(2).centroid_index == pytest.approx(
+        (3.4, 0.8, 1.0)
+    )
 
     with pytest.raises(Exception, match="uint16"):
         seg.build_binary_label_volume_into(
@@ -397,6 +417,11 @@ def test_binary_segmentation_builds_packed_label_volume() -> None:
     overlap_code = int(overlapped.label_volume[0, 1, 0])
     assert overlapped.label_set(overlap_code) == (1, 2)
     assert overlapped.label_code_count == overlap_code + 1
+    assert overlapped.label_stats_for_segment(1).voxel_count == 8
+    assert overlapped.label_stats_for_segment(2).voxel_count == 5
+    assert overlapped.label_stats_for_segment(2).centroid_index == pytest.approx(
+        (3.4, 0.8, 0.0)
+    )
     overlap_rgba = overlapped.build_rgba8_lut(
         [
             (0, 0, 0, 0),
@@ -408,6 +433,19 @@ def test_binary_segmentation_builds_packed_label_volume() -> None:
 
     with pytest.raises(Exception, match="label_rgba_by_label_id"):
         packed.build_rgba8_lut([(0, 0, 0, 0), (10, 20, 30, 100)])
+
+    reserved = seg.build_binary_label_volume(
+        [(0, 0), (1, 1)], slices=2, single_label_code_end=4
+    )
+    empty_stats = reserved.label_stats_for_label_id(3)
+    assert empty_stats.has_voxels is False
+    assert empty_stats.voxel_count == 0
+    assert empty_stats.min_index is None
+    assert empty_stats.max_index is None
+    assert empty_stats.centroid_index is None
+
+    with pytest.raises(Exception, match="SegmentNumber"):
+        packed.label_stats_for_segment(99)
 
 
 def test_segmentation_read_file_and_read_bytes(tmp_path) -> None:

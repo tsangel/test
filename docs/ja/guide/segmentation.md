@@ -288,6 +288,17 @@ code = int(labels[30, 120, 90])
 print(packed.label_set(code))
 ```
 
+`BinaryLabelVolume` は volume の構築時に label ごとの voxel 統計も保存します。
+座標は voxel index の `(x, y, z)` 順で、`x` は column、`y` は row、
+`z` は slice です。
+
+```python
+stats = packed.label_stats_for_segment(segment_number)
+print(stats.voxel_count)
+print(stats.min_index, stats.max_index)
+print(stats.centroid_index)
+```
+
 表示用 LUT が必要な場合は、dense な `label_id -> RGBA` table を渡します。返される
 配列は shape `(label_code_count, 4)` で、格納された label code で直接 index でき
 ます。Overlap label code の色は、含まれる label の RGBA 平均で作られます。別の

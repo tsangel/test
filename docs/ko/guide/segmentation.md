@@ -316,6 +316,17 @@ code = int(labels[30, 120, 90])
 print(packed.label_set(code))
 ```
 
+`BinaryLabelVolume`은 volume을 만들 때 label별 voxel 통계도 함께 저장합니다.
+좌표는 voxel index 기준 `(x, y, z)` 순서이며, `x`는 column, `y`는 row,
+`z`는 slice입니다.
+
+```python
+stats = packed.label_stats_for_segment(segment_number)
+print(stats.voxel_count)
+print(stats.min_index, stats.max_index)
+print(stats.centroid_index)
+```
+
 Display LUT가 필요하면 dense `label_id -> RGBA` table을 넘긴다. 반환 배열은
 shape `(label_code_count, 4)`이고 저장된 label code로 바로 index할 수 있다.
 Overlap label code의 색은 포함된 label들의 RGBA 평균으로 만든다. 다른 blend 정책이
