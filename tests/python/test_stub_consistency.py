@@ -42,6 +42,21 @@ def _class_method_names(tree: ast.Module, class_name: str) -> set[str]:
     raise AssertionError(f"stub is missing class {class_name}")
 
 
+def _class_attribute_names(tree: ast.Module, class_name: str) -> set[str]:
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and node.name == class_name:
+            names: set[str] = set()
+            for child in node.body:
+                if isinstance(child, ast.AnnAssign) and isinstance(child.target, ast.Name):
+                    names.add(child.target.id)
+                elif isinstance(child, ast.Assign):
+                    for target in child.targets:
+                        if isinstance(target, ast.Name):
+                            names.add(target.id)
+            return names
+    raise AssertionError(f"stub is missing class {class_name}")
+
+
 def _module_function_names(tree: ast.Module) -> set[str]:
     return {
         node.name
@@ -93,3 +108,28 @@ def test_stub_includes_diagnostics_api():
     assert {"set_default_reporter", "set_thread_reporter", "set_log_level"} <= functions
     buffering_methods = _class_method_names(tree, "BufferingReporter")
     assert {"take_messages", "for_each"} <= buffering_methods
+
+
+def test_stub_includes_seg_binary_label_stats_api():
+    tree = _stub_tree()
+    assert hasattr(dicom.seg, "BinaryLabelStats")
+
+    stats_methods = _class_method_names(tree, "_BinaryLabelStats")
+    assert {
+        "__repr__",
+        "has_voxels",
+        "voxel_count",
+        "index_sum",
+        "min_index",
+        "max_index",
+        "centroid_index",
+    } <= stats_methods
+
+    volume_methods = _class_method_names(tree, "_BinaryLabelVolume")
+    assert {
+        "label_stats_for_label_id",
+        "label_stats_for_segment",
+    } <= volume_methods
+
+    seg_attrs = _class_attribute_names(tree, "_SegModule")
+    assert "BinaryLabelStats" in seg_attrs

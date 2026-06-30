@@ -2172,6 +2172,30 @@ class _SegmentFrameIterator:
     def __next__(self) -> _SegmentFrame: ...
 
 
+class _BinaryLabelStats:
+    @property
+    def has_voxels(self) -> bool: ...
+    @property
+    def voxel_count(self) -> int: ...
+    @property
+    def index_sum(self) -> tuple[int, int, int]:
+        """Sum of voxel indices as (x, y, z)."""
+        ...
+    @property
+    def min_index(self) -> tuple[int, int, int] | None:
+        """Minimum voxel index as (x, y, z), or None when empty."""
+        ...
+    @property
+    def max_index(self) -> tuple[int, int, int] | None:
+        """Maximum voxel index as (x, y, z), or None when empty."""
+        ...
+    @property
+    def centroid_index(self) -> tuple[float, float, float] | None:
+        """Centroid voxel index as (x, y, z), or None when empty."""
+        ...
+    def __repr__(self) -> str: ...
+
+
 class _BinaryLabelVolume:
     @property
     def shape(self) -> tuple[int, int, int]: ...
@@ -2192,6 +2216,12 @@ class _BinaryLabelVolume:
     def label_id_for_segment_number(self, segment_number: int, /) -> int | None: ...
     def label_set(self, label_code: int, /) -> tuple[int, ...]: ...
     def label_codes_for_label_id(self, label_id: int, /) -> tuple[int, ...]: ...
+    def label_stats_for_label_id(self, label_id: int, /) -> _BinaryLabelStats:
+        """Return per-label stats for one dense label_id."""
+        ...
+    def label_stats_for_segment(self, segment_number: int, /) -> _BinaryLabelStats:
+        """Return per-label stats for one DICOM SegmentNumber."""
+        ...
     def build_rgba8_lut(
         self,
         label_rgba_by_label_id: Sequence[tuple[int, int, int, int]],
@@ -2316,6 +2346,7 @@ class _SegModule:
     SegmentFrame: type[_SegmentFrame]
     SegmentFrameList: type[_SegmentFrameList]
     SegmentFrameIterator: type[_SegmentFrameIterator]
+    BinaryLabelStats: type[_BinaryLabelStats]
     BinaryLabelVolume: type[_BinaryLabelVolume]
     SourceImageRef: type[_SourceImageRef]
     SourceImageRefList: type[_SourceImageRefList]
