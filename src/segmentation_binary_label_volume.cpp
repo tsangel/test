@@ -151,43 +151,80 @@ void reset_binary_label_stats_table(
 	return static_cast<std::uint64_t>(value);
 }
 
-[[nodiscard]] std::uint64_t checked_add_u64(
+[[nodiscard]] std::uint64_t checked_mul_u64(
     std::uint64_t lhs, std::uint64_t rhs, std::string_view label) {
-	if (lhs > std::numeric_limits<std::uint64_t>::max() - rhs) {
+	if (lhs != 0 &&
+	    rhs > std::numeric_limits<std::uint64_t>::max() / lhs) {
 		throw std::overflow_error(std::string(label) + " overflow");
 	}
-	return lhs + rhs;
+	return lhs * rhs;
+}
+
+[[nodiscard]] std::uint64_t checked_triangular_sum_u64(
+    std::uint64_t count, std::string_view label) {
+	if (count == 0) {
+		return 0;
+	}
+	const std::uint64_t last = count - 1u;
+	if ((count % 2u) == 0) {
+		return checked_mul_u64(count / 2u, last, label);
+	}
+	return checked_mul_u64(count, last / 2u, label);
+}
+
+void validate_binary_label_stats_capacity(BinaryLabelVolumeSize size) {
+	const std::uint64_t columns =
+	    checked_size_to_u64(size.columns, "BINARY SEG stats columns");
+	const std::uint64_t rows =
+	    checked_size_to_u64(size.rows, "BINARY SEG stats rows");
+	const std::uint64_t slices =
+	    checked_size_to_u64(size.slices, "BINARY SEG stats slices");
+
+	const std::uint64_t row_pixels =
+	    checked_mul_u64(columns, rows, "BINARY SEG stats row pixel count");
+	(void)checked_mul_u64(
+	    row_pixels, slices, "BINARY SEG stats voxel count");
+
+	const std::uint64_t x_sum =
+	    checked_triangular_sum_u64(columns, "BINARY SEG stats x sum");
+	const std::uint64_t y_sum =
+	    checked_triangular_sum_u64(rows, "BINARY SEG stats y sum");
+	const std::uint64_t z_sum =
+	    checked_triangular_sum_u64(slices, "BINARY SEG stats z sum");
+
+	(void)checked_mul_u64(
+	    checked_mul_u64(x_sum, rows, "BINARY SEG stats x sum"),
+	    slices, "BINARY SEG stats x sum");
+	(void)checked_mul_u64(
+	    checked_mul_u64(y_sum, columns, "BINARY SEG stats y sum"),
+	    slices, "BINARY SEG stats y sum");
+	(void)checked_mul_u64(
+	    checked_mul_u64(z_sum, columns, "BINARY SEG stats z sum"),
+	    rows, "BINARY SEG stats z sum");
 }
 
 class BinaryLabelStatsAccumulator final {
 public:
 	BinaryLabelStatsAccumulator(
 	    std::vector<BinaryLabelStats>* stats_by_label_id,
-	    BinaryLabelVolumeSize size,
-	    std::size_t slice_pixels)
+	    BinaryLabelVolumeSize size)
 	    : stats_by_label_id_(stats_by_label_id),
-	      size_(size),
-	      slice_pixels_(slice_pixels) {}
+	      size_(size) {}
 
-	void add(std::size_t voxel_index, BinaryLabelId label_id) {
+	void add(
+	    std::size_t pixel_index, std::size_t slice_index, BinaryLabelId label_id) {
 		if (stats_by_label_id_ == nullptr) {
 			return;
 		}
 		if (label_id >= stats_by_label_id_->size()) {
 			throw std::out_of_range("BINARY SEG stats label_id is out of range");
 		}
-		const auto xyz = xyz_for_voxel(voxel_index);
+		const auto xyz = xyz_for_pixel(pixel_index, slice_index);
 		BinaryLabelStats& stats = (*stats_by_label_id_)[label_id];
 		const bool first_voxel = !stats.has_voxels();
-		if (stats.voxel_count == std::numeric_limits<std::uint64_t>::max()) {
-			throw std::overflow_error("BINARY SEG stats voxel_count overflow");
-		}
 		stats.voxel_count += 1u;
 		for (std::size_t axis = 0; axis < xyz.size(); ++axis) {
-			stats.index_sum_xyz[axis] = checked_add_u64(
-			    stats.index_sum_xyz[axis],
-			    checked_size_to_u64(xyz[axis], "BINARY SEG stats index"),
-			    "BINARY SEG stats index sum");
+			stats.index_sum_xyz[axis] += static_cast<std::uint64_t>(xyz[axis]);
 			if (first_voxel) {
 				stats.min_index_xyz[axis] = xyz[axis];
 				stats.max_index_xyz[axis] = xyz[axis];
@@ -201,24 +238,24 @@ public:
 	}
 
 private:
-	[[nodiscard]] std::array<std::size_t, 3> xyz_for_voxel(
-	    std::size_t voxel_index) {
-		if (voxel_index == last_voxel_index_) {
+	[[nodiscard]] std::array<std::size_t, 3> xyz_for_pixel(
+	    std::size_t pixel_index, std::size_t slice_index) {
+		if (pixel_index == last_pixel_index_ &&
+		    slice_index == last_slice_index_) {
 			return last_xyz_;
 		}
-		const std::size_t z = voxel_index / slice_pixels_;
-		const std::size_t local = voxel_index - z * slice_pixels_;
-		const std::size_t y = local / size_.columns;
-		const std::size_t x = local - y * size_.columns;
-		last_voxel_index_ = voxel_index;
-		last_xyz_ = {x, y, z};
+		const std::size_t y = pixel_index / size_.columns;
+		const std::size_t x = pixel_index - y * size_.columns;
+		last_pixel_index_ = pixel_index;
+		last_slice_index_ = slice_index;
+		last_xyz_ = {x, y, slice_index};
 		return last_xyz_;
 	}
 
 	std::vector<BinaryLabelStats>* stats_by_label_id_{nullptr};
 	BinaryLabelVolumeSize size_{};
-	std::size_t slice_pixels_{0};
-	std::size_t last_voxel_index_{std::numeric_limits<std::size_t>::max()};
+	std::size_t last_pixel_index_{std::numeric_limits<std::size_t>::max()};
+	std::size_t last_slice_index_{std::numeric_limits<std::size_t>::max()};
 	std::array<std::size_t, 3> last_xyz_{0, 0, 0};
 };
 
@@ -780,6 +817,7 @@ void build_binary_label_volume_into(
 
 	clear_binary_label_volume(target.label_volume);
 	if (target.label_stats_by_label_id) {
+		validate_binary_label_stats_capacity(target.size);
 		reset_binary_label_stats_table(
 		    *target.label_stats_by_label_id,
 		    target.code_table->single_label_code_end());
@@ -795,7 +833,7 @@ void build_binary_label_volume_into(
 		throw std::logic_error("BINARY SEG label_volume size mismatch");
 	}
 	BinaryLabelStatsAccumulator stats_accumulator(
-	    target.label_stats_by_label_id, size, slice_pixels);
+	    target.label_stats_by_label_id, size);
 
 	const auto frames = source.frames();
 	std::vector<std::size_t> frame_order(frames.size());
@@ -843,7 +881,8 @@ void build_binary_label_volume_into(
 		};
 		auto on_label_added = [&](std::size_t voxel_index,
 		                          BinaryLabelId label_id) {
-			stats_accumulator.add(voxel_index, label_id);
+			stats_accumulator.add(
+			    voxel_index - voxel_base, frame.slice_index, label_id);
 		};
 
 		if (options.segments_overlap == BinaryLabelSegmentsOverlap::no) {
