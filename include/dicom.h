@@ -2185,6 +2185,10 @@ public:
 	    const DecodeOptions& opt = {}) const;
 	void decode_into(std::size_t frame_index, std::span<std::uint8_t> dst,
 	    const DecodePlan& plan) const;
+	/// Decode into caller-owned storage and report the backend output format.
+	/// `info` is overwritten on success and left unchanged when decode throws.
+	void decode_into(std::size_t frame_index, std::span<std::uint8_t> dst,
+	    const DecodePlan& plan, DecodeInfo& info) const;
 	[[nodiscard]] PixelBuffer pixel_buffer(
 	    std::size_t frame_index, const DecodePlan& plan) const;
 	/// Report the backend output format without changing the planned layout.

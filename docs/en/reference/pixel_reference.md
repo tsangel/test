@@ -40,15 +40,16 @@ DicomSDL keeps pixel decode, pixel encode, and frame-aware pixel metadata on `Di
 
 - Reuse decode plans only while pixel-affecting metadata stays unchanged.
 - For split payloads in C++, `PixelPayloadDecoder::pixel_buffer(frame, plan, info)`
-  reports the backend's actual output in `DecodeInfo`, just like `DicomFile`.
+  and `decode_into(frame, dst, plan, info)` report the backend's actual output
+  in `DecodeInfo`, just like `DicomFile`.
   The returned buffer keeps the planned layout; consult `info.photometric` before
   applying color conversion (JPEG and JPEG 2000 may return RGB for YBR input).
   Native MONOCHROME1, palette indices, and unpacked 1-bit pixels retain their
   original semantics. The overload without `info` remains available.
 - `decode_into(...)` is the best fit when you want to control allocation and reuse an existing output buffer.
 - `to_array(...)` is the best fit when you want a new Python array returned directly.
-- In Python, `to_array(..., with_info=True)` returns `(array, DecodeInfo)`.
-- In Python, `decode_into(..., with_info=True)` still fills the caller-provided destination but returns `DecodeInfo`.
+- On Python `DicomFile`, `to_array(..., with_info=True)` returns `(array, DecodeInfo)`.
+- On Python `DicomFile`, `decode_into(..., with_info=True)` still fills the caller-provided destination but returns `DecodeInfo`.
 - For `frame=-1` on multi-frame input, Python `with_info=True` reports frame-0/common decode metadata.
 - Writer-side codec limits, option mapping, and metadata side effects are documented separately.
 

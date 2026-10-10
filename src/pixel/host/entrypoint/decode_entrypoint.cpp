@@ -704,6 +704,11 @@ void PixelPayloadDecoder::decode_into(std::size_t frame_index,
 	decode_into_impl(frame_index, dst, plan, nullptr);
 }
 
+void PixelPayloadDecoder::decode_into(std::size_t frame_index,
+    std::span<std::uint8_t> dst, const DecodePlan& plan, DecodeInfo& info) const {
+	decode_into_impl(frame_index, dst, plan, &info);
+}
+
 void PixelPayloadDecoder::decode_into_impl(std::size_t frame_index,
     std::span<std::uint8_t> dst, const DecodePlan& plan, DecodeInfo* info) const {
 	std::vector<std::uint8_t> owned_prepared_source{};
@@ -813,7 +818,7 @@ PixelBuffer PixelPayloadDecoder::pixel_buffer(
 PixelBuffer PixelPayloadDecoder::pixel_buffer(
     std::size_t frame_index, const DecodePlan& plan, DecodeInfo& info) const {
 	auto decoded = PixelBuffer::allocate(plan.output_layout.single_frame());
-	decode_into_impl(frame_index, decoded.bytes, plan, &info);
+	decode_into(frame_index, decoded.bytes, plan, info);
 	return decoded;
 }
 

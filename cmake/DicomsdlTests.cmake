@@ -341,6 +341,7 @@ if(BUILD_TESTING)
     endif()
 
     foreach(_dicomsdl_test_target IN ITEMS
+        dicomsdl_payload_decode_info_smoke
         dicomsdl_dictionary_consistency
         dicomsdl_basic_smoke
         dicomsdl_pixel_io_smoke

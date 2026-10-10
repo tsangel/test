@@ -5,6 +5,7 @@
 #include <vector>
 
 #include <dicom.h>
+#include "codec_builtin_flags.hpp"
 
 using namespace dicom::literals;
 namespace dp = dicom::pixel;
@@ -12,6 +13,14 @@ namespace dp = dicom::pixel;
 namespace {
 void require(bool condition, const char* message) {
 	if (!condition) throw std::runtime_error(message);
+}
+
+void require_same_info(const dp::DecodeInfo& lhs, const dp::DecodeInfo& rhs) {
+	require(lhs.photometric == rhs.photometric &&
+	    lhs.encoded_lossy_state == rhs.encoded_lossy_state &&
+	    lhs.data_type == rhs.data_type && lhs.planar == rhs.planar &&
+	    lhs.bits_per_sample == rhs.bits_per_sample,
+	    "pixel_buffer and decode_into metadata differ");
 }
 
 void native_metadata() {
@@ -28,7 +37,12 @@ void native_metadata() {
 		const auto plan = decoder.create_decode_plan();
 		dp::DecodeInfo info;
 		const auto result = decoder.pixel_buffer(0, plan, info);
+		std::vector<std::uint8_t> destination(plan.output_layout.frame_stride);
+		dp::DecodeInfo into_info;
+		decoder.decode_into(0, destination, plan, into_info);
 		require(result.bytes == bytes, "native pixels changed");
+		require(destination == result.bytes, "native decode_into pixels differ");
+		require_same_info(info, into_info);
 		require(result.bytes == decoder.pixel_buffer(0, plan).bytes,
 		    "legacy overload changed");
 		require(info.photometric == dp::parse_photometric(photo),
@@ -50,18 +64,38 @@ void native_metadata() {
 	dp::PixelPayloadDecoder decoder(desc, bits);
 	const auto plan = decoder.create_decode_plan();
 	dp::DecodeInfo info;
-	require(decoder.pixel_buffer(0, plan, info).bytes ==
+	const auto result = decoder.pixel_buffer(0, plan, info);
+	std::vector<std::uint8_t> destination(plan.output_layout.frame_stride);
+	dp::DecodeInfo into_info;
+	decoder.decode_into(0, destination, plan, into_info);
+	require(result.bytes == destination, "1-bit decode_into pixels differ");
+	require_same_info(info, into_info);
+	require(result.bytes ==
 	    std::vector<std::uint8_t>({1, 0, 1}), "1-bit unpack changed");
 	require(info.photometric == dp::Photometric::monochrome2 &&
 	    info.data_type == dp::DataType::u8 && info.bits_per_sample == 1 &&
 	    info.planar == dp::Planar::interleaved &&
 	    info.encoded_lossy_state == dp::EncodedLossyState::lossless,
 	    "1-bit decode metadata incorrect");
+
+	const auto previous_info = info;
+	bool threw = false;
+	try {
+		decoder.decode_into(1, destination, plan, info);
+	} catch (const std::exception&) {
+		threw = true;
+	}
+	require(threw, "invalid frame decode should throw");
+	require_same_info(previous_info, info);
 }
 
 void compressed_metadata() {
 	for (const auto photo : {"YBR_FULL_422", "YBR_RCT", "YBR_ICT"}) {
 		const bool jpeg = std::string_view(photo) == "YBR_FULL_422";
+		if ((jpeg && !dicom::test::kJpegBuiltin) ||
+		    (!jpeg && !dicom::test::kJpeg2kBuiltin)) {
+			continue;
+		}
 		const auto ts = jpeg ? "JPEGBaseline8Bit"_uid :
 		    std::string_view(photo) == "YBR_RCT" ? "JPEG2000Lossless"_uid : "JPEG2000"_uid;
 		std::vector<std::uint8_t> bytes(8 * 8 * 3);
@@ -90,6 +124,12 @@ void compressed_metadata() {
 		const auto plan = decoder.create_decode_plan();
 		dp::DecodeInfo info, file_info;
 		const auto result = decoder.pixel_buffer(0, plan, info);
+		std::vector<std::uint8_t> destination(plan.output_layout.frame_stride);
+		dp::DecodeInfo into_info;
+		decoder.decode_into(0, destination, plan, into_info);
+		require(destination == result.bytes,
+		    "compressed decode_into pixels differ");
+		require_same_info(info, into_info);
 		const auto expected = file.pixel_buffer(0, file.create_decode_plan(), file_info);
 		require(result.bytes == expected.bytes &&
 		    result.bytes == decoder.pixel_buffer(0, plan).bytes,
@@ -103,6 +143,11 @@ void compressed_metadata() {
 		    info.planar == file_info.planar && info.bits_per_sample == file_info.bits_per_sample &&
 		    info.encoded_lossy_state == file_info.encoded_lossy_state,
 		    "payload and DicomFile decode metadata differ");
+		require(info.encoded_lossy_state ==
+		    (std::string_view(photo) == "YBR_RCT"
+		            ? dp::EncodedLossyState::lossless
+		            : dp::EncodedLossyState::lossy),
+		    "compressed lossiness not reported");
 	}
 }
 } // namespace
