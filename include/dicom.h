@@ -2187,8 +2187,13 @@ public:
 	    const DecodePlan& plan) const;
 	[[nodiscard]] PixelBuffer pixel_buffer(
 	    std::size_t frame_index, const DecodePlan& plan) const;
+	/// Report the backend output format without changing the planned layout.
+	[[nodiscard]] PixelBuffer pixel_buffer(
+	    std::size_t frame_index, const DecodePlan& plan, DecodeInfo& info) const;
 
 private:
+	void decode_into_impl(std::size_t frame_index, std::span<std::uint8_t> dst,
+	    const DecodePlan& plan, DecodeInfo* info) const;
 	struct Fragment {
 		std::size_t offset{0};
 		std::size_t length{0};

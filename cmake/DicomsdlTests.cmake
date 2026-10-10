@@ -66,6 +66,13 @@ if(BUILD_TESTING)
     add_test(NAME split_pixel_payload_smoke COMMAND dicomsdl_split_pixel_payload_smoke)
     set_tests_properties(split_pixel_payload_smoke PROPERTIES LABELS "dicomsdl")
 
+    add_executable(dicomsdl_payload_decode_info_smoke
+        tests/payload_decode_info_smoke.cpp
+    )
+    target_link_libraries(dicomsdl_payload_decode_info_smoke PRIVATE dicomsdl)
+    add_test(NAME payload_decode_info_smoke COMMAND dicomsdl_payload_decode_info_smoke)
+    set_tests_properties(payload_decode_info_smoke PROPERTIES LABELS "dicomsdl")
+
     add_executable(dicomsdl_charset_smoke
         tests/charset_smoke.cpp
     )
@@ -367,6 +374,7 @@ if(BUILD_TESTING)
 
     if(WIN32)
         foreach(_dicomsdl_test_target IN ITEMS
+            dicomsdl_payload_decode_info_smoke
             dicomsdl_dictionary_consistency
             dicomsdl_basic_smoke
             dicomsdl_pixel_io_smoke
