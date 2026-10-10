@@ -20,29 +20,6 @@ using namespace dicom::literals;
 
 namespace {
 
-[[nodiscard]] std::optional<Photometric> representable_photometric(
-    Photometric photometric) noexcept {
-	switch (photometric) {
-	case Photometric::monochrome1:
-	case Photometric::monochrome2:
-	case Photometric::palette_color:
-	case Photometric::rgb:
-	case Photometric::ybr_full:
-	case Photometric::ybr_full_422:
-	case Photometric::ybr_rct:
-	case Photometric::ybr_ict:
-	case Photometric::ybr_partial_420:
-	case Photometric::xyb:
-	case Photometric::hsv:
-	case Photometric::argb:
-	case Photometric::cmyk:
-	case Photometric::ybr_partial_422:
-		return photometric;
-	default:
-		return std::nullopt;
-	}
-}
-
 [[nodiscard]] std::optional<Photometric> map_decoded_photometric(
     uint8_t color_space_code, Photometric planned_photometric) noexcept {
 	switch (color_space_code) {
@@ -83,7 +60,7 @@ namespace {
 		return std::nullopt;
 	case PIXEL_DECODED_COLOR_SPACE_UNKNOWN:
 	default:
-		return representable_photometric(planned_photometric);
+		return std::nullopt;
 	}
 }
 

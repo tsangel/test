@@ -1,11 +1,16 @@
 #include <cstdint>
+#include <cstring>
 #include <iostream>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <vector>
 
 #include <dicom.h>
 #include "codec_builtin_flags.hpp"
+#if defined(DICOMSDL_PIXEL_RUNTIME_TEST_HOOKS)
+#include "pixel/runtime/runtime_registry.hpp"
+#endif
 
 using namespace dicom::literals;
 namespace dp = dicom::pixel;
@@ -150,12 +155,111 @@ void compressed_metadata() {
 		    "compressed lossiness not reported");
 	}
 }
+
+#if defined(DICOMSDL_PIXEL_RUNTIME_TEST_HOOKS)
+void* unreported_color_create() { return new int(0); }
+void unreported_color_destroy(void* ctx) { delete static_cast<int*>(ctx); }
+pixel_error_code unreported_color_configure(
+    void*, std::uint32_t, const pixel_option_list*) {
+	return PIXEL_CODEC_ERR_OK;
+}
+pixel_error_code unreported_color_decode_frame(
+    void*, const pixel_decoder_request* request) {
+	if (request == nullptr || request->output.dst == nullptr ||
+	    request->source.source_buffer.data == nullptr ||
+	    request->source.source_buffer.size > request->output.dst_size) {
+		return PIXEL_CODEC_ERR_INVALID_ARGUMENT;
+	}
+	std::memcpy(request->output.dst, request->source.source_buffer.data,
+	    static_cast<std::size_t>(request->source.source_buffer.size));
+	// A valid plugin may decode pixels without filling the optional decode_info.
+	return PIXEL_CODEC_ERR_OK;
+}
+std::uint32_t unreported_color_error(const void*, char*, std::uint32_t) { return 0; }
+
+const pixel_decoder_plugin_api& unreported_color_api() {
+	static const pixel_decoder_plugin_api api = [] {
+		pixel_decoder_plugin_api out{};
+		out.struct_size = sizeof(out);
+		out.abi_version = PIXEL_DECODER_PLUGIN_ABI;
+		out.info.struct_size = sizeof(out.info);
+		out.info.abi_version = PIXEL_DECODER_PLUGIN_ABI;
+		out.info.display_name = "Unreported Color Test Plugin";
+		out.info.supported_profile_flags = PIXEL_CODEC_PROFILE_RLE_LOSSLESS_DEC;
+		out.create = &unreported_color_create;
+		out.destroy = &unreported_color_destroy;
+		out.configure = &unreported_color_configure;
+		out.decode_frame = &unreported_color_decode_frame;
+		out.copy_last_error_detail = &unreported_color_error;
+		return out;
+	}();
+	return api;
+}
+
+void unreported_color_metadata() {
+	std::string error;
+	require(pixel::runtime::test::register_external_codec_plugin_api_for_test(
+	    &unreported_color_api(), nullptr, &error),
+	    "could not register unreported color test plugin");
+	struct ClearPlugin {
+		~ClearPlugin() {
+			std::string error;
+			(void)pixel::runtime::clear_external_codec_plugins(&error);
+		}
+	} clear_plugin;
+
+	// The input metadata says YBR, but this test backend emits RGB without
+	// reporting its color space. Neither public API can assert that YBR is actual.
+	const std::vector<std::uint8_t> rgb{230, 40, 180};
+	dp::PixelPayloadDecodeDescriptor desc;
+	desc.transfer_syntax_uid = "1.2.840.10008.1.2.5";
+	desc.photometric = "YBR_FULL";
+	desc.rows = desc.cols = 1;
+	desc.samples_per_pixel = 3;
+	desc.bits_allocated = desc.bits_stored = 8;
+	desc.expected_payload_length = rgb.size();
+	desc.frame_fragments = "0:3";
+	dp::PixelPayloadDecoder decoder(desc, rgb);
+	const auto plan = decoder.create_decode_plan();
+	dp::DecodeInfo info;
+	const auto pixels = decoder.pixel_buffer(0, plan, info);
+	require(pixels.bytes == rgb && !info.photometric.has_value(),
+	    "payload decode inferred unreported color space");
+	std::vector<std::uint8_t> destination(plan.output_layout.frame_stride);
+	dp::DecodeInfo into_info;
+	decoder.decode_into(0, destination, plan, into_info);
+	require(destination == rgb && !into_info.photometric.has_value(),
+	    "payload decode_into inferred unreported color space");
+
+	dicom::DicomFile file;
+	require(file.set_value("Rows"_tag, long{1}) &&
+	    file.set_value("Columns"_tag, long{1}) &&
+	    file.set_value("SamplesPerPixel"_tag, long{3}) &&
+	    file.set_value("BitsAllocated"_tag, long{8}) &&
+	    file.set_value("BitsStored"_tag, long{8}) &&
+	    file.set_value("HighBit"_tag, long{7}) &&
+	    file.set_value("PixelRepresentation"_tag, long{0}) &&
+	    file.set_value("PlanarConfiguration"_tag, long{0}) &&
+	    file.set_value("PhotometricInterpretation"_tag, std::string_view("YBR_FULL")),
+	    "could not set DicomFile pixel metadata");
+	file.reset_encapsulated_pixel_data(1);
+	file.set_transfer_syntax_state_only("RLELossless"_uid);
+	file.set_encoded_pixel_frame(0, std::vector<std::uint8_t>(rgb));
+	dp::DecodeInfo file_info;
+	const auto file_pixels = file.pixel_buffer(0, file.create_decode_plan(), file_info);
+	require(file_pixels.bytes == rgb && !file_info.photometric.has_value(),
+	    "DicomFile decode inferred unreported color space");
+}
+#endif
 } // namespace
 
 int main() {
 	try {
 		native_metadata();
 		compressed_metadata();
+#if defined(DICOMSDL_PIXEL_RUNTIME_TEST_HOOKS)
+		unreported_color_metadata();
+#endif
 		std::cout << "Payload decode metadata tests passed\n";
 		return 0;
 	} catch (const std::exception& error) {

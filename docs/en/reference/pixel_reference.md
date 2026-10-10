@@ -44,6 +44,8 @@ DicomSDL keeps pixel decode, pixel encode, and frame-aware pixel metadata on `Di
   in `DecodeInfo`, just like `DicomFile`.
   The returned buffer keeps the planned layout; consult `info.photometric` before
   applying color conversion (JPEG and JPEG 2000 may return RGB for YBR input).
+  If a backend does not report its output color space, `info.photometric` is empty;
+  the planned layout must not be treated as a confirmed decoded color space.
   Native MONOCHROME1, palette indices, and unpacked 1-bit pixels retain their
   original semantics. The overload without `info` remains available.
 - `decode_into(...)` is the best fit when you want to control allocation and reuse an existing output buffer.

@@ -70,6 +70,17 @@ if(BUILD_TESTING)
         tests/payload_decode_info_smoke.cpp
     )
     target_link_libraries(dicomsdl_payload_decode_info_smoke PRIVATE dicomsdl)
+    if(TARGET dicomsdl_pixel_runtime)
+        target_link_libraries(dicomsdl_payload_decode_info_smoke PRIVATE
+            dicomsdl_pixel_runtime
+        )
+        target_include_directories(dicomsdl_payload_decode_info_smoke PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src
+        )
+        target_compile_definitions(dicomsdl_payload_decode_info_smoke PRIVATE
+            DICOMSDL_PIXEL_RUNTIME_TEST_HOOKS=1
+        )
+    endif()
     add_test(NAME payload_decode_info_smoke COMMAND dicomsdl_payload_decode_info_smoke)
     set_tests_properties(payload_decode_info_smoke PROPERTIES LABELS "dicomsdl")
 
