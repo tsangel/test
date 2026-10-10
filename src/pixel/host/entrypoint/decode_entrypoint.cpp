@@ -20,29 +20,6 @@ using namespace dicom::literals;
 
 namespace {
 
-[[nodiscard]] std::optional<Photometric> representable_photometric(
-    Photometric photometric) noexcept {
-	switch (photometric) {
-	case Photometric::monochrome1:
-	case Photometric::monochrome2:
-	case Photometric::palette_color:
-	case Photometric::rgb:
-	case Photometric::ybr_full:
-	case Photometric::ybr_full_422:
-	case Photometric::ybr_rct:
-	case Photometric::ybr_ict:
-	case Photometric::ybr_partial_420:
-	case Photometric::xyb:
-	case Photometric::hsv:
-	case Photometric::argb:
-	case Photometric::cmyk:
-	case Photometric::ybr_partial_422:
-		return photometric;
-	default:
-		return std::nullopt;
-	}
-}
-
 [[nodiscard]] std::optional<Photometric> map_decoded_photometric(
     uint8_t color_space_code, Photometric planned_photometric) noexcept {
 	switch (color_space_code) {
@@ -83,7 +60,7 @@ namespace {
 		return std::nullopt;
 	case PIXEL_DECODED_COLOR_SPACE_UNKNOWN:
 	default:
-		return representable_photometric(planned_photometric);
+		return std::nullopt;
 	}
 }
 
@@ -701,6 +678,16 @@ DecodePlan PixelPayloadDecoder::create_decode_plan(const DecodeOptions& opt) con
 
 void PixelPayloadDecoder::decode_into(std::size_t frame_index,
     std::span<std::uint8_t> dst, const DecodePlan& plan) const {
+	decode_into_impl(frame_index, dst, plan, nullptr);
+}
+
+void PixelPayloadDecoder::decode_into(std::size_t frame_index,
+    std::span<std::uint8_t> dst, const DecodePlan& plan, DecodeInfo& info) const {
+	decode_into_impl(frame_index, dst, plan, &info);
+}
+
+void PixelPayloadDecoder::decode_into_impl(std::size_t frame_index,
+    std::span<std::uint8_t> dst, const DecodePlan& plan, DecodeInfo* info) const {
 	std::vector<std::uint8_t> owned_prepared_source{};
 	std::span<const std::uint8_t> prepared_source{};
 	try {
@@ -733,6 +720,8 @@ void PixelPayloadDecoder::decode_into(std::size_t frame_index,
 			};
 			unpack_native_one_bit_frame_at_codec_boundary(
 			    pixel_payload_, one_bit_layout, frame_index, dst, plan.output_layout);
+			if (info)
+				assign_native_one_bit_decode_info(plan.output_layout, *info);
 			return;
 		}
 
@@ -779,8 +768,16 @@ void PixelPayloadDecoder::decode_into(std::size_t frame_index,
 			}
 		}
 
+		pixel_decoder_info abi_info{};
+		if (info) {
+			abi_info.struct_size = sizeof(pixel_decoder_info);
+			abi_info.abi_version = PIXEL_DECODER_PLUGIN_ABI;
+		}
 		detail::dispatch_decode_prepared_frame(transfer_syntax_uid_,
-		    source_layout_, frame_index, prepared_source, dst, plan, nullptr);
+		    source_layout_, frame_index, prepared_source, dst, plan,
+		    info ? &abi_info : nullptr);
+		if (info)
+			assign_decode_info(abi_info, plan.output_layout.photometric, *info);
 	} catch (const diag::DicomException& ex) {
 		detail::rethrow_codec_exception_at_boundary_or_throw(
 		    "pixel::PixelPayloadDecoder::decode_into",
@@ -792,6 +789,13 @@ PixelBuffer PixelPayloadDecoder::pixel_buffer(
     std::size_t frame_index, const DecodePlan& plan) const {
 	auto decoded = PixelBuffer::allocate(plan.output_layout.single_frame());
 	decode_into(frame_index, decoded.bytes, plan);
+	return decoded;
+}
+
+PixelBuffer PixelPayloadDecoder::pixel_buffer(
+    std::size_t frame_index, const DecodePlan& plan, DecodeInfo& info) const {
+	auto decoded = PixelBuffer::allocate(plan.output_layout.single_frame());
+	decode_into(frame_index, decoded.bytes, plan, info);
 	return decoded;
 }
 
