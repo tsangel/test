@@ -211,7 +211,11 @@ def test_split_pixeldata_payload_roundtrip_native_one_bit() -> None:
     assert desc.expected_payload_length == len(payload)
 
     decoder = dicom.PixelPayloadDecoder(desc, split.pixel_payload)
-    assert decoder.to_array(frame=0).tobytes() == frame0
+    first, first_info = decoder.to_array(frame=0, with_info=True)
+    assert first.tobytes() == frame0
+    assert first_info.photometric == dicom.Photometric.monochrome2
+    assert first_info.dtype == np.dtype(np.uint8)
+    assert first_info.bits_per_sample == 1
     assert decoder.to_array(frame=1).tobytes() == frame1
 
     rejoined = dicom.read_bytes_with_pixeldata_payload(
@@ -383,10 +387,26 @@ def test_pixel_payload_decoder_decodes_split_payload_only() -> None:
     decoder = dicom.PixelPayloadDecoder(desc, payload_bytes)
     plan = decoder.create_decode_plan()
     assert decoder.to_array(frame=0, plan=plan).tobytes() == payload
+    array, info = decoder.to_array(frame=0, plan=plan, with_info=True)
+    assert array.tobytes() == payload
+    assert isinstance(info, dicom.DecodeInfo)
+    assert info.photometric == dicom.Photometric.monochrome2
+    assert info.dtype == np.dtype(np.uint16)
+    assert info.planar == dicom.Planar.interleaved
+    assert info.bits_per_sample == 16
+    assert info.encoded_lossy_state == dicom.EncodedLossyState.lossless
+    alias_array, alias_info = decoder.pixel_array(frame=0, plan=plan, with_info=True)
+    assert np.array_equal(alias_array, array)
+    assert alias_info.photometric == info.photometric
     out = np.empty((1, 3), dtype=np.uint16)
     returned = decoder.decode_into(out, frame=0, plan=plan)
     assert returned is out
     assert out.tobytes() == payload
+    out_info = decoder.decode_into(out, frame=0, plan=plan, with_info=True)
+    assert isinstance(out_info, dicom.DecodeInfo)
+    assert out.tobytes() == payload
+    assert out_info.photometric == info.photometric
+    assert out_info.dtype == info.dtype
 
     # Descriptor string_views are parsed at construction time; Python descriptor
     # strings can be replaced or released after the decoder is built.
@@ -429,6 +449,35 @@ def test_pixel_payload_decoder_decodes_split_payload_only() -> None:
     bad_desc.frame_fragments = "999999:1"
     with pytest.raises(Exception, match="outside pixel payload"):
         dicom.PixelPayloadDecoder(bad_desc, encap_payload)
+
+
+def test_pixel_payload_decoder_with_info_reports_rgb_for_ybr_jpeg() -> None:
+    if not any(
+        (uid.keyword or uid.value) == "JPEGBaseline8Bit"
+        for uid in dicom.transfer_syntax_uids_encode_supported()
+    ):
+        pytest.skip("JPEG encoder is unavailable")
+
+    source = np.empty((8, 8, 3), dtype=np.uint8)
+    source[:] = (230, 40, 180)
+    file = dicom.read_bytes(_build_native_full(b"\x00" * 6))
+    file.set_pixel_data("JPEGBaseline8Bit", source)
+    assert file.set_value("PhotometricInterpretation", "YBR_FULL_422")
+    encoded = file.write_bytes_with_transfer_syntax("JPEGBaseline8Bit")
+    split = dicom.split_pixeldata_payload([], encoded)
+    assert split.ok
+
+    decoder = dicom.PixelPayloadDecoder(split.decode_descriptor, split.pixel_payload)
+    plan = decoder.create_decode_plan()
+    array, info = decoder.to_array(frame=0, plan=plan, with_info=True)
+    file_array, file_info = file.to_array(frame=0, with_info=True)
+    assert np.array_equal(array, file_array)
+    assert info.photometric == file_info.photometric == dicom.Photometric.rgb
+
+    out = np.empty_like(array)
+    out_info = decoder.decode_into(out, frame=0, plan=plan, with_info=True)
+    assert np.array_equal(out, array)
+    assert out_info.photometric == dicom.Photometric.rgb
 
 
 def test_write_bytes_with_transfer_syntax_then_split_roundtrip() -> None:

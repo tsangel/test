@@ -2306,7 +2306,8 @@ DecodedArrayLayout payload_decoder_layout_or_throw(
 }
 
 nb::object pixel_payload_decoder_decode_into(
-    const PyPixelPayloadDecoder& self, nb::handle out, long frame, nb::handle plan_obj) {
+    const PyPixelPayloadDecoder& self, nb::handle out, long frame, nb::handle plan_obj,
+    bool with_info) {
 	const auto layout = payload_decoder_layout_or_throw(self, frame, plan_obj);
 	PyWritableBufferView writable(out);
 	const auto& view = writable.view();
@@ -2331,23 +2332,38 @@ nb::object pixel_payload_decoder_decode_into(
 
 	auto out_span = std::span<std::uint8_t>(
 	    static_cast<std::uint8_t*>(view.buf), actual_bytes);
+	dicom::pixel::DecodeInfo decode_info{};
 	{
 		nb::gil_scoped_release release;
-		self.decoder().decode_into(layout.frame_index, out_span, layout.plan);
+		if (with_info) {
+			self.decoder().decode_into(layout.frame_index, out_span, layout.plan, decode_info);
+		} else {
+			self.decoder().decode_into(layout.frame_index, out_span, layout.plan);
+		}
 	}
+	if (with_info) return nb::cast(std::move(decode_info));
 	return nb::borrow<nb::object>(out);
 }
 
 nb::object pixel_payload_decoder_to_array(
-    const PyPixelPayloadDecoder& self, long frame, nb::handle plan_obj) {
+    const PyPixelPayloadDecoder& self, long frame, nb::handle plan_obj, bool with_info) {
 	const auto layout = payload_decoder_layout_or_throw(self, frame, plan_obj);
 	auto out = make_writable_numpy_array(
 	    layout.ndim, layout.shape, layout.strides, layout.spec.dtype,
 	    layout.required_bytes);
+	dicom::pixel::DecodeInfo decode_info{};
 	{
 		nb::gil_scoped_release release;
-		self.decoder().decode_into(layout.frame_index, out.bytes, layout.plan);
+		if (with_info) {
+			self.decoder().decode_into(layout.frame_index, out.bytes, layout.plan,
+			    decode_info);
+		} else {
+			self.decoder().decode_into(layout.frame_index, out.bytes, layout.plan);
+		}
 	}
+	if (with_info)
+		return nb::cast(nb::make_tuple(
+		    nb::cast(std::move(out.array)), std::move(decode_info)));
 	return nb::cast(std::move(out.array));
 }
 
@@ -6320,19 +6336,24 @@ NB_MODULE(_dicomsdl, m) {
 		    nb::arg("frame") = 0,
 		    nb::kw_only(),
 		    nb::arg("plan") = nb::none(),
-		    "Decode one split-payload frame into an existing writable buffer.")
+		    nb::arg("with_info") = false,
+		    "Decode one split-payload frame into an existing writable buffer; "
+		    "return DecodeInfo when with_info=True.")
 		.def("to_array",
 		    &pixel_payload_decoder_to_array,
 		    nb::arg("frame") = 0,
 		    nb::kw_only(),
 		    nb::arg("plan") = nb::none(),
-		    "Decode one split-payload frame and return a NumPy array.")
+		    nb::arg("with_info") = false,
+		    "Decode one split-payload frame and return an array, or "
+		    "(array, DecodeInfo) when with_info=True.")
 		.def("pixel_array",
 		    &pixel_payload_decoder_to_array,
 		    nb::arg("frame") = 0,
 		    nb::kw_only(),
 		    nb::arg("plan") = nb::none(),
-		    "Alias for to_array(frame=...).");
+		    nb::arg("with_info") = false,
+		    "Alias for to_array(frame=..., with_info=...).");
 
 	nb::class_<dicom::pixel::RescaleTransform>(m, "RescaleTransform",
 	    "Linear rescale transform applied after decode.")
